@@ -43,12 +43,12 @@ def _declared_type_names(lines: list[str]) -> set[str]:
 
 def _expand_type(text: str, declared_types: set[str]) -> str:
     text = text.strip()
-    slash = _find_top_level_char(text, "/")
-    if slash >= 0:
-        success = text[:slash].strip()
-        error = text[slash + 1 :].strip()
+    pipe = _find_top_level_char(text, "|")
+    if pipe >= 0:
+        success = text[:pipe].strip()
+        error = text[pipe + 1 :].strip()
         if not success or not error:
-            raise GlyphError(f"結果型は T/E の形式で記述する: {text}")
+            raise GlyphError(f"結果型は T|E の形式で記述する: {text}")
         return f"R<{_expand_type(success, declared_types)},{_expand_type(error, declared_types)}>"
 
     if text.startswith("("):
@@ -263,6 +263,9 @@ def expand_compact_syntax(source: str) -> str:
             elif marker == "=":
                 stripped = _expand_alias(stripped, declared_types)
             code = stripped
+        elif ">>" in stripped:
+            # ガード行だけで短い `>>` を既存文法の `=>` へ展開する。
+            code = indent + stripped.replace(">>", "=>", 1)
 
         if comment:
             transformed.append(code + (" " if code else "") + comment)
