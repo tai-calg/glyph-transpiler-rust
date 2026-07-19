@@ -36,7 +36,13 @@ jobs:
         run: cargo fmt --manifest-path demo/Cargo.toml
 
       - name: Run Rust tests
-        run: cargo test --manifest-path demo/Cargo.toml --verbose
+        shell: bash
+        run: |
+          set +e
+          cargo test --manifest-path demo/Cargo.toml --verbose > /tmp/cargo-test.log 2>&1
+          status=$?
+          tail -n 120 /tmp/cargo-test.log
+          exit $status
 
       - name: Run demo
         run: cargo run --manifest-path demo/Cargo.toml --quiet
