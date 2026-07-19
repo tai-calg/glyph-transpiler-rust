@@ -1,9 +1,6 @@
-//! 外部作用の実装。
-//! DSLでは `!exec(...)` として境界だけを宣言し、具体的処理はRust側へ置く。
+//! Glyphの外部作用モジュール。
+//!
+//! 通常の試作では `host.generated.rs` をそのまま使う。
+//! 実機接続へ移るときは、このファイルだけを手書きアダプターへ差し替える。
 
-use crate::generated::{C, E, Receipt};
-
-pub fn exec(c: C) -> Result<Receipt, E> {
-    // 実機ではここをGPIO、UART、CANなどのドライバ呼出しへ置き換える。
-    Ok(Receipt { c })
-}
+include!("host.generated.rs");
