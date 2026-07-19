@@ -269,31 +269,7 @@ def expand_compact_syntax(source: str) -> str:
         else:
             transformed.append(code)
 
-    # ガード関数の最後の裸式は `_ => expression` と同義。
-    output: list[str] = []
-    in_guard_function = False
-    for line in transformed:
-        code, comment = _split_comment(line)
-        stripped = code.strip()
-        if stripped and not code[0].isspace():
-            close_pos = stripped.find(")")
-            tail = stripped[close_pos + 1 :] if close_pos >= 0 else stripped
-            in_guard_function = (
-                stripped.startswith(">")
-                and _find_top_level_char(tail, "=") < 0
-            )
-            output.append(line)
-            continue
-        if in_guard_function and stripped and "=>" not in stripped:
-            indent = code[: len(code) - len(code.lstrip())]
-            rewritten = f"{indent}_ => {stripped}"
-            if comment:
-                rewritten += " " + comment
-            output.append(rewritten)
-        else:
-            output.append(line)
-
-    return "\n".join(output) + ("\n" if source.endswith("\n") else "")
+    return "\n".join(transformed) + ("\n" if source.endswith("\n") else "")
 
 
 def parse_program(source: str) -> Program:
