@@ -11,6 +11,7 @@ from .compiler import (
     RustGenerator,
     parse_program,
 )
+from .syntax import expand_compact_syntax
 
 
 @dataclass(frozen=True)
@@ -89,7 +90,8 @@ def _generate_host(program: Program, inline_effects: tuple[FunctionDecl, ...]) -
 
 
 def compile_artifacts(source: str) -> RustArtifacts:
-    program, inline_effects = _parse_effect_program(source)
+    expanded = expand_compact_syntax(source)
+    program, inline_effects = _parse_effect_program(expanded)
     logic = RustGenerator(program).generate()
     host = _generate_host(program, inline_effects)
     return RustArtifacts(logic=logic, host=host)

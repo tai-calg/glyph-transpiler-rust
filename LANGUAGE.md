@@ -2,11 +2,11 @@
 
 ## 1. 設計原則
 
-1. 一つの記号は一つの概念だけを表す。
+1. 記号の意味は構文位置から一意に決まる。
 2. DSLは型、変換、失敗、外部作用の境界だけを記述する。
 3. 所有権、ドライバ、非同期処理などRust固有の詳細はホスト側へ残す。
 4. 単語マクロは文字列部分一致ではなく、識別子トークン完全一致で展開する。
-5. マクロ展開後にASTへ解析し、通常のRustを生成する。
+5. 短縮構文とマクロを展開してからASTへ解析し、通常のRustを生成する。
 
 ## 2. 単語マクロ
 
@@ -26,8 +26,8 @@
 
 >cap(x:u16):u16=LOWER(x,MAX)
 >cmd(s:S):C
-  BLOCK => Stop
-  _ => Run(s.r)
+  BLOCK>>Stop
+  _>>Run(s.r)
 ```
 
 意味:
@@ -92,6 +92,12 @@ macro cycle: A -> B -> A
 *Point(x:f32,y:f32)
 ```
 
+短縮:
+
+```text
+*Point(x,y:f)
+```
+
 生成:
 
 ```rust
@@ -104,7 +110,7 @@ pub struct Point {
 ### 直和型
 
 ```text
-+State=Idle|Run(u16)|Fault{code:u8,msg:S}
++State=Idle|Run(u)|Fault{code:u8,msg:S}
 ```
 
 生成:
@@ -120,7 +126,7 @@ pub enum State {
 ### 型別名
 
 ```text
-=Output=R<u16,E>
+=Output=u|E
 ```
 
 生成:
@@ -134,24 +140,24 @@ pub type Output = Result<u16, E>;
 単一式:
 
 ```text
->double(x:u16):u16=x*2
+>double(x:u):u=x*2
 ```
 
 ガード節:
 
 ```text
->sign(x:i32):i32
-  x<0 => -1
-  x=0 => 0
-  _ => 1
+>sign(x:i):i
+  x<0>>-1
+  x=0>>0
+  _>>1
 ```
 
-`_`は最後に一つだけ必要である。
+`>>`はガードの条件と結果を区切る。`_`は最後に一つだけ必要である。従来の`=>`も互換構文として受理する。
 
 ### 外部作用境界
 
 ```text
-!send(x:u8):R<u8,E>
+!send(x:u8):u8|E
 ```
 
 呼出しは次へ展開される。
@@ -160,7 +166,15 @@ pub type Output = Result<u16, E>;
 crate::host::send(x)
 ```
 
+`=expression`を付けると試作実装を生成する。
+
+```text
+!send(x:u8):u8|E=Ok(x)
+```
+
 ## 4. 型
+
+長形式:
 
 ```text
 u8 u16 u32 u64
@@ -172,7 +186,38 @@ V<T>    -> Vec<T>
 S       -> String
 ```
 
-ユーザー定義型が`S`なら、ユーザー定義型を優先する。
+短縮表記では、型位置に限って次も使える。
+
+```text
+T|E       -> R<T,E> -> Result<T,E>
+f d u i b -> f32 f64 u16 i32 bool
+```
+
+`|`は文脈によって一意に解釈する。
+
+- 型シグネチャ最上位の`T|E`: Result型
+- 式中の`a|b`: 論理和
+- 直和型宣言の`+A=X|Y`: variant区切り
+
+`?`は型記号として使わず、式末尾の失敗伝播だけを表す。旧候補の`T?E`と`T/E`は受理しない。従来の`R<T,E>`は引き続き使用できる。
+
+ユーザー定義型が`S`、`f`、`u`などの短縮名と一致する場合は、ユーザー定義型を優先する。
+
+### 積型引数展開
+
+積型のfield rowは関数引数へ展開できる。
+
+```text
+*S(v,t:f,r:u)
+>decode(*S):S|E
+```
+
+展開:
+
+```text
+*S(v:f32,t:f32,r:u16)
+>decode(v:f32,t:f32,r:u16):R<S,E>
+```
 
 ## 5. 式
 
@@ -228,15 +273,25 @@ finite(x)   -> x.is_finite()
 
 ## 7. 文法概要
 
+短縮文法:
+
 ```text
-program      := (macro | declaration)*
-macro        := "@" Name "=" expr
-declaration  := product | sum | alias | function | extern
-product      := "*" Name "(" fields? ")"
-sum          := "+" Name "=" variant ("|" variant)*
-alias        := "=" Name "=" type
-function     := ">" signature ("=" expr | NEWLINE guard+)
-extern       := "!" signature
-signature    := Name "(" params? ")" ":" type
-guard        := INDENT (expr | "_") "=>" expr
+program          := (macro | declaration)*
+macro            := "@" Name "=" expr
+declaration      := product | sum | alias | function | extern
+product          := "*" Name "(" compact-fields? ")"
+sum              := "+" Name "=" variant ("|" variant)*
+alias            := "=" Name "=" compact-type
+function         := ">" signature ("=" expr | NEWLINE compact-guard+)
+extern           := "!" signature ("=" expr)?
+signature        := Name "(" compact-params? ")" ":" compact-type
+compact-type     := type | type "|" type
+compact-guard    := INDENT (expr | "_") ">>" expr
+```
+
+短縮展開後の既存文法:
+
+```text
+guard            := INDENT (expr | "_") "=>" expr
+result-type      := "R" "<" type "," type ">"
 ```
