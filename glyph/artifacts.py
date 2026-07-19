@@ -12,6 +12,8 @@ from .compiler import (
     parse_program,
 )
 from .syntax import expand_compact_syntax
+from .temporal import extract_specs
+from .temporal_codegen import append_temporal_rust
 
 
 @dataclass(frozen=True)
@@ -91,8 +93,9 @@ def _generate_host(program: Program, inline_effects: tuple[FunctionDecl, ...]) -
 
 def compile_artifacts(source: str) -> RustArtifacts:
     expanded = expand_compact_syntax(source)
-    program, inline_effects = _parse_effect_program(expanded)
-    logic = RustGenerator(program).generate()
+    core, specs = extract_specs(expanded)
+    program, inline_effects = _parse_effect_program(core)
+    logic = append_temporal_rust(RustGenerator(program).generate(), program, specs)
     host = _generate_host(program, inline_effects)
     return RustArtifacts(logic=logic, host=host)
 
