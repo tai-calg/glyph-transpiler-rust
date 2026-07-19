@@ -26,11 +26,15 @@ jobs:
       - name: Run Python compiler tests
         run: python3 -m unittest tests.test_compiler tests.test_cli -v
 
-      - name: Regenerate Rust source
+      - name: Regenerate Rust sources
         run: |
           cp demo/src/generated.rs /tmp/generated.rs.before
-          python3 glyphc.py examples/controller.glyph -o demo/src/generated.rs
+          cp demo/src/host.generated.rs /tmp/host.generated.rs.before
+          python3 glyphc.py examples/controller.glyph \
+            -o demo/src/generated.rs \
+            --host-output demo/src/host.generated.rs
           diff -u /tmp/generated.rs.before demo/src/generated.rs
+          diff -u /tmp/host.generated.rs.before demo/src/host.generated.rs
 
       - name: Format generated Rust
         run: cargo fmt --manifest-path demo/Cargo.toml
