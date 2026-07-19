@@ -1,0 +1,16 @@
+[project]
+name = "glyph-rust"
+version = "0.2.0"
+description = "A tiny zero-dependency DSL transpiler that maps frequent concepts to one symbol and emits Rust"
+requires-python = ">=3.10"
+
+[project.scripts]
+glyphc = "glyphc:main"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["glyph"]
+py-modules = ["glyphc"]

@@ -1,0 +1,32 @@
+# 記号の意味
+# @ = 式中の単語マクロ
+# * = 積型（AかつB）
+# + = 直和型（AまたはB）
+# > = 純粋な変換
+# ! = Rust側に隔離した外部作用
+# R<T,E> = Result<T,E>
+# ? = 失敗伝播
+
+@LOW=10
+@HOT=80
+@MAX=1000
+@BAD=!finite(v)|!finite(t)|v<0
+@BLOCK=s.v<LOW|s.t>HOT|s.r=0
+@PIPE=exec(cmd(decode(v,t,r)?))
+
+*S(v:f32,t:f32,r:u16)
++C=Stop|Run(u16)
++E=BadSensor|Actuator
+*Receipt(c:C)
+
+>decode(v:f32,t:f32,r:u16):R<S,E>
+  BAD => Err(BadSensor)
+  _ => Ok(S(v,t,r))
+
+>cmd(s:S):C
+  BLOCK => Stop
+  _ => Run(min(s.r,MAX))
+
+!exec(c:C):R<Receipt,E>
+
+>run(v:f32,t:f32,r:u16):R<Receipt,E>=PIPE
