@@ -42,7 +42,7 @@ class CompilerTests(unittest.TestCase):
         generated = compile_source(
             "*S(v,t:f,r:u)\n"
             "+E=Bad\n"
-            ">decode(*S):S?E\n"
+            ">decode(*S):S/E\n"
             "  v<0=>Err(Bad)\n"
             "  _=>Ok(S(v,t,r))\n"
         )
@@ -54,6 +54,10 @@ class CompilerTests(unittest.TestCase):
             generated,
         )
         self.assertIn("else {\n        Ok(S { v: v, t: t, r: r })", generated)
+
+    def test_question_mark_is_reserved_for_failure_propagation(self) -> None:
+        with self.assertRaises(GlyphError):
+            compile_source("+E=Bad\n>f():u?E=Err(Bad)\n")
 
     def test_compact_primitive_type_shortcuts(self) -> None:
         generated = compile_source("*P(x:f,y:d,n:u,k:i,ok:b)\n")
@@ -97,7 +101,7 @@ class CompilerTests(unittest.TestCase):
 
     def test_inline_effect_generates_prototype_host_implementation(self) -> None:
         artifacts = compile_artifacts(
-            "*Receipt(x:u8)\n!send(x:u8):Receipt?u8=Ok(Receipt(x))\n"
+            "*Receipt(x:u8)\n!send(x:u8):Receipt/u8=Ok(Receipt(x))\n"
         )
         self.assertNotIn("pub fn send", artifacts.logic)
         self.assertIn("pub fn send(x: u8) -> Result<Receipt, u8>", artifacts.host)
