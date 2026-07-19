@@ -1,5 +1,6 @@
 from .artifacts import RustArtifacts, compile_artifact_files, compile_artifacts
-from .compiler import GlyphError, compile_file, compile_source, parse_program
+from .compiler import GlyphError
+from .syntax import compile_file, compile_source, parse_program
 
 __all__ = [
     "GlyphError",
