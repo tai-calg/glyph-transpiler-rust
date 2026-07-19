@@ -44,7 +44,7 @@ class CompilerTests(unittest.TestCase):
             "+E=Bad\n"
             ">decode(*S):S?E\n"
             "  v<0=>Err(Bad)\n"
-            "  Ok(S(v,t,r))\n"
+            "  _=>Ok(S(v,t,r))\n"
         )
         self.assertIn("pub v: f32", generated)
         self.assertIn("pub t: f32", generated)
@@ -71,6 +71,10 @@ class CompilerTests(unittest.TestCase):
     def test_unknown_product_spread_is_rejected(self) -> None:
         with self.assertRaisesRegex(GlyphError, "積型 '\\*Missing' が定義されていない"):
             compile_source(">f(*Missing):i=0\n")
+
+    def test_guard_function_requires_explicit_final_fallback(self) -> None:
+        with self.assertRaises(GlyphError):
+            parse_program(">f(x:i):i\n  x<0=>0\n  1\n")
 
     def test_guard_function_requires_final_fallback(self) -> None:
         with self.assertRaisesRegex(GlyphError, "最後にちょうど1個"):
