@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   test:
@@ -16,8 +16,6 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
-        with:
-          ref: ${{ github.head_ref || github.ref_name }}
 
       - name: Show toolchains
         run: |
@@ -44,24 +42,12 @@ jobs:
         if: steps.python_tests.outcome == 'failure'
         run: exit 1
 
-      - name: Regenerate Rust sources
+      - name: Verify deterministic Rust generation
         run: |
           python3 glyphc.py examples/controller.glyph \
             -o demo/src/generated.rs \
             --host-output demo/src/host.generated.rs
-
-      - name: Commit generated Rust sources
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-        shell: bash
-        run: |
-          if git diff --quiet -- demo/src/generated.rs demo/src/host.generated.rs; then
-            exit 0
-          fi
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add demo/src/generated.rs demo/src/host.generated.rs
-          git commit -m "Regenerate temporal Rust monitors"
-          git push origin HEAD:${{ github.head_ref }}
+          git diff --exit-code -- demo/src/generated.rs demo/src/host.generated.rs
 
       - name: Upload generated Rust sources
         uses: actions/upload-artifact@v4
