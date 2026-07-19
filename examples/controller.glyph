@@ -1,10 +1,11 @@
 # 記号の意味
 # @ = 式中の単語マクロ
-# * = 積型（AかつB）
+# * = 積型。関数引数の *S はSのfield row展開
 # + = 直和型（AまたはB）
 # > = 純粋な変換
 # ! = 外部作用との境界。=式を付ければ試作実装も同時生成
-# R<T,E> = Result<T,E>
+# T?E = Result<T,E>
+# f/u = f32/u16
 # ? = 失敗伝播
 
 @LOW=10.0
@@ -14,19 +15,19 @@
 @BLOCK=s.v<LOW|s.t>HOT|s.r=0
 @PIPE=exec(cmd(decode(v,t,r)?))
 
-*S(v:f32,t:f32,r:u16)
-+C=Stop|Run(u16)
+*S(v,t:f,r:u)
++C=Stop|Run(u)
 +E=BadSensor|Actuator
 *Receipt(c:C)
 
->decode(v:f32,t:f32,r:u16):R<S,E>
-  BAD => Err(BadSensor)
-  _ => Ok(S(v,t,r))
+>decode(*S):S?E
+  BAD=>Err(BadSensor)
+  Ok(S(v,t,r))
 
 >cmd(s:S):C
-  BLOCK => Stop
-  _ => Run(min(s.r,MAX))
+  BLOCK=>Stop
+  Run(min(s.r,MAX))
 
-!exec(c:C):R<Receipt,E>=Ok(Receipt(c))
+!exec(c:C):Receipt?E=Ok(Receipt(c))
 
->run(v:f32,t:f32,r:u16):R<Receipt,E>=PIPE
+>run(*S):Receipt?E=PIPE
