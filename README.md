@@ -1,10 +1,10 @@
 # Glyph Rust
 
-頻出概念を一つの記号へ圧縮し、短いDSLから通常のRustコードを生成する依存ゼロの小型トランスパイラ。
+頻出概念を短い記号へ圧縮し、短いDSLから通常のRustコードを生成する依存ゼロの小型トランスパイラ。
 
 ## 最上位目的
 
-> 自分が頻繁に使う概念を、一つの記号で一意に表現する。
+> 自分が頻繁に使う概念を、構文位置から一意に読める記号で表現する。
 
 | 記号 | 意味 | Rustへの展開 |
 |---|---|---|
@@ -13,9 +13,12 @@
 | `+` | 直和型。候補のうち一つを取る | `enum` |
 | `>` | 純粋な変換 | `fn` |
 | `!` | 外部作用との境界 | `crate::host::<name>` |
-| `R<T,E>` | 成功または失敗 | `Result<T,E>` |
+| 型位置の `T|E` | 成功型または失敗型 | `Result<T,E>` |
+| ガード行の `>>` | 条件と結果の区切り | `if` / `else` |
 | `?` | 失敗の早期返却 | Rustの`?` |
-| `|` / `&` | 論理和 / 論理積 | `||` / `&&` |
+| 式位置の `|` / `&` | 論理和 / 論理積 | `||` / `&&` |
+
+`|`は構文位置で区別する。型シグネチャではResult型、式では論理和、直和型宣言ではvariant区切りになる。
 
 ## 単語マクロ
 
@@ -31,10 +34,10 @@
 
 ```text
 >cmd(s:S):C
-  BLOCK => Stop
-  _ => Run(min(s.r,MAX))
+  BLOCK>>Stop
+  _>>Run(min(s.r,MAX))
 
->run(v:f32,t:f32,r:u16):R<Receipt,E>=PIPE
+>run(*S):Receipt|E=PIPE
 ```
 
 マクロは文字列部分一致ではなく、式lexerが生成した完全一致の識別子トークンだけを置換する。
@@ -70,15 +73,17 @@ python3 run.py
 処理:
 
 1. `examples/controller.glyph`を解析する
-2. 単語マクロを展開する
-3. `demo/src/generated.rs`を再生成する
+2. 短縮構文と単語マクロを展開する
+3. `demo/src/generated.rs`と`demo/src/host.generated.rs`を再生成する
 4. Cargoが存在すれば`cargo test`を実行する
 5. テスト成功後にデモを実行する
 
 変換だけを実行:
 
 ```bash
-python3 glyphc.py examples/controller.glyph -o generated.rs
+python3 glyphc.py examples/controller.glyph \
+  -o demo/src/generated.rs \
+  --host-output demo/src/host.generated.rs
 ```
 
 構文検査だけを実行:
@@ -103,28 +108,42 @@ python3 -m unittest discover -s tests -v
 @BLOCK=s.v<LOW|s.t>HOT|s.r=0
 @PIPE=exec(cmd(decode(v,t,r)?))
 
-*S(v:f32,t:f32,r:u16)
-+C=Stop|Run(u16)
+*S(v,t:f,r:u)
++C=Stop|Run(u)
 +E=BadSensor|Actuator
 *Receipt(c:C)
 
->decode(v:f32,t:f32,r:u16):R<S,E>
-  BAD => Err(BadSensor)
-  _ => Ok(S(v,t,r))
+>decode(*S):S|E
+  BAD>>Err(BadSensor)
+  _>>Ok(S(v,t,r))
 
 >cmd(s:S):C
-  BLOCK => Stop
-  _ => Run(min(s.r,MAX))
+  BLOCK>>Stop
+  _>>Run(min(s.r,MAX))
 
-!exec(c:C):R<Receipt,E>
->run(v:f32,t:f32,r:u16):R<Receipt,E>=PIPE
+!exec(c:C):Receipt|E=Ok(Receipt(c))
+>run(*S):Receipt|E=PIPE
 ```
 
-コメントと空行を除くと18行、空白を除くと356文字。生成されるRustは39実コード行、空白を除くと544文字。
+短縮構文は従来文法へ展開してから解析する。
+
+```text
+*S(v,t:f,r:u)       -> *S(v:f32,t:f32,r:u16)
+>run(*S):Receipt|E  -> >run(v:f32,t:f32,r:u16):R<Receipt,E>
+BLOCK>>Stop          -> BLOCK=>Stop
+```
+
+従来の`R<T,E>`とガード矢印`=>`も互換構文として使用できる。
 
 ## 外部作用の扱い
 
-DSL内の`!exec(...)`は、外部作用のシグネチャだけを宣言する。実装は`demo/src/host.rs`へ置く。
+`!name(args):Ret`は外部作用の境界だけを宣言する。`=expression`を付けると、試作実装を`host.generated.rs`へ生成する。
+
+```text
+!exec(c:C):Receipt|E=Ok(Receipt(c))
+```
+
+生成:
 
 ```rust
 pub fn exec(c: C) -> Result<Receipt, E> {
@@ -132,24 +151,27 @@ pub fn exec(c: C) -> Result<Receipt, E> {
 }
 ```
 
-これにより、判断ロジックとGPIO、UART、CAN、ファイルI/Oなどを分離できる。
+実機接続では`host.rs`をGPIO、UART、CANなどのアダプターへ差し替える。
 
 ## ディレクトリ
 
 ```text
 glyph-rust/
 ├── glyphc.py                 CLI
-├── glyph/compiler.py         macro / lexer / parser / AST / Rust generator
+├── glyph/compiler.py         lexer / parser / AST / Rust generator
+├── glyph/syntax.py           短縮構文展開
+├── glyph/artifacts.py        logic / host生成
 ├── examples/controller.glyph DSL入力例
 ├── demo/
 │   ├── Cargo.toml
 │   └── src/
-│       ├── generated.rs      生成物
-│       ├── host.rs           外部作用
+│       ├── generated.rs      ロジック生成物
+│       ├── host.generated.rs 試作用作用実装
+│       ├── host.rs           実機アダプター差替点
 │       └── main.rs           実行例とRustテスト
 ├── tests/                    Pythonテスト
 ├── LANGUAGE.md               文法仕様
-├── DESIGN.md                 設計判断
+├── COMPACT_SYNTAX.md         短縮構文仕様
 └── run.py                    再生成・検査・実行
 ```
 
@@ -158,7 +180,7 @@ glyph-rust/
 - 文字列リテラル、配列、ループ、参照、ライフタイム、ジェネリック関数は未対応
 - 単語マクロは式専用で、引数を取らない
 - 型検査はRustコンパイラへ委譲する
-- `!`で宣言した関数は`crate::host`に実装する必要がある
+- 実機の外部作用は`crate::host`に実装する
 - 生成先はRust 2021 Editionを想定する
 
 ## ライセンス
