@@ -4,8 +4,9 @@
 # + = 直和型（AまたはB）
 # > = 純粋な変換
 # ! = 外部作用との境界。=式を付ければ試作実装も同時生成
-# T/E = Result<T,E>
+# T|E = Result<T,E>
 # f/u = f32/u16
+# >> = ガード分岐
 # ? = 失敗伝播
 
 @LOW=10.0
@@ -20,14 +21,14 @@
 +E=BadSensor|Actuator
 *Receipt(c:C)
 
->decode(*S):S/E
-  BAD=>Err(BadSensor)
-  _=>Ok(S(v,t,r))
+>decode(*S):S|E
+  BAD>>Err(BadSensor)
+  _>>Ok(S(v,t,r))
 
 >cmd(s:S):C
-  BLOCK=>Stop
-  _=>Run(min(s.r,MAX))
+  BLOCK>>Stop
+  _>>Run(min(s.r,MAX))
 
-!exec(c:C):Receipt/E=Ok(Receipt(c))
+!exec(c:C):Receipt|E=Ok(Receipt(c))
 
->run(*S):Receipt/E=PIPE
+>run(*S):Receipt|E=PIPE
