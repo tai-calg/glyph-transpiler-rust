@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Show toolchains
+        run: |
+          python3 --version
+          rustc --version
+          cargo --version
+
+      - name: Run Python tests
+        run: python3 -m unittest discover -s tests -v
+
+      - name: Regenerate Rust source
+        run: |
+          cp demo/src/generated.rs /tmp/generated.rs.before
+          python3 glyphc.py examples/controller.glyph -o demo/src/generated.rs
+          diff -u /tmp/generated.rs.before demo/src/generated.rs
+
+      - name: Check Rust formatting
+        run: cargo fmt --manifest-path demo/Cargo.toml -- --check
+
+      - name: Run Clippy
+        run: cargo clippy --manifest-path demo/Cargo.toml --all-targets -- -D warnings
+
+      - name: Run Rust tests
+        run: cargo test --manifest-path demo/Cargo.toml --verbose
+
+      - name: Run demo
+        run: cargo run --manifest-path demo/Cargo.toml --quiet
