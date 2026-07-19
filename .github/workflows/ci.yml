@@ -24,7 +24,23 @@ jobs:
           cargo --version
 
       - name: Run Python compiler tests
-        run: python3 -m unittest discover -s tests -v
+        id: python_tests
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          python3 -m unittest discover -s tests -v 2>&1 | tee python-test.log
+
+      - name: Upload Python test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-test-log
+          path: python-test.log
+
+      - name: Stop after Python test failure
+        if: steps.python_tests.outcome == 'failure'
+        run: exit 1
 
       - name: Regenerate Rust sources
         run: |
