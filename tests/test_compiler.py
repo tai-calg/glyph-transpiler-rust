@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
+from glyph import compile_artifacts
 from glyph.compiler import GlyphError, compile_source, parse_program
 
 
@@ -12,17 +13,19 @@ ROOT = Path(__file__).resolve().parents[1]
 class CompilerTests(unittest.TestCase):
     def test_controller_example_generates_expected_rust(self) -> None:
         source = (ROOT / "examples" / "controller.glyph").read_text(encoding="utf-8")
-        generated = compile_source(source)
+        artifacts = compile_artifacts(source)
 
-        self.assertIn("pub struct S", generated)
-        self.assertIn("pub enum C", generated)
-        self.assertIn("C::Run(std::cmp::min(s.r, 1000))", generated)
-        self.assertIn("crate::host::exec(cmd(decode(v, t, r)?))", generated)
-        self.assertIn("if !v.is_finite() || !t.is_finite() || v < 0", generated)
+        self.assertIn("pub struct S", artifacts.logic)
+        self.assertIn("pub enum C", artifacts.logic)
+        self.assertIn("C::Run(std::cmp::min(s.r, 1000))", artifacts.logic)
+        self.assertIn("crate::host::exec(cmd(decode(v, t, r)?))", artifacts.logic)
+        self.assertIn("if !v.is_finite() || !t.is_finite() || v < 0.0", artifacts.logic)
+        self.assertIn("pub fn exec(c: C) -> Result<Receipt, E>", artifacts.host)
+        self.assertIn("Ok(Receipt { c: c })", artifacts.host)
 
     def test_generation_is_deterministic(self) -> None:
         source = (ROOT / "examples" / "controller.glyph").read_text(encoding="utf-8")
-        self.assertEqual(compile_source(source), compile_source(source))
+        self.assertEqual(compile_artifacts(source), compile_artifacts(source))
 
     def test_product_constructor_uses_declared_field_order(self) -> None:
         generated = compile_source("*P(x:i32,y:i32)\n>mk(x:i32,y:i32):P=P(x,y)\n")
@@ -49,8 +52,19 @@ class CompilerTests(unittest.TestCase):
             compile_source("*P(x:i32,y:i32)\n>mk():P=P(1)\n")
 
     def test_external_effect_is_routed_to_host_module(self) -> None:
-        generated = compile_source("!send(x:u8):R<u8,u8>\n>run(x:u8):R<u8,u8>=send(x)\n")
-        self.assertIn("crate::host::send(x)", generated)
+        artifacts = compile_artifacts(
+            "!send(x:u8):R<u8,u8>\n>run(x:u8):R<u8,u8>=send(x)\n"
+        )
+        self.assertIn("crate::host::send(x)", artifacts.logic)
+        self.assertIn("panic!(\"Glyph effect boundary `send` is not connected\")", artifacts.host)
+
+    def test_inline_effect_generates_prototype_host_implementation(self) -> None:
+        artifacts = compile_artifacts(
+            "*Receipt(x:u8)\n!send(x:u8):R<Receipt,u8>=Ok(Receipt(x))\n"
+        )
+        self.assertNotIn("pub fn send", artifacts.logic)
+        self.assertIn("pub fn send(x: u8) -> Result<Receipt, u8>", artifacts.host)
+        self.assertIn("Ok(Receipt { x: x })", artifacts.host)
 
     def test_word_macro_expands_only_complete_identifier_tokens(self) -> None:
         generated = compile_source("@M=1000\n>cap(requested:u16):u16=min(requested,M)\n")

@@ -8,21 +8,23 @@ import subprocess
 import sys
 from pathlib import Path
 
-from glyph import GlyphError, compile_file
+from glyph import GlyphError, compile_artifact_files
 
 ROOT = Path(__file__).resolve().parent
 SOURCE = ROOT / "examples" / "controller.glyph"
 GENERATED = ROOT / "demo" / "src" / "generated.rs"
+HOST_GENERATED = ROOT / "demo" / "src" / "host.generated.rs"
 
 
 def main() -> int:
     try:
-        compile_file(SOURCE, GENERATED)
+        compile_artifact_files(SOURCE, GENERATED, HOST_GENERATED)
     except (OSError, GlyphError) as exc:
         print(f"生成失敗: {exc}", file=sys.stderr)
         return 1
 
     print(f"生成完了: {GENERATED.relative_to(ROOT)}")
+    print(f"生成完了: {HOST_GENERATED.relative_to(ROOT)}")
 
     cargo = shutil.which("cargo")
     if cargo is None:
@@ -30,6 +32,10 @@ def main() -> int:
         print("Rust導入後に `python3 run.py` を再実行する。")
         return 0
 
+    subprocess.run(
+        [cargo, "fmt", "--manifest-path", str(ROOT / "demo" / "Cargo.toml")],
+        check=True,
+    )
     subprocess.run(
         [cargo, "test", "--manifest-path", str(ROOT / "demo" / "Cargo.toml")],
         check=True,

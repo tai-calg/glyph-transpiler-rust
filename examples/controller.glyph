@@ -3,7 +3,7 @@
 # * = 積型（AかつB）
 # + = 直和型（AまたはB）
 # > = 純粋な変換
-# ! = Rust側に隔離した外部作用
+# ! = 外部作用との境界。=式を付ければ試作実装も同時生成
 # R<T,E> = Result<T,E>
 # ? = 失敗伝播
 
@@ -27,6 +27,6 @@
   BLOCK => Stop
   _ => Run(min(s.r,MAX))
 
-!exec(c:C):R<Receipt,E>
+!exec(c:C):R<Receipt,E>=Ok(Receipt(c))
 
 >run(v:f32,t:f32,r:u16):R<Receipt,E>=PIPE
