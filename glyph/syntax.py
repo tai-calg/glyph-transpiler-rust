@@ -43,12 +43,12 @@ def _declared_type_names(lines: list[str]) -> set[str]:
 
 def _expand_type(text: str, declared_types: set[str]) -> str:
     text = text.strip()
-    question = _find_top_level_char(text, "?")
-    if question >= 0:
-        success = text[:question].strip()
-        error = text[question + 1 :].strip()
+    slash = _find_top_level_char(text, "/")
+    if slash >= 0:
+        success = text[:slash].strip()
+        error = text[slash + 1 :].strip()
         if not success or not error:
-            raise GlyphError(f"結果型は T?E の形式で記述する: {text}")
+            raise GlyphError(f"結果型は T/E の形式で記述する: {text}")
         return f"R<{_expand_type(success, declared_types)},{_expand_type(error, declared_types)}>"
 
     if text.startswith("("):
