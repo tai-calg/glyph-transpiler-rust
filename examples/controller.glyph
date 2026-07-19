@@ -22,11 +22,11 @@
 
 >decode(*S):S?E
   BAD=>Err(BadSensor)
-  Ok(S(v,t,r))
+  _=>Ok(S(v,t,r))
 
 >cmd(s:S):C
   BLOCK=>Stop
-  Run(min(s.r,MAX))
+  _=>Run(min(s.r,MAX))
 
 !exec(c:C):Receipt?E=Ok(Receipt(c))
 
