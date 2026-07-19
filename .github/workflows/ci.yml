@@ -24,7 +24,7 @@ jobs:
           cargo --version
 
       - name: Run Python compiler tests
-        run: python3 -m unittest tests.test_compiler tests.test_cli -v
+        run: python3 -m unittest discover -s tests -v
 
       - name: Regenerate Rust sources
         run: |
