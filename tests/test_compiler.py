@@ -3,8 +3,7 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-from glyph import compile_artifacts
-from glyph.compiler import GlyphError, compile_source, parse_program
+from glyph import GlyphError, compile_artifacts, compile_source, parse_program
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -39,6 +38,40 @@ class CompilerTests(unittest.TestCase):
         generated = compile_source("+E=Bad\n=x=R<u16,E>\n")
         self.assertIn("pub type x = Result<u16, E>;", generated)
 
+    def test_compact_grouped_fields_result_and_product_spread(self) -> None:
+        generated = compile_source(
+            "*S(v,t:f,r:u)\n"
+            "+E=Bad\n"
+            ">decode(*S):S?E\n"
+            "  v<0=>Err(Bad)\n"
+            "  Ok(S(v,t,r))\n"
+        )
+        self.assertIn("pub v: f32", generated)
+        self.assertIn("pub t: f32", generated)
+        self.assertIn("pub r: u16", generated)
+        self.assertIn(
+            "pub fn decode(v: f32, t: f32, r: u16) -> Result<S, E>",
+            generated,
+        )
+        self.assertIn("else {\n        Ok(S { v: v, t: t, r: r })", generated)
+
+    def test_compact_primitive_type_shortcuts(self) -> None:
+        generated = compile_source("*P(x:f,y:d,n:u,k:i,ok:b)\n")
+        self.assertIn("pub x: f32", generated)
+        self.assertIn("pub y: f64", generated)
+        self.assertIn("pub n: u16", generated)
+        self.assertIn("pub k: i32", generated)
+        self.assertIn("pub ok: bool", generated)
+
+    def test_declared_type_name_overrides_primitive_shortcut(self) -> None:
+        generated = compile_source("*f(x:i)\n>id(x:f):f=x\n")
+        self.assertIn("pub struct f", generated)
+        self.assertIn("pub fn id(x: f) -> f", generated)
+
+    def test_unknown_product_spread_is_rejected(self) -> None:
+        with self.assertRaisesRegex(GlyphError, "積型 '\\*Missing' が定義されていない"):
+            compile_source(">f(*Missing):i=0\n")
+
     def test_guard_function_requires_final_fallback(self) -> None:
         with self.assertRaisesRegex(GlyphError, "最後にちょうど1個"):
             parse_program(">f(x:i32):i32\n  x<0 => 0\n")
@@ -60,7 +93,7 @@ class CompilerTests(unittest.TestCase):
 
     def test_inline_effect_generates_prototype_host_implementation(self) -> None:
         artifacts = compile_artifacts(
-            "*Receipt(x:u8)\n!send(x:u8):R<Receipt,u8>=Ok(Receipt(x))\n"
+            "*Receipt(x:u8)\n!send(x:u8):Receipt?u8=Ok(Receipt(x))\n"
         )
         self.assertNotIn("pub fn send", artifacts.logic)
         self.assertIn("pub fn send(x: u8) -> Result<Receipt, u8>", artifacts.host)
