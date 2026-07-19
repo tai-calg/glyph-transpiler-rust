@@ -38,13 +38,13 @@ class CompilerTests(unittest.TestCase):
         generated = compile_source("+E=Bad\n=x=R<u16,E>\n")
         self.assertIn("pub type x = Result<u16, E>;", generated)
 
-    def test_compact_grouped_fields_result_and_product_spread(self) -> None:
+    def test_compact_grouped_fields_result_spread_and_guard_arrow(self) -> None:
         generated = compile_source(
             "*S(v,t:f,r:u)\n"
             "+E=Bad\n"
-            ">decode(*S):S/E\n"
-            "  v<0=>Err(Bad)\n"
-            "  _=>Ok(S(v,t,r))\n"
+            ">decode(*S):S|E\n"
+            "  v<0>>Err(Bad)\n"
+            "  _>>Ok(S(v,t,r))\n"
         )
         self.assertIn("pub v: f32", generated)
         self.assertIn("pub t: f32", generated)
@@ -58,6 +58,10 @@ class CompilerTests(unittest.TestCase):
     def test_question_mark_is_reserved_for_failure_propagation(self) -> None:
         with self.assertRaises(GlyphError):
             compile_source("+E=Bad\n>f():u?E=Err(Bad)\n")
+
+    def test_slash_is_not_a_compact_result_type(self) -> None:
+        with self.assertRaises(GlyphError):
+            compile_source("+E=Bad\n>f():u/E=Err(Bad)\n")
 
     def test_compact_primitive_type_shortcuts(self) -> None:
         generated = compile_source("*P(x:f,y:d,n:u,k:i,ok:b)\n")
@@ -78,11 +82,15 @@ class CompilerTests(unittest.TestCase):
 
     def test_guard_function_requires_explicit_final_fallback(self) -> None:
         with self.assertRaises(GlyphError):
-            parse_program(">f(x:i):i\n  x<0=>0\n  1\n")
+            parse_program(">f(x:i):i\n  x<0>>0\n  1\n")
 
     def test_guard_function_requires_final_fallback(self) -> None:
         with self.assertRaisesRegex(GlyphError, "最後にちょうど1個"):
-            parse_program(">f(x:i32):i32\n  x<0 => 0\n")
+            parse_program(">f(x:i32):i32\n  x<0>>0\n")
+
+    def test_legacy_guard_arrow_remains_compatible(self) -> None:
+        generated = compile_source(">f(x:i):i\n  x<0=>0\n  _=>1\n")
+        self.assertIn("if x < 0", generated)
 
     def test_duplicate_variant_is_rejected(self) -> None:
         with self.assertRaisesRegex(GlyphError, "衝突"):
@@ -101,7 +109,7 @@ class CompilerTests(unittest.TestCase):
 
     def test_inline_effect_generates_prototype_host_implementation(self) -> None:
         artifacts = compile_artifacts(
-            "*Receipt(x:u8)\n!send(x:u8):Receipt/u8=Ok(Receipt(x))\n"
+            "*Receipt(x:u8)\n!send(x:u8):Receipt|u8=Ok(Receipt(x))\n"
         )
         self.assertNotIn("pub fn send", artifacts.logic)
         self.assertIn("pub fn send(x: u8) -> Result<Receipt, u8>", artifacts.host)
