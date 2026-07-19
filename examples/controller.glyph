@@ -7,10 +7,10 @@
 # R<T,E> = Result<T,E>
 # ? = 失敗伝播
 
-@LOW=10
-@HOT=80
+@LOW=10.0
+@HOT=80.0
 @MAX=1000
-@BAD=!finite(v)|!finite(t)|v<0
+@BAD=!finite(v)|!finite(t)|v<0.0
 @BLOCK=s.v<LOW|s.t>HOT|s.r=0
 @PIPE=exec(cmd(decode(v,t,r)?))
 
