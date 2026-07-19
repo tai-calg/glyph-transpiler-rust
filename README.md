@@ -15,10 +15,13 @@
 | `!` | 外部作用との境界 | `crate::host::<name>` |
 | 型位置の `T|E` | 成功型または失敗型 | `Result<T,E>` |
 | ガード行の `>>` | 条件と結果の区切り | `if` / `else` |
-| `?` | 失敗の早期返却 | Rustの`?` |
+| トップレベルの `?` | 時相制約 | Rustモニタ |
+| 式末尾の `?` | 失敗の早期返却 | Rustの`?` |
 | 式位置の `|` / `&` | 論理和 / 論理積 | `||` / `&&` |
 
-`|`は構文位置で区別する。型シグネチャではResult型、式では論理和、直和型宣言ではvariant区切りになる。
+`|`と`?`は構文位置で区別する。型シグネチャではResult型、式では論理和、直和型宣言ではvariant区切りになる。トップレベルの`?name(...)=...`は時相制約、式末尾の`?`は失敗伝播になる。
+
+時相制約の文法、有限トレース意味論、生成モニタ、省メモリ化計画は[`TEMPORAL_DESIGN.md`](TEMPORAL_DESIGN.md)を参照。
 
 ## 単語マクロ
 
@@ -73,7 +76,7 @@ python3 run.py
 処理:
 
 1. `examples/controller.glyph`を解析する
-2. 短縮構文と単語マクロを展開する
+2. 時相制約を抽出し、短縮構文と単語マクロを展開する
 3. `demo/src/generated.rs`と`demo/src/host.generated.rs`を再生成する
 4. Cargoが存在すれば`cargo test`を実行する
 5. テスト成功後にデモを実行する
@@ -112,6 +115,7 @@ python3 -m unittest discover -s tests -v
 +C=Stop|Run(u)
 +E=BadSensor|Actuator
 *Receipt(c:C)
+*O(send,ack,closed,auth,beat,stable:b)
 
 >decode(*S):S|E
   BAD>>Err(BadSensor)
@@ -123,6 +127,10 @@ python3 -m unittest discover -s tests -v
 
 !exec(c:C):Receipt|E=Ok(Receipt(c))
 >run(*S):Receipt|E=PIPE
+
+?ack(*O)=□(send>>◇5s ack)
+?safe(*O)=□(!auth>>closed)
+?wait(*O)=closed W auth
 ```
 
 短縮構文は従来文法へ展開してから解析する。
@@ -134,6 +142,33 @@ BLOCK>>Stop          -> BLOCK=>Stop
 ```
 
 従来の`R<T,E>`とガード矢印`=>`も互換構文として使用できる。
+
+## 時相制約
+
+```glyph
+?ack(*O)=□(send>>◇5s ack)
+```
+
+は、すべての`send`について5秒以内の`ack`を要求するRustモニタを生成する。
+
+生成モニタは次の3値を返す。
+
+```rust
+TemporalVerdict::Satisfied
+TemporalVerdict::Violated
+TemporalVerdict::Pending
+```
+
+API:
+
+```rust
+monitor.step(at_ms, ...);
+monitor.verdict();
+monitor.finish();
+monitor.reset();
+```
+
+第1版は意味論を検査する全履歴参照実装であり、長時間稼働向けの逐次モニタは次段階で追加する。
 
 ## 外部作用の扱い
 
@@ -160,18 +195,22 @@ glyph-rust/
 ├── glyphc.py                 CLI
 ├── glyph/compiler.py         lexer / parser / AST / Rust generator
 ├── glyph/syntax.py           短縮構文展開
+├── glyph/temporal.py         時相式AST / parser / spec抽出
+├── glyph/temporal_codegen.py 時相Rustモニタ生成
 ├── glyph/artifacts.py        logic / host生成
 ├── examples/controller.glyph DSL入力例
 ├── demo/
 │   ├── Cargo.toml
 │   └── src/
-│       ├── generated.rs      ロジック生成物
+│       ├── generated.rs      ロジック・モニタ生成物
 │       ├── host.generated.rs 試作用作用実装
 │       ├── host.rs           実機アダプター差替点
 │       └── main.rs           実行例とRustテスト
 ├── tests/                    Pythonテスト
 ├── LANGUAGE.md               文法仕様
 ├── COMPACT_SYNTAX.md         短縮構文仕様
+├── DESIGN.md                 全体設計
+├── TEMPORAL_DESIGN.md        時相制約設計
 └── run.py                    再生成・検査・実行
 ```
 
@@ -181,6 +220,8 @@ glyph-rust/
 - 単語マクロは式専用で、引数を取らない
 - 型検査はRustコンパイラへ委譲する
 - 実機の外部作用は`crate::host`に実装する
+- 時相モニタ第1版は全観測を保持する参照実装
+- `X`、過去演算子、ID付き要求応答相関は未対応
 - 生成先はRust 2021 Editionを想定する
 
 ## ライセンス
