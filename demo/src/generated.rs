@@ -26,7 +26,7 @@ pub struct Receipt {
 }
 
 pub fn decode(v: f32, t: f32, r: u16) -> Result<S, E> {
-    if !v.is_finite() || !t.is_finite() || v < 0 {
+    if !v.is_finite() || !t.is_finite() || v < 0.0 {
         Err(E::BadSensor)
     }
     else {
@@ -35,7 +35,7 @@ pub fn decode(v: f32, t: f32, r: u16) -> Result<S, E> {
 }
 
 pub fn cmd(s: S) -> C {
-    if s.v < 10 || s.t > 80 || s.r == 0 {
+    if s.v < 10.0 || s.t > 80.0 || s.r == 0 {
         C::Stop
     }
     else {
