@@ -7,7 +7,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from glyph import GlyphError, compile_artifacts, compile_source
+from glyph import GlyphError, compile_artifacts
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -45,7 +45,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.host_output.write_text(artifacts.host, encoding="utf-8")
                 print(f"generated: {args.host_output}")
         else:
-            sys.stdout.write(compile_source(source))
+            sys.stdout.write(artifacts.logic)
         return 0
     except (OSError, GlyphError) as exc:
         print(f"glyphc: error: {exc}", file=sys.stderr)
