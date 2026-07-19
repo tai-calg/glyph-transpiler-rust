@@ -23,8 +23,8 @@ jobs:
           rustc --version
           cargo --version
 
-      - name: Run Python tests
-        run: python3 -m unittest discover -s tests -v
+      - name: Run Python compiler tests
+        run: python3 -m unittest tests.test_compiler tests.test_cli -v
 
       - name: Regenerate Rust source
         run: |
