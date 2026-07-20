@@ -58,15 +58,15 @@ jobs:
       - name: Generate execution structure diagrams
         run: |
           python3 glyphc.py examples/system_controller.glyph \
-            --diagram-dir /tmp/glyph-diagrams
-          test -s /tmp/glyph-diagrams/execution.mmd
-          test -s /tmp/glyph-diagrams/machine-controller.mmd
-          test -s /tmp/glyph-diagrams/temporal.mmd
-          test -s /tmp/glyph-diagrams/execution-ir.json
-          test -s /tmp/glyph-diagrams/source-map.json
-          test -s /tmp/glyph-diagrams/index.md
-          grep -q 'stateDiagram-v2' /tmp/glyph-diagrams/machine-controller.mmd
-          grep -q 'click fn_step' /tmp/glyph-diagrams/execution.mmd
+            --diagram-dir build/glyph-diagrams
+          test -s build/glyph-diagrams/execution.mmd
+          test -s build/glyph-diagrams/machine-controller.mmd
+          test -s build/glyph-diagrams/temporal.mmd
+          test -s build/glyph-diagrams/execution-ir.json
+          test -s build/glyph-diagrams/source-map.json
+          test -s build/glyph-diagrams/index.md
+          grep -q 'stateDiagram-v2' build/glyph-diagrams/machine-controller.mmd
+          grep -q 'click fn_step' build/glyph-diagrams/execution.mmd
 
       - name: Upload generated sources and diagrams
         if: always()
@@ -78,7 +78,7 @@ jobs:
             demo/src/host.generated.rs
             demo-system/src/generated.rs
             demo-system/src/host.generated.rs
-            /tmp/glyph-diagrams
+            build/glyph-diagrams
 
       - name: Format generated Rust
         run: |
