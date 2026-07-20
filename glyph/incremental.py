@@ -42,6 +42,7 @@ def _write_if_changed(path: Path, content: str) -> bool:
 
 def _design_json(model) -> str:
     payload = model.semantic.to_dict()
+    payload["blocks"] = [item.to_dict() for item in model.blocks]
     payload["lambdas"] = [asdict(item) for item in model.lambdas]
     payload["architecture"] = model.architecture.to_dict()
     payload["rust_todos"] = [item.to_dict() for item in model.opaques]
