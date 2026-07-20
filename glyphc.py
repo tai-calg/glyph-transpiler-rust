@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import asdict
 import json
 import sys
 from pathlib import Path
@@ -33,7 +34,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--ast-json",
         type=Path,
-        help="SymbolIdを含む型付きASTをJSONで出力する",
+        help="SymbolId、ラムダ、Architectureを含む型付き設計JSONを出力する",
     )
     parser.add_argument("--check", action="store_true", help="解析と検査だけを行う")
     parser.add_argument("--repl", action="store_true", help="開発時REPLを起動する")
@@ -52,11 +53,14 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _write_semantic(source: str, output: Path) -> None:
-    model = parse_compilation_model(source)
+def _write_semantic(source: str, source_name: str, output: Path) -> None:
+    model = parse_compilation_model(source, source_name)
+    payload = model.semantic.to_dict()
+    payload["lambdas"] = [asdict(item) for item in model.lambdas]
+    payload["architecture"] = model.architecture.to_dict()
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(
-        json.dumps(model.semantic.to_dict(), ensure_ascii=False, indent=2) + "\n",
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
 
@@ -117,7 +121,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"generated: {args.diagram_dir / name}")
 
         if args.ast_json:
-            _write_semantic(source, args.ast_json)
+            _write_semantic(source, str(args.input), args.ast_json)
             print(f"generated: {args.ast_json}")
 
         if not args.output and not args.diagram_dir and not args.ast_json:
