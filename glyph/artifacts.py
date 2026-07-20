@@ -11,9 +11,10 @@ from .compiler import (
     RustGenerator,
     parse_program,
 )
+from .machine import MachineDecl, extract_machines, validate_machines
 from .pattern_codegen import PatternRustGenerator
 from .syntax import expand_compact_syntax
-from .temporal import extract_specs
+from .temporal import SpecDecl, extract_specs
 from .temporal_codegen import append_temporal_rust
 from .temporal_stream_codegen import append_streaming_temporal_rust
 from .temporal_stream_safety_codegen import append_safety_streaming_temporal_rust
@@ -95,11 +96,27 @@ def _generate_host(program: Program, inline_effects: tuple[FunctionDecl, ...]) -
     return "\n".join(out).rstrip() + "\n"
 
 
-def compile_artifacts(source: str) -> RustArtifacts:
+def parse_artifact_model(
+    source: str,
+) -> tuple[
+    Program,
+    tuple[FunctionDecl, ...],
+    tuple[SpecDecl, ...],
+    tuple[MachineDecl, ...],
+]:
+    """Parse one Glyph source into logic, effect, temporal, and machine models."""
+
     expanded = expand_compact_syntax(source)
-    core, specs = extract_specs(expanded)
+    without_specs, specs = extract_specs(expanded)
+    core, machines = extract_machines(without_specs)
     program, inline_effects = _parse_effect_program(core)
     validate_temporal_specs(program, specs)
+    validate_machines(program, machines)
+    return program, inline_effects, specs, machines
+
+
+def compile_artifacts(source: str) -> RustArtifacts:
+    program, inline_effects, specs, _ = parse_artifact_model(source)
     logic = append_temporal_rust(PatternRustGenerator(program).generate(), program, specs)
     logic = append_streaming_temporal_rust(logic, program, specs)
     logic = append_safety_streaming_temporal_rust(logic, program, specs)
