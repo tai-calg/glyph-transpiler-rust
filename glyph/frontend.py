@@ -7,6 +7,7 @@ from .syntax import expand_compact_syntax
 from .temporal import extract_specs
 from .temporal_codegen import append_temporal_rust
 from .temporal_stream_codegen import append_streaming_temporal_rust
+from .temporal_stream_safety_codegen import append_safety_streaming_temporal_rust
 from .temporal_validate import validate_temporal_specs
 
 
@@ -26,7 +27,8 @@ def parse_program(source: str) -> Program:
 def compile_source(source: str) -> str:
     program, specs = _parse(source)
     logic = append_temporal_rust(RustGenerator(program).generate(), program, specs)
-    return append_streaming_temporal_rust(logic, program, specs)
+    logic = append_streaming_temporal_rust(logic, program, specs)
+    return append_safety_streaming_temporal_rust(logic, program, specs)
 
 
 def compile_file(input_path: str | Path, output_path: str | Path) -> None:
