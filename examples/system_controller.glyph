@@ -5,27 +5,27 @@
 @HOT=80.0
 @MAX=1000
 @INVALID=!finite(input.voltage)|!finite(input.temperature)|input.voltage<0.0
-@BLOCK=input.voltage<LOW|input.temperature>HOT|!input.authorized|input.fault|input.requested=0
+@BLOCK=input.voltage<LOW|input.temperature>HOT|!input.authorized|input.fault|input.requested==0
 
-*Input(voltage,temperature:f,requested:u,authorized,emergency,fault,send,ack,heartbeat,closed,stable:b)
+*Input(voltage,temperature:F,requested:U,authorized,emergency,fault,send,ack,heartbeat,closed,stable:B)
 +Mode=Idle|Running|Stopping|Faulted
-+Command=Stop|Run(u)|EmergencyStop
++Command=Stop|Run(U)|EmergencyStop
 +Error=BadSensor|Actuator
-*System(mode:Mode,sequence,last_speed:u,command:Command,closed,stable:b)
-*Receipt(command:Command,sequence:u)
+*System(mode:Mode,sequence,last_speed:U,command:Command,closed,stable:B)
+*Receipt(command:Command,sequence:U)
 *Cycle(system:System,receipt:Receipt)
 
 # 送信後500ms以内のACK、1秒以内ごとのheartbeatを要求する。
-?ack_deadline(*Input)=□(send>>◇500ms ack)
-?heartbeat_live(*Input)=□◇1s heartbeat
+?ack_deadline(*Input)=A(send>>E 500ms ack)
+?heartbeat_live(*Input)=AE 1s heartbeat
 
 # 未認可・緊急停止・fault時には閉状態でなければならない。
-?authorization_safe(*Input)=□(!authorized>>closed)
-?emergency_safe(*Input)=□(emergency>>closed)
-?fault_safe(*Input)=□(fault>>closed)
+?authorization_safe(*Input)=A(!authorized>>closed)
+?emergency_safe(*Input)=A(emergency>>closed)
+?fault_safe(*Input)=A(fault>>closed)
 
 # 有限トレース終端が安定状態なら収束済みと判定する。
-?convergence(*Input)=◇□stable
+?convergence(*Input)=EA stable
 
 >validate(input:Input):Input|Error
   INVALID>>Err(BadSensor)
@@ -38,14 +38,14 @@
 
 # 1枝目はpayload値照合、2枝目はpayload束縛を使用する。
 >transition(system:System,command:Command):System
-  command=Run(system.last_speed)>>System(Running,system.sequence+1,system.last_speed,command,false,true)
-  command=Run(speed)>>System(Running,system.sequence+1,speed,Run(speed),false,true)
-  command=EmergencyStop>>System(Faulted,system.sequence+1,system.last_speed,EmergencyStop,true,false)
-  command=Stop>>System(Stopping,system.sequence+1,system.last_speed,Stop,true,false)
+  command==Run(system.last_speed)>>System(Running,system.sequence+1,system.last_speed,command,false,true)
+  command==Run(speed)>>System(Running,system.sequence+1,speed,Run(speed),false,true)
+  command==EmergencyStop>>System(Faulted,system.sequence+1,system.last_speed,EmergencyStop,true,false)
+  command==Stop>>System(Stopping,system.sequence+1,system.last_speed,Stop,true,false)
   _>>system
 
 # 実装はdemo-system/src/host.rsで接続する。生成host側は未接続stubとなる。
 !write_actuator(system:System):Cycle|Error
-!report_violation(code:u):b|Error
+!report_violation(code:U):B|Error
 
 >cycle(system:System,input:Input):Cycle|Error=write_actuator(transition(system,decide(validate(input)?)))
