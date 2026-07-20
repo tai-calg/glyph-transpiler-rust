@@ -68,6 +68,22 @@ jobs:
           grep -q 'stateDiagram-v2' build/glyph-diagrams/machine-controller.mmd
           grep -q 'click fn_step' build/glyph-diagrams/execution.mmd
 
+      - name: Verify function values, AST macros, typed AST, and watch iteration
+        run: |
+          python3 glyphc.py examples/lisp_core.glyph \
+            -o build/lisp-core/generated.rs \
+            --diagram-dir build/lisp-core/diagrams \
+            --ast-json build/lisp-core/typed-ast.json
+          rustc --edition 2021 --crate-type lib build/lisp-core/generated.rs \
+            -o build/lisp-core/libglyph_lisp_core.rlib
+          python3 glyphc.py examples/lisp_core.glyph \
+            --watch-once \
+            --diagram-dir build/lisp-core/watch-diagrams \
+            --ast-json build/lisp-core/watch-typed-ast.json
+          test -s build/lisp-core/typed-ast.json
+          test -s build/lisp-core/watch-diagrams/execution.mmd
+          grep -q '"analysis": "structural"' build/lisp-core/typed-ast.json
+
       - name: Upload generated sources and diagrams
         if: always()
         uses: actions/upload-artifact@v4
@@ -79,6 +95,7 @@ jobs:
             demo-system/src/generated.rs
             demo-system/src/host.generated.rs
             build/glyph-diagrams
+            build/lisp-core
 
       - name: Format generated Rust
         run: |
