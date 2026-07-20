@@ -100,6 +100,34 @@ jobs:
           grep -q 'sensor' build/door-sketch/diagrams/architecture.mmd
           grep -q '__glyph_lambda' build/door-sketch/generated.rs
 
+      - name: Verify guarded conditionals and Rust TODO contracts
+        run: |
+          mkdir -p build/algorithm-sketch
+          python3 - <<'PY'
+          from pathlib import Path
+          from glyph import compile_artifacts, parse_compilation_model
+
+          source = Path('examples/algorithm_sketch.glyph').read_text(encoding='utf-8')
+          artifacts = compile_artifacts(source)
+          root = Path('build/algorithm-sketch')
+          (root / 'generated.rs').write_text(artifacts.logic, encoding='utf-8')
+          (root / 'manual.rs').write_text(artifacts.manual_scaffold, encoding='utf-8')
+          (root / 'lib.rs').write_text(
+              'pub mod generated;\npub mod manual;\n', encoding='utf-8'
+          )
+          model = parse_compilation_model(source)
+          (root / 'rust-todos.txt').write_text(
+              '\n'.join(item.name for item in model.opaques) + '\n',
+              encoding='utf-8',
+          )
+          PY
+          rustc --edition 2021 --crate-type lib build/algorithm-sketch/lib.rs \
+            -o build/algorithm-sketch/libglyph_algorithm_sketch.rlib
+          grep -q 'else if x == 0' build/algorithm-sketch/generated.rs
+          grep -q 'crate::manual::shortest_path' build/algorithm-sketch/generated.rs
+          grep -q 'todo!' build/algorithm-sketch/manual.rs
+          grep -q 'shortest_path' build/algorithm-sketch/rust-todos.txt
+
       - name: Upload generated sources and diagrams
         if: always()
         uses: actions/upload-artifact@v4
@@ -113,6 +141,7 @@ jobs:
             build/glyph-diagrams
             build/lisp-core
             build/door-sketch
+            build/algorithm-sketch
 
       - name: Format generated Rust
         run: |
