@@ -17,6 +17,11 @@ from .ast_macros import (
     extract_ast_macros,
 )
 from .compiler import ExternDecl, FunctionDecl, GlyphError, Program, parse_program
+from .function_blocks import (
+    FunctionBlockLowering,
+    lower_function_blocks,
+    restore_block_source_lines,
+)
 from .functional import FunctionalPatternRustGenerator, validate_function_values
 from .machine import MachineDecl, extract_machines, validate_machines
 from .opaque import (
@@ -61,6 +66,7 @@ class CompilationModel:
     systems: tuple[SystemDecl, ...]
     architecture: ArchitectureIR
     ast_macros: tuple[AstMacroDef, ...]
+    blocks: tuple[FunctionBlockLowering, ...]
     lambdas: tuple[LambdaLowering, ...]
     opaques: tuple[OpaqueDecl, ...]
     semantic: SemanticModel
@@ -91,7 +97,6 @@ def _parse_effect_program(source: str) -> tuple[Program, tuple[FunctionDecl, ...
     parsed = parse_program("\n".join(transformed))
     effects: list[FunctionDecl] = []
     logic_declarations = []
-
     for decl in parsed.declarations:
         if isinstance(decl, FunctionDecl) and decl.line in inline_lines:
             effects.append(decl)
@@ -100,7 +105,6 @@ def _parse_effect_program(source: str) -> tuple[Program, tuple[FunctionDecl, ...
             )
         else:
             logic_declarations.append(decl)
-
     return Program(tuple(logic_declarations)), tuple(effects)
 
 
@@ -123,7 +127,6 @@ def _generate_host(
         "use crate::generated::*;",
         "",
     ]
-
     for decl in externs:
         signature = generator._signature_tail(decl.params, decl.return_type)
         out.append("#[allow(unused_variables)]")
@@ -140,7 +143,6 @@ def _generate_host(
                 f"{implementation.line}行目: !境界の試作実装は単一式で記述する"
             )
         out.extend(["}", ""])
-
     return "\n".join(out).rstrip() + "\n"
 
 
@@ -158,7 +160,8 @@ def parse_compilation_model(
     pure_source, opaques = expose_opaque_as_pure(
         without_ast_macros, opaque_seeds
     )
-    pipeline_result = lower_lambda_pipelines(pure_source)
+    block_result = lower_function_blocks(pure_source, ast_macros)
+    pipeline_result = lower_lambda_pipelines(block_result.source)
     parser_source = lower_opaque_to_extern(
         pipeline_result.source, opaque_seeds
     )
@@ -167,7 +170,9 @@ def parse_compilation_model(
     program, inline_effects = _parse_effect_program(core)
 
     program = expand_program_macros(program, ast_macros)
-    program = restore_lambda_source_lines(program, pipeline_result.lambdas)
+    program = restore_block_source_lines(program, block_result.blocks)
+    combined_lambdas = (*block_result.lambdas, *pipeline_result.lambdas)
+    program = restore_lambda_source_lines(program, combined_lambdas)
     inline_effects = expand_function_macros(inline_effects, ast_macros)
     machines = expand_machine_macros(machines, ast_macros)
 
@@ -188,7 +193,8 @@ def parse_compilation_model(
         systems,
         architecture,
         ast_macros,
-        pipeline_result.lambdas,
+        block_result.blocks,
+        tuple(combined_lambdas),
         opaques,
         semantic,
     )
@@ -203,7 +209,6 @@ def parse_artifact_model(
     tuple[MachineDecl, ...],
 ]:
     """Compatibility view of the full compilation model."""
-
     model = parse_compilation_model(source)
     return model.program, model.inline_effects, model.specs, model.machines
 
@@ -211,7 +216,9 @@ def parse_artifact_model(
 def compile_artifacts(source: str) -> RustArtifacts:
     model = parse_compilation_model(source)
     logic = append_temporal_rust(
-        OpaqueAwareRustGenerator(model.program, model.opaques).generate(),
+        OpaqueAwareRustGenerator(
+            model.program, model.opaques, model.blocks
+        ).generate(),
         model.program,
         model.specs,
     )
