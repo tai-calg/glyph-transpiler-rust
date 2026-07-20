@@ -1,0 +1,15 @@
++Kind=Negative|Zero|Positive
+*Graph(nodes:U,edges:U)
+*Path(cost:U)
+
+>classify(x:I):Kind
+  x<0 >> Negative
+  x==0 >> Zero
+  _ >> Positive
+
+~shortest_path(graph:Graph,start:U,goal:U):Path # TODO: choose Dijkstra or A* and design complexity in Rust
+~optimize(path:Path):Path # TODO: optimize the path in Rust
+
+>plan(graph:Graph,start:U,goal:U):Path=
+  shortest_path(graph,start,goal)
+  /> optimize
