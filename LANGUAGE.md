@@ -1,104 +1,53 @@
-# Glyph Language 0.2
+# Glyph Language 0.3
 
 ## 1. 設計原則
 
 1. 記号の意味は構文位置から一意に決まる。
-2. DSLは型、変換、失敗、外部作用の境界だけを記述する。
-3. 所有権、ドライバ、非同期処理などRust固有の詳細はホスト側へ残す。
-4. 単語マクロは文字列部分一致ではなく、識別子トークン完全一致で展開する。
-5. 短縮構文とマクロを展開してからASTへ解析し、通常のRustを生成する。
+2. 型、純粋計算、状態遷移、作用境界、実行履歴制約を記述する。
+3. 所有権、時計、ドライバ、非同期処理、違反後の復旧はRustホスト側へ残す。
+4. 型短縮は大文字、値識別子は通常小文字として視覚的に区別する。
+5. `=`は宣言・定義、`==`は等値比較に限定する。
+6. 時相論理の表面構文はASCIIで入力できる形にする。
 
 ## 2. 単語マクロ
 
-### 構文
-
-```text
+```glyph
 @NAME=expression
 ```
 
 例:
 
-```text
+```glyph
 @LOW=10
 @MAX=1000
-@BLOCK=s.v<LOW|s.t>80|s.r=0
+@BLOCK=s.v<LOW|s.t>80|s.r==0
 @LOWER=min
 
 >cap(x:u16):u16=LOWER(x,MAX)
->cmd(s:S):C
-  BLOCK>>Stop
-  _>>Run(s.r)
 ```
 
-意味:
+- 置換対象は完全一致した識別子トークンだけ
+- ファイル全体で有効
+- 別のマクロを参照可能
+- 式専用であり、型や宣言は置換しない
+- 引数付きマクロは未対応
 
-- `NAME`は有効な識別子でなければならない。
-- 置換対象は式中の完全一致した識別子トークンだけである。
-- `@R=1`は`R`を置換するが、`Receipt`の一部は置換しない。
-- マクロはファイル全体で有効であり、宣言順に依存しない。
-- マクロ本体から別のマクロを参照できる。
-- マクロ本体は式であり、型またはトップレベル宣言の置換には使わない。
-- 引数付きマクロは未対応である。
+以下を拒否する。
 
-### 優先順位
-
-各置換式は構文上の括弧で囲んで展開する。
-
-```text
-@NEXT=x+1
->f(x:i32):i32=NEXT*2
-```
-
-生成:
-
-```rust
-pub fn f(x: i32) -> i32 {
-    (x + 1) * 2
-}
-```
-
-### 検査
-
-以下をコンパイルエラーにする。
-
-- 同名マクロの重複
-- 空の置換式
-- 文法的に不正な置換式
-- マクロの直接・間接循環
-- 宣言名またはenum variant名との衝突
+- 重複
+- 空または不正な式
+- 直接・間接循環
+- 宣言名・variant名との衝突
 - 展開深さ64超過
-- 一式あたり4096展開トークン超過
-
-循環例:
-
-```text
-@A=B
-@B=A
-```
-
-エラー:
-
-```text
-macro cycle: A -> B -> A
-```
-
-マクロ名には大文字を推奨する。小文字も使用できるが、ローカル変数やフィールド名と一致すれば、その識別子も置換対象になる。
+- 4096トークン超過
 
 ## 3. 宣言
 
 ### 積型
 
-```text
-*Point(x:f32,y:f32)
+```glyph
+*Point(x,y:F)
 ```
-
-短縮:
-
-```text
-*Point(x,y:f)
-```
-
-生成:
 
 ```rust
 pub struct Point {
@@ -109,11 +58,9 @@ pub struct Point {
 
 ### 直和型
 
-```text
-+State=Idle|Run(u)|Fault{code:u8,msg:S}
+```glyph
++State=Idle|Run(U)|Fault{code:u8,msg:S}
 ```
-
-生成:
 
 ```rust
 pub enum State {
@@ -125,51 +72,49 @@ pub enum State {
 
 ### 型別名
 
-```text
-=Output=u|E
+```glyph
+=Output=U|Error
 ```
 
-生成:
-
 ```rust
-pub type Output = Result<u16, E>;
+pub type Output = Result<u16, Error>;
 ```
 
 ### 純粋関数
 
 単一式:
 
-```text
->double(x:u):u=x*2
+```glyph
+>double(x:U):U=x*2
 ```
 
-ガード節:
+ガード:
 
-```text
->sign(x:i):i
+```glyph
+>sign(x:I):I
   x<0>>-1
-  x=0>>0
+  x==0>>0
   _>>1
 ```
 
-`>>`はガードの条件と結果を区切る。`_`は最後に一つだけ必要である。従来の`=>`も互換構文として受理する。
+`_`は最後に一つだけ必要。`=>`は内部互換構文として受理する。
 
 ### 外部作用境界
 
-```text
-!send(x:u8):u8|E
+```glyph
+!send(x:u8):u8|Error
 ```
 
-呼出しは次へ展開される。
+呼出し:
 
 ```rust
 crate::host::send(x)
 ```
 
-`=expression`を付けると試作実装を生成する。
+試作実装:
 
-```text
-!send(x:u8):u8|E=Ok(x)
+```glyph
+!send(x:u8):u8|Error=Ok(x)
 ```
 
 ## 4. 型
@@ -178,7 +123,7 @@ crate::host::send(x)
 
 ```text
 u8 u16 u32 u64
- i8 i16 i32 i64
+i8 i16 i32 i64
 f32 f64 bool String
 R<T,E>  -> Result<T,E>
 O<T>    -> Option<T>
@@ -186,42 +131,36 @@ V<T>    -> Vec<T>
 S       -> String
 ```
 
-短縮表記では、型位置に限って次も使える。
+短縮形式:
 
 ```text
-T|E       -> R<T,E> -> Result<T,E>
-f d u i b -> f32 f64 u16 i32 bool
+F -> f32
+D -> f64
+U -> u16
+I -> i32
+B -> bool
+T|E -> Result<T,E>
 ```
 
-`|`は文脈によって一意に解釈する。
-
-- 型シグネチャ最上位の`T|E`: Result型
-- 式中の`a|b`: 論理和
-- 直和型宣言の`+A=X|Y`: variant区切り
-
-`?`は型記号として使わず、式末尾の失敗伝播だけを表す。旧候補の`T?E`と`T/E`は受理しない。従来の`R<T,E>`は引き続き使用できる。
-
-ユーザー定義型が`S`、`f`、`u`などの短縮名と一致する場合は、ユーザー定義型を優先する。
-
-### 積型引数展開
+旧短縮型`f/d/u/i/b`は受理しない。同名のユーザー定義型が存在する場合はユーザー定義型を優先する。
 
 積型のfield rowは関数引数へ展開できる。
 
-```text
-*S(v,t:f,r:u)
->decode(*S):S|E
+```glyph
+*S(v,t:F,r:U)
+>decode(*S):S|Error
 ```
 
-展開:
+内部展開:
 
 ```text
 *S(v:f32,t:f32,r:u16)
->decode(v:f32,t:f32,r:u16):R<S,E>
+>decode(v:f32,t:f32,r:u16):R<S,Error>
 ```
 
 ## 5. 式
 
-対応済み:
+対応形:
 
 ```text
 name
@@ -234,24 +173,125 @@ expr?
 !expr
 -expr
 a+b a-b a*b a/b
-a<b a>b a<=b a>=b a=b a!=b
+a<b a>b a<=b a>=b a==b a!=b
 cond1|cond2
 cond1&cond2
 ```
 
-演算子優先順位は高い順に以下。
+単独`=`は式演算子ではない。等値比較は`==`だけを使う。
+
+優先順位:
 
 ```text
 postfix: () . ?
 unary:   ! -
 product: * /
 sum:     + -
-compare: = != < > <= >=
+compare: == != < > <= >=
 and:     &
 or:      |
 ```
 
-## 6. 組込み関数
+## 6. variant pattern
+
+```glyph
++Command=Stop|Run(U)
+
+>transition(system:System,command:Command):System
+  command==Run(system.sequence)>>same_speed(system,command)
+  command==Run(speed)>>new_speed(system,speed)
+  command==Stop>>stop(system)
+  _>>system
+```
+
+- `command==Stop`: unit variant照合
+- `command==Run(_)`: payload無視
+- `command==Run(speed)`: 新しい局所名へ束縛
+- `command==Run(system.sequence)`: 既存式との値比較
+
+## 7. 時相制約
+
+### 宣言
+
+```glyph
+?name(parameters)=formula
+```
+
+### 演算子
+
+```text
+!P            否定
+P & Q         論理積
+P | Q         論理和
+P >> Q        含意
+A P           Always
+E P           Eventually
+E 500ms P     bounded eventually
+P U Q         strong until
+P W Q         weak until
+```
+
+Unicodeの`□/◇`は受理しない。
+
+単項演算子は連結できる。
+
+```glyph
+AE 1s heartbeat
+EA stable
+```
+
+意味:
+
+```text
+AE 1s heartbeat = A(E 1s heartbeat)
+EA stable       = E(A stable)
+```
+
+演算子列とオペランドの境界には空白または`(`が必要。
+
+```text
+EA stable   # 演算子列
+EA(stable)  # 演算子列
+EAstable    # 単一識別子
+```
+
+優先順位:
+
+```text
+1. ! A E E duration
+2. U W
+3. &
+4. |
+5. >> 右結合
+```
+
+例:
+
+```glyph
+?ack(*Observation)=A(send>>E 500ms ack)
+?safe(*Observation)=A(!authorized>>closed)
+?wait(*Observation)=closed W authorized
+?live(*Observation)=AE 1s heartbeat
+?conv(*Observation)=EA stable
+```
+
+### 有限トレース判定
+
+```rust
+pub enum TemporalVerdict {
+    Satisfied,
+    Violated,
+    Pending,
+}
+```
+
+- `A P`: 途中で反例が出れば違反。終了まで反例がなければ満足
+- `E P`: P成立時に満足。終了まで成立しなければ違反
+- `E d P`: 期限内成立で満足。期限超過または未解決終了で違反
+- `P U Q`: Q前のP違反、またはQ未到達終了で違反
+- `P W Q`: Q未到達でも終了までPが成立すれば満足
+
+## 8. 組込み関数
 
 ```text
 Ok(x)
@@ -263,35 +303,28 @@ max(a,b)
 finite(x)
 ```
 
-展開:
+## 9. 文法概要
 
 ```text
-min(a,b)    -> std::cmp::min(a,b)
-max(a,b)    -> std::cmp::max(a,b)
-finite(x)   -> x.is_finite()
-```
-
-## 7. 文法概要
-
-短縮文法:
-
-```text
-program          := (macro | declaration)*
+program          := (macro | declaration | temporal-spec)*
 macro            := "@" Name "=" expr
 declaration      := product | sum | alias | function | extern
 product          := "*" Name "(" compact-fields? ")"
 sum              := "+" Name "=" variant ("|" variant)*
 alias            := "=" Name "=" compact-type
-function         := ">" signature ("=" expr | NEWLINE compact-guard+)
+function         := ">" signature ("=" expr | NEWLINE guard+)
 extern           := "!" signature ("=" expr)?
 signature        := Name "(" compact-params? ")" ":" compact-type
-compact-type     := type | type "|" type
-compact-guard    := INDENT (expr | "_") ">>" expr
-```
-
-短縮展開後の既存文法:
-
-```text
-guard            := INDENT (expr | "_") "=>" expr
-result-type      := "R" "<" type "," type ">"
+guard            := INDENT (expr | "_") ">>" expr
+temporal-spec    := "?" Name "(" temporal-params? ")" "=" formula
+formula          := implication
+implication      := or-formula (">>" implication)?
+or-formula       := and-formula ("|" and-formula)*
+and-formula      := until-formula ("&" until-formula)*
+until-formula    := unary-formula (("U" | "W") unary-formula)*
+unary-formula    := "!" unary-formula
+                  | "A" unary-formula
+                  | "E" duration? unary-formula
+                  | "(" formula ")"
+                  | atom
 ```
