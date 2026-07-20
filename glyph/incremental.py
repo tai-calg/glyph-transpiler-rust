@@ -41,7 +41,7 @@ def _write_if_changed(path: Path, content: str) -> bool:
 
 
 class IncrementalCompiler:
-    """Content-addressed one-file compiler cache used by watch mode and the REPL."""
+    """Content-addressed one-file compiler cache used by watch mode and the Studio."""
 
     def __init__(self) -> None:
         self._cache: dict[str, CompilationSnapshot] = {}
@@ -56,10 +56,12 @@ class IncrementalCompiler:
         digest = _digest(source)
         cached = self._cache.get(digest)
         if cached is None:
-            model = parse_compilation_model(source)
+            model = parse_compilation_model(source, source_name)
             artifacts = compile_artifacts(source)
             diagrams = compile_diagram_bundle(source, source_name, source_href)
-            semantic_json = json.dumps(model.semantic.to_dict(), ensure_ascii=False, indent=2) + "\n"
+            semantic_json = (
+                json.dumps(model.semantic.to_dict(), ensure_ascii=False, indent=2) + "\n"
+            )
             cached = CompilationSnapshot(digest, artifacts, diagrams, semantic_json)
             self._cache[digest] = cached
         changed = digest != self._last_digest
@@ -81,7 +83,9 @@ class IncrementalCompiler:
         if diagram_dir is not None:
             import os
 
-            source_href = os.path.relpath(input_file, Path(diagram_dir)).replace(os.sep, "/")
+            source_href = os.path.relpath(input_file, Path(diagram_dir)).replace(
+                os.sep, "/"
+            )
         result = self.compile_text(source, str(input_file), source_href)
         written: list[Path] = []
         if logic_output is not None:
