@@ -55,16 +55,30 @@ jobs:
             -o demo-system/src/generated.rs \
             --host-output demo-system/src/host.generated.rs
 
-      - name: Upload generated Rust sources
+      - name: Generate execution structure diagrams
+        run: |
+          python3 glyphc.py examples/system_controller.glyph \
+            --diagram-dir /tmp/glyph-diagrams
+          test -s /tmp/glyph-diagrams/execution.mmd
+          test -s /tmp/glyph-diagrams/machine-controller.mmd
+          test -s /tmp/glyph-diagrams/temporal.mmd
+          test -s /tmp/glyph-diagrams/execution-ir.json
+          test -s /tmp/glyph-diagrams/source-map.json
+          test -s /tmp/glyph-diagrams/index.md
+          grep -q 'stateDiagram-v2' /tmp/glyph-diagrams/machine-controller.mmd
+          grep -q 'click fn_step' /tmp/glyph-diagrams/execution.mmd
+
+      - name: Upload generated sources and diagrams
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: generated-rust-sources
+          name: generated-artifacts
           path: |
             demo/src/generated.rs
             demo/src/host.generated.rs
             demo-system/src/generated.rs
             demo-system/src/host.generated.rs
+            /tmp/glyph-diagrams
 
       - name: Format generated Rust
         run: |
