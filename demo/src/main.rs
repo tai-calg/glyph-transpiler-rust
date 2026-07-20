@@ -14,8 +14,8 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::generated::{
-        run, AckMonitor, AuthMonitor, C, E, Receipt, SafeMonitor, TemporalVerdict,
-        WaitMonitor,
+        run, AckMonitor, AuthMonitor, BeatMonitor, C, ConvMonitor, E, Receipt, SafeMonitor,
+        TemporalVerdict, WaitMonitor,
     };
 
     #[test]
@@ -48,6 +48,11 @@ mod tests {
     }
 
     #[test]
+    fn empty_trace_remains_pending() {
+        assert_eq!(AckMonitor::new().finish(), TemporalVerdict::Pending);
+    }
+
+    #[test]
     fn ack_within_deadline_satisfies_closed_trace() {
         let mut monitor = AckMonitor::new();
         assert_eq!(
@@ -62,6 +67,25 @@ mod tests {
     }
 
     #[test]
+    fn ack_at_exact_deadline_is_included() {
+        let mut monitor = AckMonitor::new();
+        monitor.step(0, true, false, true, false, false, false);
+        monitor.step(5000, false, true, true, false, false, false);
+        assert_eq!(monitor.finish(), TemporalVerdict::Satisfied);
+    }
+
+    #[test]
+    fn unresolved_ack_at_exact_deadline_is_pending_until_finish() {
+        let mut monitor = AckMonitor::new();
+        monitor.step(0, true, false, true, false, false, false);
+        assert_eq!(
+            monitor.step(5000, false, false, true, false, false, false),
+            TemporalVerdict::Pending
+        );
+        assert_eq!(monitor.finish(), TemporalVerdict::Violated);
+    }
+
+    #[test]
     fn ack_after_deadline_is_violated() {
         let mut monitor = AckMonitor::new();
         monitor.step(0, true, false, true, false, false, false);
@@ -72,12 +96,50 @@ mod tests {
     }
 
     #[test]
+    fn equal_timestamps_are_allowed() {
+        let mut monitor = AckMonitor::new();
+        monitor.step(0, true, false, true, false, false, false);
+        assert_eq!(
+            monitor.step(0, false, false, true, false, false, false),
+            TemporalVerdict::Pending
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "temporal observation time must be monotonic")]
+    fn observation_time_cannot_move_backwards() {
+        let mut monitor = AckMonitor::new();
+        monitor.step(10, false, false, true, false, false, false);
+        monitor.step(9, false, false, true, false, false, false);
+    }
+
+    #[test]
+    fn implication_is_vacuously_true_without_send() {
+        let mut monitor = AckMonitor::new();
+        monitor.step(0, false, false, true, false, false, false);
+        assert_eq!(monitor.finish(), TemporalVerdict::Satisfied);
+    }
+
+    #[test]
     fn invariant_violation_is_detected_immediately() {
         let mut monitor = SafeMonitor::new();
         assert_eq!(
             monitor.step(0, false, false, false, false, false, false),
             TemporalVerdict::Violated
         );
+    }
+
+    #[test]
+    fn untimed_invariant_is_stutter_invariant() {
+        let mut single = SafeMonitor::new();
+        single.step(0, false, false, true, false, false, false);
+
+        let mut repeated = SafeMonitor::new();
+        repeated.step(0, false, false, true, false, false, false);
+        repeated.step(0, false, false, true, false, false, false);
+
+        assert_eq!(single.finish(), TemporalVerdict::Satisfied);
+        assert_eq!(repeated.finish(), single.finish());
     }
 
     #[test]
@@ -95,6 +157,24 @@ mod tests {
     }
 
     #[test]
+    fn weak_until_rejects_hold_failure_before_target() {
+        let mut monitor = WaitMonitor::new();
+        assert_eq!(
+            monitor.step(0, false, false, false, false, false, false),
+            TemporalVerdict::Violated
+        );
+    }
+
+    #[test]
+    fn until_target_at_initial_point_does_not_require_hold() {
+        let mut monitor = AuthMonitor::new();
+        assert_eq!(
+            monitor.step(0, false, false, false, true, false, false),
+            TemporalVerdict::Satisfied
+        );
+    }
+
+    #[test]
     fn strong_until_satisfies_when_target_arrives() {
         let mut monitor = AuthMonitor::new();
         monitor.step(0, false, false, true, false, false, false);
@@ -102,5 +182,30 @@ mod tests {
             monitor.step(100, false, false, false, true, false, false),
             TemporalVerdict::Satisfied
         );
+    }
+
+    #[test]
+    fn strong_until_rejects_hold_failure_before_target() {
+        let mut monitor = AuthMonitor::new();
+        assert_eq!(
+            monitor.step(0, false, false, false, false, false, false),
+            TemporalVerdict::Violated
+        );
+    }
+
+    #[test]
+    fn finite_recurring_property_requires_target_from_final_suffix() {
+        let mut monitor = BeatMonitor::new();
+        monitor.step(0, false, false, true, false, true, false);
+        monitor.step(500, false, false, true, false, false, false);
+        assert_eq!(monitor.finish(), TemporalVerdict::Violated);
+    }
+
+    #[test]
+    fn finite_convergence_accepts_a_stable_final_suffix() {
+        let mut monitor = ConvMonitor::new();
+        monitor.step(0, false, false, true, false, false, false);
+        monitor.step(100, false, false, true, false, false, true);
+        assert_eq!(monitor.finish(), TemporalVerdict::Satisfied);
     }
 }
