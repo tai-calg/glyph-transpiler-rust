@@ -50,6 +50,7 @@ jobs:
           git diff --exit-code -- demo/src/generated.rs demo/src/host.generated.rs
 
       - name: Upload generated Rust sources
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: generated-rust-sources
