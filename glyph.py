@@ -8,7 +8,8 @@ import sys
 from pathlib import Path
 
 from glyph import GlyphError
-import glyph.studio as studio
+import glyph.studio as studio_base
+from glyph.studio_manual import run_project_studio
 from glyph.studio_ui import STUDIO_HTML
 
 
@@ -28,8 +29,8 @@ def main(argv: list[str] | None = None) -> int:
             raise GlyphError("入力ファイルの拡張子は .glyph にする")
         if not args.input.is_file():
             raise GlyphError(f"Glyphファイルが存在しない: {args.input}")
-        studio.STUDIO_HTML = STUDIO_HTML
-        return studio.run_studio(args.input)
+        studio_base.STUDIO_HTML = STUDIO_HTML
+        return run_project_studio(args.input)
     except (OSError, GlyphError) as exc:
         print(f"glyph: error: {exc}", file=sys.stderr)
         return 1
