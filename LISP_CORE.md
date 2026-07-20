@@ -1,6 +1,16 @@
-# Glyph: expression trees and development loop
+# Glyph: expression trees and one-process development environment
 
-This extension adopts the Lisp ideas that fit Glyph without introducing dynamic typing, garbage collection, or runtime `eval`.
+This extension adopts the Lisp ideas that fit a statically typed systems DSL without introducing dynamic typing, garbage collection, or runtime `eval`.
+
+## One public command
+
+```bash
+python3 glyph.py examples/lisp_core.glyph
+```
+
+This launches Glyph Studio. The same process edits the source, watches external changes, compiles Rust, lowers the typed expression tree, interns `SymbolId` values, displays diagrams, and writes artifacts below `.glyph/<source-stem>/`.
+
+The user does not switch between separate compile, watch, diagram, AST, and REPL commands. `glyphc.py` remains only as a low-level interface for CI and external tooling.
 
 ## Pure functions as values
 
@@ -40,14 +50,9 @@ A direct recursive call with an argument shaped like `parameter - constant` is m
 
 Every pure function body is represented as a typed expression tree. A guarded function is one `guard` expression containing ordered `branch` expressions and a final `fallback` expression. Names in the semantic tree refer to deterministic `SymbolId` values.
 
-```bash
-python3 glyphc.py examples/lisp_core.glyph \
-  --ast-json build/lisp-core/typed-ast.json
-```
+The Studio `AST` and `Symbols` views expose this model directly. The generated `typed-ast.json` contains interned symbols, typed function expression trees, typed `machine` expressions, recursion metadata, and compile-time macro and temporal-spec symbols.
 
-The JSON contains interned symbols, typed function expression trees, typed `machine` expressions, recursion metadata, and compile-time macro and temporal-spec symbols.
-
-The source parser AST remains immutable. Name resolution and typing lower it into this semantic tree before Rust and development-tool output is accepted.
+The source parser AST remains immutable. Name resolution and typing lower it into this semantic tree before Rust and visual output are accepted.
 
 ## AST macros
 
@@ -63,46 +68,46 @@ Expansion substitutes expression nodes, not source strings. Arity, recursive mac
 
 AST macros run at compile time only. They cannot call a runtime evaluator or replace an effect boundary dynamically.
 
-## Development REPL
+## Integrated development loop
 
-```bash
-python3 glyphc.py examples/lisp_core.glyph --repl
-```
-
-Commands:
+Glyph Studio provides these views inside one application:
 
 ```text
-:check
-:symbols
-:type NAME
-:ast NAME
-:diagram
-:reload
-:help
-:quit
+Overview
+Machine
+Flow
+Temporal
+Rust
+Host
+AST
+Symbols
+Artifacts
 ```
 
-The REPL evaluates compiler queries against the same semantic model used by normal compilation. It does not execute arbitrary Glyph code at runtime.
+Saving the source triggers the same content-addressed compilation pipeline used for external file changes.
 
-## Incremental compilation and live diagrams
-
-```bash
-python3 glyphc.py examples/system_controller.glyph \
-  -o demo-system/src/generated.rs \
-  --host-output demo-system/src/host.generated.rs \
-  --ast-json build/system-controller/typed-ast.json \
-  --diagram-dir build/system-controller \
-  --watch
+```text
+source changed
+    ↓
+parse
+    ↓
+AST macro expansion
+    ↓
+SymbolId resolution
+    ↓
+typed expression tree
+    ↓
+Rust + execution IR + diagrams
+    ↓
+Studio refresh
 ```
 
-Watch mode hashes the source. Parsing, semantic lowering, Rust generation, typed-AST generation, and Mermaid generation run only when source content changes. Output files are replaced atomically and are not rewritten when their contents are unchanged.
+Output files are replaced atomically and are not rewritten when their contents are unchanged.
 
-When `--watch` is used without `--diagram-dir`, diagrams are written below `.glyph/<source-stem>/`. The minimum polling interval is 0.1 seconds.
+## Low-level interface
 
-For CI and scripts, one incremental iteration is available:
+`glyphc.py` remains available for deterministic CI and scripts, but it is not the normal interactive interface.
 
 ```bash
-python3 glyphc.py examples/lisp_core.glyph \
-  --watch-once \
-  --ast-json build/lisp-core/typed-ast.json
+python3 glyphc.py examples/lisp_core.glyph --check
 ```
