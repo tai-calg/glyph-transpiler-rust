@@ -3,6 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from .architecture import (
+    ArchitectureIR,
+    SystemDecl,
+    build_architecture_ir,
+    extract_systems,
+)
 from .ast_macros import (
     AstMacroDef,
     expand_function_macros,
@@ -13,6 +19,12 @@ from .ast_macros import (
 from .compiler import ExternDecl, FunctionDecl, GlyphError, Program, parse_program
 from .functional import FunctionalPatternRustGenerator, validate_function_values
 from .machine import MachineDecl, extract_machines, validate_machines
+from .pipeline import (
+    LambdaLowering,
+    join_pipeline_continuations,
+    lower_lambda_pipelines,
+    restore_lambda_source_lines,
+)
 from .semantic import SemanticModel, build_semantic_model
 from .syntax import expand_compact_syntax
 from .temporal import SpecDecl, extract_specs
@@ -34,7 +46,10 @@ class CompilationModel:
     inline_effects: tuple[FunctionDecl, ...]
     specs: tuple[SpecDecl, ...]
     machines: tuple[MachineDecl, ...]
+    systems: tuple[SystemDecl, ...]
+    architecture: ArchitectureIR
     ast_macros: tuple[AstMacroDef, ...]
+    lambdas: tuple[LambdaLowering, ...]
     semantic: SemanticModel
 
 
@@ -67,7 +82,9 @@ def _parse_effect_program(source: str) -> tuple[Program, tuple[FunctionDecl, ...
     for decl in parsed.declarations:
         if isinstance(decl, FunctionDecl) and decl.line in inline_lines:
             effects.append(decl)
-            logic_declarations.append(ExternDecl(decl.name, decl.params, decl.return_type, decl.line))
+            logic_declarations.append(
+                ExternDecl(decl.name, decl.params, decl.return_type, decl.line)
+            )
         else:
             logic_declarations.append(decl)
 
@@ -91,26 +108,37 @@ def _generate_host(program: Program, inline_effects: tuple[FunctionDecl, ...]) -
         out.append(f"pub fn {decl.name}{signature} {{")
         implementation = inline_by_name.get(decl.name)
         if implementation is None:
-            out.append(f'    panic!("Glyph effect boundary `{decl.name}` is not connected")')
+            out.append(
+                f'    panic!("Glyph effect boundary `{decl.name}` is not connected")'
+            )
         elif implementation.expression is not None:
             out.append(f"    {generator._expr(implementation.expression)}")
         else:
-            raise GlyphError(f"{implementation.line}行目: !境界の試作実装は単一式で記述する")
+            raise GlyphError(
+                f"{implementation.line}行目: !境界の試作実装は単一式で記述する"
+            )
         out.extend(["}", ""])
 
     return "\n".join(out).rstrip() + "\n"
 
 
-def parse_compilation_model(source: str) -> CompilationModel:
+def parse_compilation_model(
+    source: str,
+    source_name: str = "input.glyph",
+) -> CompilationModel:
     """Parse and lower one Glyph source into the shared semantic model."""
 
-    expanded = expand_compact_syntax(source)
+    without_systems, systems = extract_systems(source)
+    joined = join_pipeline_continuations(without_systems)
+    expanded = expand_compact_syntax(joined)
     without_ast_macros, ast_macros = extract_ast_macros(expanded)
-    without_specs, specs = extract_specs(without_ast_macros)
+    pipeline_result = lower_lambda_pipelines(without_ast_macros)
+    without_specs, specs = extract_specs(pipeline_result.source)
     core, machines = extract_machines(without_specs)
     program, inline_effects = _parse_effect_program(core)
 
     program = expand_program_macros(program, ast_macros)
+    program = restore_lambda_source_lines(program, pipeline_result.lambdas)
     inline_effects = expand_function_macros(inline_effects, ast_macros)
     machines = expand_machine_macros(machines, ast_macros)
 
@@ -118,12 +146,28 @@ def parse_compilation_model(source: str) -> CompilationModel:
     validate_temporal_specs(program, specs)
     validate_machines(program, machines)
     semantic = build_semantic_model(program, machines, ast_macros, specs)
-    return CompilationModel(program, inline_effects, specs, machines, ast_macros, semantic)
+    architecture = build_architecture_ir(source_name, program, systems)
+    return CompilationModel(
+        program,
+        inline_effects,
+        specs,
+        machines,
+        systems,
+        architecture,
+        ast_macros,
+        pipeline_result.lambdas,
+        semantic,
+    )
 
 
 def parse_artifact_model(
     source: str,
-) -> tuple[Program, tuple[FunctionDecl, ...], tuple[SpecDecl, ...], tuple[MachineDecl, ...]]:
+) -> tuple[
+    Program,
+    tuple[FunctionDecl, ...],
+    tuple[SpecDecl, ...],
+    tuple[MachineDecl, ...],
+]:
     """Compatibility view of the full compilation model."""
 
     model = parse_compilation_model(source)
