@@ -1,4 +1,5 @@
 # R3-0: 型・純粋関数・作用境界・variant pattern・時相制約を接続する完全例
+# R3-1〜R3-4: machine宣言から実行構造IRとMermaid図を生成する。
 # 時計、周期実行、I/O、違反後の復旧はRustホスト側が担当する。
 
 @LOW=10.0
@@ -28,24 +29,34 @@
 ?convergence(*Input)=EA stable
 
 >validate(input:Input):Input|Error
-  INVALID>>Err(BadSensor)
-  _>>Ok(input)
+  INVALID >> Err(BadSensor)
+  _ >> Ok(input)
 
 >decide(input:Input):Command
-  input.emergency>>EmergencyStop
-  BLOCK>>Stop
-  _>>Run(min(input.requested,MAX))
+  input.emergency >> EmergencyStop
+  BLOCK >> Stop
+  _ >> Run(min(input.requested,MAX))
 
 # 1枝目はpayload値照合、2枝目はpayload束縛を使用する。
 >transition(system:System,command:Command):System
-  command==Run(system.last_speed)>>System(Running,system.sequence+1,system.last_speed,command,false,true)
-  command==Run(speed)>>System(Running,system.sequence+1,speed,Run(speed),false,true)
-  command==EmergencyStop>>System(Faulted,system.sequence+1,system.last_speed,EmergencyStop,true,false)
-  command==Stop>>System(Stopping,system.sequence+1,system.last_speed,Stop,true,false)
-  _>>system
+  command==Run(system.last_speed) >> System(Running,system.sequence+1,system.last_speed,command,false,true)
+  command==Run(speed) >> System(Running,system.sequence+1,speed,Run(speed),false,true)
+  command==EmergencyStop >> System(Faulted,system.sequence+1,system.last_speed,EmergencyStop,true,false)
+  command==Stop >> System(Stopping,system.sequence+1,system.last_speed,Stop,true,false)
+  _ >> system
+
+# machineのnextが状態またはResult<状態,Error>を返すよう、純粋な1周期遷移を分離する。
+>step(state:System,input:Input):System|Error=transition(state,decide(validate(input)?))
 
 # 実装はdemo-system/src/host.rsで接続する。生成host側は未接続stubとなる。
 !write_actuator(system:System):Cycle|Error
 !report_violation(code:U):B|Error
 
->cycle(system:System,input:Input):Cycle|Error=write_actuator(transition(system,decide(validate(input)?)))
+>cycle(system:System,input:Input):Cycle|Error=write_actuator(step(system,input)?)
+
+machine Controller(state:System,input:Input)
+  select=state.mode
+  init=System(Idle,0,0,Stop,true,true)
+  next=step(state,input)
+  success=Stopping
+  failure=Faulted
