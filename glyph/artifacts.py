@@ -14,6 +14,7 @@ from .compiler import (
 from .syntax import expand_compact_syntax
 from .temporal import extract_specs
 from .temporal_codegen import append_temporal_rust
+from .temporal_stream_codegen import append_streaming_temporal_rust
 from .temporal_validate import validate_temporal_specs
 
 
@@ -98,6 +99,7 @@ def compile_artifacts(source: str) -> RustArtifacts:
     program, inline_effects = _parse_effect_program(core)
     validate_temporal_specs(program, specs)
     logic = append_temporal_rust(RustGenerator(program).generate(), program, specs)
+    logic = append_streaming_temporal_rust(logic, program, specs)
     host = _generate_host(program, inline_effects)
     return RustArtifacts(logic=logic, host=host)
 
