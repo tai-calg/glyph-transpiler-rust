@@ -252,8 +252,10 @@ class FunctionalPatternRustGenerator(PatternRustGenerator):
         function_ty = as_function_type(ty)
         if function_ty is None:
             return super()._type(ty)
-        params = ", ".join(super()._type(item) for item in function_ty.params)
-        result = super()._type(function_ty.result)
+        params = ", ".join(
+            PatternRustGenerator._type(self, item) for item in function_ty.params
+        )
+        result = PatternRustGenerator._type(self, function_ty.result)
         return f"fn({params}) -> {result}"
 
 
