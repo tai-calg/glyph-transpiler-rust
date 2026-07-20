@@ -1,0 +1,26 @@
+system Door
+  sensor -> ctl
+  panel -> ctl
+  ctl -> lock
+  ctl -> log
+
+@MAX=1000
+
+*In(open,auth,stop:B,value:U)
++C=Stop|Run(U)
++Error=Bad
+
+>validate(i:In):In|Error=Ok(i)
+>command(n:U):C|Error=Ok(Run(n))
+
+>ctl(i:In):C|Error=
+  i
+  /> validate?
+  /> |x| x.value
+  /> |n| min(n,MAX)
+  /> command
+
+!lock(c:C):B=true
+!log(c:C):B=true
+
+?safe(*In)=A(!auth >> !open)
