@@ -59,6 +59,8 @@ jobs:
         run: |
           python3 glyphc.py examples/system_controller.glyph \
             --diagram-dir build/glyph-diagrams
+          test -s build/glyph-diagrams/architecture.mmd
+          test -s build/glyph-diagrams/architecture-ir.json
           test -s build/glyph-diagrams/execution.mmd
           test -s build/glyph-diagrams/machine-controller.mmd
           test -s build/glyph-diagrams/temporal.mmd
@@ -84,6 +86,20 @@ jobs:
           test -s build/lisp-core/watch-diagrams/execution.mmd
           grep -q '"analysis": "structural"' build/lisp-core/typed-ast.json
 
+      - name: Verify architecture and slash-pipe lambdas
+        run: |
+          python3 glyphc.py examples/door_sketch.glyph \
+            -o build/door-sketch/generated.rs \
+            --host-output build/door-sketch/host.generated.rs \
+            --diagram-dir build/door-sketch/diagrams \
+            --ast-json build/door-sketch/typed-ast.json
+          rustc --edition 2021 --crate-type lib build/door-sketch/generated.rs \
+            -o build/door-sketch/libglyph_door_sketch.rlib
+          test -s build/door-sketch/diagrams/architecture.mmd
+          test -s build/door-sketch/diagrams/architecture-ir.json
+          grep -q 'sensor' build/door-sketch/diagrams/architecture.mmd
+          grep -q '__glyph_lambda' build/door-sketch/generated.rs
+
       - name: Upload generated sources and diagrams
         if: always()
         uses: actions/upload-artifact@v4
@@ -96,6 +112,7 @@ jobs:
             demo-system/src/host.generated.rs
             build/glyph-diagrams
             build/lisp-core
+            build/door-sketch
 
       - name: Format generated Rust
         run: |
