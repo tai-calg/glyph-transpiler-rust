@@ -37,10 +37,10 @@ class PatternRustGenerator(RustGenerator):
     Existing expression equality remains unchanged. A guard condition is treated as
     a pattern only when its right-hand side is a declared enum variant:
 
-        command=Run(system.sequence)  # compare payload with an expression
-        command=Run(speed)            # bind payload as `speed`
-        command=Run(_)                # ignore payload
-        command=Stop                  # unit variant
+        command==Run(system.sequence)  # compare payload with an expression
+        command==Run(speed)            # bind payload as `speed`
+        command==Run(_)                # ignore payload
+        command==Stop                  # unit variant
 
     Matching is performed against a clone of the subject. Generated sum types
     already derive Clone, and cloning keeps the original value available to the
@@ -82,7 +82,7 @@ class PatternRustGenerator(RustGenerator):
         return lines
 
     def _variant_guard(self, decl: FunctionDecl, condition: Expr) -> _VariantGuard | None:
-        if not isinstance(condition, BinaryExpr) or condition.op not in {"=", "=="}:
+        if not isinstance(condition, BinaryExpr) or condition.op != "==":
             return None
 
         variant_name: str
