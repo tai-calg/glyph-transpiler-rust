@@ -5,7 +5,8 @@ import json
 import os
 from pathlib import Path
 
-from .artifacts import parse_artifact_model
+from .architecture import ArchitectureIR
+from .artifacts import parse_compilation_model
 from .execution_ir import ExecutionStructureIR, build_execution_structure_ir
 
 
@@ -21,11 +22,44 @@ def _slug(text: str) -> str:
 
 
 def _escape(text: str) -> str:
-    return text.replace("\\", "\\\\").replace('"', "\\\"").replace("\n", "<br/>")
+    return text.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "<br/>")
 
 
 def _source_url(source_href: str, line: int) -> str:
     return f"{source_href}#L{line}"
+
+
+def render_architecture_mermaid(
+    architecture: ArchitectureIR, source_href: str
+) -> str:
+    lines = [
+        "flowchart LR",
+        "  classDef function fill:#eef,stroke:#446;",
+        "  classDef effect fill:#fee,stroke:#844;",
+        "  classDef data fill:#efe,stroke:#484;",
+        "  classDef external fill:#f7f7f7,stroke:#777,stroke-dasharray: 4 3;",
+    ]
+    for system in architecture.systems:
+        lines.append(f'  subgraph {system.id}["{_escape(system.name)}"]')
+        for component in system.components:
+            label = _escape(
+                f"{component.name}<br/>{component.kind} [L{component.line}]"
+            )
+            if component.kind == "effect":
+                lines.append(f'    {component.id}[/"{label}"/]')
+            elif component.kind == "data":
+                lines.append(f'    {component.id}[("{label}")]')
+            else:
+                lines.append(f'    {component.id}["{label}"]')
+            lines.append(f"    class {component.id} {component.kind};")
+            lines.append(
+                f'    click {component.id} "{_source_url(source_href, component.line)}" '
+                f'"Open {architecture.source_name}:{component.line}"'
+            )
+        for edge in system.edges:
+            lines.append(f"    {edge.source_id} --> {edge.target_id}")
+        lines.append("  end")
+    return "\n".join(lines) + "\n"
 
 
 def render_dataflow_mermaid(ir: ExecutionStructureIR, source_href: str) -> str:
@@ -111,7 +145,9 @@ def render_temporal_mermaid(ir: ExecutionStructureIR, source_href: str) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _source_map(ir: ExecutionStructureIR) -> dict[str, object]:
+def _source_map(
+    ir: ExecutionStructureIR, architecture: ArchitectureIR
+) -> dict[str, object]:
     lines: dict[str, list[dict[str, str]]] = {}
 
     def add(line: int, kind: str, item_id: str, diagram: str) -> None:
@@ -119,6 +155,22 @@ def _source_map(ir: ExecutionStructureIR) -> dict[str, object]:
             {"kind": kind, "id": item_id, "diagram": diagram}
         )
 
+    for system in architecture.systems:
+        add(system.line, "architecture-system", system.name, "architecture.mmd")
+        for component in system.components:
+            add(
+                component.line,
+                "architecture-component",
+                component.name,
+                "architecture.mmd",
+            )
+        for edge in system.edges:
+            add(
+                edge.line,
+                "architecture-edge",
+                f"{edge.source_id}->{edge.target_id}",
+                "architecture.mmd",
+            )
     for node in ir.nodes:
         add(node.source.line, "execution-node", node.id, "execution.mmd")
     for machine in ir.machines:
@@ -138,23 +190,40 @@ def _source_map(ir: ExecutionStructureIR) -> dict[str, object]:
 
 def render_index_markdown(
     ir: ExecutionStructureIR,
+    architecture_ir: ArchitectureIR,
     source_href: str,
+    architecture: str,
     dataflow: str,
     machines: dict[str, str],
     temporal: str,
 ) -> str:
     lines = [
-        "# Glyph execution structure",
+        "# Glyph design views",
         "",
         f"Source: [`{ir.source_name}`]({_source_url(source_href, 1)})",
         "",
-        "## Dataflow",
-        "",
-        "```mermaid",
-        dataflow.rstrip(),
-        "```",
-        "",
     ]
+    if architecture_ir.systems:
+        lines.extend(
+            [
+                "## Architecture",
+                "",
+                "```mermaid",
+                architecture.rstrip(),
+                "```",
+                "",
+            ]
+        )
+    lines.extend(
+        [
+            "## Dataflow",
+            "",
+            "```mermaid",
+            dataflow.rstrip(),
+            "```",
+            "",
+        ]
+    )
     for machine in ir.machines:
         filename = f"machine-{_slug(machine.name)}.mmd"
         lines.extend(
@@ -196,7 +265,7 @@ def render_index_markdown(
             )
         lines.append("")
 
-    source_map = _source_map(ir)["line_to_views"]
+    source_map = _source_map(ir, architecture_ir)["line_to_views"]
     lines.extend(
         [
             "## Source map",
@@ -225,9 +294,12 @@ def compile_diagram_bundle(
     source_name: str = "input.glyph",
     source_href: str | None = None,
 ) -> DiagramBundle:
-    program, _, specs, machines = parse_artifact_model(source)
-    ir = build_execution_structure_ir(source, source_name, program, specs, machines)
+    model = parse_compilation_model(source, source_name)
+    ir = build_execution_structure_ir(
+        source, source_name, model.program, model.specs, model.machines
+    )
     href = source_href or source_name
+    architecture = render_architecture_mermaid(model.architecture, href)
     dataflow = render_dataflow_mermaid(ir, href)
     machine_files = {
         f"machine-{_slug(machine.name)}.mmd": render_machine_mermaid(machine)
@@ -235,14 +307,29 @@ def compile_diagram_bundle(
     }
     temporal = render_temporal_mermaid(ir, href)
     files = {
+        "architecture.mmd": architecture,
+        "architecture-ir.json": json.dumps(
+            model.architecture.to_dict(), ensure_ascii=False, indent=2
+        )
+        + "\n",
         "execution.mmd": dataflow,
         **machine_files,
         "temporal.mmd": temporal,
-        "execution-ir.json": json.dumps(ir.to_dict(), ensure_ascii=False, indent=2) + "\n",
-        "source-map.json": json.dumps(_source_map(ir), ensure_ascii=False, indent=2) + "\n",
+        "execution-ir.json": json.dumps(ir.to_dict(), ensure_ascii=False, indent=2)
+        + "\n",
+        "source-map.json": json.dumps(
+            _source_map(ir, model.architecture), ensure_ascii=False, indent=2
+        )
+        + "\n",
     }
     files["index.md"] = render_index_markdown(
-        ir, href, dataflow, machine_files, temporal
+        ir,
+        model.architecture,
+        href,
+        architecture,
+        dataflow,
+        machine_files,
+        temporal,
     )
     return DiagramBundle(ir=ir, files=files)
 
