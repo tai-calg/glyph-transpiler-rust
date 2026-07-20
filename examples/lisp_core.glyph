@@ -1,0 +1,13 @@
+@twice(f,x)=f(f(x))
+
+>inc(x:U):U=x+1
+>clamp(x:U):U=min(x,1000)
+
+>apply(f:Fn<U,U>,x:U):U=f(x)
+>apply_twice(f:Fn<U,U>,x:U):U=twice(f,x)
+
+>sum(n:U):U
+  n==0 >> 0
+  _ >> n+sum(n-1)
+
+>run(x:U):U=apply_twice(clamp,apply(inc,x))
