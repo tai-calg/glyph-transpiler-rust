@@ -1,0 +1,30 @@
++Command=Stop|Run(U)|Fault
++Error=Bad
+
+>double(x:U):U=x*2
+>validate(x:U):U|Error=Ok(x)
+
+>process(c:Command):U
+  speed :=
+    c==Stop >> 0
+    c==Run(n) >> n
+    _ >> 0
+
+  limited :=
+    speed>100 >> 100
+    _ >> speed
+
+  normalized :=
+    limited
+    /> |n| n+1
+    /> double
+
+  result :=
+    normalized==0 >> 1
+    _ >> normalized
+
+  result
+
+>checked(x:U):U|Error
+  value := validate(x)?
+  Ok(value)
