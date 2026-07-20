@@ -34,7 +34,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--ast-json",
         type=Path,
-        help="SymbolId、ラムダ、Architectureを含む型付き設計JSONを出力する",
+        help="SymbolId、:=ブロック、ラムダ、Architectureを含む型付き設計JSONを出力する",
     )
     parser.add_argument("--check", action="store_true", help="解析と検査だけを行う")
     parser.add_argument("--repl", action="store_true", help="開発時REPLを起動する")
@@ -56,8 +56,10 @@ def build_parser() -> argparse.ArgumentParser:
 def _write_semantic(source: str, source_name: str, output: Path) -> None:
     model = parse_compilation_model(source, source_name)
     payload = model.semantic.to_dict()
+    payload["blocks"] = [item.to_dict() for item in model.blocks]
     payload["lambdas"] = [asdict(item) for item in model.lambdas]
     payload["architecture"] = model.architecture.to_dict()
+    payload["rust_todos"] = [item.to_dict() for item in model.opaques]
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
