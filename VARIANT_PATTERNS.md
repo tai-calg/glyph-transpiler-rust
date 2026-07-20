@@ -5,22 +5,24 @@
 Guard clauses can inspect sum-type variants and their payloads without expanding a full Rust `match` expression in Glyph.
 
 ```glyph
-+C=Stop|Run(u)
++C=Stop|Run(U)
 
->speed(command:C):u
-  command=Run(value)>>value
-  command=Stop>>0
+>speed(command:C):U
+  command==Run(value)>>value
+  command==Stop>>0
   _>>0
 ```
 
-The feature is limited to guard conditions. Ordinary expression equality keeps its existing meaning.
+The feature is limited to guard conditions. Ordinary expression equality also uses `==`.
 
 ## Syntax
 
 ```text
-subject=Variant
-subject=Variant(pattern,...)
+subject==Variant
+subject==Variant(pattern,...)
 ```
+
+A single `=` is reserved for declarations and definitions and is rejected inside expressions.
 
 Pattern arguments:
 
@@ -34,34 +36,34 @@ Pattern arguments:
 Examples:
 
 ```glyph
-command=Stop
-command=Run(_)
-command=Run(speed)
-command=Run(expected)
-command=Run(system.sequence)
+command==Stop
+command==Run(_)
+command==Run(speed)
+command==Run(expected)
+command==Run(system.sequence)
 ```
 
-In the fourth example, `expected` is a value comparison when it is already a function parameter. In the third example, `speed` is a new branch-local binding when no parameter named `speed` exists.
+`expected` is a value comparison when it is already a function parameter. `speed` is a new branch-local binding when no parameter named `speed` exists.
 
 ## Tuple and named-field variants
 
 Tuple variant:
 
 ```glyph
-+Pair=Both(u,u)
++Pair=Both(U,U)
 
->second(pair:Pair):u
-  pair=Both(_,value)>>value
+>second(pair:Pair):U
+  pair==Both(_,value)>>value
   _>>0
 ```
 
-Named-field variant declarations continue to use positional pattern arguments in Glyph. The transpiler maps them to Rust field patterns.
+Named-field variant declarations use positional pattern arguments in Glyph. The transpiler maps them to Rust field patterns.
 
 ```glyph
-+Event=Fault{code:u,active:b}|Clear
++Event=Fault{code:U,active:B}|Clear
 
->fault_code(event:Event):u
-  event=Fault(code,_)>>code
+>fault_code(event:Event):U
+  event==Fault(code,_)>>code
   _>>0
 ```
 
@@ -80,13 +82,11 @@ if let Event::Fault {
 
 ## Value matching and ownership
 
-The requested system-transition form is accepted directly:
-
 ```glyph
 >transition(system:System,command:C):System
-  command=Run(system.sequence)>>System(Running,system.sequence+1,command)
-  command=Run(speed)>>System(Running,system.sequence+1,Run(speed))
-  command=Stop>>System(Stopping,system.sequence+1,Stop)
+  command==Run(system.sequence)>>System(Running,system.sequence+1,command)
+  command==Run(speed)>>System(Running,system.sequence+1,Run(speed))
+  command==Stop>>System(Stopping,system.sequence+1,Stop)
   _>>system
 ```
 
@@ -104,14 +104,16 @@ if let C::Run(__glyph_match) = command.clone() {
 }
 ```
 
-Generated sum types already derive `Clone` and `PartialEq`; payload types therefore need to satisfy those Rust trait requirements as before.
+Generated sum types derive `Clone` and `PartialEq`; payload types need to satisfy those Rust trait requirements.
 
 ## Validation
 
 The transpiler rejects:
 
+- single `=` in a guard expression
 - incorrect variant-pattern arity
 - duplicate binding names within one pattern
-- patterns whose right-hand constructor is not a declared variant are not treated as patterns; they remain ordinary equality expressions
 
-The first implementation intentionally does not support nested variant destructuring or combining a variant pattern with another boolean condition in the same guard. Such conditions should be split into ordered guard clauses or moved into a pure helper function.
+A right-hand constructor that is not a declared variant remains an ordinary `==` expression.
+
+Nested variant destructuring and combining a variant pattern with another boolean condition in the same guard are not supported. Split such conditions into ordered guard clauses or move the additional predicate into a pure helper function.

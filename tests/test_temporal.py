@@ -4,11 +4,14 @@ import unittest
 
 from glyph import GlyphError, compile_source, parse_program
 from glyph.temporal import Always, Implies, Until, Within, parse_formula
+from glyph.syntax import expand_compact_syntax
 
 
 class TemporalTests(unittest.TestCase):
-    def test_compact_response_formula_parses(self) -> None:
-        formula = parse_formula("□(send>>◇5s ack)")
+    def test_ascii_response_formula_parses(self) -> None:
+        expanded = expand_compact_syntax("?ack(send,ack:B)=A(send>>E 5s ack)\n")
+        formula_text = expanded.split("=", 1)[1].strip()
+        formula = parse_formula(formula_text)
         self.assertIsInstance(formula, Always)
         self.assertIsInstance(formula.value, Implies)
         self.assertIsInstance(formula.value.consequence, Within)
@@ -22,10 +25,14 @@ class TemporalTests(unittest.TestCase):
         self.assertFalse(strong.weak)
         self.assertTrue(weak.weak)
 
+    def test_operator_chain_requires_operand_boundary(self) -> None:
+        generated = compile_source("?conv(EAstable:B)=EAstable\n")
+        self.assertIn("pub struct ConvMonitor", generated)
+
     def test_temporal_spec_generates_monitor(self) -> None:
         generated = compile_source(
-            "*O(send,ack:b)\n"
-            "?ack(*O)=□(send>>◇5s ack)\n"
+            "*O(send,ack:B)\n"
+            "?ack(*O)=A(send>>E 5s ack)\n"
         )
         self.assertIn("pub enum TemporalVerdict", generated)
         self.assertIn("pub struct AckMonitor", generated)
@@ -34,22 +41,30 @@ class TemporalTests(unittest.TestCase):
 
     def test_specs_are_removed_before_core_program_parse(self) -> None:
         program = parse_program(
-            "*O(send,ack:b)\n"
-            "?ack(*O)=□(send>>◇5s ack)\n"
+            "*O(send,ack:B)\n"
+            "?ack(*O)=A(send>>E 5s ack)\n"
         )
         self.assertEqual(len(program.declarations), 1)
 
+    def test_unicode_temporal_operators_are_rejected(self) -> None:
+        with self.assertRaisesRegex(GlyphError, "'A' と 'E'"):
+            compile_source("?x(done:B)=◇done\n")
+
     def test_zero_duration_is_rejected(self) -> None:
         with self.assertRaisesRegex(GlyphError, "0より大きく"):
-            compile_source("?deadline(done:b)=◇0s done\n")
+            compile_source("?deadline(done:B)=E 0s done\n")
 
     def test_unknown_product_spread_is_rejected(self) -> None:
         with self.assertRaisesRegex(GlyphError, "積型 '\\*Missing' が定義されていない"):
-            compile_source("?x(*Missing)=□true\n")
+            compile_source("?x(*Missing)=A true\n")
 
     def test_duplicate_spec_is_rejected(self) -> None:
         with self.assertRaisesRegex(GlyphError, "既に定義済み"):
-            compile_source("?x(p:b)=□p\n?x(p:b)=◇p\n")
+            compile_source("?x(p:B)=A p\n?x(p:B)=E p\n")
+
+    def test_single_equal_is_rejected_inside_temporal_atom(self) -> None:
+        with self.assertRaisesRegex(GlyphError, "'=='"):
+            compile_source("?same(x,y:I)=A(x=y)\n")
 
 
 if __name__ == "__main__":

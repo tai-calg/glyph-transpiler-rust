@@ -10,24 +10,24 @@ from glyph import GlyphError, compile_source
 
 
 SYSTEM_SOURCE = """
-+C=Stop|Run(u)
++C=Stop|Run(U)
 +Mode=Idle|Running|Stopping
-+Event=Fault{code:u,active:b}|Clear
-+Pair=Both(u,u)
-*System(mode:Mode,sequence:u,command:C)
++Event=Fault{code:U,active:B}|Clear
++Pair=Both(U,U)
+*System(mode:Mode,sequence:U,command:C)
 
 >transition(system:System,command:C):System
-  command=Run(system.sequence)>>System(Running,system.sequence+1,command)
-  command=Run(speed)>>System(Running,system.sequence+1,Run(speed))
-  command=Stop>>System(Stopping,system.sequence+1,Stop)
+  command==Run(system.sequence)>>System(Running,system.sequence+1,command)
+  command==Run(speed)>>System(Running,system.sequence+1,Run(speed))
+  command==Stop>>System(Stopping,system.sequence+1,Stop)
   _>>system
 
->fault_code(event:Event):u
-  event=Fault(code,_)>>code
+>fault_code(event:Event):U
+  event==Fault(code,_)>>code
   _>>0
 
->same(x,y:u):b
-  x=y>>true
+>same(x,y:U):B
+  x==y>>true
   _>>false
 """.lstrip()
 
@@ -50,18 +50,27 @@ class VariantPatternTests(unittest.TestCase):
     def test_pattern_arity_is_checked(self) -> None:
         with self.assertRaisesRegex(GlyphError, "variant pattern Run は1引数"):
             compile_source(
-                "+C=Stop|Run(u)\n"
-                ">f(command:C):u\n"
-                "  command=Run()>>1\n"
+                "+C=Stop|Run(U)\n"
+                ">f(command:C):U\n"
+                "  command==Run()>>1\n"
                 "  _>>0\n"
             )
 
     def test_duplicate_binding_is_rejected(self) -> None:
         with self.assertRaisesRegex(GlyphError, "束縛名 'x' が重複"):
             compile_source(
-                "+Pair=Both(u,u)\n"
-                ">f(pair:Pair):u\n"
-                "  pair=Both(x,x)>>x\n"
+                "+Pair=Both(U,U)\n"
+                ">f(pair:Pair):U\n"
+                "  pair==Both(x,x)>>x\n"
+                "  _>>0\n"
+            )
+
+    def test_single_equal_variant_guard_is_rejected(self) -> None:
+        with self.assertRaisesRegex(GlyphError, "'=='"):
+            compile_source(
+                "+C=Stop|Run(U)\n"
+                ">f(command:C):U\n"
+                "  command=Stop>>1\n"
                 "  _>>0\n"
             )
 

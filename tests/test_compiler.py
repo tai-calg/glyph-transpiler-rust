@@ -40,7 +40,7 @@ class CompilerTests(unittest.TestCase):
 
     def test_compact_grouped_fields_result_spread_and_guard_arrow(self) -> None:
         generated = compile_source(
-            "*S(v,t:f,r:u)\n"
+            "*S(v,t:F,r:U)\n"
             "+E=Bad\n"
             ">decode(*S):S|E\n"
             "  v<0>>Err(Bad)\n"
@@ -57,40 +57,58 @@ class CompilerTests(unittest.TestCase):
 
     def test_question_mark_is_reserved_for_failure_propagation(self) -> None:
         with self.assertRaises(GlyphError):
-            compile_source("+E=Bad\n>f():u?E=Err(Bad)\n")
+            compile_source("+E=Bad\n>f():U?E=Err(Bad)\n")
 
     def test_slash_is_not_a_compact_result_type(self) -> None:
         with self.assertRaises(GlyphError):
-            compile_source("+E=Bad\n>f():u/E=Err(Bad)\n")
+            compile_source("+E=Bad\n>f():U/E=Err(Bad)\n")
 
     def test_compact_primitive_type_shortcuts(self) -> None:
-        generated = compile_source("*P(x:f,y:d,n:u,k:i,ok:b)\n")
+        generated = compile_source("*P(x:F,y:D,n:U,k:I,ok:B)\n")
         self.assertIn("pub x: f32", generated)
         self.assertIn("pub y: f64", generated)
         self.assertIn("pub n: u16", generated)
         self.assertIn("pub k: i32", generated)
         self.assertIn("pub ok: bool", generated)
 
+    def test_legacy_lowercase_type_shortcuts_are_rejected(self) -> None:
+        for old, new in (("f", "F"), ("d", "D"), ("u", "U"), ("i", "I"), ("b", "B")):
+            with self.subTest(old=old):
+                with self.assertRaisesRegex(GlyphError, f"'{new}'"):
+                    compile_source(f"*P(value:{old})\n")
+
     def test_declared_type_name_overrides_primitive_shortcut(self) -> None:
-        generated = compile_source("*f(x:i)\n>id(x:f):f=x\n")
-        self.assertIn("pub struct f", generated)
-        self.assertIn("pub fn id(x: f) -> f", generated)
+        generated = compile_source("*F(x:I)\n>id(x:F):F=x\n")
+        self.assertIn("pub struct F", generated)
+        self.assertIn("pub fn id(x: F) -> F", generated)
 
     def test_unknown_product_spread_is_rejected(self) -> None:
         with self.assertRaisesRegex(GlyphError, "積型 '\\*Missing' が定義されていない"):
-            compile_source(">f(*Missing):i=0\n")
+            compile_source(">f(*Missing):I=0\n")
 
     def test_guard_function_requires_explicit_final_fallback(self) -> None:
         with self.assertRaises(GlyphError):
-            parse_program(">f(x:i):i\n  x<0>>0\n  1\n")
+            parse_program(">f(x:I):I\n  x<0>>0\n  1\n")
 
     def test_guard_function_requires_final_fallback(self) -> None:
         with self.assertRaisesRegex(GlyphError, "最後にちょうど1個"):
             parse_program(">f(x:i32):i32\n  x<0>>0\n")
 
     def test_legacy_guard_arrow_remains_compatible(self) -> None:
-        generated = compile_source(">f(x:i):i\n  x<0=>0\n  _=>1\n")
+        generated = compile_source(">f(x:I):I\n  x<0=>0\n  _=>1\n")
         self.assertIn("if x < 0", generated)
+
+    def test_single_equal_is_rejected_in_guard_expression(self) -> None:
+        with self.assertRaisesRegex(GlyphError, "'=='"):
+            compile_source(">same(x,y:I):B\n  x=y>>true\n  _>>false\n")
+
+    def test_double_equal_is_boolean_comparison(self) -> None:
+        generated = compile_source(">same(x,y:I):B\n  x==y>>true\n  _>>false\n")
+        self.assertIn("if x == y", generated)
+
+    def test_single_equal_is_rejected_in_macro_expression(self) -> None:
+        with self.assertRaisesRegex(GlyphError, "'=='"):
+            compile_source("@ZERO=x=0\n>f(x:I):B=ZERO\n")
 
     def test_duplicate_variant_is_rejected(self) -> None:
         with self.assertRaisesRegex(GlyphError, "衝突"):

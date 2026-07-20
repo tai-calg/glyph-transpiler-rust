@@ -5,30 +5,31 @@
 # > = 純粋な変換
 # ! = 外部作用との境界。=式を付ければ試作実装も同時生成
 # T|E = Result<T,E>
-# f/u/b = f32/u16/bool
+# F/U/B = f32/u16/bool
 # ガード行の >> = 条件分岐
 # ?name(...)=... = 時相制約
+# A/E = always/eventually
 # 式末尾の ? = 失敗伝播
 
 @LOW=10.0
 @HOT=80.0
 @MAX=1000
 @BAD=!finite(v)|!finite(t)|v<0.0
-@BLOCK=s.v<LOW|s.t>HOT|s.r=0
+@BLOCK=s.v<LOW|s.t>HOT|s.r==0
 @PIPE=exec(cmd(decode(v,t,r)?))
 
-*S(v,t:f,r:u)
-+C=Stop|Run(u)
+*S(v,t:F,r:U)
++C=Stop|Run(U)
 +E=BadSensor|Actuator
 *Receipt(c:C)
-*O(send,ack,closed,auth,beat,stable:b)
+*O(send,ack,closed,auth,beat,stable:B)
 
-?ack(*O)=□(send>>◇5s ack)
-?safe(*O)=□(!auth>>closed)
+?ack(*O)=A(send>>E 5s ack)
+?safe(*O)=A(!auth>>closed)
 ?auth(*O)=closed U auth
 ?wait(*O)=closed W auth
-?beat(*O)=□◇1s beat
-?conv(*O)=◇□stable
+?beat(*O)=AE 1s beat
+?conv(*O)=EA stable
 
 >decode(*S):S|E
   BAD>>Err(BadSensor)
