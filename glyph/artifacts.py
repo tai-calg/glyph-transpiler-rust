@@ -3,16 +3,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from .compiler import (
-    ExternDecl,
-    FunctionDecl,
-    GlyphError,
-    Program,
-    RustGenerator,
-    parse_program,
+from .ast_macros import (
+    AstMacroDef,
+    expand_function_macros,
+    expand_machine_macros,
+    expand_program_macros,
+    extract_ast_macros,
 )
+from .compiler import ExternDecl, FunctionDecl, GlyphError, Program, parse_program
+from .functional import FunctionalPatternRustGenerator, validate_function_values
 from .machine import MachineDecl, extract_machines, validate_machines
-from .pattern_codegen import PatternRustGenerator
+from .semantic import SemanticModel, build_semantic_model
 from .syntax import expand_compact_syntax
 from .temporal import SpecDecl, extract_specs
 from .temporal_codegen import append_temporal_rust
@@ -25,6 +26,16 @@ from .temporal_validate import validate_temporal_specs
 class RustArtifacts:
     logic: str
     host: str
+
+
+@dataclass(frozen=True)
+class CompilationModel:
+    program: Program
+    inline_effects: tuple[FunctionDecl, ...]
+    specs: tuple[SpecDecl, ...]
+    machines: tuple[MachineDecl, ...]
+    ast_macros: tuple[AstMacroDef, ...]
+    semantic: SemanticModel
 
 
 def _inline_effect_lines(source: str) -> set[int]:
@@ -56,9 +67,7 @@ def _parse_effect_program(source: str) -> tuple[Program, tuple[FunctionDecl, ...
     for decl in parsed.declarations:
         if isinstance(decl, FunctionDecl) and decl.line in inline_lines:
             effects.append(decl)
-            logic_declarations.append(
-                ExternDecl(decl.name, decl.params, decl.return_type, decl.line)
-            )
+            logic_declarations.append(ExternDecl(decl.name, decl.params, decl.return_type, decl.line))
         else:
             logic_declarations.append(decl)
 
@@ -66,7 +75,7 @@ def _parse_effect_program(source: str) -> tuple[Program, tuple[FunctionDecl, ...
 
 
 def _generate_host(program: Program, inline_effects: tuple[FunctionDecl, ...]) -> str:
-    generator = RustGenerator(program)
+    generator = FunctionalPatternRustGenerator(program)
     inline_by_name = {decl.name: decl for decl in inline_effects}
     externs = [decl for decl in program.declarations if isinstance(decl, ExternDecl)]
 
@@ -82,45 +91,53 @@ def _generate_host(program: Program, inline_effects: tuple[FunctionDecl, ...]) -
         out.append(f"pub fn {decl.name}{signature} {{")
         implementation = inline_by_name.get(decl.name)
         if implementation is None:
-            out.append(
-                f'    panic!("Glyph effect boundary `{decl.name}` is not connected")'
-            )
+            out.append(f'    panic!("Glyph effect boundary `{decl.name}` is not connected")')
         elif implementation.expression is not None:
             out.append(f"    {generator._expr(implementation.expression)}")
         else:
-            raise GlyphError(
-                f"{implementation.line}行目: !境界の試作実装は単一式で記述する"
-            )
+            raise GlyphError(f"{implementation.line}行目: !境界の試作実装は単一式で記述する")
         out.extend(["}", ""])
 
     return "\n".join(out).rstrip() + "\n"
 
 
-def parse_artifact_model(
-    source: str,
-) -> tuple[
-    Program,
-    tuple[FunctionDecl, ...],
-    tuple[SpecDecl, ...],
-    tuple[MachineDecl, ...],
-]:
-    """Parse one Glyph source into logic, effect, temporal, and machine models."""
+def parse_compilation_model(source: str) -> CompilationModel:
+    """Parse and lower one Glyph source into the shared semantic model."""
 
     expanded = expand_compact_syntax(source)
-    without_specs, specs = extract_specs(expanded)
+    without_ast_macros, ast_macros = extract_ast_macros(expanded)
+    without_specs, specs = extract_specs(without_ast_macros)
     core, machines = extract_machines(without_specs)
     program, inline_effects = _parse_effect_program(core)
+
+    program = expand_program_macros(program, ast_macros)
+    inline_effects = expand_function_macros(inline_effects, ast_macros)
+    machines = expand_machine_macros(machines, ast_macros)
+
+    validate_function_values(program)
     validate_temporal_specs(program, specs)
     validate_machines(program, machines)
-    return program, inline_effects, specs, machines
+    semantic = build_semantic_model(program, machines, ast_macros, specs)
+    return CompilationModel(program, inline_effects, specs, machines, ast_macros, semantic)
+
+
+def parse_artifact_model(
+    source: str,
+) -> tuple[Program, tuple[FunctionDecl, ...], tuple[SpecDecl, ...], tuple[MachineDecl, ...]]:
+    """Compatibility view of the full compilation model."""
+
+    model = parse_compilation_model(source)
+    return model.program, model.inline_effects, model.specs, model.machines
 
 
 def compile_artifacts(source: str) -> RustArtifacts:
-    program, inline_effects, specs, _ = parse_artifact_model(source)
-    logic = append_temporal_rust(PatternRustGenerator(program).generate(), program, specs)
-    logic = append_streaming_temporal_rust(logic, program, specs)
-    logic = append_safety_streaming_temporal_rust(logic, program, specs)
-    host = _generate_host(program, inline_effects)
+    model = parse_compilation_model(source)
+    logic = append_temporal_rust(
+        FunctionalPatternRustGenerator(model.program).generate(), model.program, model.specs
+    )
+    logic = append_streaming_temporal_rust(logic, model.program, model.specs)
+    logic = append_safety_streaming_temporal_rust(logic, model.program, model.specs)
+    host = _generate_host(model.program, model.inline_effects)
     return RustArtifacts(logic=logic, host=host)
 
 
