@@ -44,6 +44,7 @@ def _design_json(model) -> str:
     payload = model.semantic.to_dict()
     payload["lambdas"] = [asdict(item) for item in model.lambdas]
     payload["architecture"] = model.architecture.to_dict()
+    payload["rust_todos"] = [item.to_dict() for item in model.opaques]
     return json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
 
 
