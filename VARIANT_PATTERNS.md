@@ -84,12 +84,9 @@ The requested system-transition form is accepted directly:
 
 ```glyph
 >transition(system:System,command:C):System
-  command=Run(system.sequence)>>
-    System(Running,system.sequence+1,command)
-  command=Run(speed)>>
-    System(Running,system.sequence+1,Run(speed))
-  command=Stop>>
-    System(Stopping,system.sequence+1,Stop)
+  command=Run(system.sequence)>>System(Running,system.sequence+1,command)
+  command=Run(speed)>>System(Running,system.sequence+1,Run(speed))
+  command=Stop>>System(Stopping,system.sequence+1,Stop)
   _>>system
 ```
 
