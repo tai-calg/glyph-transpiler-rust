@@ -46,7 +46,7 @@
   _ >> system
 
 # machineのnextが状態またはResult<状態,Error>を返すよう、純粋な1周期遷移を分離する。
->step(state:System,input:Input):System|Error=transition(state,decide(validate(input)?))
+>step(state:System,input:Input):System|Error=Ok(transition(state,decide(validate(input)?)))
 
 # 実装はdemo-system/src/host.rsで接続する。生成host側は未接続stubとなる。
 !write_actuator(system:System):Cycle|Error
