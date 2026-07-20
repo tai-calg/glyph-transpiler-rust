@@ -8,6 +8,7 @@ from .compiler import (
     CallExpr,
     ExternDecl,
     Expr,
+    FunctionDecl,
     GlyphError,
     NameExpr,
     Param,
@@ -15,6 +16,7 @@ from .compiler import (
     TypeRef,
     _parse_named_signature,
 )
+from .function_blocks import FunctionBlockLowering
 from .functional import FunctionalPatternRustGenerator
 from .semantic import SemanticModel
 
@@ -27,15 +29,7 @@ class OpaqueSeed:
 
 @dataclass(frozen=True)
 class OpaqueDecl:
-    """A pure function contract implemented manually in Rust.
-
-    Surface syntax:
-
-        ~route(graph:Graph,start:Node,goal:Node):Path # TODO: A*
-
-    `~` means that Glyph knows the typed contract and call graph position but
-    deliberately does not contain the algorithm body.
-    """
+    """A pure function contract implemented manually in Rust."""
 
     name: str
     params: tuple[Param, ...]
@@ -129,9 +123,7 @@ def expose_opaque_as_pure(
                 f"{seed.line}行目: ~関数 '{name}' は{seen[name]}行目で定義済み"
             )
         seen[name] = seed.line
-        declarations.append(
-            OpaqueDecl(name, params, return_type, seed.line, seed.note)
-        )
+        declarations.append(OpaqueDecl(name, params, return_type, seed.line, seed.note))
     return (
         "\n".join(lines) + ("\n" if source.endswith("\n") else ""),
         tuple(declarations),
@@ -167,12 +159,65 @@ def without_opaque_externs(program: Program, opaques: Sequence[OpaqueDecl]) -> P
 
 
 class OpaqueAwareRustGenerator(FunctionalPatternRustGenerator):
-    """Generate `~foo(...)` calls as stable `crate::manual::foo(...)` calls."""
+    """Generate opaque calls and reconstruct `:=` blocks as direct Rust code."""
 
-    def __init__(self, program: Program, opaques: Sequence[OpaqueDecl]):
+    def __init__(
+        self,
+        program: Program,
+        opaques: Sequence[OpaqueDecl],
+        blocks: Sequence[FunctionBlockLowering] = (),
+    ):
         self.opaque_names = {item.name for item in opaques}
         filtered = without_opaque_externs(program, opaques)
+        self.block_by_name = {item.name: item for item in blocks}
+        self.block_helper_names = {
+            helper for block in blocks for helper in block.helper_names
+        }
+        self.function_by_name = {
+            declaration.name: declaration
+            for declaration in filtered.declarations
+            if isinstance(declaration, FunctionDecl)
+        }
         super().__init__(filtered)
+
+    def _function(self, decl: FunctionDecl) -> list[str]:
+        if decl.name in self.block_helper_names:
+            return []
+        block = self.block_by_name.get(decl.name)
+        if block is None:
+            return super()._function(decl)
+        return self._block_function(decl, block)
+
+    def _block_function(
+        self, decl: FunctionDecl, block: FunctionBlockLowering
+    ) -> list[str]:
+        signature = f"pub fn {decl.name}{self._signature_tail(decl.params, decl.return_type)} {{"
+        lines = [signature]
+        for binding in block.bindings:
+            helper = self.function_by_name.get(binding.value_helper)
+            if helper is None:
+                raise GlyphError(
+                    f"{binding.line}行目: 中間値 '{binding.name}' の内部表現が見つからない"
+                )
+            if helper.expression is not None:
+                lines.append(f"    let {binding.name} = {self._expr(helper.expression)};")
+                continue
+            if not helper.guards:
+                raise GlyphError(
+                    f"{binding.line}行目: 中間値 '{binding.name}' の条件本体が空"
+                )
+            lines.append(f"    let {binding.name} = {{")
+            lines.extend(self._guard_expression_lines(helper, helper.guards, 8))
+            lines.append("    };")
+
+        final_helper = self.function_by_name.get(block.final_helper)
+        if final_helper is None or final_helper.expression is None:
+            raise GlyphError(
+                f"{block.final_line}行目: 関数 '{block.name}' の最終式を復元できない"
+            )
+        lines.append(f"    {self._expr(final_helper.expression)}")
+        lines.extend(["}", ""])
+        return lines
 
     def _expr(self, expr: Expr, parent_prec: int = 0) -> str:
         if isinstance(expr, NameExpr) and expr.name in self.opaque_names:
