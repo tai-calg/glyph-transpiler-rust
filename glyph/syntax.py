@@ -15,13 +15,23 @@ from .compiler import (
 
 
 # 型位置だけで有効な、制御・組み込み用途向けの既定幅。
+# 大文字に限定し、値識別子と型識別子を視覚的に区別する。
 _TYPE_SHORTCUTS = {
-    "f": "f32",
-    "d": "f64",
-    "u": "u16",
-    "i": "i32",
-    "b": "bool",
+    "F": "f32",
+    "D": "f64",
+    "U": "u16",
+    "I": "i32",
+    "B": "bool",
 }
+_LEGACY_TYPE_SHORTCUTS = {
+    "f": "F",
+    "d": "D",
+    "u": "U",
+    "i": "I",
+    "b": "B",
+}
+_SINGLE_EQUAL_RE = re.compile(r"(?<![<>=!])=(?!=)")
+_TEMPORAL_WORD_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
 def _declared_type_names(lines: list[str]) -> set[str]:
@@ -67,11 +77,15 @@ def _expand_type(text: str, declared_types: set[str]) -> str:
         if close == len(text) - 1:
             name = text[:angle].strip()
             args = _split_top_level(text[angle + 1 : close], ",")
-            expanded_name = (
-                name
-                if name in declared_types
-                else _TYPE_SHORTCUTS.get(name, name)
-            )
+            if name in declared_types:
+                expanded_name = name
+            elif name in _LEGACY_TYPE_SHORTCUTS:
+                replacement = _LEGACY_TYPE_SHORTCUTS[name]
+                raise GlyphError(
+                    f"旧短縮型 '{name}' は廃止された。型位置では '{replacement}' を使う"
+                )
+            else:
+                expanded_name = _TYPE_SHORTCUTS.get(name, name)
             return (
                 f"{expanded_name}<"
                 f"{','.join(_expand_type(arg, declared_types) for arg in args)}>"
@@ -79,6 +93,11 @@ def _expand_type(text: str, declared_types: set[str]) -> str:
 
     if text in declared_types:
         return text
+    if text in _LEGACY_TYPE_SHORTCUTS:
+        replacement = _LEGACY_TYPE_SHORTCUTS[text]
+        raise GlyphError(
+            f"旧短縮型 '{text}' は廃止された。型位置では '{replacement}' を使う"
+        )
     return _TYPE_SHORTCUTS.get(text, text)
 
 
@@ -142,6 +161,53 @@ def _replace_parenthesized_fields(
     return code[: open_pos + 1] + ",".join(fields) + code[close_pos:]
 
 
+def _reject_single_equal(expression: str) -> None:
+    match = _SINGLE_EQUAL_RE.search(expression)
+    if match is not None:
+        raise GlyphError(
+            f"式中の等値比較には '=' ではなく '==' を使う at {match.start()}: {expression.strip()}"
+        )
+
+
+def _normalize_temporal_formula(formula: str) -> str:
+    if "□" in formula or "◇" in formula:
+        raise GlyphError("時相演算子 '□' と '◇' は廃止された。'A' と 'E' を使う")
+    _reject_single_equal(formula)
+
+    def replace(match: re.Match[str]) -> str:
+        word = match.group(0)
+        if set(word) <= {"A", "E"}:
+            return "".join("□" if ch == "A" else "◇" for ch in word)
+        return word
+
+    return _TEMPORAL_WORD_RE.sub(replace, formula)
+
+
+def _expand_temporal_decl(code: str, declared_types: set[str]) -> str:
+    open_pos = code.find("(")
+    if open_pos <= 1:
+        return code
+    close_pos = _find_matching(code, open_pos)
+    params: list[str] = []
+    for part in _split_top_level(code[open_pos + 1 : close_pos], ","):
+        item = part.strip()
+        if not item or (item.startswith("*") and item[1:].isidentifier()):
+            params.append(item)
+            continue
+        colon = _find_top_level_char(item, ":")
+        if colon < 0:
+            params.append(item)
+            continue
+        name = item[:colon].strip()
+        params.append(f"{name}:{_expand_type(item[colon + 1 :], declared_types)}")
+
+    rest = code[close_pos + 1 :]
+    if not rest.startswith("="):
+        return code[: open_pos + 1] + ",".join(params) + code[close_pos:]
+    formula = _normalize_temporal_formula(rest[1:])
+    return code[: open_pos + 1] + ",".join(params) + ")=" + formula
+
+
 def _expand_signature(
     code: str,
     declared_types: set[str],
@@ -164,7 +230,9 @@ def _expand_signature(
     eq = _find_top_level_char(typed_body, "=")
     if eq >= 0:
         return_type = _expand_type(typed_body[:eq], declared_types)
-        return before_type + return_type + typed_body[eq:]
+        expression = typed_body[eq + 1 :]
+        _reject_single_equal(expression)
+        return before_type + return_type + "=" + expression
     return before_type + _expand_type(typed_body, declared_types)
 
 
@@ -252,7 +320,11 @@ def expand_compact_syntax(source: str) -> str:
         stripped = code.strip()
         if not indent:
             marker = stripped[0]
-            if marker == "*":
+            if marker == "@":
+                separator = stripped.find("=")
+                if separator >= 0:
+                    _reject_single_equal(stripped[separator + 1 :])
+            elif marker == "*":
                 stripped = _replace_parenthesized_fields(
                     stripped, declared_types, products, allow_spread=False
                 )
@@ -262,10 +334,19 @@ def expand_compact_syntax(source: str) -> str:
                 stripped = _expand_sum(stripped, declared_types)
             elif marker == "=":
                 stripped = _expand_alias(stripped, declared_types)
+            elif marker == "?":
+                stripped = _expand_temporal_decl(stripped, declared_types)
             code = stripped
         elif ">>" in stripped:
             # ガード行だけで短い `>>` を既存文法の `=>` へ展開する。
-            code = indent + stripped.replace(">>", "=>", 1)
+            condition, value = stripped.split(">>", 1)
+            _reject_single_equal(condition)
+            _reject_single_equal(value)
+            code = indent + condition + "=>" + value
+        elif "=>" in stripped:
+            condition, value = stripped.split("=>", 1)
+            _reject_single_equal(condition)
+            _reject_single_equal(value)
 
         if comment:
             transformed.append(code + (" " if code else "") + comment)
