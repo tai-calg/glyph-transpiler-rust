@@ -38,7 +38,7 @@ class TemporalStreamingTests(unittest.TestCase):
         self.assertNotIn("trace", body)
 
     def test_unsupported_general_formula_keeps_reference_only(self) -> None:
-        generated = compile_source("?x(a,b:b)=□(a|◇b)\n")
+        generated = compile_source("?x(a:b,b:b)=□(a|◇b)\n")
         self.assertIn("pub struct XMonitor", generated)
         self.assertNotIn("pub struct XStreamingMonitor", generated)
 
