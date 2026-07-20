@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Sequence
 
 from .compiler import GlyphError, Program, RustGenerator
-from .temporal import Always, Atom, Implies, SpecDecl
+from .temporal import Always, And, Atom, Formula, Implies, Not, Or, SpecDecl
 
 
 def _pascal_case(name: str) -> str:
@@ -12,12 +12,32 @@ def _pascal_case(name: str) -> str:
 
 
 class TemporalSafetyStreamingRustGenerator:
-    """`□(P>>Q)`を定数状態の安全性モニタへ変換する。"""
+    """`□P`のPが瞬時状態式なら定数状態の安全性モニタへ変換する。"""
 
     def __init__(self, program: Program, specs: Sequence[SpecDecl]):
         self.program = program
         self.specs = tuple(specs)
         self.base = RustGenerator(program)
+
+    def _state_expr(self, formula: Formula) -> str | None:
+        if isinstance(formula, Atom):
+            return self.base._expr(formula.expr)
+        if isinstance(formula, Not):
+            value = self._state_expr(formula.value)
+            return None if value is None else f"!({value})"
+        if isinstance(formula, And):
+            left = self._state_expr(formula.left)
+            right = self._state_expr(formula.right)
+            return None if left is None or right is None else f"({left}) && ({right})"
+        if isinstance(formula, Or):
+            left = self._state_expr(formula.left)
+            right = self._state_expr(formula.right)
+            return None if left is None or right is None else f"({left}) || ({right})"
+        if isinstance(formula, Implies):
+            left = self._state_expr(formula.premise)
+            right = self._state_expr(formula.consequence)
+            return None if left is None or right is None else f"!({left}) || ({right})"
+        return None
 
     def generate(self) -> str:
         declared = {decl.name for decl in self.program.declarations}
@@ -25,29 +45,19 @@ class TemporalSafetyStreamingRustGenerator:
         generated: set[str] = set()
         for spec in self.specs:
             formula = spec.formula
-            if not (
-                isinstance(formula, Always)
-                and isinstance(formula.value, Implies)
-                and isinstance(formula.value.premise, Atom)
-                and isinstance(formula.value.consequence, Atom)
-            ):
+            if not isinstance(formula, Always) or isinstance(formula.value, Atom):
+                continue
+            expression = self._state_expr(formula.value)
+            if expression is None:
                 continue
             monitor = f"{_pascal_case(spec.name)}StreamingMonitor"
             if monitor in declared or monitor in generated:
                 raise GlyphError(f"{spec.line}行目: 生成逐次モニタ名 '{monitor}' が衝突する")
             generated.add(monitor)
-            out.extend(self._spec(spec, monitor))
+            out.extend(self._spec(spec, monitor, expression))
         return "\n".join(out).rstrip() + ("\n" if out else "")
 
-    def _spec(self, spec: SpecDecl, monitor: str) -> list[str]:
-        formula = spec.formula
-        assert isinstance(formula, Always)
-        implication = formula.value
-        assert isinstance(implication, Implies)
-        assert isinstance(implication.premise, Atom)
-        assert isinstance(implication.consequence, Atom)
-        premise = self.base._expr(implication.premise.expr)
-        consequence = self.base._expr(implication.consequence.expr)
+    def _spec(self, spec: SpecDecl, monitor: str, expression: str) -> list[str]:
         params = ", ".join(
             [
                 "at_ms: u64",
@@ -76,7 +86,7 @@ class TemporalSafetyStreamingRustGenerator:
             "        }",
             "        self.last_at_ms = Some(at_ms);",
             "        self.seen = true;",
-            f"        if ({premise}) && !({consequence}) {{",
+            f"        if !({expression}) {{",
             "            self.violated = true;",
             "        }",
             "        self.verdict()",
