@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 import hashlib
 import json
 from pathlib import Path
@@ -40,6 +40,13 @@ def _write_if_changed(path: Path, content: str) -> bool:
     return True
 
 
+def _design_json(model) -> str:
+    payload = model.semantic.to_dict()
+    payload["lambdas"] = [asdict(item) for item in model.lambdas]
+    payload["architecture"] = model.architecture.to_dict()
+    return json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
+
+
 class IncrementalCompiler:
     """Content-addressed one-file compiler cache used by watch mode and the Studio."""
 
@@ -59,10 +66,9 @@ class IncrementalCompiler:
             model = parse_compilation_model(source, source_name)
             artifacts = compile_artifacts(source)
             diagrams = compile_diagram_bundle(source, source_name, source_href)
-            semantic_json = (
-                json.dumps(model.semantic.to_dict(), ensure_ascii=False, indent=2) + "\n"
+            cached = CompilationSnapshot(
+                digest, artifacts, diagrams, _design_json(model)
             )
-            cached = CompilationSnapshot(digest, artifacts, diagrams, semantic_json)
             self._cache[digest] = cached
         changed = digest != self._last_digest
         self._last_digest = digest
