@@ -25,6 +25,16 @@ pub struct Receipt {
     pub c: C,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct O {
+    pub send: bool,
+    pub ack: bool,
+    pub closed: bool,
+    pub auth: bool,
+    pub beat: bool,
+    pub stable: bool,
+}
+
 pub fn decode(v: f32, t: f32, r: u16) -> Result<S, E> {
     if !v.is_finite() || !t.is_finite() || v < 0.0 {
         Err(E::BadSensor)
@@ -47,4 +57,942 @@ pub fn cmd(s: S) -> C {
 
 pub fn run(v: f32, t: f32, r: u16) -> Result<Receipt, E> {
     crate::host::exec(cmd(decode(v, t, r)?))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TemporalVerdict {
+    Satisfied,
+    Violated,
+    Pending,
+}
+
+fn temporal_not(value: TemporalVerdict) -> TemporalVerdict {
+    match value {
+        TemporalVerdict::Satisfied => TemporalVerdict::Violated,
+        TemporalVerdict::Violated => TemporalVerdict::Satisfied,
+        TemporalVerdict::Pending => TemporalVerdict::Pending,
+    }
+}
+
+fn temporal_and(left: TemporalVerdict, right: TemporalVerdict) -> TemporalVerdict {
+    match (left, right) {
+        (TemporalVerdict::Violated, _) | (_, TemporalVerdict::Violated) => TemporalVerdict::Violated,
+        (TemporalVerdict::Satisfied, TemporalVerdict::Satisfied) => TemporalVerdict::Satisfied,
+        _ => TemporalVerdict::Pending,
+    }
+}
+
+fn temporal_or(left: TemporalVerdict, right: TemporalVerdict) -> TemporalVerdict {
+    match (left, right) {
+        (TemporalVerdict::Satisfied, _) | (_, TemporalVerdict::Satisfied) => TemporalVerdict::Satisfied,
+        (TemporalVerdict::Violated, TemporalVerdict::Violated) => TemporalVerdict::Violated,
+        _ => TemporalVerdict::Pending,
+    }
+}
+
+#[derive(Debug, Clone)]
+struct AckObservation {
+    at_ms: u64,
+    send: bool,
+    ack: bool,
+    closed: bool,
+    auth: bool,
+    beat: bool,
+    stable: bool,
+}
+
+#[derive(Debug, Default)]
+pub struct AckMonitor {
+    trace: Vec<AckObservation>,
+}
+
+impl AckMonitor {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn step(&mut self, at_ms: u64, send: bool, ack: bool, closed: bool, auth: bool, beat: bool, stable: bool) -> TemporalVerdict {
+        if let Some(last) = self.trace.last() {
+            assert!(at_ms >= last.at_ms, "temporal observation time must be monotonic");
+        }
+        self.trace.push(AckObservation { at_ms, send, ack, closed, auth, beat, stable });
+        self.eval_4(0, false)
+    }
+
+    pub fn verdict(&self) -> TemporalVerdict {
+        if self.trace.is_empty() {
+            TemporalVerdict::Pending
+        } else {
+            self.eval_4(0, false)
+        }
+    }
+
+    pub fn finish(&self) -> TemporalVerdict {
+        if self.trace.is_empty() {
+            TemporalVerdict::Pending
+        } else {
+            self.eval_4(0, true)
+        }
+    }
+
+    pub fn reset(&mut self) {
+        self.trace.clear();
+    }
+
+    fn eval_0(&self, i: usize, closed: bool) -> TemporalVerdict {
+        if i >= self.trace.len() {
+            return TemporalVerdict::Pending;
+        }
+        if self.trace[i].send {
+            TemporalVerdict::Satisfied
+        } else {
+            TemporalVerdict::Violated
+        }
+    }
+
+    fn eval_1(&self, i: usize, closed: bool) -> TemporalVerdict {
+        if i >= self.trace.len() {
+            return TemporalVerdict::Pending;
+        }
+        if self.trace[i].ack {
+            TemporalVerdict::Satisfied
+        } else {
+            TemporalVerdict::Violated
+        }
+    }
+
+    fn eval_2(&self, i: usize, closed: bool) -> TemporalVerdict {
+        if i >= self.trace.len() {
+            return TemporalVerdict::Pending;
+        }
+        let deadline = self.trace[i].at_ms.saturating_add(5000);
+        for j in i..self.trace.len() {
+            if self.trace[j].at_ms > deadline {
+                break;
+            }
+            if self.eval_1(j, closed) == TemporalVerdict::Satisfied {
+                return TemporalVerdict::Satisfied;
+            }
+        }
+        if closed || self.trace.last().is_some_and(|last| last.at_ms > deadline) {
+            TemporalVerdict::Violated
+        } else {
+            TemporalVerdict::Pending
+        }
+    }
+
+    fn eval_3(&self, i: usize, closed: bool) -> TemporalVerdict {
+        temporal_or(temporal_not(self.eval_0(i, closed)), self.eval_2(i, closed))
+    }
+
+    fn eval_4(&self, i: usize, closed: bool) -> TemporalVerdict {
+        let mut all_satisfied = true;
+        for j in i..self.trace.len() {
+            match self.eval_3(j, closed) {
+                TemporalVerdict::Violated => return TemporalVerdict::Violated,
+                TemporalVerdict::Pending => all_satisfied = false,
+                TemporalVerdict::Satisfied => {}
+            }
+        }
+        if closed && all_satisfied {
+            TemporalVerdict::Satisfied
+        } else {
+            TemporalVerdict::Pending
+        }
+    }
+
+}
+
+#[derive(Debug, Clone)]
+struct SafeObservation {
+    at_ms: u64,
+    send: bool,
+    ack: bool,
+    closed: bool,
+    auth: bool,
+    beat: bool,
+    stable: bool,
+}
+
+#[derive(Debug, Default)]
+pub struct SafeMonitor {
+    trace: Vec<SafeObservation>,
+}
+
+impl SafeMonitor {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn step(&mut self, at_ms: u64, send: bool, ack: bool, closed: bool, auth: bool, beat: bool, stable: bool) -> TemporalVerdict {
+        if let Some(last) = self.trace.last() {
+            assert!(at_ms >= last.at_ms, "temporal observation time must be monotonic");
+        }
+        self.trace.push(SafeObservation { at_ms, send, ack, closed, auth, beat, stable });
+        self.eval_4(0, false)
+    }
+
+    pub fn verdict(&self) -> TemporalVerdict {
+        if self.trace.is_empty() {
+            TemporalVerdict::Pending
+        } else {
+            self.eval_4(0, false)
+        }
+    }
+
+    pub fn finish(&self) -> TemporalVerdict {
+        if self.trace.is_empty() {
+            TemporalVerdict::Pending
+        } else {
+            self.eval_4(0, true)
+        }
+    }
+
+    pub fn reset(&mut self) {
+        self.trace.clear();
+    }
+
+    fn eval_0(&self, i: usize, closed: bool) -> TemporalVerdict {
+        if i >= self.trace.len() {
+            return TemporalVerdict::Pending;
+        }
+        if self.trace[i].auth {
+            TemporalVerdict::Satisfied
+        } else {
+            TemporalVerdict::Violated
+        }
+    }
+
+    fn eval_1(&self, i: usize, closed: bool) -> TemporalVerdict {
+        temporal_not(self.eval_0(i, closed))
+    }
+
+    fn eval_2(&self, i: usize, closed: bool) -> TemporalVerdict {
+        if i >= self.trace.len() {
+            return TemporalVerdict::Pending;
+        }
+        if self.trace[i].closed {
+            TemporalVerdict::Satisfied
+        } else {
+            TemporalVerdict::Violated
+        }
+    }
+
+    fn eval_3(&self, i: usize, closed: bool) -> TemporalVerdict {
+        temporal_or(temporal_not(self.eval_1(i, closed)), self.eval_2(i, closed))
+    }
+
+    fn eval_4(&self, i: usize, closed: bool) -> TemporalVerdict {
+        let mut all_satisfied = true;
+        for j in i..self.trace.len() {
+            match self.eval_3(j, closed) {
+                TemporalVerdict::Violated => return TemporalVerdict::Violated,
+                TemporalVerdict::Pending => all_satisfied = false,
+                TemporalVerdict::Satisfied => {}
+            }
+        }
+        if closed && all_satisfied {
+            TemporalVerdict::Satisfied
+        } else {
+            TemporalVerdict::Pending
+        }
+    }
+
+}
+
+#[derive(Debug, Clone)]
+struct AuthObservation {
+    at_ms: u64,
+    send: bool,
+    ack: bool,
+    closed: bool,
+    auth: bool,
+    beat: bool,
+    stable: bool,
+}
+
+#[derive(Debug, Default)]
+pub struct AuthMonitor {
+    trace: Vec<AuthObservation>,
+}
+
+impl AuthMonitor {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn step(&mut self, at_ms: u64, send: bool, ack: bool, closed: bool, auth: bool, beat: bool, stable: bool) -> TemporalVerdict {
+        if let Some(last) = self.trace.last() {
+            assert!(at_ms >= last.at_ms, "temporal observation time must be monotonic");
+        }
+        self.trace.push(AuthObservation { at_ms, send, ack, closed, auth, beat, stable });
+        self.eval_2(0, false)
+    }
+
+    pub fn verdict(&self) -> TemporalVerdict {
+        if self.trace.is_empty() {
+            TemporalVerdict::Pending
+        } else {
+            self.eval_2(0, false)
+        }
+    }
+
+    pub fn finish(&self) -> TemporalVerdict {
+        if self.trace.is_empty() {
+            TemporalVerdict::Pending
+        } else {
+            self.eval_2(0, true)
+        }
+    }
+
+    pub fn reset(&mut self) {
+        self.trace.clear();
+    }
+
+    fn eval_0(&self, i: usize, closed: bool) -> TemporalVerdict {
+        if i >= self.trace.len() {
+            return TemporalVerdict::Pending;
+        }
+        if self.trace[i].closed {
+            TemporalVerdict::Satisfied
+        } else {
+            TemporalVerdict::Violated
+        }
+    }
+
+    fn eval_1(&self, i: usize, closed: bool) -> TemporalVerdict {
+        if i >= self.trace.len() {
+            return TemporalVerdict::Pending;
+        }
+        if self.trace[i].auth {
+            TemporalVerdict::Satisfied
+        } else {
+            TemporalVerdict::Violated
+        }
+    }
+
+    fn eval_2(&self, i: usize, closed: bool) -> TemporalVerdict {
+        let mut hold_satisfied = true;
+        for j in i..self.trace.len() {
+            if self.eval_1(j, closed) == TemporalVerdict::Satisfied {
+                return if hold_satisfied {
+                    TemporalVerdict::Satisfied
+                } else {
+                    TemporalVerdict::Pending
+                };
+            }
+            match self.eval_0(j, closed) {
+                TemporalVerdict::Violated => return TemporalVerdict::Violated,
+                TemporalVerdict::Pending => hold_satisfied = false,
+                TemporalVerdict::Satisfied => {}
+            }
+        }
+        if closed {
+            if hold_satisfied { TemporalVerdict::Violated } else { TemporalVerdict::Pending }
+        } else {
+            TemporalVerdict::Pending
+        }
+    }
+
+}
+
+#[derive(Debug, Clone)]
+struct WaitObservation {
+    at_ms: u64,
+    send: bool,
+    ack: bool,
+    closed: bool,
+    auth: bool,
+    beat: bool,
+    stable: bool,
+}
+
+#[derive(Debug, Default)]
+pub struct WaitMonitor {
+    trace: Vec<WaitObservation>,
+}
+
+impl WaitMonitor {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn step(&mut self, at_ms: u64, send: bool, ack: bool, closed: bool, auth: bool, beat: bool, stable: bool) -> TemporalVerdict {
+        if let Some(last) = self.trace.last() {
+            assert!(at_ms >= last.at_ms, "temporal observation time must be monotonic");
+        }
+        self.trace.push(WaitObservation { at_ms, send, ack, closed, auth, beat, stable });
+        self.eval_2(0, false)
+    }
+
+    pub fn verdict(&self) -> TemporalVerdict {
+        if self.trace.is_empty() {
+            TemporalVerdict::Pending
+        } else {
+            self.eval_2(0, false)
+        }
+    }
+
+    pub fn finish(&self) -> TemporalVerdict {
+        if self.trace.is_empty() {
+            TemporalVerdict::Pending
+        } else {
+            self.eval_2(0, true)
+        }
+    }
+
+    pub fn reset(&mut self) {
+        self.trace.clear();
+    }
+
+    fn eval_0(&self, i: usize, closed: bool) -> TemporalVerdict {
+        if i >= self.trace.len() {
+            return TemporalVerdict::Pending;
+        }
+        if self.trace[i].closed {
+            TemporalVerdict::Satisfied
+        } else {
+            TemporalVerdict::Violated
+        }
+    }
+
+    fn eval_1(&self, i: usize, closed: bool) -> TemporalVerdict {
+        if i >= self.trace.len() {
+            return TemporalVerdict::Pending;
+        }
+        if self.trace[i].auth {
+            TemporalVerdict::Satisfied
+        } else {
+            TemporalVerdict::Violated
+        }
+    }
+
+    fn eval_2(&self, i: usize, closed: bool) -> TemporalVerdict {
+        let mut hold_satisfied = true;
+        for j in i..self.trace.len() {
+            if self.eval_1(j, closed) == TemporalVerdict::Satisfied {
+                return if hold_satisfied {
+                    TemporalVerdict::Satisfied
+                } else {
+                    TemporalVerdict::Pending
+                };
+            }
+            match self.eval_0(j, closed) {
+                TemporalVerdict::Violated => return TemporalVerdict::Violated,
+                TemporalVerdict::Pending => hold_satisfied = false,
+                TemporalVerdict::Satisfied => {}
+            }
+        }
+        if closed {
+            if hold_satisfied { TemporalVerdict::Satisfied } else { TemporalVerdict::Pending }
+        } else {
+            TemporalVerdict::Pending
+        }
+    }
+
+}
+
+#[derive(Debug, Clone)]
+struct BeatObservation {
+    at_ms: u64,
+    send: bool,
+    ack: bool,
+    closed: bool,
+    auth: bool,
+    beat: bool,
+    stable: bool,
+}
+
+#[derive(Debug, Default)]
+pub struct BeatMonitor {
+    trace: Vec<BeatObservation>,
+}
+
+impl BeatMonitor {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn step(&mut self, at_ms: u64, send: bool, ack: bool, closed: bool, auth: bool, beat: bool, stable: bool) -> TemporalVerdict {
+        if let Some(last) = self.trace.last() {
+            assert!(at_ms >= last.at_ms, "temporal observation time must be monotonic");
+        }
+        self.trace.push(BeatObservation { at_ms, send, ack, closed, auth, beat, stable });
+        self.eval_2(0, false)
+    }
+
+    pub fn verdict(&self) -> TemporalVerdict {
+        if self.trace.is_empty() {
+            TemporalVerdict::Pending
+        } else {
+            self.eval_2(0, false)
+        }
+    }
+
+    pub fn finish(&self) -> TemporalVerdict {
+        if self.trace.is_empty() {
+            TemporalVerdict::Pending
+        } else {
+            self.eval_2(0, true)
+        }
+    }
+
+    pub fn reset(&mut self) {
+        self.trace.clear();
+    }
+
+    fn eval_0(&self, i: usize, closed: bool) -> TemporalVerdict {
+        if i >= self.trace.len() {
+            return TemporalVerdict::Pending;
+        }
+        if self.trace[i].beat {
+            TemporalVerdict::Satisfied
+        } else {
+            TemporalVerdict::Violated
+        }
+    }
+
+    fn eval_1(&self, i: usize, closed: bool) -> TemporalVerdict {
+        if i >= self.trace.len() {
+            return TemporalVerdict::Pending;
+        }
+        let deadline = self.trace[i].at_ms.saturating_add(1000);
+        for j in i..self.trace.len() {
+            if self.trace[j].at_ms > deadline {
+                break;
+            }
+            if self.eval_0(j, closed) == TemporalVerdict::Satisfied {
+                return TemporalVerdict::Satisfied;
+            }
+        }
+        if closed || self.trace.last().is_some_and(|last| last.at_ms > deadline) {
+            TemporalVerdict::Violated
+        } else {
+            TemporalVerdict::Pending
+        }
+    }
+
+    fn eval_2(&self, i: usize, closed: bool) -> TemporalVerdict {
+        let mut all_satisfied = true;
+        for j in i..self.trace.len() {
+            match self.eval_1(j, closed) {
+                TemporalVerdict::Violated => return TemporalVerdict::Violated,
+                TemporalVerdict::Pending => all_satisfied = false,
+                TemporalVerdict::Satisfied => {}
+            }
+        }
+        if closed && all_satisfied {
+            TemporalVerdict::Satisfied
+        } else {
+            TemporalVerdict::Pending
+        }
+    }
+
+}
+
+#[derive(Debug, Clone)]
+struct ConvObservation {
+    at_ms: u64,
+    send: bool,
+    ack: bool,
+    closed: bool,
+    auth: bool,
+    beat: bool,
+    stable: bool,
+}
+
+#[derive(Debug, Default)]
+pub struct ConvMonitor {
+    trace: Vec<ConvObservation>,
+}
+
+impl ConvMonitor {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn step(&mut self, at_ms: u64, send: bool, ack: bool, closed: bool, auth: bool, beat: bool, stable: bool) -> TemporalVerdict {
+        if let Some(last) = self.trace.last() {
+            assert!(at_ms >= last.at_ms, "temporal observation time must be monotonic");
+        }
+        self.trace.push(ConvObservation { at_ms, send, ack, closed, auth, beat, stable });
+        self.eval_2(0, false)
+    }
+
+    pub fn verdict(&self) -> TemporalVerdict {
+        if self.trace.is_empty() {
+            TemporalVerdict::Pending
+        } else {
+            self.eval_2(0, false)
+        }
+    }
+
+    pub fn finish(&self) -> TemporalVerdict {
+        if self.trace.is_empty() {
+            TemporalVerdict::Pending
+        } else {
+            self.eval_2(0, true)
+        }
+    }
+
+    pub fn reset(&mut self) {
+        self.trace.clear();
+    }
+
+    fn eval_0(&self, i: usize, closed: bool) -> TemporalVerdict {
+        if i >= self.trace.len() {
+            return TemporalVerdict::Pending;
+        }
+        if self.trace[i].stable {
+            TemporalVerdict::Satisfied
+        } else {
+            TemporalVerdict::Violated
+        }
+    }
+
+    fn eval_1(&self, i: usize, closed: bool) -> TemporalVerdict {
+        let mut all_satisfied = true;
+        for j in i..self.trace.len() {
+            match self.eval_0(j, closed) {
+                TemporalVerdict::Violated => return TemporalVerdict::Violated,
+                TemporalVerdict::Pending => all_satisfied = false,
+                TemporalVerdict::Satisfied => {}
+            }
+        }
+        if closed && all_satisfied {
+            TemporalVerdict::Satisfied
+        } else {
+            TemporalVerdict::Pending
+        }
+    }
+
+    fn eval_2(&self, i: usize, closed: bool) -> TemporalVerdict {
+        for j in i..self.trace.len() {
+            if self.eval_1(j, closed) == TemporalVerdict::Satisfied {
+                return TemporalVerdict::Satisfied;
+            }
+        }
+        if closed {
+            TemporalVerdict::Violated
+        } else {
+            TemporalVerdict::Pending
+        }
+    }
+
+}
+
+#[derive(Debug, Default)]
+pub struct AckStreamingMonitor {
+    seen: bool,
+    last_at_ms: Option<u64>,
+    pending_deadline_ms: Option<u64>,
+    violated: bool,
+}
+
+impl AckStreamingMonitor {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn step(&mut self, at_ms: u64, send: bool, ack: bool, closed: bool, auth: bool, beat: bool, stable: bool) -> TemporalVerdict {
+        if let Some(last) = self.last_at_ms {
+            assert!(at_ms >= last, "temporal observation time must be monotonic");
+        }
+        self.last_at_ms = Some(at_ms);
+        self.seen = true;
+        if let Some(deadline) = self.pending_deadline_ms {
+            if at_ms > deadline {
+                self.violated = true;
+            }
+        }
+        if !self.violated {
+            if ack {
+                self.pending_deadline_ms = None;
+            } else if send && self.pending_deadline_ms.is_none() {
+                self.pending_deadline_ms = Some(at_ms.saturating_add(5000));
+            }
+        }
+        self.verdict()
+    }
+
+    pub fn verdict(&self) -> TemporalVerdict {
+        if self.violated {
+            TemporalVerdict::Violated
+        } else {
+            TemporalVerdict::Pending
+        }
+    }
+
+    pub fn finish(&self) -> TemporalVerdict {
+        if !self.seen {
+            TemporalVerdict::Pending
+        } else if self.violated || self.pending_deadline_ms.is_some() {
+            TemporalVerdict::Violated
+        } else {
+            TemporalVerdict::Satisfied
+        }
+    }
+
+    pub fn reset(&mut self) {
+        *self = Self::default();
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct AuthStreamingMonitor {
+    seen: bool,
+    last_at_ms: Option<u64>,
+    satisfied: bool,
+    violated: bool,
+}
+
+impl AuthStreamingMonitor {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn step(&mut self, at_ms: u64, send: bool, ack: bool, closed: bool, auth: bool, beat: bool, stable: bool) -> TemporalVerdict {
+        if let Some(last) = self.last_at_ms {
+            assert!(at_ms >= last, "temporal observation time must be monotonic");
+        }
+        self.last_at_ms = Some(at_ms);
+        self.seen = true;
+        if self.satisfied || self.violated {
+            return self.verdict();
+        }
+        if auth {
+            self.satisfied = true;
+        } else if !(closed) {
+            self.violated = true;
+        }
+        self.verdict()
+    }
+
+    pub fn verdict(&self) -> TemporalVerdict {
+        if self.violated {
+            TemporalVerdict::Violated
+        } else if self.satisfied {
+            TemporalVerdict::Satisfied
+        } else {
+            TemporalVerdict::Pending
+        }
+    }
+
+    pub fn finish(&self) -> TemporalVerdict {
+        if !self.seen {
+            TemporalVerdict::Pending
+        } else if self.violated {
+            TemporalVerdict::Violated
+        } else if self.satisfied {
+            TemporalVerdict::Satisfied
+        } else {
+            TemporalVerdict::Violated
+        }
+    }
+
+    pub fn reset(&mut self) {
+        *self = Self::default();
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct WaitStreamingMonitor {
+    seen: bool,
+    last_at_ms: Option<u64>,
+    satisfied: bool,
+    violated: bool,
+}
+
+impl WaitStreamingMonitor {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn step(&mut self, at_ms: u64, send: bool, ack: bool, closed: bool, auth: bool, beat: bool, stable: bool) -> TemporalVerdict {
+        if let Some(last) = self.last_at_ms {
+            assert!(at_ms >= last, "temporal observation time must be monotonic");
+        }
+        self.last_at_ms = Some(at_ms);
+        self.seen = true;
+        if self.satisfied || self.violated {
+            return self.verdict();
+        }
+        if auth {
+            self.satisfied = true;
+        } else if !(closed) {
+            self.violated = true;
+        }
+        self.verdict()
+    }
+
+    pub fn verdict(&self) -> TemporalVerdict {
+        if self.violated {
+            TemporalVerdict::Violated
+        } else if self.satisfied {
+            TemporalVerdict::Satisfied
+        } else {
+            TemporalVerdict::Pending
+        }
+    }
+
+    pub fn finish(&self) -> TemporalVerdict {
+        if !self.seen {
+            TemporalVerdict::Pending
+        } else if self.violated {
+            TemporalVerdict::Violated
+        } else if self.satisfied {
+            TemporalVerdict::Satisfied
+        } else {
+            TemporalVerdict::Satisfied
+        }
+    }
+
+    pub fn reset(&mut self) {
+        *self = Self::default();
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct BeatStreamingMonitor {
+    seen: bool,
+    last_at_ms: Option<u64>,
+    pending_deadline_ms: Option<u64>,
+    violated: bool,
+}
+
+impl BeatStreamingMonitor {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn step(&mut self, at_ms: u64, send: bool, ack: bool, closed: bool, auth: bool, beat: bool, stable: bool) -> TemporalVerdict {
+        if let Some(last) = self.last_at_ms {
+            assert!(at_ms >= last, "temporal observation time must be monotonic");
+        }
+        self.last_at_ms = Some(at_ms);
+        self.seen = true;
+        if let Some(deadline) = self.pending_deadline_ms {
+            if at_ms > deadline {
+                self.violated = true;
+            }
+        }
+        if !self.violated {
+            if beat {
+                self.pending_deadline_ms = None;
+            } else if self.pending_deadline_ms.is_none() {
+                self.pending_deadline_ms = Some(at_ms.saturating_add(1000));
+            }
+        }
+        self.verdict()
+    }
+
+    pub fn verdict(&self) -> TemporalVerdict {
+        if self.violated {
+            TemporalVerdict::Violated
+        } else {
+            TemporalVerdict::Pending
+        }
+    }
+
+    pub fn finish(&self) -> TemporalVerdict {
+        if !self.seen {
+            TemporalVerdict::Pending
+        } else if self.violated || self.pending_deadline_ms.is_some() {
+            TemporalVerdict::Violated
+        } else {
+            TemporalVerdict::Satisfied
+        }
+    }
+
+    pub fn reset(&mut self) {
+        *self = Self::default();
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct ConvStreamingMonitor {
+    seen: bool,
+    last_at_ms: Option<u64>,
+    last_value: bool,
+}
+
+impl ConvStreamingMonitor {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn step(&mut self, at_ms: u64, send: bool, ack: bool, closed: bool, auth: bool, beat: bool, stable: bool) -> TemporalVerdict {
+        if let Some(last) = self.last_at_ms {
+            assert!(at_ms >= last, "temporal observation time must be monotonic");
+        }
+        self.last_at_ms = Some(at_ms);
+        self.seen = true;
+        self.last_value = stable;
+        TemporalVerdict::Pending
+    }
+
+    pub fn verdict(&self) -> TemporalVerdict {
+        TemporalVerdict::Pending
+    }
+
+    pub fn finish(&self) -> TemporalVerdict {
+        if !self.seen {
+            TemporalVerdict::Pending
+        } else if self.last_value {
+            TemporalVerdict::Satisfied
+        } else {
+            TemporalVerdict::Violated
+        }
+    }
+
+    pub fn reset(&mut self) {
+        *self = Self::default();
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct SafeStreamingMonitor {
+    seen: bool,
+    last_at_ms: Option<u64>,
+    violated: bool,
+}
+
+impl SafeStreamingMonitor {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn step(&mut self, at_ms: u64, send: bool, ack: bool, closed: bool, auth: bool, beat: bool, stable: bool) -> TemporalVerdict {
+        if let Some(last) = self.last_at_ms {
+            assert!(at_ms >= last, "temporal observation time must be monotonic");
+        }
+        self.last_at_ms = Some(at_ms);
+        self.seen = true;
+        if !(!(!(auth)) || (closed)) {
+            self.violated = true;
+        }
+        self.verdict()
+    }
+
+    pub fn verdict(&self) -> TemporalVerdict {
+        if self.violated {
+            TemporalVerdict::Violated
+        } else {
+            TemporalVerdict::Pending
+        }
+    }
+
+    pub fn finish(&self) -> TemporalVerdict {
+        if !self.seen {
+            TemporalVerdict::Pending
+        } else if self.violated {
+            TemporalVerdict::Violated
+        } else {
+            TemporalVerdict::Satisfied
+        }
+    }
+
+    pub fn reset(&mut self) {
+        *self = Self::default();
+    }
 }

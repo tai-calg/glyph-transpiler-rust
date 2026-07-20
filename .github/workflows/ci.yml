@@ -24,20 +24,52 @@ jobs:
           cargo --version
 
       - name: Run Python compiler tests
-        run: python3 -m unittest tests.test_compiler tests.test_cli -v
-
-      - name: Regenerate Rust sources
+        id: python_tests
+        continue-on-error: true
+        shell: bash
         run: |
-          cp demo/src/generated.rs /tmp/generated.rs.before
-          cp demo/src/host.generated.rs /tmp/host.generated.rs.before
+          set -o pipefail
+          python3 -m unittest discover -s tests -v 2>&1 | tee python-test.log
+
+      - name: Upload Python test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-test-log
+          path: python-test.log
+
+      - name: Stop after Python test failure
+        if: steps.python_tests.outcome == 'failure'
+        run: exit 1
+
+      - name: Verify deterministic Rust generation
+        run: |
           python3 glyphc.py examples/controller.glyph \
             -o demo/src/generated.rs \
             --host-output demo/src/host.generated.rs
-          diff -u /tmp/generated.rs.before demo/src/generated.rs
-          diff -u /tmp/host.generated.rs.before demo/src/host.generated.rs
+          git diff --exit-code -- demo/src/generated.rs demo/src/host.generated.rs
+
+      - name: Generate complete system demo
+        run: |
+          python3 glyphc.py examples/system_controller.glyph \
+            -o demo-system/src/generated.rs \
+            --host-output demo-system/src/host.generated.rs
+
+      - name: Upload generated Rust sources
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: generated-rust-sources
+          path: |
+            demo/src/generated.rs
+            demo/src/host.generated.rs
+            demo-system/src/generated.rs
+            demo-system/src/host.generated.rs
 
       - name: Format generated Rust
-        run: cargo fmt --manifest-path demo/Cargo.toml
+        run: |
+          cargo fmt --manifest-path demo/Cargo.toml
+          cargo fmt --manifest-path demo-system/Cargo.toml
 
       - name: Run Rust tests
         id: rust_tests
@@ -46,7 +78,11 @@ jobs:
           set +e
           cargo test --manifest-path demo/Cargo.toml --verbose > cargo-test.log 2>&1
           status=$?
-          tail -n 120 cargo-test.log
+          if [ "$status" -eq 0 ]; then
+            cargo test --manifest-path demo-system/Cargo.toml --verbose >> cargo-test.log 2>&1
+            status=$?
+          fi
+          tail -n 160 cargo-test.log
           exit $status
 
       - name: Upload Cargo test log
@@ -56,8 +92,12 @@ jobs:
           name: cargo-test-log
           path: cargo-test.log
 
-      - name: Run demo
-        run: cargo run --manifest-path demo/Cargo.toml --quiet
+      - name: Run demos
+        run: |
+          cargo run --manifest-path demo/Cargo.toml --quiet
+          cargo run --manifest-path demo-system/Cargo.toml --quiet
 
       - name: Run Clippy
-        run: cargo clippy --manifest-path demo/Cargo.toml --all-targets
+        run: |
+          cargo clippy --manifest-path demo/Cargo.toml --all-targets
+          cargo clippy --manifest-path demo-system/Cargo.toml --all-targets
