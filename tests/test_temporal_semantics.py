@@ -14,37 +14,37 @@ class TemporalSemanticTests(unittest.TestCase):
 
     def test_pure_helper_function_is_allowed_in_atom(self) -> None:
         generated = compile_source(
-            ">valid(p:b):b=p\n"
-            "?x(p:b)=□valid(p)\n"
+            ">valid(p:B):B=p\n"
+            "?x(p:B)=A valid(p)\n"
         )
         self.assertIn("pub struct XMonitor", generated)
 
     def test_direct_effect_call_is_rejected_in_atom(self) -> None:
         with self.assertRaisesRegex(GlyphError, "外部作用"):
             compile_source(
-                "!read():b\n"
-                "?x(p:b)=□read()\n"
+                "!read():B\n"
+                "?x(p:B)=A read()\n"
             )
 
     def test_transitive_effect_call_is_rejected_in_atom(self) -> None:
         with self.assertRaisesRegex(GlyphError, "外部作用"):
             compile_source(
-                "!read():b\n"
-                ">probe():b=read()\n"
-                "?x(p:b)=□probe()\n"
+                "!read():B\n"
+                ">probe():B=read()\n"
+                "?x(p:B)=A probe()\n"
             )
 
     def test_unknown_call_is_rejected_in_atom(self) -> None:
         with self.assertRaisesRegex(GlyphError, "純粋性を確認できない"):
-            compile_source("?x(p:b)=□mystery(p)\n")
+            compile_source("?x(p:B)=A mystery(p)\n")
 
     def test_try_propagation_is_rejected_in_atom(self) -> None:
         with self.assertRaisesRegex(GlyphError, "失敗伝播"):
-            compile_source("?x(p:b)=□p?\n")
+            compile_source("?x(p:B)=A p?\n")
 
     def test_dynamic_call_is_rejected_in_atom(self) -> None:
         with self.assertRaisesRegex(GlyphError, "動的な呼出し"):
-            compile_source("*F(run:b)\n?x(f:F)=□f.run()\n")
+            compile_source("*F(run:B)\n?x(f:F)=A f.run()\n")
 
 
 if __name__ == "__main__":
