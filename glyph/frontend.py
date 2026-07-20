@@ -6,12 +6,15 @@ from .compiler import Program, RustGenerator, parse_program as _parse_program
 from .syntax import expand_compact_syntax
 from .temporal import extract_specs
 from .temporal_codegen import append_temporal_rust
+from .temporal_validate import validate_temporal_specs
 
 
 def _parse(source: str) -> tuple[Program, tuple[object, ...]]:
     expanded = expand_compact_syntax(source)
     core, specs = extract_specs(expanded)
-    return _parse_program(core), specs
+    program = _parse_program(core)
+    validate_temporal_specs(program, specs)
+    return program, specs
 
 
 def parse_program(source: str) -> Program:
