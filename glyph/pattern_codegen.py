@@ -9,6 +9,7 @@ from .compiler import (
     Expr,
     FunctionDecl,
     GlyphError,
+    GuardClause,
     NameExpr,
     Program,
     RustGenerator,
@@ -32,20 +33,7 @@ class _VariantGuard:
 
 
 class PatternRustGenerator(RustGenerator):
-    """Rust generator with guard-only enum variant pattern matching.
-
-    Existing expression equality remains unchanged. A guard condition is treated as
-    a pattern only when its right-hand side is a declared enum variant:
-
-        command==Run(system.sequence)  # compare payload with an expression
-        command==Run(speed)            # bind payload as `speed`
-        command==Run(_)                # ignore payload
-        command==Stop                  # unit variant
-
-    Matching is performed against a clone of the subject. Generated sum types
-    already derive Clone, and cloning keeps the original value available to the
-    branch result.
-    """
+    """Rust generator with guard-only enum variant pattern matching."""
 
     def _function(self, decl: FunctionDecl) -> list[str]:
         if decl.expression is not None or not decl.guards:
@@ -60,12 +48,10 @@ class PatternRustGenerator(RustGenerator):
 
         signature = f"pub fn {decl.name}{self._signature_tail(decl.params, decl.return_type)} {{"
         lines = [signature]
-
         for clause, pattern in zip(decl.guards, parsed):
             if clause.condition is None:
                 lines.append(f"    {self._expr(clause.value)}")
                 continue
-
             if pattern is None:
                 lines.extend(
                     [
@@ -75,9 +61,7 @@ class PatternRustGenerator(RustGenerator):
                     ]
                 )
                 continue
-
             lines.extend(self._pattern_branch(decl, clause.value, pattern))
-
         lines.extend(["}", ""])
         return lines
 
@@ -88,7 +72,6 @@ class PatternRustGenerator(RustGenerator):
         variant_name: str
         args: Sequence[Expr]
         right = condition.right
-
         if isinstance(right, NameExpr):
             variant_name = right.name
             args = ()
@@ -101,7 +84,6 @@ class PatternRustGenerator(RustGenerator):
         resolved = self.symbols.variants.get(variant_name)
         if resolved is None:
             return None
-
         enum_name, variant = resolved
         expected = len(variant.fields) if variant.fields else len(variant.tuple_types)
         if len(args) != expected:
@@ -113,18 +95,10 @@ class PatternRustGenerator(RustGenerator):
         params = {param.name for param in decl.params}
         binders: set[str] = set()
         parsed_args: list[_PatternArg] = []
-
         for arg in args:
             if isinstance(arg, NameExpr) and arg.name == "_":
                 parsed_args.append(_PatternArg("wildcard"))
                 continue
-
-            # A bare identifier that is not already a function parameter binds the
-            # payload. Existing parameters are value constraints. Parenthesizing a
-            # bare identifier also forces value comparison because the parser no
-            # longer presents it as a naked NameExpr at this point only when macros
-            # or a larger expression are involved; field expressions are naturally
-            # value constraints.
             if isinstance(arg, NameExpr) and arg.name not in params:
                 if arg.name in binders:
                     raise GlyphError(
@@ -136,9 +110,7 @@ class PatternRustGenerator(RustGenerator):
                     binders.add(arg.name)
                     parsed_args.append(_PatternArg("bind", name=arg.name))
                 continue
-
             parsed_args.append(_PatternArg("value", value=arg))
-
         return _VariantGuard(condition.left, enum_name, variant, tuple(parsed_args))
 
     def _pattern_branch(
@@ -150,7 +122,6 @@ class PatternRustGenerator(RustGenerator):
         rust_pattern, checks, bindings = self._rust_pattern(decl, pattern)
         subject = self._expr(pattern.subject)
         lines = [f"    if let {rust_pattern} = ({subject}).clone() {{"]
-
         if checks:
             lines.append(f"        if {' && '.join(checks)} {{")
             for name, internal in bindings:
@@ -161,9 +132,60 @@ class PatternRustGenerator(RustGenerator):
             for name, internal in bindings:
                 lines.append(f"        let {name} = {internal};")
             lines.append(f"        return {self._expr(value)};")
-
         lines.append("    }")
         return lines
+
+    def _guard_expression_lines(
+        self,
+        decl: FunctionDecl,
+        guards: Sequence[GuardClause],
+        indent: int = 0,
+    ) -> list[str]:
+        """Render an ordered guard list as one value-producing Rust expression."""
+
+        if not guards:
+            raise GlyphError(f"{decl.line}行目: 空の条件ブロック")
+
+        def render(index: int, depth: int) -> list[str]:
+            pad = " " * depth
+            clause = guards[index]
+            if clause.condition is None:
+                return [pad + self._expr(clause.value)]
+            if index + 1 >= len(guards):
+                raise GlyphError(
+                    f"{clause.line}行目: 条件ブロックの最後には '_' 節が必要"
+                )
+
+            pattern = self._variant_guard(decl, clause.condition)
+            if pattern is None:
+                lines = [pad + f"if {self._expr(clause.condition)} {{"]
+                lines.append(pad + "    " + self._expr(clause.value))
+                lines.append(pad + "} else {")
+                lines.extend(render(index + 1, depth + 4))
+                lines.append(pad + "}")
+                return lines
+
+            rust_pattern, checks, bindings = self._rust_pattern(decl, pattern)
+            subject = self._expr(pattern.subject)
+            lines = [pad + f"if let {rust_pattern} = ({subject}).clone() {{"]
+            if checks:
+                lines.append(pad + f"    if {' && '.join(checks)} {{")
+                for name, internal in bindings:
+                    lines.append(pad + f"        let {name} = {internal};")
+                lines.append(pad + "        " + self._expr(clause.value))
+                lines.append(pad + "    } else {")
+                lines.extend(render(index + 1, depth + 8))
+                lines.append(pad + "    }")
+            else:
+                for name, internal in bindings:
+                    lines.append(pad + f"    let {name} = {internal};")
+                lines.append(pad + "    " + self._expr(clause.value))
+            lines.append(pad + "} else {")
+            lines.extend(render(index + 1, depth + 4))
+            lines.append(pad + "}")
+            return lines
+
+        return render(0, indent)
 
     def _rust_pattern(
         self,
@@ -173,15 +195,12 @@ class PatternRustGenerator(RustGenerator):
         rendered: list[str] = []
         checks: list[str] = []
         bindings: list[tuple[str, str]] = []
-
         for index, arg in enumerate(pattern.args):
             if arg.kind == "wildcard":
                 rendered.append("_")
                 continue
-
             internal = f"__glyph_match_{decl.line}_{index}"
             rendered.append(internal)
-
             if arg.kind == "bind":
                 assert arg.name is not None
                 bindings.append((arg.name, internal))
