@@ -1,123 +1,134 @@
-# Glyph
+# Glyph Rust
 
-Glyphは、型・純粋計算・状態遷移・作用境界・時相制約を一つの短いファイルへ記述し、Rustと設計ビューを同時に生成するシステム設計DSL。
+Glyphは、ソフトウェアの外側の構造と内側のロジックを短いコードで描き、Studio、Mermaid、型付き設計JSON、Rustへ同時展開するDSLです。
 
-通常利用で覚えるコマンドは一つだけ。
+## 起動
 
-```bash
-python3 glyph.py examples/system_controller.glyph
-```
-
-このコマンドはGlyph Studioを起動する。
-
-```text
-Glyph source
-   ↓
-Glyph Studio
-├── ソース編集
-├── 構文・型検査
-├── 自動再コンパイル
-├── Rust生成
-├── Typed AST / SymbolId表示
-├── 実行フロー表示
-├── machine状態遷移表示
-├── 時相制約表示
-└── 生成物一覧
-```
-
-ブラウザ上のStudioは同じPythonプロセス内で動作する。別々の`compile`、`watch`、`diagram`、`repl`コマンドを切り替える必要はない。
-
-## Glyph Studio
+通常利用は1コマンドだけです。
 
 ```bash
-python3 glyph.py path/to/controller.glyph
+python3 glyph.py examples/door_sketch.glyph
 ```
 
-起動後に利用できる画面:
+Glyph Studioの同一プロセス内で、編集、保存、検査、Architecture、State、Logic、Time、Rust、AST、Symbolを扱います。
 
-| View | 内容 |
-|---|---|
-| Overview | 関数、machine、時相制約、Symbol数、診断 |
-| Machine | 初期状態、遷移、正常終端、異常終端 |
-| Flow | 関数、分岐、作用境界、戻り値の実行構造 |
-| Temporal | 時相制約と生成モニタ |
-| Rust | 生成されたロジック側Rust |
-| Host | 作用境界側Rust |
-| AST | 型付き式木と再帰情報 |
-| Symbols | `SymbolId`、種類、名前、型 |
-| Artifacts | 自動生成された全ファイル |
-
-ソースを保存すると、同じプロセス内で再解析・再生成される。外部エディタによる変更も自動検出する。
-
-生成物は自動的に次へ配置する。
-
-```text
-<source directory>/.glyph/<source stem>/
-├── generated.rs
-├── host.generated.rs
-├── typed-ast.json
-├── execution.mmd
-├── execution-ir.json
-├── source-map.json
-├── temporal.mmd
-├── machine-*.mmd
-└── index.md
-```
-
-生成先の指定は通常不要。
-
-## 最小例
+## 500文字スケッチ
 
 ```glyph
-@LOW=10.0
-@HOT=80.0
+system Door
+  sensor -> ctl
+  panel -> ctl
+  ctl -> lock
+  ctl -> log
+
 @MAX=1000
-@BAD=!finite(v)|!finite(t)|v<0.0
-@BLOCK=s.v<LOW|s.t>HOT|s.r==0
-
-*S(v,t:F,r:U)
+*In(open,auth,stop:B,value:U)
 +C=Stop|Run(U)
-+Error=BadSensor|Actuator
-*Receipt(c:C)
-*Observation(send,ack,closed,auth,beat,stable:B)
++Error=Bad
 
->decode(*S):S|Error
-  BAD >> Err(BadSensor)
-  _ >> Ok(S(v,t,r))
+>validate(i:In):In|Error=Ok(i)
+>command(n:U):C|Error=Ok(Run(n))
 
->cmd(s:S):C
-  BLOCK >> Stop
-  _ >> Run(min(s.r,MAX))
+>ctl(i:In):C|Error=
+  i
+  /> validate?
+  /> |x| x.value
+  /> |n| min(n,MAX)
+  /> command
 
-!exec(c:C):Receipt|Error=Ok(Receipt(c))
->run(*S):Receipt|Error=exec(cmd(decode(v,t,r)?))
+!lock(c:C):B=true
+!log(c:C):B=true
 
-?ack(*Observation)=A(send>>E 5s ack)
-?safe(*Observation)=A(!auth>>closed)
-?wait(*Observation)=closed W auth
-?live(*Observation)=AE 1s beat
-?conv(*Observation)=EA stable
+?safe(*In)=A(!auth >> !open)
 ```
 
-## 基本文法
+この1ファイルから次を生成します。
 
-| Glyph | 意味 | Rust |
-|---|---|---|
-| `*Name(...)` | 積型 | `struct` |
-| `+Name=...` | 直和型 | `enum` |
-| `>name(...)` | 純粋関数 | `fn` |
-| `!name(...)` | 作用境界 | `crate::host` |
-| `T|E` | 成功または失敗 | `Result<T,E>` |
-| `condition >> value` | 値を返すガード | `if` / `else` |
-| `?name(...)=formula` | 時相制約 | runtime monitor |
-| `expression?` | 失敗伝播 | Rust `?` |
-| `==` | 等値比較 | `==` |
+```text
+Architecture  sensor/panel -> ctl -> lock/log
+State         machineの初期状態・遷移・正常終端・異常終端
+Logic         validate -> lambda -> lambda -> command
+Time          未認可時にopenを禁止
+Rust          型・純粋関数・effect境界・時相monitor
+```
 
-`=`は宣言・定義の区切りにだけ使う。
+## Architecture
 
-## 型
+1接続を1行で書きます。
 
-短縮型:
+```glyph
+system Door
+  sensor -> ctl
+  panel -> ctl
+  ctl -> lock
+  ctl -> log
+```
+
+component名は同名宣言へ自動bindingされます。
+
+```text
+>name  -> function
+!name  -> effect
+型name -> data
+未定義 -> external
+```
+
+## `/>`パイプライン
+
+`/>`は左から右へ処理を連結します。
+
+```glyph
+value /> f /> g
+```
+
+は次と同じ意味です。
+
+```glyph
+g(f(value))
+```
+
+失敗を伝播する段には既存の`?`を付けます。
+
+```glyph
+value /> validate? /> decide
+```
+
+## ラムダ
+
+パイプライン内で、一度しか使わない純粋な局所変換を書けます。
+
+```glyph
+value
+/> |x| x+1
+/> |x| min(x,MAX)
+```
+
+現在のラムダは、1引数・単一式・non-capturing・純粋に限定しています。前段の値から引数型を推論し、必要なら明示できます。
+
+```glyph
+value /> |x:U| x+1
+```
+
+外側の実行時変数をcaptureするラムダや、effectへ到達するラムダは拒否します。
+
+## 記号
+
+| 記号 | 意味 |
+|---|---|
+| `system` | component接続 |
+| `@` | コンパイル時マクロ |
+| `*` | 積型 |
+| `+` | 直和型 |
+| `>` | 純粋関数 |
+| `!` | 外部作用境界 |
+| `>>` | ガードの条件と結果 |
+| `/>` | 左から右への処理連結 |
+| `|x| expr` | pipeline lambda |
+| `?name` | 時相制約宣言 |
+| `expr?` | Resultの失敗伝播 |
+| `A / E / U / W` | 時相演算子 |
+
+型位置の短縮型は次です。
 
 ```text
 F -> f32
@@ -128,113 +139,37 @@ B -> bool
 T|E -> Result<T,E>
 ```
 
-同じ型を持つ名前はまとめられる。
+式中の等値比較は`==`を使い、単独の`=`は宣言・定義の区切りだけに使います。
 
-```glyph
-*Point(x,y:F)
+## 生成物
+
+Studioは生成先を自動的に決めます。
+
+```text
+.glyph/<source-stem>/
+├── architecture.mmd
+├── architecture-ir.json
+├── execution.mmd
+├── execution-ir.json
+├── machine-<name>.mmd
+├── temporal.mmd
+├── source-map.json
+├── index.md
+├── typed-ast.json
+├── generated.rs
+└── host.generated.rs
 ```
 
-## 純粋関数を値として渡す
+## 詳細仕様
 
-```glyph
->inc(x:U):U=x+1
->apply(f:Fn<U,U>,x:U):U=f(x)
->run(x:U):U=apply(inc,x)
-```
+- `SKETCH_DESIGN.md` — 500文字設計スケッチ全体
+- `PIPELINE_DESIGN.md` — `system`、`/>`、ラムダの実装仕様
+- `LANGUAGE.md` — 言語仕様
+- `TEMPORAL_DESIGN.md` — 時相論理設計
 
-`Fn<U,U>`は、`U`を受け取り`U`を返す純粋関数の型。
+## CI・低水準利用
 
-作用境界`!`と、推移的に作用境界へ到達する関数は関数値にできない。
-
-## 再帰
-
-```glyph
->sum(n:U):U
-  n==0 >> 0
-  _ >> n+sum(n-1)
-```
-
-構造的に減少する自己再帰はTyped AST上で`structural`と記録する。
-
-```glyph
->loop(x:U):U=loop(x)
-```
-
-停止性を確認できない再帰も受理し、`unchecked`と記録する。コンパイラは拒否せず、停止性も保証しない。
-
-## ASTコンパイル時マクロ
-
-```glyph
-@twice(f,x)=f(f(x))
-
->inc(x:U):U=x+1
->run(x:U):U=twice(inc,x)
-```
-
-関数形式のマクロは文字列ではなく式木を置換する。引数数、循環、展開深度を検査する。
-
-定数・共通式には既存の単語マクロも使える。
-
-```glyph
-@MAX=1000
-```
-
-## machine
-
-```glyph
-+Mode=Idle|Running|Stopping|Faulted
-
-*System(mode:Mode,sequence:U)
-*Input(stop,fault:B)
-
->step(state:System,input:Input):System
-  input.fault >> System(Faulted,state.sequence+1)
-  input.stop >> System(Stopping,state.sequence+1)
-  _ >> System(Running,state.sequence+1)
-
-machine Controller(state:System,input:Input)
-  select=state.mode
-  init=System(Idle,0)
-  next=step(state,input)
-  success=Stopping
-  failure=Faulted
-```
-
-Studioはこの宣言から初期状態、遷移、正常終端、異常終端を表示する。
-
-## 時相論理
-
-| Glyph | 意味 |
-|---|---|
-| `!P` | 否定 |
-| `P & Q` | 論理積 |
-| `P | Q` | 論理和 |
-| `P >> Q` | 含意 |
-| `A P` | 常にP |
-| `E P` | いつかP |
-| `E 500ms P` | 500ms以内にP |
-| `P U Q` | strong until |
-| `P W Q` | weak until |
-| `AE P` | 常に、いつかP |
-| `EA P` | いつか、以後常にP |
-
-例:
-
-```glyph
-?ack(send,ack:B)=A(send>>E 500ms ack)
-```
-
-有限トレースでは`Satisfied`、`Violated`、`Pending`の3値で評価する。
-
-## 低水準コンパイラ
-
-`glyphc.py`はCI、生成物固定、外部ツール統合向けの低水準インターフェースとして残す。通常の設計・編集では`glyph.py`だけを使う。
-
-```bash
-python3 glyphc.py input.glyph --check
-```
-
-## テスト
+`glyphc.py`はCIや外部ツール連携用です。通常の設計作業では`glyph.py`を使います。
 
 ```bash
 python3 -m unittest discover -s tests -v
@@ -242,13 +177,13 @@ cargo test --manifest-path demo/Cargo.toml
 cargo test --manifest-path demo-system/Cargo.toml
 ```
 
-## 詳細仕様
+## 現在の制限
 
-- [LANGUAGE.md](LANGUAGE.md)
-- [TEMPORAL_DESIGN.md](TEMPORAL_DESIGN.md)
-- [VARIANT_PATTERNS.md](VARIANT_PATTERNS.md)
-- [LISP_CORE.md](LISP_CORE.md)
-- [EXECUTION_STRUCTURE_DESIGN.md](EXECUTION_STRUCTURE_DESIGN.md)
+- capturing closure、部分適用、複数引数pipeline lambdaは未対応
+- standalone lambdaは未対応。ラムダは`/>`段で使う
+- 文字列、配列、参照、lifetime、ジェネリック関数は未対応
+- 実機の外部作用はRust host adapterへ実装する
+- runtime `eval`は提供しない
 
 ## ライセンス
 
