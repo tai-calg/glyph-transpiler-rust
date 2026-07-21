@@ -17,16 +17,16 @@
 *Cycle(system:System,receipt:Receipt)
 
 # 送信後500ms以内のACK、1秒以内ごとのheartbeatを要求する。
-?ack_deadline(*Input)=A(send>>E 500ms ack)
-?heartbeat_live(*Input)=AE 1s heartbeat
+?ack_deadline(*Input)=@A(send>>@E 500ms ack)
+?heartbeat_live(*Input)=@A@E 1s heartbeat
 
 # 未認可・緊急停止・fault時には閉状態でなければならない。
-?authorization_safe(*Input)=A(!authorized>>closed)
-?emergency_safe(*Input)=A(emergency>>closed)
-?fault_safe(*Input)=A(fault>>closed)
+?authorization_safe(*Input)=@A(!authorized>>closed)
+?emergency_safe(*Input)=@A(emergency>>closed)
+?fault_safe(*Input)=@A(fault>>closed)
 
 # 有限トレース終端が安定状態なら収束済みと判定する。
-?convergence(*Input)=EA stable
+?convergence(*Input)=@E@A stable
 
 >validate(input:Input):Input|Error
   INVALID >> Err(BadSensor)
