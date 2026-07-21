@@ -24,7 +24,13 @@ from .mermaid import (
 )
 from .opaque import OpaqueAwareRustGenerator, generate_manual_scaffold
 from .preprocessor import remap_source_lines
-from .schema import TYPED_DESIGN_SCHEMA, versioned_payload
+from .schema import (
+    ALGORITHM_IR_SCHEMA,
+    EXECUTION_IR_SCHEMA,
+    SOURCE_MAP_SCHEMA,
+    TYPED_DESIGN_SCHEMA,
+    versioned_payload,
+)
 from .temporal_codegen import append_temporal_rust
 from .temporal_stream_codegen import append_streaming_temporal_rust
 from .temporal_stream_safety_codegen import append_safety_streaming_temporal_rust
@@ -38,6 +44,15 @@ class CompilationOutputs:
     artifacts: RustArtifacts
     diagrams: DiagramBundle
     design_json: str
+
+
+def _with_schema(schema: str, payload: dict[str, object]) -> dict[str, object]:
+    if payload.get("schema") == schema and isinstance(payload.get("version"), int):
+        return payload
+    payload = dict(payload)
+    payload.pop("schema", None)
+    payload.pop("version", None)
+    return versioned_payload(schema, payload)
 
 
 def build_rust_artifacts(model: CompilationModel) -> RustArtifacts:
@@ -121,6 +136,15 @@ def build_diagram_bundle(
         for machine in ir.machines
     }
     temporal = render_temporal_mermaid(ir, href)
+
+    architecture_payload = model.architecture.to_dict()
+    algorithm_payload = _with_schema(ALGORITHM_IR_SCHEMA, algorithm_ir.to_dict())
+    execution_payload = _with_schema(EXECUTION_IR_SCHEMA, ir.to_dict())
+    source_map_payload = _with_schema(
+        SOURCE_MAP_SCHEMA,
+        _source_map(ir, model.architecture, algorithm_ir),
+    )
+
     files = {
         "preprocessed.glyph": model.preprocess.source,
         "preprocessor-map.json": json.dumps(
@@ -131,14 +155,14 @@ def build_diagram_bundle(
         + "\n",
         "architecture.mmd": architecture,
         "architecture-ir.json": json.dumps(
-            model.architecture.to_dict(),
+            architecture_payload,
             ensure_ascii=False,
             indent=2,
         )
         + "\n",
         "logic.mmd": logic,
         "algorithm-ir.json": json.dumps(
-            algorithm_ir.to_dict(),
+            algorithm_payload,
             ensure_ascii=False,
             indent=2,
         )
@@ -147,13 +171,13 @@ def build_diagram_bundle(
         **machine_files,
         "temporal.mmd": temporal,
         "execution-ir.json": json.dumps(
-            ir.to_dict(),
+            execution_payload,
             ensure_ascii=False,
             indent=2,
         )
         + "\n",
         "source-map.json": json.dumps(
-            _source_map(ir, model.architecture, algorithm_ir),
+            source_map_payload,
             ensure_ascii=False,
             indent=2,
         )
@@ -177,8 +201,8 @@ class CompilationPipeline:
     """Authoritative source -> model -> Rust/IR/JSON pipeline.
 
     Compatibility entry points may still return one subset of these outputs, but Studio,
-    watch mode, and new integrations should use this class so parsing and validation happen
-    exactly once per source digest.
+    watch mode, the CLI, and new integrations should use this class so parsing and
+    validation happen exactly once per source digest.
     """
 
     def compile_text(
