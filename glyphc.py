@@ -4,12 +4,12 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import asdict
-import json
+import os
 import sys
 from pathlib import Path
 
-from glyph import GlyphError, compile_artifacts, parse_compilation_model, write_diagram_bundle
+from glyph import GlyphError
+from glyph.compilation import CompilationPipeline
 from glyph.incremental import IncrementalCompiler, watch_file
 from glyph.repl import run_repl
 
@@ -53,18 +53,10 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _write_semantic(source: str, source_name: str, output: Path) -> None:
-    model = parse_compilation_model(source, source_name)
-    payload = model.semantic.to_dict()
-    payload["blocks"] = [item.to_dict() for item in model.blocks]
-    payload["lambdas"] = [asdict(item) for item in model.lambdas]
-    payload["architecture"] = model.architecture.to_dict()
-    payload["rust_todos"] = [item.to_dict() for item in model.opaques]
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
+def _source_href(input_path: Path, diagram_dir: Path | None) -> str | None:
+    if diagram_dir is None:
+        return None
+    return os.path.relpath(input_path, diagram_dir).replace(os.sep, "/")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -103,7 +95,13 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         source = args.input.read_text(encoding="utf-8")
-        artifacts = compile_artifacts(source)
+        outputs = CompilationPipeline().compile_text(
+            source,
+            str(args.input),
+            _source_href(args.input, args.diagram_dir),
+        )
+        artifacts = outputs.artifacts
+
         if args.check:
             print(f"OK: {args.input}")
             return 0
@@ -118,12 +116,16 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"generated: {args.host_output}")
 
         if args.diagram_dir:
-            bundle = write_diagram_bundle(args.input, args.diagram_dir)
-            for name in sorted(bundle.files):
+            args.diagram_dir.mkdir(parents=True, exist_ok=True)
+            for name, content in outputs.diagrams.files.items():
+                path = args.diagram_dir / name
+                path.write_text(content, encoding="utf-8")
+            for name in sorted(outputs.diagrams.files):
                 print(f"generated: {args.diagram_dir / name}")
 
         if args.ast_json:
-            _write_semantic(source, str(args.input), args.ast_json)
+            args.ast_json.parent.mkdir(parents=True, exist_ok=True)
+            args.ast_json.write_text(outputs.design_json, encoding="utf-8")
             print(f"generated: {args.ast_json}")
 
         if not args.output and not args.diagram_dir and not args.ast_json:
