@@ -106,7 +106,7 @@ class CompilerTests(unittest.TestCase):
         generated = compile_source(">same(x,y:I):B\n  x==y>>true\n  _>>false\n")
         self.assertIn("if x == y", generated)
 
-    def test_single_equal_is_rejected_in_macro_expression(self) -> None:
+    def test_single_equal_is_rejected_after_raw_macro_expansion(self) -> None:
         with self.assertRaisesRegex(GlyphError, "'=='"):
             compile_source("@ZERO=x=0\n>f(x:I):B=ZERO\n")
 
@@ -137,9 +137,10 @@ class CompilerTests(unittest.TestCase):
         generated = compile_source("@M=1000\n>cap(requested:u16):u16=min(requested,M)\n")
         self.assertIn("std::cmp::min(requested, 1000)", generated)
 
-    def test_expression_macro_is_parenthesized_to_preserve_precedence(self) -> None:
+    def test_raw_macro_is_textual_and_does_not_add_parentheses(self) -> None:
         generated = compile_source("@NEXT=x+1\n>double_next(x:i32):i32=NEXT*2\n")
-        self.assertIn("(x + 1) * 2", generated)
+        self.assertIn("x + 1 * 2", generated)
+        self.assertNotIn("(x + 1) * 2", generated)
 
     def test_macro_can_alias_a_function_name(self) -> None:
         generated = compile_source("@LOWER=min\n>f(x:u16):u16=LOWER(x,10)\n")
@@ -159,15 +160,15 @@ class CompilerTests(unittest.TestCase):
             parse_program("@A=1\n@A=2\n>f():i32=A\n")
 
     def test_macro_cycle_is_rejected(self) -> None:
-        with self.assertRaisesRegex(GlyphError, "macro cycle: A -> B -> A"):
+        with self.assertRaisesRegex(GlyphError, "raw macro cycle: A -> B -> A"):
             parse_program("@A=B\n@B=A\n>f():i32=A\n")
 
-    def test_invalid_unused_macro_is_rejected(self) -> None:
-        with self.assertRaisesRegex(GlyphError, "マクロ 'BAD'"):
-            parse_program("@BAD=1+\n>f():i32=1\n")
+    def test_unused_raw_macro_body_may_be_arbitrary_source_text(self) -> None:
+        generated = compile_source("@ARBITRARY=1+\n>f():i32=1\n")
+        self.assertIn("pub fn f() -> i32", generated)
 
-    def test_macro_name_cannot_shadow_a_declared_symbol(self) -> None:
-        with self.assertRaisesRegex(GlyphError, "宣言またはvariant名と衝突"):
+    def test_object_like_raw_macro_name_must_be_uppercase(self) -> None:
+        with self.assertRaisesRegex(GlyphError, "大文字"):
             parse_program("@run=1\n>run():i32=1\n")
 
 
