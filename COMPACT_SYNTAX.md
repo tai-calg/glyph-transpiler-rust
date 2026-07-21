@@ -17,8 +17,8 @@ Glyphは表面構文を内部文法へ正規化してからASTを解析する。
 | ガード行の `condition>>expression` | `condition=>expression` |
 | `F` / `D` | `f32` / `f64` |
 | `U` / `I` / `B` | `u16` / `i32` / `bool` |
-| 時相式の `A` / `E` | 内部ASTのAlways / Eventually |
-| `EA stable` | `E(A stable)` |
+| 時相式の `@A` / `@E` | 内部ASTのAlways / Eventually |
+| `@E@A stable` | `@E(@A stable)` |
 
 例えば、
 
@@ -49,14 +49,15 @@ Glyphは表面構文を内部文法へ正規化してからASTを解析する。
   _>>false
 ```
 
-旧短縮型`f/d/u/i/b`、旧時相記号`□/◇`、式中の単独`=`は受理しない。エラーには対応する新構文を表示する。
+旧短縮型`f/d/u/i/b`、裸の時相演算子`A/E/AE/EA`、旧時相記号`□/◇`、式中の単独`=`は受理しない。エラーには対応する新構文を表示する。
 
-時相演算子列とオペランドの間には空白または`(`を置く。
+各時相演算子に`@`を付け、演算子と識別子の間には空白または`(`を置く。
 
 ```text
-EA stable   # E(A stable)
-EA(stable)  # E(A stable)
-EAstable    # EAstableという識別子
+@E@A stable    # @E(@A stable)
+@E@A(stable)   # @E(@A stable)
+@E@Astable     # エラー
+EAstable       # EAstableという通常識別子
 ```
 
 従来の`R<T,E>`とガード矢印`=>`は内部互換構文として使用できる。`T?E`と`T/E`は受理しない。

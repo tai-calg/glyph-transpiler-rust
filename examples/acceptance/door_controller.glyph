@@ -19,9 +19,9 @@ system DoorController
 *Receipt(action:Action)
 
 # 解錠が観測されたら500ms以内に施錠されなければならない。
-?lock_deadline(*Input)=A(unlocked>>E LOCK_LIMIT locked)
+?lock_deadline(*Input)=@A(unlocked>>@E LOCK_LIMIT locked)
 # こじ開けが観測されたらalarm状態でなければならない。
-?forced_open_safe(*Input)=A(forced_open>>alarmed)
+?forced_open_safe(*Input)=@A(forced_open>>alarmed)
 
 >authenticate(input:Input):B=input.badge_valid&!input.forced_open
 

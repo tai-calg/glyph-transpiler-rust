@@ -18,8 +18,8 @@ system MotorSafety
 *MotorState(mode:Mode,command:Command)
 *Receipt(command:Command)
 
-?emergency_stop(*Input)=A(emergency>>E STOP_LIMIT stopped)
-?fault_stop(*Input)=A(fault>>E STOP_LIMIT stopped)
+?emergency_stop(*Input)=@A(emergency>>@E STOP_LIMIT stopped)
+?fault_stop(*Input)=@A(fault>>@E STOP_LIMIT stopped)
 
 >decide(input:Input):Command
   NORMALIZE

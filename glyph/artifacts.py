@@ -46,6 +46,10 @@ from .semantic import SemanticModel, build_semantic_model
 from .syntax import expand_compact_syntax
 from .temporal import SpecDecl, extract_specs
 from .temporal_codegen import append_temporal_rust
+from .temporal_sigils import (
+    normalize_temporal_sigils,
+    reject_reserved_temporal_macro_names,
+)
 from .temporal_stream_codegen import append_streaming_temporal_rust
 from .temporal_stream_safety_codegen import append_safety_streaming_temporal_rust
 from .temporal_validate import validate_temporal_specs
@@ -90,7 +94,6 @@ class CompilationModel:
     expanded: ExpandedCompilation
 
 
-
 def _inline_effect_lines(source: str) -> set[int]:
     """Return 1-based line numbers for `!signature=expr` declarations."""
     lines: set[int] = set()
@@ -101,7 +104,6 @@ def _inline_effect_lines(source: str) -> set[int]:
         if "=" in clean:
             lines.add(line_no)
     return lines
-
 
 
 def _parse_effect_program(source: str) -> tuple[Program, tuple[FunctionDecl, ...]]:
@@ -126,7 +128,6 @@ def _parse_effect_program(source: str) -> tuple[Program, tuple[FunctionDecl, ...
         else:
             logic_declarations.append(decl)
     return Program(tuple(logic_declarations)), tuple(effects)
-
 
 
 def _generate_host(
@@ -167,17 +168,17 @@ def _generate_host(
     return "\n".join(out).rstrip() + "\n"
 
 
-
 def parse_compilation_model(
     source: str,
     source_name: str = "input.glyph",
 ) -> CompilationModel:
     """Preprocess, parse, lower, validate, and build one shared design model."""
 
+    reject_reserved_temporal_macro_names(source)
     preprocess = preprocess_source(source)
-    expanded_source = preprocess.source
 
     try:
+        expanded_source = normalize_temporal_sigils(preprocess.source)
         masked, opaque_seeds = mask_opaque_as_effect(expanded_source)
         without_systems, systems = extract_systems(masked)
         joined = join_pipeline_continuations(without_systems)
@@ -255,7 +256,6 @@ def parse_compilation_model(
     )
 
 
-
 def parse_artifact_model(
     source: str,
 ) -> tuple[
@@ -267,7 +267,6 @@ def parse_artifact_model(
     """Compatibility view of the full compilation model."""
     model = parse_compilation_model(source)
     return model.program, model.inline_effects, model.specs, model.machines
-
 
 
 def compile_artifacts(source: str) -> RustArtifacts:
@@ -290,7 +289,6 @@ def compile_artifacts(source: str) -> RustArtifacts:
         host=host,
         manual_scaffold=manual_scaffold,
     )
-
 
 
 def compile_artifact_files(

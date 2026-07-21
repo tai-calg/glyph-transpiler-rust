@@ -31,6 +31,7 @@
 - 別のマクロを参照可能
 - 式専用であり、型や宣言は置換しない
 - 引数付きマクロは未対応
+- `A`と`E`は時相演算子名として予約され、マクロ名には使用できない
 
 以下を拒否する。
 
@@ -220,45 +221,46 @@ or:      |
 ### 演算子
 
 ```text
-!P            否定
-P & Q         論理積
-P | Q         論理和
-P >> Q        含意
-A P           Always
-E P           Eventually
-E 500ms P     bounded eventually
-P U Q         strong until
-P W Q         weak until
+!P             否定
+P & Q          論理積
+P | Q          論理和
+P >> Q         含意
+@A P           Always
+@E P           Eventually
+@E 500ms P     bounded eventually
+P U Q          strong until
+P W Q          weak until
 ```
 
-Unicodeの`□/◇`は受理しない。
+裸の`A`、`E`、`AE`、`EA`は受理しない。Unicodeの`□/◇`も受理しない。
 
-単項演算子は連結できる。
+単項演算子は、各演算子に`@`を付けて連結する。
 
 ```glyph
-AE 1s heartbeat
-EA stable
+@A@E 1s heartbeat
+@E@A stable
 ```
 
 意味:
 
 ```text
-AE 1s heartbeat = A(E 1s heartbeat)
-EA stable       = E(A stable)
+@A@E 1s heartbeat = @A(@E 1s heartbeat)
+@E@A stable       = @E(@A stable)
 ```
 
-演算子列とオペランドの境界には空白または`(`が必要。
+演算子と識別子の境界には空白または`(`が必要。
 
 ```text
-EA stable   # 演算子列
-EA(stable)  # 演算子列
-EAstable    # 単一識別子
+@E@A stable    # 演算子列
+@E@A(stable)   # 演算子列
+@E@Astable     # エラー
+EAstable       # 単一識別子
 ```
 
 優先順位:
 
 ```text
-1. ! A E E duration
+1. ! @A @E @E duration
 2. U W
 3. &
 4. |
@@ -268,11 +270,11 @@ EAstable    # 単一識別子
 例:
 
 ```glyph
-?ack(*Observation)=A(send>>E 500ms ack)
-?safe(*Observation)=A(!authorized>>closed)
+?ack(*Observation)=@A(send>>@E 500ms ack)
+?safe(*Observation)=@A(!authorized>>closed)
 ?wait(*Observation)=closed W authorized
-?live(*Observation)=AE 1s heartbeat
-?conv(*Observation)=EA stable
+?live(*Observation)=@A@E 1s heartbeat
+?conv(*Observation)=@E@A stable
 ```
 
 ### 有限トレース判定
@@ -285,9 +287,9 @@ pub enum TemporalVerdict {
 }
 ```
 
-- `A P`: 途中で反例が出れば違反。終了まで反例がなければ満足
-- `E P`: P成立時に満足。終了まで成立しなければ違反
-- `E d P`: 期限内成立で満足。期限超過または未解決終了で違反
+- `@A P`: 途中で反例が出れば違反。終了まで反例がなければ満足
+- `@E P`: P成立時に満足。終了まで成立しなければ違反
+- `@E d P`: 期限内成立で満足。期限超過または未解決終了で違反
 - `P U Q`: Q前のP違反、またはQ未到達終了で違反
 - `P W Q`: Q未到達でも終了までPが成立すれば満足
 
@@ -323,8 +325,8 @@ or-formula       := and-formula ("|" and-formula)*
 and-formula      := until-formula ("&" until-formula)*
 until-formula    := unary-formula (("U" | "W") unary-formula)*
 unary-formula    := "!" unary-formula
-                  | "A" unary-formula
-                  | "E" duration? unary-formula
+                  | "@A" unary-formula
+                  | "@E" duration? unary-formula
                   | "(" formula ")"
                   | atom
 ```

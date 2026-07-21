@@ -157,11 +157,11 @@ class CompilerTests(unittest.TestCase):
 
     def test_duplicate_macro_is_rejected(self) -> None:
         with self.assertRaisesRegex(GlyphError, "既に定義済み"):
-            parse_program("@A=1\n@A=2\n>f():i32=A\n")
+            parse_program("@X=1\n@X=2\n>f():i32=X\n")
 
     def test_macro_cycle_is_rejected(self) -> None:
-        with self.assertRaisesRegex(GlyphError, "raw macro cycle: A -> B -> A"):
-            parse_program("@A=B\n@B=A\n>f():i32=A\n")
+        with self.assertRaisesRegex(GlyphError, "raw macro cycle: X -> Y -> X"):
+            parse_program("@X=Y\n@Y=X\n>f():i32=X\n")
 
     def test_unused_raw_macro_body_may_be_arbitrary_source_text(self) -> None:
         generated = compile_source("@ARBITRARY=1+\n>f():i32=1\n")

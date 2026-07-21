@@ -108,8 +108,8 @@ BLOCK BLOCK
         self.assertIn(">f():I=10 # MAX remains documentation", result.source)
 
     def test_raw_macro_cycle_is_rejected_even_when_unused(self) -> None:
-        with self.assertRaisesRegex(GlyphError, "raw macro cycle: A -> B -> A"):
-            compile_source("@A=B\n@B=A\n>f():I=1\n")
+        with self.assertRaisesRegex(GlyphError, "raw macro cycle: X -> Y -> X"):
+            compile_source("@X=Y\n@Y=X\n>f():I=1\n")
 
     def test_expanded_diagnostic_is_mapped_to_invocation_line(self) -> None:
         source = """@BAD

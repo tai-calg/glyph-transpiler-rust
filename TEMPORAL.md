@@ -5,12 +5,12 @@ Glyphのトップレベル`?`宣言は、単一状態ではなく時刻付き状
 ```glyph
 *O(send,ack,closed,auth,beat,stable:B)
 
-?ack(*O)=A(send>>E 5s ack)
-?safe(*O)=A(!auth>>closed)
+?ack(*O)=@A(send>>@E 5s ack)
+?safe(*O)=@A(!auth>>closed)
 ?auth(*O)=closed U auth
 ?wait(*O)=closed W auth
-?beat(*O)=AE 1s beat
-?conv(*O)=EA stable
+?beat(*O)=@A@E 1s beat
+?conv(*O)=@E@A stable
 ```
 
 ## 記法
@@ -18,9 +18,9 @@ Glyphのトップレベル`?`宣言は、単一状態ではなく時刻付き状
 | 記法 | 意味 |
 |---|---|
 | `?name(params)=P` | 時相制約の宣言 |
-| `A P` | すべての観測点でP |
-| `E P` | 現在または将来の観測点でP |
-| `E 5s P` | 現在から5秒以内にP |
+| `@A P` | すべての観測点でP |
+| `@E P` | 現在または将来の観測点でP |
+| `@E 5s P` | 現在から5秒以内にP |
 | `P>>Q` | PならばQ |
 | `P U Q` | Qが成立するまでPを維持し、最終的にQが成立する |
 | `P W Q` | Qが成立するまでPを維持する。Qは成立しなくてもよい |
@@ -28,28 +28,38 @@ Glyphのトップレベル`?`宣言は、単一状態ではなく時刻付き状
 
 時間単位は整数の`ms`、`s`、`m`に限定する。`0.5s`ではなく`500ms`と書く。
 
-Unicodeの`□`と`◇`は受理しない。AlwaysとEventuallyはASCIIの`A`と`E`で記述する。
+裸の`A`、`E`、`AE`、`EA`は受理しない。Unicodeの`□`と`◇`も受理しない。AlwaysとEventuallyは必ず`@A`と`@E`で記述する。
+
+`A`と`E`は時相演算子名として予約されるため、rawマクロまたはASTマクロ名には使用できない。
+
+```glyph
+@A=other       # エラー
+@E(x)=x        # エラー
+```
 
 ## 演算子列
 
 単項演算子は連結できる。
 
 ```glyph
-AE 1s beat
-EA stable
+@A@E 1s beat
+@E@A stable
 ```
 
 ```text
-AE 1s beat = A(E 1s beat)
-EA stable  = E(A stable)
+@A@E 1s beat = @A(@E 1s beat)
+@E@A stable  = @E(@A stable)
 ```
 
-演算子列とオペランドの間には空白または`(`を置く。
+各演算子に`@`を付ける。`@AE`や裸の`AE`は使用しない。
+
+演算子と識別子の間には空白または`(`を置く。
 
 ```text
-EA stable   # 演算子列
-EA(stable)  # 演算子列
-EAstable    # 一つの識別子
+@E@A stable    # 演算子列
+@E@A(stable)   # 演算子列
+@E@Astable     # エラー。演算子境界が不明
+EAstable       # 一つの通常識別子
 ```
 
 ## 優先順位
@@ -57,7 +67,7 @@ EAstable    # 一つの識別子
 高い順:
 
 ```text
-! A E E duration
+! @A @E @E duration
 U W
 &
 |
@@ -97,29 +107,29 @@ pub enum TemporalVerdict {
 
 有限トレース意味論:
 
-- `A P`: Pが偽になった時点で`Violated`。反例なく終了すれば`Satisfied`
-- `E P`: P成立まで`Pending`。未成立終了で`Violated`
-- `E d P`: 期限内成立で`Satisfied`。期限超過または未解決終了で`Violated`
+- `@A P`: Pが偽になった時点で`Violated`。反例なく終了すれば`Satisfied`
+- `@E P`: P成立まで`Pending`。未成立終了で`Violated`
+- `@E d P`: 期限内成立で`Satisfied`。期限超過または未解決終了で`Violated`
 - `P U Q`: Q前のP違反、またはQ未成立終了で`Violated`
 - `P W Q`: Q未成立でもPを維持したまま終了すれば`Satisfied`
-- `AE P`と`EA P`: 通常は実行途中で最終成立を確定しない
+- `@A@E P`と`@E@A P`: 通常は実行途中で最終成立を確定しない
 
 ## 逐次モニタ
 
 頻出形には全履歴を保存しない`<Name>StreamingMonitor`も生成する。
 
 ```text
-A P
-E P
-E d P
+@A P
+@E P
+@E d P
 P U Q
 P W Q
-A(P >> Q)
-A(P >> E Q)
-A(P >> E d Q)
-AE P
-AE d P
-EA P
+@A(P >> Q)
+@A(P >> @E Q)
+@A(P >> @E d Q)
+@A@E P
+@A@E d P
+@E@A P
 ```
 
 安全な専用変換がない一般入れ子式には参照モニタだけを生成する。

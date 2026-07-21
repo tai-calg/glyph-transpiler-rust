@@ -17,10 +17,23 @@ from .compiler import GlyphError
 from .frontend import compile_file, compile_source, parse_program
 from .incremental import CompilationSnapshot, IncrementalCompiler, IncrementalResult
 from .mermaid import DiagramBundle
-from .preprocessor import PreprocessResult, RawMacroDef, preprocess_source
+from .preprocessor import (
+    PreprocessResult,
+    RawMacroDef,
+    preprocess_source as _preprocess_source,
+)
 from .semantic import SemanticModel
 from .studio import GlyphStudio, StudioSnapshot, run_studio
 from .symbols import SymbolId, SymbolRecord
+from .temporal_sigils import reject_reserved_temporal_macro_names
+
+
+def preprocess_source(source: str) -> PreprocessResult:
+    """Run the public raw preprocessor with language-level name reservations."""
+
+    reject_reserved_temporal_macro_names(source)
+    return _preprocess_source(source)
+
 
 __all__ = [
     "CompilationModel",
