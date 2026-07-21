@@ -23,4 +23,4 @@ system Door
 !lock(c:C):B=true
 !log(c:C):B=true
 
-?safe(*In)=A(!auth >> !open)
+?safe(*In)=@A(!auth >> !open)
