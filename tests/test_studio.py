@@ -86,9 +86,11 @@ class GlyphStudioTests(unittest.TestCase):
     def test_studio_html_contains_integrated_views(self) -> None:
         for label in (
             "Glyph Studio",
-            "Machine",
+            "Architecture",
+            "State",
+            "Logic",
             "Flow",
-            "Temporal",
+            "Time",
             "Rust",
             "AST",
             "Symbols",
