@@ -1,5 +1,5 @@
 # 記号の意味
-# @ = 式中の単語マクロ
+# @ = raw/ASTマクロ、および時相演算子のsigil
 # * = 積型。関数引数の *S はSのfield row展開
 # + = 直和型（AまたはB）
 # > = 純粋な変換
@@ -8,7 +8,7 @@
 # F/U/B = f32/u16/bool
 # ガード行の >> = 条件分岐。前後の空白は任意
 # ?name(...)=... = 時相制約
-# A/E = always/eventually
+# @A/@E = always/eventually
 # 式末尾の ? = 失敗伝播
 
 @LOW=10.0
@@ -24,12 +24,12 @@
 *Receipt(c:C)
 *O(send,ack,closed,auth,beat,stable:B)
 
-?ack(*O)=A(send>>E 5s ack)
-?safe(*O)=A(!auth>>closed)
+?ack(*O)=@A(send>>@E 5s ack)
+?safe(*O)=@A(!auth>>closed)
 ?auth(*O)=closed U auth
 ?wait(*O)=closed W auth
-?beat(*O)=AE 1s beat
-?conv(*O)=EA stable
+?beat(*O)=@A@E 1s beat
+?conv(*O)=@E@A stable
 
 >decode(*S):S|E
   BAD >> Err(BadSensor)
