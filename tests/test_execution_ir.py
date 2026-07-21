@@ -13,7 +13,7 @@ SOURCE = """
 *Input(tick,send,ack:B)
 *System(mode:Mode,count:U,command:Command)
 
-?ack(*Input)=A(send>>E 500ms ack)
+?ack(*Input)=@A(send>>@E 500ms ack)
 
 >step(state:System,input:Input):System|Error
   state.mode==Idle >> Ok(System(Running,state.count+1,Run(1)))
