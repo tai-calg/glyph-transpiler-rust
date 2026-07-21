@@ -42,6 +42,27 @@ jobs:
         if: steps.python_tests.outcome == 'failure'
         run: exit 1
 
+      - name: Run v0.1 acceptance campaign
+        run: |
+          python3 glyphc.py examples/acceptance/door_controller.glyph --check
+          python3 glyphc.py examples/acceptance/job_scheduler.glyph --check
+          python3 glyphc.py examples/acceptance/motor_safety.glyph --check
+          python3 -m unittest discover -s tests -p 'test_acceptance_*.py' -v
+          for source in examples/acceptance/*.glyph; do
+            name="$(basename "$source" .glyph)"
+            python3 glyphc.py "$source" \
+              -o "build/acceptance/$name/generated.rs" \
+              --host-output "build/acceptance/$name/host.generated.rs" \
+              --diagram-dir "build/acceptance/$name/diagrams" \
+              --ast-json "build/acceptance/$name/typed-ast.json"
+          done
+          test -s build/acceptance/door_controller/diagrams/machine-door.mmd
+          test -s build/acceptance/motor_safety/diagrams/machine-motor.mmd
+          grep -q '"schema": "glyph.algorithm-ir"' \
+            build/acceptance/job_scheduler/diagrams/algorithm-ir.json
+          grep -q 'class algorithm_build_batch' \
+            build/acceptance/job_scheduler/diagrams/logic.mmd
+
       - name: Verify deterministic Rust generation
         run: |
           python3 glyphc.py examples/controller.glyph \
@@ -138,6 +159,7 @@ jobs:
             demo/src/host.generated.rs
             demo-system/src/generated.rs
             demo-system/src/host.generated.rs
+            build/acceptance
             build/glyph-diagrams
             build/lisp-core
             build/door-sketch
