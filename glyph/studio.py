@@ -15,6 +15,7 @@ import webbrowser
 
 from .compiler import GlyphError
 from .incremental import IncrementalCompiler
+from .studio_ui import STUDIO_HTML
 
 
 @dataclass(frozen=True)
@@ -119,7 +120,7 @@ class GlyphStudio:
             for name, content in artifacts.items():
                 _atomic_write(self.output_dir / name, content)
             semantic = json.loads(compilation.semantic_json)
-            execution_ir = compilation.diagrams.ir.to_dict()
+            execution_ir = json.loads(artifacts["execution-ir.json"])
             snapshot = StudioSnapshot(
                 version=previous.version + 1,
                 status="ready",
@@ -300,54 +301,6 @@ class GlyphStudio:
             server.server_close()
             self.stop()
         return 0
-
-
-STUDIO_HTML = r'''<!doctype html>
-<html lang="ja">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Glyph Studio</title>
-<style>
-:root{color-scheme:dark;--bg:#111318;--panel:#191c23;--line:#303540;--text:#e9edf4;--muted:#97a0b2;--ok:#63d5a4;--bad:#ff7c8d;--accent:#88a8ff}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 ui-sans-serif,system-ui,sans-serif;height:100vh;overflow:hidden}
-header{height:58px;display:flex;align-items:center;gap:14px;padding:0 18px;border-bottom:1px solid var(--line);background:#14171d}
-.brand{font-weight:750;font-size:17px}.path{color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}.status{padding:5px 9px;border-radius:999px;background:#252a34}.status.ready{color:var(--ok)}.status.error{color:var(--bad)}
-button{border:1px solid var(--line);background:#252a34;color:var(--text);border-radius:7px;padding:7px 11px;cursor:pointer}button.primary{background:#3658a7;border-color:#5276cf}button:hover{filter:brightness(1.12)}
-main{height:calc(100vh - 58px);display:grid;grid-template-columns:minmax(350px,46%) 1fr}.editor-pane{border-right:1px solid var(--line);display:flex;flex-direction:column;min-width:0}.pane-title{height:42px;padding:11px 14px;color:var(--muted);border-bottom:1px solid var(--line)}
-textarea{flex:1;width:100%;resize:none;border:0;outline:0;background:#101217;color:#e6ebf3;padding:16px;font:13px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;tab-size:2}
-.viewer{min-width:0;display:flex;flex-direction:column}.tabs{height:42px;display:flex;gap:2px;padding:5px 8px;border-bottom:1px solid var(--line);overflow-x:auto}.tab{background:transparent;border:0;color:var(--muted);white-space:nowrap}.tab.active{color:var(--text);background:#252a34}.content{flex:1;overflow:auto;padding:18px}
-.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.card{background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:13px}.value{font-size:24px;font-weight:700}.label{color:var(--muted)}
-pre{white-space:pre-wrap;word-break:break-word;background:#101217;border:1px solid var(--line);border-radius:8px;padding:14px;font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace}.error{border:1px solid #743844;background:#26171b;color:#ffc2ca;padding:12px;border-radius:8px;margin-bottom:12px}
-.machine{display:flex;align-items:center;gap:10px;overflow:auto;padding:14px 4px}.state{min-width:130px;text-align:center;background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:13px}.state.initial{border-color:var(--accent)}.state.success{border-color:var(--ok)}.state.failure{border-color:var(--bad)}.arrow{color:var(--muted);font-size:20px}.transition{display:grid;grid-template-columns:140px 32px 140px 1fr;gap:8px;padding:8px 0;border-bottom:1px solid var(--line)}
-.symbol{display:grid;grid-template-columns:50px 120px 1fr 1fr;gap:9px;padding:7px;border-bottom:1px solid var(--line)}.muted{color:var(--muted)}h2{font-size:16px;margin:5px 0 12px}h3{font-size:14px;margin:18px 0 8px}
-</style>
-</head>
-<body>
-<header><div class="brand">Glyph Studio</div><div id="path" class="path"></div><div id="status" class="status">starting</div><button id="rebuild">Rebuild</button><button id="save" class="primary">Save</button></header>
-<main><section class="editor-pane"><div class="pane-title">Source</div><textarea id="editor" spellcheck="false"></textarea></section><section class="viewer"><nav id="tabs" class="tabs"></nav><div id="content" class="content"></div></section></main>
-<script>
-const tabs=['Overview','Machine','Flow','Temporal','Rust','Host','AST','Symbols','Artifacts'];let active='Overview',state=null,dirty=false,lastVersion=-1;
-const editor=document.getElementById('editor'),content=document.getElementById('content');editor.addEventListener('input',()=>dirty=true);
-document.getElementById('save').onclick=async()=>{await post('/api/save',{source:editor.value});dirty=false;await refresh(true)};document.getElementById('rebuild').onclick=async()=>{await post('/api/rebuild',{});await refresh(true)};
-function esc(x){return String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
-async function post(url,body){return fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})}
-async function artifact(name){const r=await fetch('/api/artifact?name='+encodeURIComponent(name));return (await r.json()).content||''}
-function makeTabs(){document.getElementById('tabs').innerHTML=tabs.map(t=>`<button class="tab ${t===active?'active':''}" data-t="${t}">${t}</button>`).join('');document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{active=b.dataset.t;makeTabs();render()})}
-function diagnostics(){return (state.diagnostics||[]).map(d=>`<div class="error">${esc(d.message)}</div>`).join('')}
-function overview(){const ir=state.execution_ir||{},sem=state.semantic||{};return diagnostics()+`<div class="cards"><div class="card"><div class="value">${(sem.functions||[]).length}</div><div class="label">Functions</div></div><div class="card"><div class="value">${(ir.machines||[]).length}</div><div class="label">Machines</div></div><div class="card"><div class="value">${(ir.temporal||[]).length}</div><div class="label">Temporal constraints</div></div><div class="card"><div class="value">${(sem.symbols||[]).length}</div><div class="label">Symbols</div></div></div><h3>Build</h3><pre>Status: ${esc(state.status)}\nUpdated: ${esc(state.updated_at)}\nDigest: ${esc((state.digest||'').slice(0,16))}\nOutput: ${esc(state.output_dir)}</pre>`}
-function machine(){const ms=(state.execution_ir?.machines||[]);if(!ms.length)return '<div class="muted">machine declaration is not present.</div>';return ms.map(m=>{const states=m.states||[];const boxes=states.map((s,i)=>`<div class="state ${s.name===m.initial_state?'initial':''} ${s.name===m.success_state?'success':''} ${s.name===m.failure_state?'failure':''}"><b>${esc(s.name)}</b><div class="muted">${s.name===m.initial_state?'initial ':''}${s.terminal||''}</div></div>${i<states.length-1?'<div class="arrow">→</div>':''}`).join('');const ts=(m.transitions||[]).map(t=>`<div class="transition"><b>${esc(t.source_state)}</b><span>→</span><b>${esc(t.target_state)}</b><span>${esc(t.condition)}</span></div>`).join('');return `<h2>${esc(m.name)}</h2><div class="machine">${boxes}</div><h3>Transitions</h3>${ts}`}).join('')}
-function flow(){const ir=state.execution_ir||{};const nodes=ir.nodes||[],edges=ir.edges||[];return `<h2>Execution flow</h2><div class="cards">${nodes.map(n=>`<div class="card"><b>${esc(n.label)}</b><div class="muted">${esc(n.kind)} · L${n.source?.line||0}</div></div>`).join('')}</div><h3>Edges</h3>${edges.map(e=>`<div class="transition"><b>${esc(e.source_id)}</b><span>→</span><b>${esc(e.target_id)}</b><span>${esc(e.label||e.kind)}</span></div>`).join('')}`}
-function temporal(){const xs=state.execution_ir?.temporal||[];return `<h2>Temporal constraints</h2>${xs.map(x=>`<div class="card" style="margin-bottom:9px"><b>${esc(x.name)}</b><pre>${esc(x.formula)}</pre><div class="muted">${esc(x.streaming_monitor)}</div></div>`).join('')||'<div class="muted">No temporal constraints.</div>'}`}
-async function code(name){content.innerHTML='<div class="muted">loading…</div>';content.innerHTML='<pre>'+esc(await artifact(name))+'</pre>'}
-function ast(){return '<pre>'+esc(JSON.stringify(state.semantic||{},null,2))+'</pre>'}
-function symbols(){return `<div class="symbol muted"><span>ID</span><span>Kind</span><span>Name</span><span>Type</span></div>${(state.semantic?.symbols||[]).map(s=>`<div class="symbol"><span>${s.id}</span><span>${esc(s.kind)}</span><b>${esc(s.name)}</b><span>${esc(s.type||'')}</span></div>`).join('')}`}
-function artifacts(){return `<h2>Generated automatically</h2>${(state.artifact_names||[]).map(n=>`<div class="card" style="margin-bottom:8px"><b>${esc(n)}</b><div class="muted">${esc(state.output_dir+'/'+n)}</div></div>`).join('')}`}
-function render(){if(!state)return;document.getElementById('path').textContent=state.source_path;const st=document.getElementById('status');st.textContent=state.status;st.className='status '+state.status;if(active==='Overview')content.innerHTML=overview();else if(active==='Machine')content.innerHTML=machine();else if(active==='Flow')content.innerHTML=flow();else if(active==='Temporal')content.innerHTML=temporal();else if(active==='Rust')code('generated.rs');else if(active==='Host')code('host.generated.rs');else if(active==='AST')content.innerHTML=ast();else if(active==='Symbols')content.innerHTML=symbols();else content.innerHTML=artifacts()}
-async function refresh(force=false){const r=await fetch('/api/state',{cache:'no-store'});const next=await r.json();if(force||next.version!==lastVersion){state=next;lastVersion=next.version;if(!dirty)editor.value=state.source||'';render()}}
-makeTabs();refresh(true);setInterval(()=>refresh(false),600);
-</script>
-</body></html>'''
 
 
 def run_studio(input_path: str | Path) -> int:
