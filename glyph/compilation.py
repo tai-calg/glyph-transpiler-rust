@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 import json
+import os
+from pathlib import Path
 
 from .algorithm_ir import build_algorithm_ir
 from .algorithm_mermaid import render_algorithm_mermaid
@@ -200,9 +202,9 @@ def build_diagram_bundle(
 class CompilationPipeline:
     """Authoritative source -> model -> Rust/IR/JSON pipeline.
 
-    Compatibility entry points may still return one subset of these outputs, but Studio,
-    watch mode, the CLI, and new integrations should use this class so parsing and
-    validation happen exactly once per source digest.
+    Compatibility entry points return subsets of these outputs. Studio, watch mode, the
+    CLI, and external integrations use this class so parsing and validation happen exactly
+    once per source digest.
     """
 
     def compile_text(
@@ -218,3 +220,40 @@ class CompilationPipeline:
             diagrams=build_diagram_bundle(model, source_name, source_href),
             design_json=build_design_json(model),
         )
+
+
+def compile_outputs(
+    source: str,
+    source_name: str = "input.glyph",
+    source_href: str | None = None,
+) -> CompilationOutputs:
+    """Functional entry point for the authoritative compilation pipeline."""
+
+    return CompilationPipeline().compile_text(source, source_name, source_href)
+
+
+def compile_diagram_bundle(
+    source: str,
+    source_name: str = "input.glyph",
+    source_href: str | None = None,
+) -> DiagramBundle:
+    """Compatibility API backed by the authoritative single-pass pipeline."""
+
+    return compile_outputs(source, source_name, source_href).diagrams
+
+
+def write_diagram_bundle(
+    input_path: str | Path,
+    output_dir: str | Path,
+) -> DiagramBundle:
+    """Compile and write versioned IR/diagram artifacts through one pipeline run."""
+
+    input_file = Path(input_path)
+    destination = Path(output_dir)
+    source = input_file.read_text(encoding="utf-8")
+    source_href = os.path.relpath(input_file, destination).replace(os.sep, "/")
+    bundle = compile_diagram_bundle(source, str(input_file), source_href)
+    destination.mkdir(parents=True, exist_ok=True)
+    for name, content in bundle.files.items():
+        (destination / name).write_text(content, encoding="utf-8")
+    return bundle
