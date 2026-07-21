@@ -1,0 +1,53 @@
+# v0.1 acceptance: 認証、状態遷移、作用境界、時間制約を一つの設計にする。
+@LOCK_LIMIT=500ms
+
+@DOOR_FLOW
+  sensor -> authenticate
+  authenticate -> decide
+  decide -> step
+  step -> lock
+  step -> alarm
+@end
+
+system DoorController
+  DOOR_FLOW
+
+*Input(badge_valid,request_open,forced_open,unlocked,locked,alarmed:B)
++Action=KeepLocked|Unlock|RaiseAlarm
++Mode=Locked|Unlocked|Alarmed|Faulted
+*DoorState(mode:Mode,failures:U,action:Action)
+*Receipt(action:Action)
+
+# 解錠が観測されたら500ms以内に施錠されなければならない。
+?lock_deadline(*Input)=A(unlocked>>E LOCK_LIMIT locked)
+# こじ開けが観測されたらalarm状態でなければならない。
+?forced_open_safe(*Input)=A(forced_open>>alarmed)
+
+>authenticate(input:Input):B=input.badge_valid&!input.forced_open
+
+>decide(input:Input):Action
+  allowed := authenticate(input)
+  action :=
+    input.forced_open >> RaiseAlarm
+    allowed&input.request_open >> Unlock
+    _ >> KeepLocked
+  action
+
+>step(state:DoorState,input:Input):DoorState
+  action := decide(input)
+  next :=
+    action==RaiseAlarm >> DoorState(Alarmed,state.failures+1,action)
+    action==Unlock >> DoorState(Unlocked,state.failures,action)
+    action==KeepLocked >> DoorState(Locked,state.failures,action)
+    _ >> DoorState(Faulted,state.failures+1,KeepLocked)
+  next
+
+!lock(state:DoorState):Receipt
+!alarm(state:DoorState):Receipt
+
+machine Door(state:DoorState,input:Input)
+  select=state.mode
+  init=DoorState(Locked,0,KeepLocked)
+  next=step(state,input)
+  success=Locked
+  failure=Faulted
