@@ -59,6 +59,8 @@ jobs:
         run: |
           python3 glyphc.py examples/system_controller.glyph \
             --diagram-dir build/glyph-diagrams
+          test -s build/glyph-diagrams/architecture.mmd
+          test -s build/glyph-diagrams/architecture-ir.json
           test -s build/glyph-diagrams/execution.mmd
           test -s build/glyph-diagrams/machine-controller.mmd
           test -s build/glyph-diagrams/temporal.mmd
@@ -67,6 +69,64 @@ jobs:
           test -s build/glyph-diagrams/index.md
           grep -q 'stateDiagram-v2' build/glyph-diagrams/machine-controller.mmd
           grep -q 'click fn_step' build/glyph-diagrams/execution.mmd
+
+      - name: Verify function values, AST macros, typed AST, and watch iteration
+        run: |
+          python3 glyphc.py examples/lisp_core.glyph \
+            -o build/lisp-core/generated.rs \
+            --diagram-dir build/lisp-core/diagrams \
+            --ast-json build/lisp-core/typed-ast.json
+          rustc --edition 2021 --crate-type lib build/lisp-core/generated.rs \
+            -o build/lisp-core/libglyph_lisp_core.rlib
+          python3 glyphc.py examples/lisp_core.glyph \
+            --watch-once \
+            --diagram-dir build/lisp-core/watch-diagrams \
+            --ast-json build/lisp-core/watch-typed-ast.json
+          test -s build/lisp-core/typed-ast.json
+          test -s build/lisp-core/watch-diagrams/execution.mmd
+          grep -q '"analysis": "structural"' build/lisp-core/typed-ast.json
+
+      - name: Verify architecture and slash-pipe lambdas
+        run: |
+          python3 glyphc.py examples/door_sketch.glyph \
+            -o build/door-sketch/generated.rs \
+            --host-output build/door-sketch/host.generated.rs \
+            --diagram-dir build/door-sketch/diagrams \
+            --ast-json build/door-sketch/typed-ast.json
+          rustc --edition 2021 --crate-type lib build/door-sketch/generated.rs \
+            -o build/door-sketch/libglyph_door_sketch.rlib
+          test -s build/door-sketch/diagrams/architecture.mmd
+          test -s build/door-sketch/diagrams/architecture-ir.json
+          grep -q 'sensor' build/door-sketch/diagrams/architecture.mmd
+          grep -q '__glyph_lambda' build/door-sketch/generated.rs
+
+      - name: Verify guarded conditionals and Rust TODO contracts
+        run: |
+          mkdir -p build/algorithm-sketch
+          python3 - <<'PY'
+          from pathlib import Path
+          from glyph import compile_artifacts, parse_compilation_model
+
+          source = Path('examples/algorithm_sketch.glyph').read_text(encoding='utf-8')
+          artifacts = compile_artifacts(source)
+          root = Path('build/algorithm-sketch')
+          (root / 'generated.rs').write_text(artifacts.logic, encoding='utf-8')
+          (root / 'manual.rs').write_text(artifacts.manual_scaffold, encoding='utf-8')
+          (root / 'lib.rs').write_text(
+              'pub mod generated;\npub mod manual;\n', encoding='utf-8'
+          )
+          model = parse_compilation_model(source)
+          (root / 'rust-todos.txt').write_text(
+              '\n'.join(item.name for item in model.opaques) + '\n',
+              encoding='utf-8',
+          )
+          PY
+          rustc --edition 2021 --crate-type lib build/algorithm-sketch/lib.rs \
+            -o build/algorithm-sketch/libglyph_algorithm_sketch.rlib
+          grep -q 'else if x == 0' build/algorithm-sketch/generated.rs
+          grep -q 'crate::manual::shortest_path' build/algorithm-sketch/generated.rs
+          grep -q 'todo!' build/algorithm-sketch/manual.rs
+          grep -q 'shortest_path' build/algorithm-sketch/rust-todos.txt
 
       - name: Upload generated sources and diagrams
         if: always()
@@ -79,6 +139,9 @@ jobs:
             demo-system/src/generated.rs
             demo-system/src/host.generated.rs
             build/glyph-diagrams
+            build/lisp-core
+            build/door-sketch
+            build/algorithm-sketch
 
       - name: Format generated Rust
         run: |

@@ -1,22 +1,26 @@
 #!/usr/bin/env python3
-"""Glyph DSLからRustコードと実行構造図を生成する依存ゼロCLI。"""
+"""Glyph DSL compiler, semantic inspector, REPL, and live diagram watcher."""
 
 from __future__ import annotations
 
 import argparse
+from dataclasses import asdict
+import json
 import sys
 from pathlib import Path
 
-from glyph import GlyphError, compile_artifacts, write_diagram_bundle
+from glyph import GlyphError, compile_artifacts, parse_compilation_model, write_diagram_bundle
+from glyph.incremental import IncrementalCompiler, watch_file
+from glyph.repl import run_repl
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="glyphc",
-        description="Glyph DSLをRustと実行構造図へ変換する",
+        description="Glyph DSLをRust、型付きAST、実行構造図へ変換する",
     )
     parser.add_argument("input", type=Path, help="入力 .glyph ファイル")
-    parser.add_argument("-o", "--output", type=Path, help="ロジック側の出力 .rs。省略時は標準出力")
+    parser.add_argument("-o", "--output", type=Path, help="ロジック側の出力 .rs")
     parser.add_argument(
         "--host-output",
         type=Path,
@@ -27,20 +31,82 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="実行構造IR、Mermaid図、source mapを出力するディレクトリ",
     )
+    parser.add_argument(
+        "--ast-json",
+        type=Path,
+        help="SymbolId、:=ブロック、ラムダ、Architectureを含む型付き設計JSONを出力する",
+    )
     parser.add_argument("--check", action="store_true", help="解析と検査だけを行う")
+    parser.add_argument("--repl", action="store_true", help="開発時REPLを起動する")
+    parser.add_argument("--watch", action="store_true", help="変更を監視して増分再生成する")
+    parser.add_argument(
+        "--watch-once",
+        action="store_true",
+        help="watch処理を1回だけ実行する。CIとスクリプト向け",
+    )
+    parser.add_argument(
+        "--interval",
+        type=float,
+        default=0.5,
+        help="watch間隔。最小0.1秒、既定0.5秒",
+    )
     return parser
+
+
+def _write_semantic(source: str, source_name: str, output: Path) -> None:
+    model = parse_compilation_model(source, source_name)
+    payload = model.semantic.to_dict()
+    payload["blocks"] = [item.to_dict() for item in model.blocks]
+    payload["lambdas"] = [asdict(item) for item in model.lambdas]
+    payload["architecture"] = model.architecture.to_dict()
+    payload["rust_todos"] = [item.to_dict() for item in model.opaques]
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
+        if args.host_output and not args.output:
+            raise GlyphError("--host-output を使う場合は -o/--output も指定する")
+        if args.repl and (args.watch or args.watch_once or args.check):
+            raise GlyphError("--repl は --watch/--watch-once/--check と同時に使えない")
+
+        if args.repl:
+            return run_repl(args.input, args.diagram_dir, stdin=sys.stdin, stdout=sys.stdout)
+
+        if args.watch or args.watch_once:
+            diagram_dir = args.diagram_dir or (args.input.parent / ".glyph" / args.input.stem)
+            compiler = IncrementalCompiler()
+
+            def report(result) -> None:
+                if not result.changed:
+                    return
+                print(f"compiled: {args.input} [{result.snapshot.digest[:12]}]")
+                for path in result.written:
+                    print(f"generated: {path}")
+
+            watch_file(
+                compiler,
+                args.input,
+                logic_output=args.output,
+                host_output=args.host_output,
+                diagram_dir=diagram_dir,
+                ast_output=args.ast_json,
+                interval=args.interval,
+                once=args.watch_once,
+                on_result=report,
+            )
+            return 0
+
         source = args.input.read_text(encoding="utf-8")
         artifacts = compile_artifacts(source)
         if args.check:
             print(f"OK: {args.input}")
             return 0
-        if args.host_output and not args.output:
-            raise GlyphError("--host-output を使う場合は -o/--output も指定する")
 
         if args.output:
             args.output.parent.mkdir(parents=True, exist_ok=True)
@@ -56,10 +122,16 @@ def main(argv: list[str] | None = None) -> int:
             for name in sorted(bundle.files):
                 print(f"generated: {args.diagram_dir / name}")
 
-        if not args.output and not args.diagram_dir:
+        if args.ast_json:
+            _write_semantic(source, str(args.input), args.ast_json)
+            print(f"generated: {args.ast_json}")
+
+        if not args.output and not args.diagram_dir and not args.ast_json:
             sys.stdout.write(artifacts.logic)
         return 0
-    except (OSError, GlyphError) as exc:
+    except KeyboardInterrupt:
+        return 0
+    except (OSError, ValueError, GlyphError) as exc:
         print(f"glyphc: error: {exc}", file=sys.stderr)
         return 1
 
