@@ -12,6 +12,7 @@ from .compiler import (
     Program,
     SumDecl,
 )
+from .schema import ARCHITECTURE_IR_SCHEMA, versioned_payload
 
 
 @dataclass(frozen=True)
@@ -59,7 +60,7 @@ class ArchitectureIR:
     systems: tuple[ArchitectureSystem, ...]
 
     def to_dict(self) -> dict[str, object]:
-        return asdict(self)
+        return versioned_payload(ARCHITECTURE_IR_SCHEMA, asdict(self))
 
 
 def _safe_id(text: str) -> str:

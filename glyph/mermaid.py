@@ -10,6 +10,7 @@ from .algorithm_mermaid import algorithm_source_entries, render_algorithm_mermai
 from .architecture import ArchitectureIR
 from .artifacts import parse_compilation_model
 from .execution_ir import ExecutionStructureIR, build_execution_structure_ir
+from .preprocessor import remap_source_lines
 
 
 @dataclass(frozen=True)
@@ -318,17 +319,24 @@ def compile_diagram_bundle(
     source_href: str | None = None,
 ) -> DiagramBundle:
     model = parse_compilation_model(source, source_name)
+    expanded = model.expanded
     ir = build_execution_structure_ir(
-        source, source_name, model.program, model.specs, model.machines
-    )
-    algorithm_ir = build_algorithm_ir(
-        source,
+        model.preprocess.source,
         source_name,
-        model.program,
-        model.blocks,
-        model.lambdas,
-        model.opaques,
+        expanded.program,
+        expanded.specs,
+        expanded.machines,
     )
+    ir = remap_source_lines(ir, model.preprocess)
+    algorithm_ir = build_algorithm_ir(
+        model.preprocess.source,
+        source_name,
+        expanded.program,
+        expanded.blocks,
+        expanded.lambdas,
+        expanded.opaques,
+    )
+    algorithm_ir = remap_source_lines(algorithm_ir, model.preprocess)
     href = source_href or source_name
     architecture = render_architecture_mermaid(model.architecture, href)
     logic = render_algorithm_mermaid(algorithm_ir, href)
@@ -339,6 +347,11 @@ def compile_diagram_bundle(
     }
     temporal = render_temporal_mermaid(ir, href)
     files = {
+        "preprocessed.glyph": model.preprocess.source,
+        "preprocessor-map.json": json.dumps(
+            model.preprocess.map_dict(source_name), ensure_ascii=False, indent=2
+        )
+        + "\n",
         "architecture.mmd": architecture,
         "architecture-ir.json": json.dumps(
             model.architecture.to_dict(), ensure_ascii=False, indent=2

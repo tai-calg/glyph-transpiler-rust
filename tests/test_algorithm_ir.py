@@ -72,7 +72,7 @@ class AlgorithmIRTests(unittest.TestCase):
 
         normalized_stages = function["steps"][2]["value"]["stages"]
         self.assertEqual([stage["kind"] for stage in normalized_stages], ["lambda", "rust"])
-        self.assertEqual(normalized_stages[0]["label"], "λ n → min(n,MAX)")
+        self.assertEqual(normalized_stages[0]["label"], "λ n → min(n,100)")
         self.assertEqual(normalized_stages[0]["source"]["line"], 20)
         self.assertEqual(normalized_stages[1]["name"], "optimize")
         self.assertEqual(normalized_stages[1]["source"]["line"], 21)
@@ -87,7 +87,7 @@ class AlgorithmIRTests(unittest.TestCase):
         self.assertIn("algorithm-ir.json", bundle.files)
         self.assertNotIn("__glyph_", bundle.files["logic.mmd"])
         self.assertNotIn("__glyph_", bundle.files["algorithm-ir.json"])
-        self.assertIn("λ n → min(n,MAX)", bundle.files["logic.mmd"])
+        self.assertIn("λ n → min(n,100)", bundle.files["logic.mmd"])
         self.assertIn("class algorithm_process_0_step_2_stage_1 rust", bundle.files["logic.mmd"])
         self.assertIn("Err", bundle.files["logic.mmd"])
 

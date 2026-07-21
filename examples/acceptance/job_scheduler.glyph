@@ -1,0 +1,44 @@
+@MAX_BATCH=10
+
+system BatchRuntime
+  packet -> validate
+  validate -> build_batch
+  build_batch -> layout_lane
+  build_batch -> submit_batch
+
+*Packet(count:U)
+*Lanes(free:U)
+*BatchInput(packet:Packet,lanes:Lanes,size:U)
+*BatchLayout(lane,size:U)
+*SubmitReceipt(lane:U)
++Error=EmptyPacket|NoLane
+
+>validate(input:BatchInput):BatchInput|Error
+  input.packet.count==0 >> Err(EmptyPacket)
+  input.lanes.free==0 >> Err(NoLane)
+  _ >> Ok(input)
+
+~layout_lane(input:BatchInput):BatchLayout # TODO: Rust implementation
+
+>build_batch(input:BatchInput):BatchLayout|Error
+  checked :=
+    input
+    /> validate?
+  layout :=
+    checked
+    /> layout_lane
+  limited :=
+    layout
+    /> |x| BatchLayout(x.lane,min(x.size,MAX_BATCH))
+  Ok(limited)
+
+!submit_batch(layout:BatchLayout):SubmitReceipt
+
+>run(input:BatchInput):SubmitReceipt|Error
+  batch :=
+    input
+    /> build_batch?
+  receipt :=
+    batch
+    /> submit_batch
+  Ok(receipt)

@@ -41,6 +41,7 @@ from .pipeline import (
     lower_lambda_pipelines,
     restore_lambda_source_lines,
 )
+from .preprocessor import PreprocessResult, preprocess_source, remap_source_lines
 from .semantic import SemanticModel, build_semantic_model
 from .syntax import expand_compact_syntax
 from .temporal import SpecDecl, extract_specs
@@ -58,6 +59,21 @@ class RustArtifacts:
 
 
 @dataclass(frozen=True)
+class ExpandedCompilation:
+    """Compiler-internal model whose lines refer to `preprocess.source`."""
+
+    program: Program
+    inline_effects: tuple[FunctionDecl, ...]
+    specs: tuple[SpecDecl, ...]
+    machines: tuple[MachineDecl, ...]
+    systems: tuple[SystemDecl, ...]
+    ast_macros: tuple[AstMacroDef, ...]
+    blocks: tuple[FunctionBlockLowering, ...]
+    lambdas: tuple[LambdaLowering, ...]
+    opaques: tuple[OpaqueDecl, ...]
+
+
+@dataclass(frozen=True)
 class CompilationModel:
     program: Program
     inline_effects: tuple[FunctionDecl, ...]
@@ -70,6 +86,9 @@ class CompilationModel:
     lambdas: tuple[LambdaLowering, ...]
     opaques: tuple[OpaqueDecl, ...]
     semantic: SemanticModel
+    preprocess: PreprocessResult
+    expanded: ExpandedCompilation
+
 
 
 def _inline_effect_lines(source: str) -> set[int]:
@@ -82,6 +101,7 @@ def _inline_effect_lines(source: str) -> set[int]:
         if "=" in clean:
             lines.add(line_no)
     return lines
+
 
 
 def _parse_effect_program(source: str) -> tuple[Program, tuple[FunctionDecl, ...]]:
@@ -106,6 +126,7 @@ def _parse_effect_program(source: str) -> tuple[Program, tuple[FunctionDecl, ...
         else:
             logic_declarations.append(decl)
     return Program(tuple(logic_declarations)), tuple(effects)
+
 
 
 def _generate_host(
@@ -146,39 +167,71 @@ def _generate_host(
     return "\n".join(out).rstrip() + "\n"
 
 
+
 def parse_compilation_model(
     source: str,
     source_name: str = "input.glyph",
 ) -> CompilationModel:
-    """Parse and lower one Glyph source into the shared semantic model."""
+    """Preprocess, parse, lower, validate, and build one shared design model."""
 
-    masked, opaque_seeds = mask_opaque_as_effect(source)
-    without_systems, systems = extract_systems(masked)
-    joined = join_pipeline_continuations(without_systems)
-    expanded = expand_compact_syntax(joined)
-    without_ast_macros, ast_macros = extract_ast_macros(expanded)
-    pure_source, opaques = expose_opaque_as_pure(
-        without_ast_macros, opaque_seeds
+    preprocess = preprocess_source(source)
+    expanded_source = preprocess.source
+
+    try:
+        masked, opaque_seeds = mask_opaque_as_effect(expanded_source)
+        without_systems, systems = extract_systems(masked)
+        joined = join_pipeline_continuations(without_systems)
+        compact = expand_compact_syntax(joined)
+        without_ast_macros, ast_macros = extract_ast_macros(compact)
+        pure_source, opaques = expose_opaque_as_pure(
+            without_ast_macros, opaque_seeds
+        )
+        block_result = lower_function_blocks(pure_source, ast_macros)
+        pipeline_result = lower_lambda_pipelines(block_result.source)
+        parser_source = lower_opaque_to_extern(
+            pipeline_result.source, opaque_seeds
+        )
+        without_specs, specs = extract_specs(parser_source)
+        core, machines = extract_machines(without_specs)
+        program, inline_effects = _parse_effect_program(core)
+
+        program = expand_program_macros(program, ast_macros)
+        program = restore_block_source_lines(program, block_result.blocks)
+        combined_lambdas = (*block_result.lambdas, *pipeline_result.lambdas)
+        program = restore_lambda_source_lines(program, combined_lambdas)
+        inline_effects = expand_function_macros(inline_effects, ast_macros)
+        machines = expand_machine_macros(machines, ast_macros)
+
+        validate_function_values(without_opaque_externs(program, opaques))
+        validate_temporal_specs(program, specs)
+        validate_machines(program, machines)
+    except GlyphError as exc:
+        raise preprocess.remap_error(exc) from exc
+
+    expanded = ExpandedCompilation(
+        program,
+        inline_effects,
+        specs,
+        machines,
+        systems,
+        ast_macros,
+        block_result.blocks,
+        tuple(combined_lambdas),
+        opaques,
     )
-    block_result = lower_function_blocks(pure_source, ast_macros)
-    pipeline_result = lower_lambda_pipelines(block_result.source)
-    parser_source = lower_opaque_to_extern(
-        pipeline_result.source, opaque_seeds
-    )
-    without_specs, specs = extract_specs(parser_source)
-    core, machines = extract_machines(without_specs)
-    program, inline_effects = _parse_effect_program(core)
 
-    program = expand_program_macros(program, ast_macros)
-    program = restore_block_source_lines(program, block_result.blocks)
-    combined_lambdas = (*block_result.lambdas, *pipeline_result.lambdas)
-    program = restore_lambda_source_lines(program, combined_lambdas)
-    inline_effects = expand_function_macros(inline_effects, ast_macros)
-    machines = expand_machine_macros(machines, ast_macros)
+    # Public metadata always points to the original `.glyph` file. The expanded copy is
+    # retained separately for diagrams that need to inspect the post-preprocessor text.
+    program = remap_source_lines(program, preprocess)
+    inline_effects = remap_source_lines(inline_effects, preprocess)
+    specs = remap_source_lines(specs, preprocess)
+    machines = remap_source_lines(machines, preprocess)
+    systems = remap_source_lines(systems, preprocess)
+    ast_macros = remap_source_lines(ast_macros, preprocess)
+    blocks = remap_source_lines(block_result.blocks, preprocess)
+    combined_lambdas = remap_source_lines(tuple(combined_lambdas), preprocess)
+    opaques = remap_source_lines(opaques, preprocess)
 
-    validate_function_values(without_opaque_externs(program, opaques))
-    validate_temporal_specs(program, specs)
-    validate_machines(program, machines)
     semantic = relabel_semantic_model(
         build_semantic_model(program, machines, ast_macros, specs), opaques
     )
@@ -193,11 +246,14 @@ def parse_compilation_model(
         systems,
         architecture,
         ast_macros,
-        block_result.blocks,
+        blocks,
         tuple(combined_lambdas),
         opaques,
         semantic,
+        preprocess,
+        expanded,
     )
+
 
 
 def parse_artifact_model(
@@ -211,6 +267,7 @@ def parse_artifact_model(
     """Compatibility view of the full compilation model."""
     model = parse_compilation_model(source)
     return model.program, model.inline_effects, model.specs, model.machines
+
 
 
 def compile_artifacts(source: str) -> RustArtifacts:
@@ -233,6 +290,7 @@ def compile_artifacts(source: str) -> RustArtifacts:
         host=host,
         manual_scaffold=manual_scaffold,
     )
+
 
 
 def compile_artifact_files(
