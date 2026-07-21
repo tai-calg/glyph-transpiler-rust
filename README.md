@@ -397,85 +397,83 @@ path /> optimize
 ## `!`: 外部作用境界
 
 ```glyph
-!write_log(event:Event):Receipt
-!send(command:Command):Result
+!read_sensor():Input
+!write_motor(command:Command):Receipt
 ```
 
-`!`はファイル、ネットワーク、GPIO、DB、時刻など、外部世界へ作用する境界です。具体的な実装はRust host adapterへ残します。
+`!`は通信、GPIO、ファイル、DB、デバイスI/Oなど、外部世界への作用を表します。詳細実装はhost adapterへ置きます。
 
 ---
 
-## 状態機械と時間制約
+## Source-level Logic view
 
-`machine`で初期状態、遷移関数、正常終端、異常終端を設計します。`?name(...)`では時相制約を宣言できます。
-
-```glyph
-?safe(*Input)=A(!auth >> !open)
-```
-
-Studioと生成物では、状態遷移と時相制約を別ビューで確認できます。
-
----
-
-## 内部表現
-
-`:=`ブロックは、既存の型検査・call graph・マクロ展開を再利用するため、コンパイラ内部では決定的なSSA/continuation形式へloweringします。
-
-利用者向けの生成Rustでは内部helperを除去し、元の構造を直接復元します。
+StudioのLogicタブは、lowering後のcall graphではなく、ユーザーが書いた`:=`ブロックから直接生成したAlgorithm IRを表示します。
 
 ```text
-Glyph := block
-      ↓
-検査用の純粋IR
-      ↓
-Typed design JSON / call graph
-      ↓
-Rust let bindings
+speed := match Command
+        ↓
+checked := validate? ──Err──→ exit
+        ↓
+normalized := λ min(n,MAX) → optimize [Rust]
+        ↓
+emitted := emit [effect]
+        ↓
+return
 ```
 
-Typed design JSONには次を保持します。
+Logic viewが保持する情報:
 
-- binding名
-- 推論型
-- `expression` / `conditional`
-- 元ソース行
-- 元の右辺
-- ラムダlowering
-- Architecture / SymbolId / Rust TODO契約
+- `:=`の順序と推論型
+- 分岐条件、分岐値、variant binder
+- `/>`の段階順序
+- ラムダの元ソース
+- `~`をRust node、`!`をeffect nodeとして区別
+- `?`からのErr経路
+- 元Glyphのsource line
+
+関数、binding、分岐、pipeline stage、returnを選択すると、エディタの対応行へ移動します。
+
+`__glyph_block_*`や`__glyph_lambda_*`はコンパイラ内部名であり、Logic view、`algorithm-ir.json`、`logic.mmd`、StudioのSymbolsには表示しません。lowering後の構造は別の`execution-ir.json`と`execution.mmd`に残します。
+
+詳細仕様は[`ALGORITHM_IR.md`](ALGORITHM_IR.md)を参照してください。
 
 ---
 
-## 記号一覧
+## Studio
 
-| 記号 | 意味 |
-|---|---|
-| `system` | component接続 |
-| `@` | コンパイル時マクロ |
-| `*` | 積型 |
-| `+` | 直和型 |
-| `>` | Glyph実装の関数 |
-| `~` | Rust実装の純粋TODO契約 |
-| `!` | 外部作用境界 |
-| `:=` | 一度だけ定義する中間値 |
-| `>>` | 条件またはpatternと結果 |
-| `/>` | 左から右への処理連結 |
-| `|x| expr` | pipeline lambda |
-| `?name` | 時相制約宣言 |
-| `expr?` | Resultの失敗伝播 |
-| `A / E / U / W` | 時相演算子 |
+```bash
+python3 glyph.py path/to/design.glyph
+```
 
-式中の等値比較は`==`を使います。単独の`=`は宣言と関数本体の区切りです。
+1プロセスで次を実行します。
+
+```text
+Source editor
+Automatic compile and diagnostics
+Architecture
+State
+Logic
+Time
+Rust
+Host
+Manual
+Typed AST
+Symbols
+Artifacts
+```
+
+保存時に図、JSON、Rustを自動更新します。コンパイルエラーが起きてもStudioは終了せず、最後に成功した生成物と現在の診断を保持します。
 
 ---
 
 ## 生成物
 
-Studioは生成先を自動的に決めます。
-
 ```text
 .glyph/<source-stem>/
 ├── architecture.mmd
 ├── architecture-ir.json
+├── logic.mmd
+├── algorithm-ir.json
 ├── execution.mmd
 ├── execution-ir.json
 ├── machine-<name>.mmd
@@ -485,76 +483,76 @@ Studioは生成先を自動的に決めます。
 ├── typed-ast.json
 ├── generated.rs
 ├── host.generated.rs
-└── manual.rs          # ~宣言がある場合。初回だけ作成
+└── manual.rs
 ```
 
-所有権:
+### 2種類のロジックIR
 
-```text
-generated.rs       Glyph所有。再生成される
-host.generated.rs  Glyph所有。再生成される
-manual.rs          利用者所有。上書きされない
-```
+| ファイル | 対象 |
+|---|---|
+| `algorithm-ir.json` / `logic.mmd` | 人間が書いた`:=`、分岐、pipeline、lambda |
+| `execution-ir.json` / `execution.mmd` | compiler lowering後のcall graphと実行構造 |
+
+`source-map.json`はArchitecture、Logic、Execution、State、Timeの各viewを元ソース行へ逆引きします。
 
 ---
 
-## 低水準CLI
+## 記号一覧
 
-`glyphc.py`はCIや外部ツール連携用です。通常の設計作業では`glyph.py`を使います。
-
-```bash
-python3 glyphc.py examples/function_block.glyph \
-  -o build/generated.rs \
-  --diagram-dir build/diagrams \
-  --ast-json build/typed-design.json
-```
+| 記法 | 意味 |
+|---|---|
+| `system` | component接続 |
+| `@` | コンパイル時マクロ |
+| `*` | 積型 |
+| `+` | 直和型 |
+| `>` | Glyph実装の純粋関数 |
+| `~` | Rust実装の純粋関数契約 |
+| `!` | 外部作用境界 |
+| `:=` | 一度だけ定義する中間値 |
+| `>>` | ガード条件から値 |
+| `/>` | 左から右への処理連結 |
+| `|x| expression` | pipeline lambda |
+| `expression?` | Result失敗伝播 |
+| `?name(...)=formula` | 時相制約 |
 
 ---
 
-## テスト
+## 設計文書
+
+- [`SKETCH_DESIGN.md`](SKETCH_DESIGN.md) — 500文字設計スケッチ
+- [`PIPELINE_DESIGN.md`](PIPELINE_DESIGN.md) — `system`、`/>`、ラムダ
+- [`RUST_TODO.md`](RUST_TODO.md) — `~`と`manual.rs`
+- [`ALGORITHM_IR.md`](ALGORITHM_IR.md) — source-level Algorithm IRとLogic view
+- [`LISP_CORE.md`](LISP_CORE.md) — 関数値、AST macro、再帰
+- [`LANGUAGE.md`](LANGUAGE.md) — コア言語仕様
+
+---
+
+## CI・低水準利用
+
+`glyphc.py`はCIと外部ツール統合向けです。通常利用は`glyph.py`です。
 
 ```bash
+python3 glyphc.py design.glyph --check
+python3 glyphc.py design.glyph --diagram-dir .glyph/design
 python3 -m unittest discover -s tests -v
 cargo test --manifest-path demo/Cargo.toml
 cargo test --manifest-path demo-system/Cargo.toml
 ```
 
-CIでは次を検証します。
-
-- `:=`の単一代入性
-- 条件ブロックとvariant pattern
-- `/>`とラムダ
-- 中間値内の`?`伝播
-- 生成Rustの`rustc`コンパイル
-- `~`と`manual.rs`の保持
-- Architecture / State / Time / source map
-- 既存デモ、Cargo test、Clippy
-
----
-
-## 詳細仕様
-
-- `SKETCH_DESIGN.md` — 500文字設計スケッチ全体
-- `PIPELINE_DESIGN.md` — `system`、`/>`、ラムダ
-- `RUST_TODO.md` — `~` Rust TODO契約
-- `LANGUAGE.md` — 基本文法
-- `TEMPORAL_DESIGN.md` — 時相論理
-- `examples/function_block.glyph` — `:=`を使ったアルゴリズム例
-
 ---
 
 ## 現在の制限
 
-- `:=`は関数内の一度きりの定義であり、再代入はできない
-- `:=`条件ブロックは最後に`_`fallbackを必要とする
-- binding型の明示構文は未対応。右辺から推論する
 - capturing closure、部分適用、複数引数pipeline lambdaは未対応
-- standalone lambdaは未対応。ラムダは`/>`段で使う
+- standalone lambdaは未対応
+- `:=`は単一代入であり、可変変数とループ文は提供しない
 - 文字列、配列、参照、lifetime、ジェネリック関数は未対応
-- 計算量コメントは契約メタデータであり、自動証明しない
-- `manual.rs`のシグネチャ不一致はRustコンパイルで検出する
+- 再帰metadataは停止性の完全証明ではない
+- `manual.rs`のシグネチャ変更はRustコンパイルで検出する
+- 実機の外部作用はRust host adapterへ実装する
 - runtime `eval`は提供しない
 
-## ライセンス
+## License
 
 MIT License
