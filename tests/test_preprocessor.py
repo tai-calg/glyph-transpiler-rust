@@ -3,8 +3,14 @@ from __future__ import annotations
 import json
 import unittest
 
-from glyph import GlyphError, compile_diagram_bundle, compile_source, parse_compilation_model
-from glyph.preprocessor import preprocess_source
+from glyph import (
+    GlyphError,
+    IncrementalCompiler,
+    compile_diagram_bundle,
+    compile_source,
+    parse_compilation_model,
+    preprocess_source,
+)
 
 
 class RawPreprocessorTests(unittest.TestCase):
@@ -58,7 +64,10 @@ system Demo
         self.assertIn("positive > 100", rust)
 
         model = parse_compilation_model(source)
-        self.assertEqual([item.name for item in model.blocks[0].bindings], ["positive", "limited"])
+        self.assertEqual(
+            [item.name for item in model.blocks[0].bindings],
+            ["positive", "limited"],
+        )
         self.assertEqual([item.line for item in model.blocks[0].bindings], [12, 12])
 
     def test_multiline_macro_must_be_used_as_a_whole_line(self) -> None:
@@ -122,6 +131,19 @@ BAD
         self.assertEqual(mapping["macros"][0]["name"], "TYPE")
         self.assertEqual(mapping["expanded_lines"][0]["source_line"], 2)
         self.assertEqual(mapping["expanded_lines"][0]["macro_stack"], ["TYPE"])
+
+    def test_typed_design_json_contains_raw_macro_metadata(self) -> None:
+        result = IncrementalCompiler().compile_text(
+            "@MAX=10\n@TYPE=Point\n*TYPE(x:I)\n",
+            "macro.glyph",
+        )
+        payload = json.loads(result.snapshot.semantic_json)
+        self.assertEqual(payload["preprocessor"]["schema"], "glyph.preprocessor")
+        self.assertTrue(payload["preprocessor"]["changed"])
+        self.assertEqual(
+            [item["name"] for item in payload["raw_macros"]],
+            ["MAX", "TYPE"],
+        )
 
     def test_raw_substitution_is_intentionally_textual_not_parenthesized(self) -> None:
         rust = compile_source("@NEXT=x+1\n>f(x:I):I=NEXT*2\n")
