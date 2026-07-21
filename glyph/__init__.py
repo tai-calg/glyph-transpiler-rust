@@ -6,11 +6,17 @@ from .artifacts import (
     parse_artifact_model,
     parse_compilation_model,
 )
-from .compilation import CompilationOutputs, CompilationPipeline
+from .compilation import (
+    CompilationOutputs,
+    CompilationPipeline,
+    compile_diagram_bundle,
+    compile_outputs,
+    write_diagram_bundle,
+)
 from .compiler import GlyphError
 from .frontend import compile_file, compile_source, parse_program
 from .incremental import CompilationSnapshot, IncrementalCompiler, IncrementalResult
-from .mermaid import DiagramBundle, compile_diagram_bundle, write_diagram_bundle
+from .mermaid import DiagramBundle
 from .preprocessor import PreprocessResult, RawMacroDef, preprocess_source
 from .semantic import SemanticModel
 from .studio import GlyphStudio, StudioSnapshot, run_studio
@@ -37,6 +43,7 @@ __all__ = [
     "compile_artifacts",
     "compile_diagram_bundle",
     "compile_file",
+    "compile_outputs",
     "compile_source",
     "parse_artifact_model",
     "parse_compilation_model",
