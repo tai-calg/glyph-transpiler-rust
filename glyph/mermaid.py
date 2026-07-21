@@ -5,6 +5,8 @@ import json
 import os
 from pathlib import Path
 
+from .algorithm_ir import AlgorithmIR, build_algorithm_ir
+from .algorithm_mermaid import algorithm_source_entries, render_algorithm_mermaid
 from .architecture import ArchitectureIR
 from .artifacts import parse_compilation_model
 from .execution_ir import ExecutionStructureIR, build_execution_structure_ir
@@ -13,6 +15,7 @@ from .execution_ir import ExecutionStructureIR, build_execution_structure_ir
 @dataclass(frozen=True)
 class DiagramBundle:
     ir: ExecutionStructureIR
+    algorithm_ir: AlgorithmIR
     files: dict[str, str]
 
 
@@ -36,6 +39,7 @@ def render_architecture_mermaid(
         "flowchart LR",
         "  classDef function fill:#eef,stroke:#446;",
         "  classDef effect fill:#fee,stroke:#844;",
+        "  classDef rust fill:#f4e5ff,stroke:#8050a0;",
         "  classDef data fill:#efe,stroke:#484;",
         "  classDef external fill:#f7f7f7,stroke:#777,stroke-dasharray: 4 3;",
     ]
@@ -146,7 +150,9 @@ def render_temporal_mermaid(ir: ExecutionStructureIR, source_href: str) -> str:
 
 
 def _source_map(
-    ir: ExecutionStructureIR, architecture: ArchitectureIR
+    ir: ExecutionStructureIR,
+    architecture: ArchitectureIR,
+    algorithm_ir: AlgorithmIR,
 ) -> dict[str, object]:
     lines: dict[str, list[dict[str, str]]] = {}
 
@@ -171,6 +177,8 @@ def _source_map(
                 f"{edge.source_id}->{edge.target_id}",
                 "architecture.mmd",
             )
+    for line, kind, item_id in algorithm_source_entries(algorithm_ir):
+        add(line, kind, item_id, "logic.mmd")
     for node in ir.nodes:
         add(node.source.line, "execution-node", node.id, "execution.mmd")
     for machine in ir.machines:
@@ -191,8 +199,10 @@ def _source_map(
 def render_index_markdown(
     ir: ExecutionStructureIR,
     architecture_ir: ArchitectureIR,
+    algorithm_ir: AlgorithmIR,
     source_href: str,
     architecture: str,
+    logic: str,
     dataflow: str,
     machines: dict[str, str],
     temporal: str,
@@ -214,9 +224,22 @@ def render_index_markdown(
                 "",
             ]
         )
+    if algorithm_ir.functions:
+        lines.extend(
+            [
+                "## Source-level logic",
+                "",
+                "The diagram below is built from `:=`, guards, `/>`, lambdas, `~`, and `!` before compiler lowering.",
+                "",
+                "```mermaid",
+                logic.rstrip(),
+                "```",
+                "",
+            ]
+        )
     lines.extend(
         [
-            "## Dataflow",
+            "## Lowered execution dataflow",
             "",
             "```mermaid",
             dataflow.rstrip(),
@@ -265,7 +288,7 @@ def render_index_markdown(
             )
         lines.append("")
 
-    source_map = _source_map(ir, architecture_ir)["line_to_views"]
+    source_map = _source_map(ir, architecture_ir, algorithm_ir)["line_to_views"]
     lines.extend(
         [
             "## Source map",
@@ -298,8 +321,17 @@ def compile_diagram_bundle(
     ir = build_execution_structure_ir(
         source, source_name, model.program, model.specs, model.machines
     )
+    algorithm_ir = build_algorithm_ir(
+        source,
+        source_name,
+        model.program,
+        model.blocks,
+        model.lambdas,
+        model.opaques,
+    )
     href = source_href or source_name
     architecture = render_architecture_mermaid(model.architecture, href)
+    logic = render_algorithm_mermaid(algorithm_ir, href)
     dataflow = render_dataflow_mermaid(ir, href)
     machine_files = {
         f"machine-{_slug(machine.name)}.mmd": render_machine_mermaid(machine)
@@ -312,26 +344,35 @@ def compile_diagram_bundle(
             model.architecture.to_dict(), ensure_ascii=False, indent=2
         )
         + "\n",
+        "logic.mmd": logic,
+        "algorithm-ir.json": json.dumps(
+            algorithm_ir.to_dict(), ensure_ascii=False, indent=2
+        )
+        + "\n",
         "execution.mmd": dataflow,
         **machine_files,
         "temporal.mmd": temporal,
         "execution-ir.json": json.dumps(ir.to_dict(), ensure_ascii=False, indent=2)
         + "\n",
         "source-map.json": json.dumps(
-            _source_map(ir, model.architecture), ensure_ascii=False, indent=2
+            _source_map(ir, model.architecture, algorithm_ir),
+            ensure_ascii=False,
+            indent=2,
         )
         + "\n",
     }
     files["index.md"] = render_index_markdown(
         ir,
         model.architecture,
+        algorithm_ir,
         href,
         architecture,
+        logic,
         dataflow,
         machine_files,
         temporal,
     )
-    return DiagramBundle(ir=ir, files=files)
+    return DiagramBundle(ir=ir, algorithm_ir=algorithm_ir, files=files)
 
 
 def write_diagram_bundle(input_path: str | Path, output_dir: str | Path) -> DiagramBundle:
