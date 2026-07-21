@@ -1,1 +1,40 @@
-# Job scheduler acceptance example
+@MAX_BATCH=10
+
+system BatchRuntime
+  packet -> validate
+  validate -> plan
+  plan -> place_on_lane
+  plan -> submit_batch
+
+*Packet(count:U)
+*Lanes(free:U)
+*BatchInput(packet:Packet,lanes:Lanes,size:U)
+*BatchPlan(lane,size:U)
+*SubmitReceipt(lane:U)
++Error=EmptyPacket|NoLane
+
+>validate(input:BatchInput):BatchInput|Error
+  input.packet.count==0 >> Err(EmptyPacket)
+  input.lanes.free==0 >> Err(NoLane)
+  _ >> Ok(input)
+
+~place_on_lane(input:BatchInput):BatchPlan # TODO: Rust implementation
+
+>plan(input:BatchInput):BatchPlan|Error
+  checked := validate(input)?
+  placed :=
+    checked
+    /> place_on_lane
+  limited :=
+    placed
+    /> |x| BatchPlan(x.lane,min(x.size,MAX_BATCH))
+  Ok(limited)
+
+!submit_batch(plan:BatchPlan):SubmitReceipt
+
+>run(input:BatchInput):SubmitReceipt|Error
+  plan := plan(input)?
+  receipt :=
+    plan
+    /> submit_batch
+  Ok(receipt)
