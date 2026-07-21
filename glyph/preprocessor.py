@@ -158,6 +158,8 @@ def _collect_definitions(source: str) -> tuple[dict[str, RawMacroDef], list[_Sou
         if equal >= 0:
             name = _raw_name(body[:equal].strip(), index + 1)
             replacement = body[equal + 1 :].strip()
+            if not replacement:
+                raise GlyphError(f"{index + 1}行目: rawマクロ '{name}' の置換文字列が空")
             if name in definitions:
                 raise GlyphError(
                     f"{index + 1}行目: rawマクロ '{name}' は"
@@ -199,6 +201,8 @@ def _collect_definitions(source: str) -> tuple[dict[str, RawMacroDef], list[_Sou
             raise GlyphError(
                 f"{index + 1}行目: 複数行rawマクロ '{name}' を '@end' で閉じる"
             )
+        if not any(line.strip() for line in body_lines):
+            raise GlyphError(f"{index + 1}行目: 複数行rawマクロ '{name}' の本体が空")
         definitions[name] = RawMacroDef(
             name,
             _dedent(body_lines),
@@ -256,22 +260,44 @@ class _Expander:
         if stripped in self.definitions:
             name = stripped
             replacement = self.resolve(name, stack)
+            combined_stack = list(stack)
+            combined_definitions = [
+                self.definitions[item].line
+                for item in stack
+                if item in self.definitions
+            ]
             result: list[_ResolvedLine] = []
             if comment:
-                result.append(_ResolvedLine(leading + comment, stack, ()))
+                result.append(
+                    _ResolvedLine(
+                        leading + comment,
+                        tuple(combined_stack),
+                        tuple(combined_definitions),
+                    )
+                )
             for item in replacement:
+                for macro_name in item.macro_stack:
+                    if macro_name not in combined_stack:
+                        combined_stack.append(macro_name)
+                for definition_line in item.definition_lines:
+                    if definition_line not in combined_definitions:
+                        combined_definitions.append(definition_line)
                 text = leading + item.text if item.text else ""
                 result.append(
                     _ResolvedLine(
                         text,
-                        item.macro_stack,
-                        item.definition_lines,
+                        tuple(combined_stack),
+                        tuple(combined_definitions),
                     )
                 )
             return result
 
         stacks: list[str] = list(stack)
-        definition_lines: list[int] = []
+        definition_lines: list[int] = [
+            self.definitions[item].line
+            for item in stack
+            if item in self.definitions
+        ]
         output: list[str] = []
         cursor = 0
         for match in _IDENTIFIER_RE.finditer(code):
@@ -281,8 +307,9 @@ class _Expander:
                 output.append(token)
                 cursor = match.end()
                 continue
+            definition = self.definitions[token]
             replacement = self.resolve(token, stack)
-            if len(replacement) != 1:
+            if definition.multiline or len(replacement) != 1:
                 raise GlyphError(
                     f"{line_number}行目: 複数行rawマクロ '{token}' は"
                     "インデントされた行に単独で置く"
@@ -328,8 +355,8 @@ def preprocess_source(source: str) -> PreprocessResult:
     definitions, remaining = _collect_definitions(source)
     expander = _Expander(definitions)
 
-    # Resolve unused definitions too, so cycles and illegal multiline-in-inline uses are
-    # deterministic and independent of which code path happens to reference a macro.
+    # Resolve unused definitions too, so cycles and illegal nested block placement are
+    # deterministic and independent of which compiler path references a macro.
     for name in definitions:
         expander.resolve(name, ())
 
