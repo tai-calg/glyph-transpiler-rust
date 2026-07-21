@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 import hashlib
-import json
 from pathlib import Path
 import time
 from typing import Callable
 
-from .artifacts import RustArtifacts, compile_artifacts, parse_compilation_model
-from .mermaid import DiagramBundle, compile_diagram_bundle
+from .artifacts import RustArtifacts
+from .compilation import CompilationPipeline
+from .mermaid import DiagramBundle
 
 
 @dataclass(frozen=True)
@@ -40,26 +40,11 @@ def _write_if_changed(path: Path, content: str) -> bool:
     return True
 
 
-def _design_json(model) -> str:
-    payload = model.semantic.to_dict()
-    payload["raw_macros"] = [item.to_dict() for item in model.preprocess.macros]
-    payload["preprocessor"] = {
-        "schema": "glyph.preprocessor",
-        "version": 1,
-        "changed": model.preprocess.changed,
-        "expanded_line_count": len(model.preprocess.lines),
-    }
-    payload["blocks"] = [item.to_dict() for item in model.blocks]
-    payload["lambdas"] = [asdict(item) for item in model.lambdas]
-    payload["architecture"] = model.architecture.to_dict()
-    payload["rust_todos"] = [item.to_dict() for item in model.opaques]
-    return json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
-
-
 class IncrementalCompiler:
-    """Content-addressed one-file compiler cache used by watch mode and the Studio."""
+    """Content-addressed compiler cache used by watch mode and Glyph Studio."""
 
-    def __init__(self) -> None:
+    def __init__(self, pipeline: CompilationPipeline | None = None) -> None:
+        self.pipeline = pipeline or CompilationPipeline()
         self._cache: dict[str, CompilationSnapshot] = {}
         self._last_digest: str | None = None
 
@@ -72,11 +57,12 @@ class IncrementalCompiler:
         digest = _digest(source)
         cached = self._cache.get(digest)
         if cached is None:
-            model = parse_compilation_model(source, source_name)
-            artifacts = compile_artifacts(source)
-            diagrams = compile_diagram_bundle(source, source_name, source_href)
+            outputs = self.pipeline.compile_text(source, source_name, source_href)
             cached = CompilationSnapshot(
-                digest, artifacts, diagrams, _design_json(model)
+                digest,
+                outputs.artifacts,
+                outputs.diagrams,
+                outputs.design_json,
             )
             self._cache[digest] = cached
         changed = digest != self._last_digest
