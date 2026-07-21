@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from glyph import GlyphError, compile_source, parse_program
+from glyph import GlyphError, compile_source, parse_program, preprocess_source
 from glyph.temporal import Always, Implies, Until, Within, parse_formula
 from glyph.temporal_sigils import normalize_temporal_sigils
 from glyph.syntax import expand_compact_syntax
@@ -65,6 +65,12 @@ class TemporalTests(unittest.TestCase):
             compile_source("@A=other\n?x(done:B)=@A done\n")
         with self.assertRaisesRegex(GlyphError, "時相演算子 '@E'.*予約済み"):
             compile_source("@E\n  value\n@end\n?x(done:B)=@E done\n")
+
+    def test_public_preprocessor_rejects_reserved_temporal_names(self) -> None:
+        with self.assertRaisesRegex(GlyphError, "時相演算子 '@A'.*予約済み"):
+            preprocess_source("@A=other\n>f():I=1\n")
+        with self.assertRaisesRegex(GlyphError, "時相演算子 '@E'.*予約済み"):
+            preprocess_source("@E(x)=x\n>f():I=1\n")
 
     def test_zero_duration_is_rejected(self) -> None:
         with self.assertRaisesRegex(GlyphError, "0より大きく"):
