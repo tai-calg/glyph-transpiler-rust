@@ -535,6 +535,7 @@ Artifacts
 ```bash
 python3 glyphc.py design.glyph --check
 python3 glyphc.py design.glyph --diagram-dir .glyph/design
+python3 -m unittest tests.test_algorithm_ir -v
 python3 -m unittest discover -s tests -v
 cargo test --manifest-path demo/Cargo.toml
 cargo test --manifest-path demo-system/Cargo.toml
