@@ -6,6 +6,7 @@ from .artifacts import (
     parse_artifact_model,
     parse_compilation_model,
 )
+from .compilation import CompilationOutputs, CompilationPipeline
 from .compiler import GlyphError
 from .frontend import compile_file, compile_source, parse_program
 from .incremental import CompilationSnapshot, IncrementalCompiler, IncrementalResult
@@ -17,6 +18,8 @@ from .symbols import SymbolId, SymbolRecord
 
 __all__ = [
     "CompilationModel",
+    "CompilationOutputs",
+    "CompilationPipeline",
     "CompilationSnapshot",
     "DiagramBundle",
     "GlyphError",
