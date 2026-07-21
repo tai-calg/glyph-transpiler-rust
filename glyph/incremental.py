@@ -42,6 +42,13 @@ def _write_if_changed(path: Path, content: str) -> bool:
 
 def _design_json(model) -> str:
     payload = model.semantic.to_dict()
+    payload["raw_macros"] = [item.to_dict() for item in model.preprocess.macros]
+    payload["preprocessor"] = {
+        "schema": "glyph.preprocessor",
+        "version": 1,
+        "changed": model.preprocess.changed,
+        "expanded_line_count": len(model.preprocess.lines),
+    }
     payload["blocks"] = [item.to_dict() for item in model.blocks]
     payload["lambdas"] = [asdict(item) for item in model.lambdas]
     payload["architecture"] = model.architecture.to_dict()
