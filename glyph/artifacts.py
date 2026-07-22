@@ -16,10 +16,8 @@ from .ast_macros import (
     expand_program_macros,
     extract_ast_macros,
 )
-from .capabilities import (
-    CapabilityModel,
-    extract_capabilities,
-)
+from .capabilities import CapabilityModel, extract_capabilities
+from .capability_surface_validate import validate_capability_surface
 from .compiler import ExternDecl, FunctionDecl, GlyphError, Program, parse_program
 from .contracts import ContractModel, extract_contracts, remap_contract_lines
 from .function_blocks import (
@@ -189,6 +187,7 @@ def parse_compilation_model(
     try:
         expanded_source = normalize_temporal_sigils(preprocess.source)
         contract_result = extract_contracts(expanded_source)
+        validate_capability_surface(contract_result.source)
         capability_result = extract_capabilities(contract_result.source)
         masked, opaque_seeds = mask_opaque_as_effect(capability_result.source)
         without_systems, systems = extract_systems(masked)
@@ -234,8 +233,6 @@ def parse_compilation_model(
         contract_result.model,
     )
 
-    # Public metadata always points to the original `.glyph` file. The expanded copy is
-    # retained separately for diagrams that need to inspect the post-preprocessor text.
     program = remap_source_lines(program, preprocess)
     inline_effects = remap_source_lines(inline_effects, preprocess)
     specs = remap_source_lines(specs, preprocess)
@@ -281,7 +278,6 @@ def parse_artifact_model(
     tuple[SpecDecl, ...],
     tuple[MachineDecl, ...],
 ]:
-    """Compatibility view of the full compilation model."""
     model = parse_compilation_model(source)
     return model.program, model.inline_effects, model.specs, model.machines
 
