@@ -16,6 +16,10 @@ from .ast_macros import (
     expand_program_macros,
     extract_ast_macros,
 )
+from .capabilities import (
+    CapabilityModel,
+    extract_capabilities,
+)
 from .compiler import ExternDecl, FunctionDecl, GlyphError, Program, parse_program
 from .contracts import ContractModel, extract_contracts, remap_contract_lines
 from .function_blocks import (
@@ -76,6 +80,7 @@ class ExpandedCompilation:
     blocks: tuple[FunctionBlockLowering, ...]
     lambdas: tuple[LambdaLowering, ...]
     opaques: tuple[OpaqueDecl, ...]
+    capabilities: CapabilityModel = field(default_factory=CapabilityModel.empty)
     contracts: ContractModel = field(default_factory=ContractModel.empty)
 
 
@@ -94,6 +99,7 @@ class CompilationModel:
     semantic: SemanticModel
     preprocess: PreprocessResult
     expanded: ExpandedCompilation
+    capabilities: CapabilityModel = field(default_factory=CapabilityModel.empty)
     contracts: ContractModel = field(default_factory=ContractModel.empty)
 
 
@@ -183,7 +189,8 @@ def parse_compilation_model(
     try:
         expanded_source = normalize_temporal_sigils(preprocess.source)
         contract_result = extract_contracts(expanded_source)
-        masked, opaque_seeds = mask_opaque_as_effect(contract_result.source)
+        capability_result = extract_capabilities(contract_result.source)
+        masked, opaque_seeds = mask_opaque_as_effect(capability_result.source)
         without_systems, systems = extract_systems(masked)
         joined = join_pipeline_continuations(without_systems)
         compact = expand_compact_syntax(joined)
@@ -223,6 +230,7 @@ def parse_compilation_model(
         block_result.blocks,
         tuple(combined_lambdas),
         opaques,
+        capability_result.model,
         contract_result.model,
     )
 
@@ -238,6 +246,7 @@ def parse_compilation_model(
     combined_lambdas = remap_source_lines(tuple(combined_lambdas), preprocess)
     opaques = remap_source_lines(opaques, preprocess)
     contracts = remap_contract_lines(contract_result.model, preprocess.source_line)
+    capabilities = capability_result.model
 
     semantic = relabel_semantic_model(
         build_semantic_model(program, machines, ast_macros, specs), opaques
@@ -259,6 +268,7 @@ def parse_compilation_model(
         semantic,
         preprocess,
         expanded,
+        capabilities,
         contracts,
     )
 
