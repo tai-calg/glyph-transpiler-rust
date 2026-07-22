@@ -36,13 +36,15 @@ def _parameter_capabilities(signature: str, line: int) -> dict[str, str]:
         names = [*pending, name]
         pending.clear()
         capability = "plain"
+        matched = False
         for candidate in ("own", "share", "link"):
             if type_text.startswith(candidate + " "):
                 capability = candidate
+                matched = True
                 break
-        elif type_text.startswith("&mut "):
+        if not matched and type_text.startswith("&mut "):
             capability = "borrow_mut"
-        elif type_text.startswith("&"):
+        elif not matched and type_text.startswith("&"):
             capability = "borrow"
         for parameter in names:
             if re.fullmatch(_IDENT, parameter):
@@ -51,12 +53,7 @@ def _parameter_capabilities(signature: str, line: int) -> dict[str, str]:
 
 
 def validate_capability_surface(source: str) -> None:
-    """Reject capability misuse before legacy expression/block parsing.
-
-    The capability layer erases valid capability syntax before the old parser runs. Invalid
-    capability syntax must therefore be diagnosed here rather than leaking an unrelated
-    legacy-parser error.
-    """
+    """Reject capability misuse before legacy expression/block parsing."""
 
     lines = source.splitlines()
     current_params: dict[str, str] = {}
