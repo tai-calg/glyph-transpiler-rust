@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .architecture import (
@@ -17,6 +17,7 @@ from .ast_macros import (
     extract_ast_macros,
 )
 from .compiler import ExternDecl, FunctionDecl, GlyphError, Program, parse_program
+from .contracts import ContractModel, extract_contracts, remap_contract_lines
 from .function_blocks import (
     FunctionBlockLowering,
     lower_function_blocks,
@@ -75,6 +76,7 @@ class ExpandedCompilation:
     blocks: tuple[FunctionBlockLowering, ...]
     lambdas: tuple[LambdaLowering, ...]
     opaques: tuple[OpaqueDecl, ...]
+    contracts: ContractModel = field(default_factory=ContractModel.empty)
 
 
 @dataclass(frozen=True)
@@ -92,6 +94,7 @@ class CompilationModel:
     semantic: SemanticModel
     preprocess: PreprocessResult
     expanded: ExpandedCompilation
+    contracts: ContractModel = field(default_factory=ContractModel.empty)
 
 
 def _inline_effect_lines(source: str) -> set[int]:
@@ -179,7 +182,8 @@ def parse_compilation_model(
 
     try:
         expanded_source = normalize_temporal_sigils(preprocess.source)
-        masked, opaque_seeds = mask_opaque_as_effect(expanded_source)
+        contract_result = extract_contracts(expanded_source)
+        masked, opaque_seeds = mask_opaque_as_effect(contract_result.source)
         without_systems, systems = extract_systems(masked)
         joined = join_pipeline_continuations(without_systems)
         compact = expand_compact_syntax(joined)
@@ -219,6 +223,7 @@ def parse_compilation_model(
         block_result.blocks,
         tuple(combined_lambdas),
         opaques,
+        contract_result.model,
     )
 
     # Public metadata always points to the original `.glyph` file. The expanded copy is
@@ -232,6 +237,7 @@ def parse_compilation_model(
     blocks = remap_source_lines(block_result.blocks, preprocess)
     combined_lambdas = remap_source_lines(tuple(combined_lambdas), preprocess)
     opaques = remap_source_lines(opaques, preprocess)
+    contracts = remap_contract_lines(contract_result.model, preprocess.source_line)
 
     semantic = relabel_semantic_model(
         build_semantic_model(program, machines, ast_macros, specs), opaques
@@ -253,6 +259,7 @@ def parse_compilation_model(
         semantic,
         preprocess,
         expanded,
+        contracts,
     )
 
 
