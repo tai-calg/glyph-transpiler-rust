@@ -61,6 +61,15 @@ def _has_contracts(model: CompilationModel) -> bool:
     return bool(model.contracts.declarations or model.contracts.applications)
 
 
+def _has_capabilities(model: CompilationModel) -> bool:
+    return bool(
+        model.capabilities.resources
+        or model.capabilities.functions
+        or model.capabilities.aggregates
+        or model.capabilities.operations
+    )
+
+
 def build_rust_artifacts(model: CompilationModel) -> RustArtifacts:
     """Generate Rust from an already parsed and validated model."""
 
@@ -104,6 +113,8 @@ def build_design_json(model: CompilationModel) -> str:
     payload["lambdas"] = [asdict(item) for item in model.lambdas]
     payload["architecture"] = model.architecture.to_dict()
     payload["rust_todos"] = [item.to_dict() for item in model.opaques]
+    if _has_capabilities(model):
+        payload["capabilities"] = model.capabilities.to_dict()
     if _has_contracts(model):
         payload["contracts"] = model.contracts.to_dict()
     return json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
@@ -191,6 +202,12 @@ def build_diagram_bundle(
         )
         + "\n",
     }
+    if _has_capabilities(model):
+        files["capability-ir.json"] = json.dumps(
+            model.capabilities.to_dict(),
+            ensure_ascii=False,
+            indent=2,
+        ) + "\n"
     if _has_contracts(model):
         files["contracts-ir.json"] = json.dumps(
             model.contracts.to_dict(),
