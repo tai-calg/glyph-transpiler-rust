@@ -14,6 +14,15 @@ from .compilation import (
     write_diagram_bundle,
 )
 from .compiler import GlyphError
+from .contracts import (
+    ContractApplication,
+    ContractDecl,
+    ContractExtraction,
+    ContractKind,
+    ContractModel,
+    ContractRef,
+    extract_contracts,
+)
 from .frontend import compile_file, compile_source, parse_program
 from .incremental import CompilationSnapshot, IncrementalCompiler, IncrementalResult
 from .mermaid import DiagramBundle
@@ -40,6 +49,12 @@ __all__ = [
     "CompilationOutputs",
     "CompilationPipeline",
     "CompilationSnapshot",
+    "ContractApplication",
+    "ContractDecl",
+    "ContractExtraction",
+    "ContractKind",
+    "ContractModel",
+    "ContractRef",
     "DiagramBundle",
     "GlyphError",
     "GlyphStudio",
@@ -57,7 +72,7 @@ __all__ = [
     "compile_diagram_bundle",
     "compile_file",
     "compile_outputs",
-    "compile_source",
+    "extract_contracts",
     "parse_artifact_model",
     "parse_compilation_model",
     "parse_program",
