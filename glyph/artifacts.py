@@ -20,6 +20,7 @@ from .capabilities import CapabilityModel, extract_capabilities
 from .capability_surface_validate import validate_capability_surface
 from .compiler import ExternDecl, FunctionDecl, GlyphError, Program, parse_program
 from .contracts import ContractModel, extract_contracts, remap_contract_lines
+from .contract_semantics import ContractSemanticModel, build_contract_semantics
 from .function_blocks import (
     FunctionBlockLowering,
     lower_function_blocks,
@@ -80,6 +81,9 @@ class ExpandedCompilation:
     opaques: tuple[OpaqueDecl, ...]
     capabilities: CapabilityModel = field(default_factory=CapabilityModel.empty)
     contracts: ContractModel = field(default_factory=ContractModel.empty)
+    runtime_contracts: ContractSemanticModel = field(
+        default_factory=ContractSemanticModel.empty
+    )
 
 
 @dataclass(frozen=True)
@@ -99,10 +103,12 @@ class CompilationModel:
     expanded: ExpandedCompilation
     capabilities: CapabilityModel = field(default_factory=CapabilityModel.empty)
     contracts: ContractModel = field(default_factory=ContractModel.empty)
+    runtime_contracts: ContractSemanticModel = field(
+        default_factory=ContractSemanticModel.empty
+    )
 
 
 def _inline_effect_lines(source: str) -> set[int]:
-    """Return 1-based line numbers for `!signature=expr` declarations."""
     lines: set[int] = set()
     for line_no, original in enumerate(source.splitlines(), start=1):
         clean = original.split("#", 1)[0].rstrip()
@@ -114,7 +120,6 @@ def _inline_effect_lines(source: str) -> set[int]:
 
 
 def _parse_effect_program(source: str) -> tuple[Program, tuple[FunctionDecl, ...]]:
-    """Parse inline effects as temporary functions, then split them from logic."""
     inline_lines = _inline_effect_lines(source)
     transformed: list[str] = []
     for line_no, original in enumerate(source.splitlines(), start=1):
@@ -216,6 +221,12 @@ def parse_compilation_model(
         validate_function_values(without_opaque_externs(program, opaques))
         validate_temporal_specs(program, specs)
         validate_machines(program, machines)
+        runtime_contracts = build_contract_semantics(
+            expanded_source,
+            contract_result.model,
+            capability_result.model,
+            program,
+        )
     except GlyphError as exc:
         raise preprocess.remap_error(exc) from exc
 
@@ -231,6 +242,7 @@ def parse_compilation_model(
         opaques,
         capability_result.model,
         contract_result.model,
+        runtime_contracts,
     )
 
     program = remap_source_lines(program, preprocess)
@@ -267,6 +279,7 @@ def parse_compilation_model(
         expanded,
         capabilities,
         contracts,
+        runtime_contracts,
     )
 
 
