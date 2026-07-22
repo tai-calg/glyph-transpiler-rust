@@ -70,6 +70,16 @@ def _has_capabilities(model: CompilationModel) -> bool:
     )
 
 
+def _has_runtime_contracts(model: CompilationModel) -> bool:
+    return bool(
+        model.runtime_contracts.worlds
+        or model.runtime_contracts.protocols
+        or model.runtime_contracts.handlers
+        or model.runtime_contracts.laws
+        or model.runtime_contracts.applications
+    )
+
+
 def build_rust_artifacts(model: CompilationModel) -> RustArtifacts:
     """Generate Rust from an already parsed and validated model."""
 
@@ -117,6 +127,8 @@ def build_design_json(model: CompilationModel) -> str:
         payload["capabilities"] = model.capabilities.to_dict()
     if _has_contracts(model):
         payload["contracts"] = model.contracts.to_dict()
+    if _has_runtime_contracts(model):
+        payload["runtime_contracts"] = model.runtime_contracts.to_dict()
     return json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
 
 
@@ -214,6 +226,12 @@ def build_diagram_bundle(
             ensure_ascii=False,
             indent=2,
         ) + "\n"
+    if _has_runtime_contracts(model):
+        files["runtime-contract-ir.json"] = json.dumps(
+            model.runtime_contracts.to_dict(),
+            ensure_ascii=False,
+            indent=2,
+        ) + "\n"
     files["index.md"] = render_index_markdown(
         ir,
         model.architecture,
@@ -229,12 +247,7 @@ def build_diagram_bundle(
 
 
 class CompilationPipeline:
-    """Authoritative source -> model -> Rust/IR/JSON pipeline.
-
-    Compatibility entry points return subsets of these outputs. Studio, watch mode, the
-    CLI, and external integrations use this class so parsing and validation happen exactly
-    once per source digest.
-    """
+    """Authoritative source -> model -> Rust/IR/JSON pipeline."""
 
     def compile_text(
         self,
@@ -256,8 +269,6 @@ def compile_outputs(
     source_name: str = "input.glyph",
     source_href: str | None = None,
 ) -> CompilationOutputs:
-    """Functional entry point for the authoritative compilation pipeline."""
-
     return CompilationPipeline().compile_text(source, source_name, source_href)
 
 
@@ -266,8 +277,6 @@ def compile_diagram_bundle(
     source_name: str = "input.glyph",
     source_href: str | None = None,
 ) -> DiagramBundle:
-    """Compatibility API backed by the authoritative single-pass pipeline."""
-
     return compile_outputs(source, source_name, source_href).diagrams
 
 
@@ -275,8 +284,6 @@ def write_diagram_bundle(
     input_path: str | Path,
     output_dir: str | Path,
 ) -> DiagramBundle:
-    """Compile and write versioned IR/diagram artifacts through one pipeline run."""
-
     input_file = Path(input_path)
     destination = Path(output_dir)
     source = input_file.read_text(encoding="utf-8")
