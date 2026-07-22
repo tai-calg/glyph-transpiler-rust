@@ -103,7 +103,7 @@ class ContractTests(unittest.TestCase):
         self.assertIn("pub fn same", generated)
 
     def test_bare_name_cannot_be_used_as_contract(self) -> None:
-        with self.assertRaisesRegex(GlyphError, "'Name"):
+        with self.assertRaisesRegex(GlyphError, "Contract適用"):
             compile_source(
                 "'@WorkerTask = Worker * App/Task\n"
                 ">double(x:I):I=x*2 @{WorkerTask}\n"
