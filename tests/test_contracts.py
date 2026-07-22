@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import json
 import unittest
 
 from glyph import (
     ContractKind,
     GlyphError,
+    compile_outputs,
     compile_source,
     extract_contracts,
     parse_compilation_model,
@@ -77,6 +79,29 @@ class ContractTests(unittest.TestCase):
         )
 
         self.assertEqual(compile_source(contracted), compile_source(plain))
+
+    def test_plain_source_does_not_change_public_ir_shape(self) -> None:
+        outputs = compile_outputs(">double(x:I):I=x*2\n")
+        design = json.loads(outputs.design_json)
+
+        self.assertNotIn("contracts", design)
+        self.assertNotIn("contracts-ir.json", outputs.diagrams.files)
+
+    def test_contract_source_emits_contract_public_ir(self) -> None:
+        outputs = compile_outputs(
+            "'@WorkerTask = Worker * App/Task\n"
+            "'WorkerJob = {'WorkerTask}\n"
+            ">double(x:I):I=x*2 @{'WorkerJob}\n"
+        )
+        design = json.loads(outputs.design_json)
+        contract_ir = json.loads(outputs.diagrams.files["contracts-ir.json"])
+
+        self.assertEqual(design["contracts"]["schema"], "glyph.contracts")
+        self.assertEqual(contract_ir["version"], 1)
+        self.assertEqual(
+            contract_ir["applications"][0]["refs"][0]["name"],
+            "WorkerJob",
+        )
 
     def test_compilation_model_exposes_remapped_contracts(self) -> None:
         model = parse_compilation_model(
