@@ -1,0 +1,77 @@
+'@MainRequest = Main * App/Request
+'@WorkerRequest = Worker * App/Request
+'@AppWorld = Main * App
+
+'>NormalizeExchange =
+  -> Input >> <- Output
+
+'!Deadline =
+  'std.timeout(2s)
+
+'!RetryPolicy =
+  'std.retry(2,'std.exponential,'std.idempotent)
+  >> 'std.return_error
+
+'?ObservationSafe =
+  @A(!fault >> stopped)
+
+'NormalizeCall = {
+  'WorkerRequest,
+  'NormalizeExchange,
+  'Deadline
+}
+
+'RetryWorker = {
+  'WorkerRequest,
+  'RetryPolicy
+}
+
+'MainOnly = {
+  'MainRequest
+}
+
+'Observed = {
+  'ObservationSafe
+}
+
+resource Buffer[
+  Ready
+ |Done
+]
+
++E=Bad
+
+*Input(value:I)
+*Output(value:I)
+*Service(id:I)
+*Context(id:I)
+
+*Observation(
+  fault:B,
+  stopped:B
+) @{'Observed}
+
+*Cache(
+  observer:link Context @{'AppWorld}
+)
+
+*ProcessError(
+  buffer:own Buffer[Ready],
+  cause:E
+)
+
+>normalize(input:Input):Output=Output(input.value) @{'NormalizeCall}
+
+>run(input:Input):Output=normalize(input) @{'MainOnly}
+
+>publish(owner:own Service):share Service
+  shared := owner as share
+  shared
+
+>remember(observer:link Context):Cache=Cache(observer) @{'WorkerRequest}
+
+>fetch(id:own I):I|E=Ok(id) @{'RetryWorker}
+
+!process(
+  buffer:own Buffer[Ready]
+):own Buffer[Done]|ProcessError @{'WorkerRequest}
