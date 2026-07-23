@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-from .live_image import LiveImage
+from .compiled_live_image import CompiledLiveImage
 from .live_studio_ui import LIVE_STUDIO_HTML
 from .studio import GlyphStudio, StudioSnapshot
 
@@ -17,13 +17,17 @@ class LiveGlyphStudio(GlyphStudio):
 
     def __init__(self, input_path: str | Path):
         super().__init__(input_path)
-        self.live_image = LiveImage()
+        self.live_image = CompiledLiveImage()
 
     def rebuild(self, source: str | None = None) -> StudioSnapshot:
         snapshot = super().rebuild(source)
         if snapshot.status == "ready":
             generated = snapshot.artifacts.get("generated.rs", "")
-            self.live_image.stage(
+            compilation = self.compiler.last_snapshot
+            if compilation is None or compilation.digest != snapshot.digest:
+                raise RuntimeError("Live Studio lost the matching CompilationModel")
+            self.live_image.stage_compilation(
+                compilation.model,
                 snapshot.semantic,
                 source_digest=snapshot.digest,
                 generated_code=generated,
