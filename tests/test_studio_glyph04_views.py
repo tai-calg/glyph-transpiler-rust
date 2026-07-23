@@ -23,7 +23,7 @@ class Glyph04StudioViewTests(unittest.TestCase):
             self.assertFalse(snapshot.glyph04_views["enabled"])
             self.assertEqual(snapshot.glyph04_views["summary"]["resources"], 0)
             self.assertIn("studio-views.json", snapshot.artifacts)
-            self.assertIn("manual.rs", snapshot.artifacts)
+            self.assertNotIn("manual.rs", snapshot.artifacts)
 
     def test_complete_system_projects_all_seven_orthogonal_views(self) -> None:
         source_text = (
@@ -97,7 +97,12 @@ class Glyph04StudioViewTests(unittest.TestCase):
         design = {
             "runtime_contracts": {
                 "worlds": [
-                    {"name": "Worker", "locus": "Worker", "region": ["App", "Task"], "line": 1}
+                    {
+                        "name": "Worker",
+                        "locus": "Worker",
+                        "region": ["App", "Task"],
+                        "line": 1,
+                    }
                 ],
                 "protocols": [],
                 "handlers": [],
