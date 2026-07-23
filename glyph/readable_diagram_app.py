@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from . import diagram_app
+from .direct_io_layout import enhance_direct_io_html
 from .transition_label_layout import enhance_diagram_html
 from .transition_semantics_runtime import enrich_runtime_io_state_views
 from .uml_transition_layout import enhance_uml_transition_html
@@ -19,10 +20,12 @@ def _build_semantic_views(model, execution):
 
 
 def run_diagram_app(input_path: str | Path) -> int:
-    """Run the diagram app with adaptive labels and UML transition semantics."""
+    """Run the diagram app with direct I/O and UML transition semantics."""
 
     diagram_app.build_io_state_views = _build_semantic_views
     diagram_app.DIAGRAM_HTML = enhance_uml_transition_html(
-        enhance_diagram_html(diagram_app.DIAGRAM_HTML)
+        enhance_diagram_html(
+            enhance_direct_io_html(diagram_app.DIAGRAM_HTML)
+        )
     )
     return diagram_app.run_diagram_app(input_path)
