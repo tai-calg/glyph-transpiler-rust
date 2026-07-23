@@ -2,15 +2,48 @@
 name = "glyph-rust"
 version = "0.4.0"
 description = "A compact systems-design DSL with capability, resource, temporal, and kinded runtime contracts"
+readme = "README.md"
+license = { file = "LICENSE" }
 requires-python = ">=3.10"
+keywords = ["dsl", "rust", "systems-design", "live-programming", "gradio"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development :: Code Generators",
+  "Topic :: Software Development :: Compilers",
+]
+
+[project.urls]
+Homepage = "https://github.com/tai-calg/glyph-transpiler-rust"
+Repository = "https://github.com/tai-calg/glyph-transpiler-rust"
+Issues = "https://github.com/tai-calg/glyph-transpiler-rust/issues"
+
+[project.optional-dependencies]
+ui = [
+  "gradio>=6.0,<7",
+  "pandas>=2.0,<3",
+]
+dev = [
+  "build>=1.2,<2",
+]
 
 [project.scripts]
 glyphc = "glyphc:main"
+glyph-ui = "glyph.ui_cli:main"
+glyph-gradio = "glyph.ui_cli:main"
 
 [build-system]
-requires = ["setuptools>=61"]
+requires = ["setuptools>=69"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 packages = ["glyph"]
-py-modules = ["glyphc"]
+py-modules = ["glyphc", "glyph_gradio"]
+
+[tool.setuptools.package-data]
+glyph = ["py.typed"]
