@@ -52,15 +52,22 @@ from .contract_semantics import (
 from .frontend import compile_file, compile_source, parse_program
 from .incremental import CompilationSnapshot, IncrementalCompiler, IncrementalResult
 from .mermaid import DiagramBundle
-from .preprocessor import (
-    PreprocessResult,
-    RawMacroDef,
-    preprocess_source as _preprocess_source,
+from .preprocessor import PreprocessResult, RawMacroDef, preprocess_source as _preprocess_source
+from .resource_flow import (
+    ResourceEndpoint,
+    ResourceFlowModel,
+    ResourceTransition,
+    build_resource_flow,
 )
 from .semantic import SemanticModel
 from .studio import GlyphStudio, StudioSnapshot, run_studio
 from .symbols import SymbolId, SymbolRecord
 from .temporal_sigils import reject_reserved_temporal_macro_names
+from .verification import (
+    VerificationItem,
+    VerificationReport,
+    build_verification_report,
+)
 
 
 def preprocess_source(source: str) -> PreprocessResult:
@@ -105,13 +112,20 @@ __all__ = [
     "ProtocolNode",
     "RawMacroDef",
     "ResourceDecl",
+    "ResourceEndpoint",
+    "ResourceFlowModel",
+    "ResourceTransition",
     "RustArtifacts",
     "SemanticModel",
     "StudioSnapshot",
     "SymbolId",
     "SymbolRecord",
+    "VerificationItem",
+    "VerificationReport",
     "WorldContract",
     "build_contract_semantics",
+    "build_resource_flow",
+    "build_verification_report",
     "compile_artifact_files",
     "compile_artifacts",
     "compile_diagram_bundle",
