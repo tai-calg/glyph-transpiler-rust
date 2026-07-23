@@ -110,7 +110,7 @@ function renderTypes(types){if(!types.length)return '';return `<section class="t
 function renderIo(){const io=snapshot?.views?.io||{},systems=io.systems||[];systemIndex=Math.min(systemIndex,Math.max(0,systems.length-1));const selected=systems[systemIndex];view.innerHTML=`<div class="view-controls"><div><h2>I/O topology</h2><div class="note">system宣言を優先し、未宣言時はコンパイラの呼出しグラフを表示する。</div></div>${systems.length?`<select id="system-select">${systems.map((s,i)=>`<option value="${i}" ${i===systemIndex?'selected':''}>${esc(s.name)}</option>`).join('')}</select>`:''}</div>${selected?renderIoGraph(selected):'<div class="empty">I/O宣言がない。</div>'}${renderTypes(io.types||[])}`;const select=document.getElementById('system-select');if(select)select.onchange=e=>{systemIndex=Number(e.target.value);renderIo()};bindJumps()}
 function statePositions(machine){
   const states=[...(machine.states||[])];
-  const width=Math.max(780,states.length*220),height=Math.max(460,states.length>4?650:520),cx=width/2,cy=height/2,r=Math.min(width*.34,210+states.length*18),pos=new Map();
+  const width=Math.max(780,states.length*220),height=Math.max(460,states.length>4?650:520),cx=width/2,topMargin=105,bottomMargin=70,r=Math.min(width*.30,(height-topMargin-bottomMargin)/2),cy=topMargin+r,pos=new Map();
   states.forEach((state,index)=>{const angle=-Math.PI/2+index*2*Math.PI/Math.max(1,states.length);pos.set(state.name,{x:cx+Math.cos(angle)*r-82,y:cy+Math.sin(angle)*r-40,state})});
   return {states,pos,width,height}
 }
