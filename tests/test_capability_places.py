@@ -13,7 +13,7 @@ class CapabilityPlaceTests(unittest.TestCase):
             "!dispose(buffer:own Buffer[Ready]):U\n"
             ">take(pair:own Pair):own Buffer[Ready]\n"
             "  left := pair.left\n"
-            "  dispose(pair.right)\n"
+            "  disposed := dispose(pair.right)\n"
             "  left\n"
         )
 
