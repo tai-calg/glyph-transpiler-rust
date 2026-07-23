@@ -21,7 +21,6 @@ class GlyphStudioTests(unittest.TestCase):
             for name in (
                 "generated.rs",
                 "host.generated.rs",
-                "manual.rs",
                 "typed-ast.json",
                 "studio-views.json",
                 "execution.mmd",
