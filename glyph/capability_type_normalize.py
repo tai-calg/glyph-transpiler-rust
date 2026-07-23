@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from .capabilities import (
     AggregateType,
     CapabilityFunction,
@@ -16,6 +18,14 @@ _SHORTCUTS = {
     "I": "i32",
     "B": "bool",
 }
+_SHORTCUT_TOKEN = re.compile(r"\b(?:F|D|U|I|B)\b")
+
+
+def _raw(text: str) -> str:
+    return _SHORTCUT_TOKEN.sub(
+        lambda match: _SHORTCUTS[match.group(0)],
+        text,
+    )
 
 
 def _type(ty: CapabilityType) -> CapabilityType:
@@ -24,7 +34,7 @@ def _type(ty: CapabilityType) -> CapabilityType:
         _SHORTCUTS.get(ty.name, ty.name),
         tuple(_type(arg) for arg in ty.args),
         ty.state,
-        _SHORTCUTS.get(ty.raw, ty.raw),
+        _raw(ty.raw),
     )
 
 
