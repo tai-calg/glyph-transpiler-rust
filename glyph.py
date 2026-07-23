@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One-command Glyph Studio launcher."""
+"""One-command Glyph I/O and state-diagram launcher."""
 
 from __future__ import annotations
 
@@ -8,15 +8,13 @@ import sys
 from pathlib import Path
 
 from glyph import GlyphError
-import glyph.studio as studio_base
-from glyph.studio_manual import run_project_studio
-from glyph.studio_ui import STUDIO_HTML
+from glyph.diagram_app import run_diagram_app
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="glyph",
-        description="1つのGlyphファイルを編集・検査・可視化・Rust生成するStudioを起動する",
+        description="Glyphコードを編集・コンパイルし、I/O図と状態遷移図を表示する",
     )
     parser.add_argument("input", type=Path, help="開く .glyph ファイル")
     return parser
@@ -29,8 +27,7 @@ def main(argv: list[str] | None = None) -> int:
             raise GlyphError("入力ファイルの拡張子は .glyph にする")
         if not args.input.is_file():
             raise GlyphError(f"Glyphファイルが存在しない: {args.input}")
-        studio_base.STUDIO_HTML = STUDIO_HTML
-        return run_project_studio(args.input)
+        return run_diagram_app(args.input)
     except (OSError, GlyphError) as exc:
         print(f"glyph: error: {exc}", file=sys.stderr)
         return 1
