@@ -29,7 +29,11 @@ jobs:
         run: python3 scripts/refactor_header_docs_once.py
 
       - name: Run Python tests
-        run: python3 -m unittest discover -s tests
+        run: |
+          if ! python3 -m unittest discover -s tests -q > /tmp/glyph-tests.log 2>&1; then
+            cat /tmp/glyph-tests.log
+            exit 1
+          fi
 
       - name: Check representative header-first sources
         run: |
