@@ -65,6 +65,27 @@ machine Motor(state:MotorState,input:Input)
 """
 
 
+EXPLICIT_STATE_SOURCE = """\
+machine Controller(state:State,input:Input)
+  select=state.mode
+  init=State(Idle)
+  next=step(state,input)
+  success=Idle
+  failure=Faulted
+
++Mode=Idle|Running|Faulted
+*State(mode:Mode)
+*Input(start:B,stop:B,fault:B)
+
+>step(state:State,input:Input):State
+  state.mode==Idle&input.start >> State(Running)
+  state.mode==Running&input.stop >> State(Idle)
+  input.fault >> State(Faulted)
+  state.mode==Faulted >> State(Faulted)
+  _ >> state
+"""
+
+
 class IoStateViewsTests(unittest.TestCase):
     def compile_views(self, source: str) -> dict[str, object]:
         output = CompilationPipeline().compile_text(source, source_name="test.glyph")
@@ -73,6 +94,7 @@ class IoStateViewsTests(unittest.TestCase):
     def test_declared_system_projects_typed_component_ports(self) -> None:
         views = self.compile_views(MOTOR_SOURCE)
         self.assertEqual(views["schema"], "glyph.io-state-views")
+        self.assertEqual(views["version"], 2)
         systems = views["io"]["systems"]
         motor = next(item for item in systems if item["name"] == "MotorSafety")
         nodes = {item["name"]: item for item in motor["nodes"]}
@@ -88,23 +110,81 @@ class IoStateViewsTests(unittest.TestCase):
         self.assertEqual(nodes["write_motor"]["output"], "Receipt")
         self.assertEqual(len(motor["edges"]), 3)
 
-    def test_machine_view_is_derived_from_compiler_state_ir(self) -> None:
+    def test_machine_normalization_expands_wildcards_and_reports_dead_logic(self) -> None:
         views = self.compile_views(MOTOR_SOURCE)
         machines = views["state"]["machines"]
         self.assertEqual(len(machines), 1)
         machine = machines[0]
         self.assertEqual(machine["name"], "Motor")
-        self.assertEqual(machine["state_type"], "MotorState")
-        self.assertEqual(machine["selector"], "state.mode")
         self.assertEqual(machine["initial_state"], "Stopped")
-        self.assertEqual(machine["success_state"], "Stopped")
-        self.assertEqual(machine["failure_state"], "Faulted")
         self.assertEqual(
             {state["name"] for state in machine["states"]},
             {"Stopped", "Running", "Faulted"},
         )
-        targets = {transition["target_state"] for transition in machine["transitions"]}
-        self.assertTrue({"Stopped", "Running", "Faulted"}.issubset(targets))
+
+        transitions = machine["transitions"]
+        self.assertEqual(len(transitions), 6)
+        self.assertFalse(
+            any(
+                transition["source_state"] == "*"
+                or transition["target_state"] == "*"
+                for transition in transitions
+            )
+        )
+        self.assertEqual(
+            {
+                (transition["source_state"], transition["target_state"])
+                for transition in transitions
+            },
+            {
+                ("Stopped", "Stopped"),
+                ("Stopped", "Running"),
+                ("Running", "Stopped"),
+                ("Running", "Running"),
+                ("Faulted", "Stopped"),
+                ("Faulted", "Running"),
+            },
+        )
+        self.assertEqual(machine["unreachable_states"], ["Faulted"])
+        state_by_name = {state["name"]: state for state in machine["states"]}
+        self.assertTrue(state_by_name["Stopped"]["reachable"])
+        self.assertTrue(state_by_name["Running"]["reachable"])
+        self.assertFalse(state_by_name["Faulted"]["reachable"])
+        codes = {item["code"] for item in machine["diagnostics"]}
+        self.assertEqual(
+            codes,
+            {
+                "unreachable-branch",
+                "unreachable-state",
+                "state-independent-transition",
+            },
+        )
+        self.assertEqual(machine["analysis"]["raw_transition_count"], 3)
+        self.assertEqual(machine["analysis"]["normalized_transition_count"], 6)
+        self.assertEqual(machine["analysis"]["reachable_state_count"], 2)
+
+    def test_explicit_state_conditions_remain_concrete(self) -> None:
+        views = self.compile_views(EXPLICIT_STATE_SOURCE)
+        machine = views["state"]["machines"][0]
+        self.assertFalse(
+            any(
+                transition["source_state"] == "*"
+                or transition["target_state"] == "*"
+                for transition in machine["transitions"]
+            )
+        )
+        self.assertIn(
+            ("Idle", "Running"),
+            {
+                (transition["source_state"], transition["target_state"])
+                for transition in machine["transitions"]
+            },
+        )
+        self.assertEqual(machine["unreachable_states"], [])
+        self.assertNotIn(
+            "state-independent-transition",
+            {item["code"] for item in machine["diagnostics"]},
+        )
 
     def test_source_without_system_uses_generic_call_graph(self) -> None:
         views = self.compile_views(
@@ -143,9 +223,11 @@ class GlyphDiagramAppTests(unittest.TestCase):
 
             self.assertEqual(snapshot.status, "ready")
             self.assertEqual(snapshot.views["summary"]["machines"], 1)
+            self.assertEqual(snapshot.views["summary"]["state_warnings"], 3)
             self.assertTrue(app.output_path.is_file())
             saved = json.loads(app.output_path.read_text(encoding="utf-8"))
             self.assertEqual(saved["schema"], "glyph.io-state-views")
+            self.assertEqual(saved["version"], 2)
 
     def test_http_state_serves_compiler_derived_views(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -162,23 +244,29 @@ class GlyphDiagramAppTests(unittest.TestCase):
                     state = json.loads(response.read().decode("utf-8"))
                 self.assertEqual(state["status"], "ready")
                 self.assertEqual(state["views"]["schema"], "glyph.io-state-views")
+                self.assertEqual(state["views"]["version"], 2)
             finally:
                 server.shutdown()
                 server.server_close()
                 thread.join(timeout=1.0)
 
-    def test_frontend_contains_only_io_and_state_primary_views(self) -> None:
+    def test_frontend_renders_only_concrete_states_and_static_diagnostics(self) -> None:
         for marker in (
             "Glyph Diagram",
             "I/O topology",
             "State transitions",
             "renderIoGraph",
             "renderStateGraph",
+            "renderMachineDiagnostics",
+            "unreachable state",
+            "ワイルドカードは実状態へ展開",
             "/api/preview",
             "/api/save",
             "machine宣言がないため、状態遷移は推測しない",
         ):
             self.assertIn(marker, DIAGRAM_HTML)
+        self.assertNotIn("Any state", DIAGRAM_HTML)
+        self.assertNotIn("needsAny", DIAGRAM_HTML)
         self.assertNotIn("gradio", DIAGRAM_HTML.lower())
 
     @unittest.skipUnless(shutil.which("node"), "Node.js is not installed")
