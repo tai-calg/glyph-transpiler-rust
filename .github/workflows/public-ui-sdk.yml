@@ -1,0 +1,136 @@
+name: Public UI SDK
+
+on:
+  pull_request:
+    branches: [main, feature/gradio-live-host, feature/gradio-ui-ir]
+    paths:
+      - "glyph/ui.py"
+      - "glyph/ui_ir.py"
+      - "glyph/ui_schema.py"
+      - "glyph/ui_backends.py"
+      - "glyph/ui_cli.py"
+      - "glyph/gradio_backend.py"
+      - "glyph/gradio_renderer.py"
+      - "glyph/py.typed"
+      - "glyph/__init__.py"
+      - "glyph_gradio.py"
+      - "pyproject.toml"
+      - "requirements-gradio.txt"
+      - "tests/test_public_ui_api.py"
+      - "tests/test_ui_ir.py"
+      - "tests/test_gradio_auto_renderer.py"
+      - ".github/workflows/public-ui-sdk.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  core-contract:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Run public API and UI IR tests without optional UI dependencies
+        run: |
+          python3 -m unittest discover -s tests -p 'test_public_ui_api.py' -v
+          python3 -m unittest discover -s tests -p 'test_ui_ir.py' -v
+      - name: Verify core import remains optional-dependency free
+        run: |
+          python3 - <<'PY'
+          import sys
+          import glyph
+          from glyph.ui import UI_API_VERSION
+          assert "gradio" not in sys.modules
+          assert "pandas" not in sys.modules
+          print(UI_API_VERSION)
+          PY
+
+  package-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build distributions
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install "build>=1.2,<2" "twine>=5,<7"
+          python3 -m build
+          python3 -m twine check dist/*
+      - name: Install core wheel into a clean environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          wheel="$(find dist -maxdepth 1 -name '*.whl' -print -quit)"
+          python3 -m venv /tmp/glyph-core
+          /tmp/glyph-core/bin/python -m pip install --upgrade pip
+          /tmp/glyph-core/bin/python -m pip install "$wheel"
+          /tmp/glyph-core/bin/glyph-ui --list-backends | grep -q '^gradio$'
+          /tmp/glyph-core/bin/glyph-gradio --help >/dev/null
+          cat >/tmp/public-ui.glyph <<'GLYPH'
+          *Input(name:S,enabled:B)
+          *View(name:S,enabled:B)
+          >render(input:Input):View=View(input.name,input.enabled)
+          GLYPH
+          /tmp/glyph-core/bin/glyph-ui /tmp/public-ui.glyph --check \
+            --ui-ir-output /tmp/public-ui.json
+          grep -q '"schema": "glyph.ui-ir"' /tmp/public-ui.json
+          /tmp/glyph-core/bin/python - <<'PY'
+          import importlib.resources
+          import sys
+          import glyph
+          from glyph.ui import UI_API_VERSION
+          marker = importlib.resources.files("glyph").joinpath("py.typed")
+          assert marker.is_file()
+          assert "gradio" not in sys.modules
+          assert "pandas" not in sys.modules
+          print(UI_API_VERSION)
+          PY
+      - name: Install wheel with UI extra and build a Gradio graph
+        shell: bash
+        run: |
+          set -euo pipefail
+          wheel="$(find dist -maxdepth 1 -name '*.whl' -print -quit)"
+          python3 -m venv /tmp/glyph-ui
+          /tmp/glyph-ui/bin/python -m pip install --upgrade pip
+          /tmp/glyph-ui/bin/python -m pip install "${wheel}[ui]"
+          /tmp/glyph-ui/bin/python - <<'PY'
+          from pathlib import Path
+          from glyph.ui import open_ui
+          source = Path("/tmp/public-ui.glyph")
+          with open_ui(source) as project:
+              demo = project.build("gradio")
+              assert demo is not None
+              assert project.application.action.name == "render"
+          print("installed-wheel Gradio graph ok")
+          PY
+
+  gradio-backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install checkout with UI extra
+        run: python3 -m pip install -e '.[ui]'
+      - name: Run built-in and generic Gradio tests
+        run: |
+          python3 -m unittest discover -s tests -p 'test_public_ui_api.py' -v
+          python3 -m unittest discover -s tests -p 'test_gradio_auto_renderer.py' -v
+      - name: Verify public CLI entrypoints
+        run: |
+          glyph-ui --help >/dev/null
+          glyph-gradio --help >/dev/null
+          glyph-ui examples/gradio_profile.glyph --check \
+            --ui-ir-output build/profile-ui-ir.json
+          grep -q '"schema": "glyph.ui-ir"' build/profile-ui-ir.json
