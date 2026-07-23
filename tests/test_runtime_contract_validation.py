@@ -14,7 +14,6 @@ class RuntimeContractValidationTests(unittest.TestCase):
             "  worker:share Worker\n"
             ")\n"
         )
-
         application = model.runtime_contracts.applications[0]
         self.assertEqual(application.target, "App.state")
         self.assertEqual(application.target_kind, "field")
@@ -37,7 +36,7 @@ class RuntimeContractValidationTests(unittest.TestCase):
                 "'Use = {'Bad}\n"
                 "+E=Bad\n"
                 "*RunError(tx:own Tx[Open],cause:E)\n"
-                ">run(tx:own Tx[Open]):I|RunError=Err(RunError(tx,Bad)) @{'Use}\n"
+                "!run(tx:own Tx[Open]):I|RunError @{'Use}\n"
             )
 
     def test_retry_count_must_be_positive(self) -> None:
