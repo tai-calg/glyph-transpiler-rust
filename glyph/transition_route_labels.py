@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 
-_MARKER = "glyph-transition-route-labels-v1"
+_MARKER = "glyph-transition-input-action-labels-v2"
 
 
 _STYLE = r"""
-<style id="glyph-transition-route-labels-v1-style">
-.edge-label.transition-label.compact.route-label{
+<style id="glyph-transition-input-action-labels-v2-style">
+.edge-label.transition-label.compact.input-action-label{
   min-width:0;
-  max-width:180px;
+  max-width:260px;
   border-radius:7px;
   padding:3px 7px;
   white-space:normal;
@@ -16,9 +16,9 @@ _STYLE = r"""
   letter-spacing:0;
   font-weight:750;
 }
-.transition-detail-id.route-label{
+.transition-detail-id.input-action-label{
   width:max-content;
-  max-width:190px;
+  max-width:270px;
   padding:3px 7px;
   border-radius:7px;
   overflow-wrap:anywhere;
@@ -29,9 +29,9 @@ _STYLE = r"""
 
 
 _SCRIPT = r"""
-<script id="glyph-transition-route-labels-v1-script">
+<script id="glyph-transition-input-action-labels-v2-script">
 (() => {
-  const MARKER = "glyph-transition-route-labels-v1";
+  const MARKER = "glyph-transition-input-action-labels-v2";
   let running = false;
   let timer = null;
 
@@ -47,8 +47,27 @@ _SCRIPT = r"""
     return selectedMachine(await response.json());
   }
 
-  function routeOf(transition) {
-    return `${transition?.source_state ?? "?"}→${transition?.target_state ?? "?"}`;
+  function text(value) {
+    return String(value ?? "").trim();
+  }
+
+  function inputOf(transition) {
+    const event = text(transition?.event);
+    const guard = text(transition?.guard);
+    if (event && guard) return `${event} [${guard}]`;
+    if (event) return event;
+    if (guard) return `[${guard}]`;
+
+    const raw = text(transition?.condition_raw ?? transition?.condition);
+    return raw || "otherwise";
+  }
+
+  function actionOf(transition) {
+    return text(transition?.action) || "—";
+  }
+
+  function inputActionOf(transition) {
+    return `${inputOf(transition)}→${actionOf(transition)}`;
   }
 
   function signatureOf(machine) {
@@ -57,12 +76,15 @@ _SCRIPT = r"""
       ...(machine?.transitions || []).map(transition => [
         transition.source_state,
         transition.target_state,
-        transition.display_label ?? transition.condition ?? "",
+        transition.event ?? "",
+        transition.guard ?? "",
+        transition.action ?? "",
+        transition.condition_raw ?? transition.condition ?? "",
       ].join("\u001f")),
     ].join("\u001e");
   }
 
-  async function applyRouteLabels() {
+  async function applyInputActionLabels() {
     if (running) return;
     const stage = document.querySelector(".state-node")?.closest(".graph-stage");
     if (!stage || stage.dataset.labelLayoutReady !== "true") return;
@@ -71,30 +93,30 @@ _SCRIPT = r"""
       const machine = await readMachine();
       if (!machine) return;
       const signature = signatureOf(machine);
-      if (stage.dataset.transitionRouteLabels === signature) return;
-      stage.dataset.transitionRouteLabels = signature;
+      if (stage.dataset.transitionInputActionLabels === signature) return;
+      stage.dataset.transitionInputActionLabels = signature;
 
       (machine.transitions || []).forEach((transition, index) => {
         const internalId = `T${index + 1}`;
-        const route = routeOf(transition);
+        const summary = inputActionOf(transition);
         const label = stage.querySelector(`.transition-label[data-transition-id="${internalId}"]`);
         if (label?.classList.contains("compact")) {
-          label.textContent = route;
-          label.classList.add("route-label");
-          label.dataset.routeLabel = route;
+          label.textContent = summary;
+          label.classList.add("input-action-label");
+          label.dataset.inputActionLabel = summary;
         }
         const detailId = document.querySelector(
           `.transition-detail[data-transition-id="${internalId}"] .transition-detail-id`,
         );
         if (detailId) {
-          detailId.textContent = route;
-          detailId.classList.add("route-label");
-          detailId.dataset.routeLabel = route;
+          detailId.textContent = summary;
+          detailId.classList.add("input-action-label");
+          detailId.dataset.inputActionLabel = summary;
         }
       });
 
-      stage.dataset.transitionRouteLabelsReady = "true";
-      document.dispatchEvent(new CustomEvent("glyph-transition-route-labels-ready", {
+      stage.dataset.transitionInputActionLabelsReady = "true";
+      document.dispatchEvent(new CustomEvent("glyph-transition-input-action-labels-ready", {
         detail: {machine: machine.name, marker: MARKER},
       }));
     } finally {
@@ -104,7 +126,7 @@ _SCRIPT = r"""
 
   function schedule() {
     clearTimeout(timer);
-    timer = setTimeout(() => applyRouteLabels().catch(() => {}), 0);
+    timer = setTimeout(() => applyInputActionLabels().catch(() => {}), 0);
   }
 
   document.addEventListener("glyph-transition-layout-ready", schedule);
@@ -121,11 +143,12 @@ _SCRIPT = r"""
 
 
 def enhance_transition_route_html(html: str) -> str:
-    """Replace visible compact T identifiers with source→target routes.
+    """Replace compact internal T identifiers with `input→action` summaries.
 
     T identifiers remain internal correlation keys for hover/focus behavior. Short
-    event/guard/action labels remain unchanged; only labels that were compacted by
-    the collision-avoidance layer are replaced visually.
+    UML `event [guard] / action` labels remain unchanged. Only labels compacted by
+    the collision-avoidance layer are replaced visually, while full semantics stay
+    available in the transition details table.
     """
 
     if _MARKER in html:
