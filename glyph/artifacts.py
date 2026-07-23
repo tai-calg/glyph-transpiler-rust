@@ -3,58 +3,26 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .architecture import (
-    ArchitectureIR,
-    SystemDecl,
-    build_architecture_ir,
-    extract_systems,
-)
-from .ast_macros import (
-    AstMacroDef,
-    expand_function_macros,
-    expand_machine_macros,
-    expand_program_macros,
-    extract_ast_macros,
-)
+from .architecture import ArchitectureIR, SystemDecl, build_architecture_ir, extract_systems
+from .ast_macros import AstMacroDef, expand_function_macros, expand_machine_macros, expand_program_macros, extract_ast_macros
 from .capabilities import CapabilityModel, extract_capabilities
 from .capability_surface_validate import validate_capability_surface
+from .capability_type_normalize import normalize_capability_types
 from .compiler import ExternDecl, FunctionDecl, GlyphError, Program, parse_program
 from .contracts import ContractModel, extract_contracts, remap_contract_lines
 from .contract_semantics import ContractSemanticModel, build_contract_semantics
 from .contract_type_normalize import normalize_contract_types
-from .function_blocks import (
-    FunctionBlockLowering,
-    lower_function_blocks,
-    restore_block_source_lines,
-)
+from .function_blocks import FunctionBlockLowering, lower_function_blocks, restore_block_source_lines
 from .functional import FunctionalPatternRustGenerator, validate_function_values
 from .machine import MachineDecl, extract_machines, validate_machines
-from .opaque import (
-    OpaqueAwareRustGenerator,
-    OpaqueDecl,
-    expose_opaque_as_pure,
-    generate_manual_scaffold,
-    lower_opaque_to_extern,
-    mask_opaque_as_effect,
-    relabel_architecture,
-    relabel_semantic_model,
-    without_opaque_externs,
-)
-from .pipeline import (
-    LambdaLowering,
-    join_pipeline_continuations,
-    lower_lambda_pipelines,
-    restore_lambda_source_lines,
-)
+from .opaque import OpaqueAwareRustGenerator, OpaqueDecl, expose_opaque_as_pure, generate_manual_scaffold, lower_opaque_to_extern, mask_opaque_as_effect, relabel_architecture, relabel_semantic_model, without_opaque_externs
+from .pipeline import LambdaLowering, join_pipeline_continuations, lower_lambda_pipelines, restore_lambda_source_lines
 from .preprocessor import PreprocessResult, preprocess_source, remap_source_lines
 from .semantic import SemanticModel, build_semantic_model
 from .syntax import expand_compact_syntax
 from .temporal import SpecDecl, extract_specs
 from .temporal_codegen import append_temporal_rust
-from .temporal_sigils import (
-    normalize_temporal_sigils,
-    reject_reserved_temporal_macro_names,
-)
+from .temporal_sigils import normalize_temporal_sigils, reject_reserved_temporal_macro_names
 from .temporal_stream_codegen import append_streaming_temporal_rust
 from .temporal_stream_safety_codegen import append_safety_streaming_temporal_rust
 from .temporal_validate import validate_temporal_specs
@@ -69,8 +37,6 @@ class RustArtifacts:
 
 @dataclass(frozen=True)
 class ExpandedCompilation:
-    """Compiler-internal model whose lines refer to `preprocess.source`."""
-
     program: Program
     inline_effects: tuple[FunctionDecl, ...]
     specs: tuple[SpecDecl, ...]
@@ -106,47 +72,46 @@ class CompilationModel:
 
 
 def _inline_effect_lines(source: str) -> set[int]:
-    lines: set[int] = set()
-    for line_no, original in enumerate(source.splitlines(), start=1):
-        clean = original.split("#", 1)[0].rstrip()
-        if not clean or clean[0].isspace() or not clean.startswith("!"):
-            continue
-        if "=" in clean:
-            lines.add(line_no)
-    return lines
+    return {
+        line_no
+        for line_no, original in enumerate(source.splitlines(), start=1)
+        if (clean := original.split("#", 1)[0].rstrip())
+        and not clean[0].isspace()
+        and clean.startswith("!")
+        and "=" in clean
+    }
 
 
 def _parse_effect_program(source: str) -> tuple[Program, tuple[FunctionDecl, ...]]:
     inline_lines = _inline_effect_lines(source)
-    transformed: list[str] = []
+    transformed = []
     for line_no, original in enumerate(source.splitlines(), start=1):
         if line_no in inline_lines:
             bang = original.index("!")
             original = original[:bang] + ">" + original[bang + 1 :]
         transformed.append(original)
-
     parsed = parse_program("\n".join(transformed))
     effects: list[FunctionDecl] = []
-    logic_declarations = []
+    logic = []
     for decl in parsed.declarations:
         if isinstance(decl, FunctionDecl) and decl.line in inline_lines:
             effects.append(decl)
-            logic_declarations.append(ExternDecl(decl.name, decl.params, decl.return_type, decl.line))
+            logic.append(ExternDecl(decl.name, decl.params, decl.return_type, decl.line))
         else:
-            logic_declarations.append(decl)
-    return Program(tuple(logic_declarations)), tuple(effects)
+            logic.append(decl)
+    return Program(tuple(logic)), tuple(effects)
 
 
 def _generate_host(program: Program, inline_effects: tuple[FunctionDecl, ...], opaques: tuple[OpaqueDecl, ...]) -> str:
     generator = FunctionalPatternRustGenerator(program)
     inline_by_name = {decl.name: decl for decl in inline_effects}
     opaque_names = {decl.name for decl in opaques}
-    externs = [decl for decl in program.declarations if isinstance(decl, ExternDecl) and decl.name not in opaque_names]
     out = ["// @generated by glyphc. Do not edit by hand.", "use crate::generated::*;", ""]
-    for decl in externs:
-        signature = generator._signature_tail(decl.params, decl.return_type)
+    for decl in program.declarations:
+        if not isinstance(decl, ExternDecl) or decl.name in opaque_names:
+            continue
         out.append("#[allow(unused_variables)]")
-        out.append(f"pub fn {decl.name}{signature} {{")
+        out.append(f"pub fn {decl.name}{generator._signature_tail(decl.params, decl.return_type)} {{")
         implementation = inline_by_name.get(decl.name)
         if implementation is None:
             out.append(f'    panic!("Glyph effect boundary `{decl.name}` is not connected")')
@@ -159,7 +124,6 @@ def _generate_host(program: Program, inline_effects: tuple[FunctionDecl, ...], o
 
 
 def parse_compilation_model(source: str, source_name: str = "input.glyph") -> CompilationModel:
-    """Preprocess, parse, lower, validate, and build one shared design model."""
     reject_reserved_temporal_macro_names(source)
     preprocess = preprocess_source(source)
     try:
@@ -168,6 +132,7 @@ def parse_compilation_model(source: str, source_name: str = "input.glyph") -> Co
         canonical_contracts = normalize_contract_types(contract_result.model)
         validate_capability_surface(contract_result.source)
         capability_result = extract_capabilities(contract_result.source)
+        canonical_capabilities = normalize_capability_types(capability_result.model)
         masked, opaque_seeds = mask_opaque_as_effect(capability_result.source)
         without_systems, systems = extract_systems(masked)
         joined = join_pipeline_continuations(without_systems)
@@ -180,8 +145,7 @@ def parse_compilation_model(source: str, source_name: str = "input.glyph") -> Co
         without_specs, specs = extract_specs(parser_source)
         core, machines = extract_machines(without_specs)
         program, inline_effects = _parse_effect_program(core)
-        program = expand_program_macros(program, ast_macros)
-        program = restore_block_source_lines(program, block_result.blocks)
+        program = restore_block_source_lines(expand_program_macros(program, ast_macros), block_result.blocks)
         combined_lambdas = (*block_result.lambdas, *pipeline_result.lambdas)
         program = restore_lambda_source_lines(program, combined_lambdas)
         inline_effects = expand_function_macros(inline_effects, ast_macros)
@@ -189,7 +153,7 @@ def parse_compilation_model(source: str, source_name: str = "input.glyph") -> Co
         validate_function_values(without_opaque_externs(program, opaques))
         validate_temporal_specs(program, specs)
         validate_machines(program, machines)
-        runtime_contracts = build_contract_semantics(expanded_source, canonical_contracts, capability_result.model, program)
+        runtime_contracts = build_contract_semantics(expanded_source, canonical_contracts, canonical_capabilities, program)
     except GlyphError as exc:
         raise preprocess.remap_error(exc) from exc
 
@@ -204,10 +168,9 @@ def parse_compilation_model(source: str, source_name: str = "input.glyph") -> Co
     combined_lambdas = remap_source_lines(tuple(combined_lambdas), preprocess)
     opaques = remap_source_lines(opaques, preprocess)
     contracts = remap_contract_lines(contract_result.model, preprocess.source_line)
-    capabilities = capability_result.model
     semantic = relabel_semantic_model(build_semantic_model(program, machines, ast_macros, specs), opaques)
     architecture = relabel_architecture(build_architecture_ir(source_name, program, systems), opaques)
-    return CompilationModel(program, inline_effects, specs, machines, systems, architecture, ast_macros, blocks, tuple(combined_lambdas), opaques, semantic, preprocess, expanded, capabilities, contracts, runtime_contracts)
+    return CompilationModel(program, inline_effects, specs, machines, systems, architecture, ast_macros, blocks, tuple(combined_lambdas), opaques, semantic, preprocess, expanded, capability_result.model, contracts, runtime_contracts)
 
 
 def parse_artifact_model(source: str) -> tuple[Program, tuple[FunctionDecl, ...], tuple[SpecDecl, ...], tuple[MachineDecl, ...]]:
@@ -220,12 +183,11 @@ def compile_artifacts(source: str) -> RustArtifacts:
     logic = append_temporal_rust(OpaqueAwareRustGenerator(model.program, model.opaques, model.blocks).generate(), model.program, model.specs)
     logic = append_streaming_temporal_rust(logic, model.program, model.specs)
     logic = append_safety_streaming_temporal_rust(logic, model.program, model.specs)
-    return RustArtifacts(logic=logic, host=_generate_host(model.program, model.inline_effects, model.opaques), manual_scaffold=generate_manual_scaffold(model.program, model.opaques))
+    return RustArtifacts(logic, _generate_host(model.program, model.inline_effects, model.opaques), generate_manual_scaffold(model.program, model.opaques))
 
 
 def compile_artifact_files(input_path: str | Path, logic_output_path: str | Path, host_output_path: str | Path) -> None:
-    source = Path(input_path).read_text(encoding="utf-8")
-    artifacts = compile_artifacts(source)
+    artifacts = compile_artifacts(Path(input_path).read_text(encoding="utf-8"))
     logic_output = Path(logic_output_path)
     logic_output.parent.mkdir(parents=True, exist_ok=True)
     logic_output.write_text(artifacts.logic, encoding="utf-8")
