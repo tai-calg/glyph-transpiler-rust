@@ -10,6 +10,7 @@ on:
       - "glyph/readable_diagram_app.py"
       - "glyph/transition_label_layout.py"
       - "glyph/transition_semantics.py"
+      - "glyph/transition_semantics_runtime.py"
       - "glyph/uml_transition_layout.py"
       - "glyph/io_state_views.py"
       - "glyph/state_machine_analysis.py"
