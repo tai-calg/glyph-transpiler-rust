@@ -6,7 +6,7 @@ import unittest
 
 from glyph import compile_outputs
 from glyph.compliance import REQUIREMENTS, build_compliance_report
-from glyph.schema import GLYPH04_PUBLIC_SCHEMAS
+from glyph.schema import GLYPH04_PUBLIC_SCHEMAS, GLYPH04_PUBLIC_SCHEMA_KEYS
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -33,48 +33,17 @@ class Glyph04ComplianceTests(unittest.TestCase):
             encoding="utf-8"
         )
         outputs = compile_outputs(source, "glyph04_system.glyph")
-        expected_keys = {
-            "capability-ir.json": {
-                "schema",
-                "version",
-                "resources",
-                "functions",
-                "aggregates",
-                "operations",
-            },
-            "resource-flow-ir.json": {"schema", "version", "transitions"},
-            "contracts-ir.json": {
-                "schema",
-                "version",
-                "declarations",
-                "applications",
-            },
-            "runtime-contract-ir.json": {
-                "schema",
-                "version",
-                "worlds",
-                "protocols",
-                "handlers",
-                "laws",
-                "rows",
-                "applications",
-            },
-            "verification-report.json": {"schema", "version", "summary", "items"},
-            "host-requirements-ir.json": {
-                "schema",
-                "version",
-                "representations",
-                "operations",
-                "invariants",
-            },
-        }
 
+        self.assertEqual(
+            set(GLYPH04_PUBLIC_SCHEMAS),
+            set(GLYPH04_PUBLIC_SCHEMA_KEYS),
+        )
         for filename, (schema, version) in GLYPH04_PUBLIC_SCHEMAS.items():
             with self.subTest(filename=filename):
                 payload = json.loads(outputs.diagrams.files[filename])
                 self.assertEqual(payload["schema"], schema)
                 self.assertEqual(payload["version"], version)
-                self.assertEqual(set(payload), expected_keys[filename])
+                self.assertEqual(set(payload), GLYPH04_PUBLIC_SCHEMA_KEYS[filename])
 
     def test_symbolic_identity_shape_is_frozen(self) -> None:
         source = (
