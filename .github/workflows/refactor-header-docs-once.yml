@@ -1,0 +1,43 @@
+name: Apply header-first layout and organize docs
+
+on:
+  push:
+    branches:
+      - agent/header-scoped-system-machine-docs
+
+permissions:
+  contents: write
+
+jobs:
+  refactor:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/header-scoped-system-machine-docs
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Apply deterministic refactor
+        run: python3 scripts/refactor_header_docs_once.py
+
+      - name: Run Python tests
+        run: python3 -m unittest discover -s tests
+
+      - name: Check representative header-first sources
+        run: |
+          python3 glyphc.py examples/acceptance/motor_safety.glyph --check
+          python3 glyphc.py examples/acceptance/door_controller.glyph --check
+
+      - name: Commit generated refactor
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Adopt header-first layout and organize documentation"
+          git push origin HEAD:agent/header-scoped-system-machine-docs
