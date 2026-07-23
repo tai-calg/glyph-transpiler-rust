@@ -115,7 +115,7 @@ Glyphの実宣言kindは次を含む。
 
 ```text
 function
--effect
+effect
 opaque
 product
 sum
