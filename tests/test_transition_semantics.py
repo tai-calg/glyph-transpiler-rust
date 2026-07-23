@@ -98,6 +98,68 @@ class TransitionSemanticsTests(unittest.TestCase):
             1,
         )
 
+    def test_event_guard_and_action_are_all_preserved(self) -> None:
+        views = compile_semantic(ROOT / "examples/state_diagrams/conveyor_control.glyph")
+        machine = views["state"]["machines"][0]
+
+        start = transition(
+            machine,
+            "ConveyorIdle",
+            "ConveyorMoving",
+            "ConveyorStart",
+        )
+        self.assertEqual(start["guard"], "input.clear")
+        self.assertEqual(start["action"], "set_conveyor(input.speed)")
+        self.assertEqual(
+            start["display_label"],
+            "ConveyorStart [input.clear] / set_conveyor(input.speed)",
+        )
+
+        failure = next(
+            item
+            for item in machine["transitions"]
+            if item["source_state"] == "ConveyorIdle"
+            and item["target_state"] == "ConveyorFault"
+            and item.get("event") == "ConveyorStart"
+            and item.get("synthesized_failure")
+        )
+        self.assertEqual(failure["guard"], "input.clear")
+        self.assertEqual(failure["failure_type"], "DriveError")
+        self.assertEqual(
+            failure["action"],
+            "set_conveyor(input.speed) ! DriveError",
+        )
+
+    def test_nested_pure_helper_exposes_the_actual_effect_action(self) -> None:
+        views = compile_semantic(ROOT / "examples/state_diagrams/valve_nested_effect.glyph")
+        machine = views["state"]["machines"][0]
+
+        opened = transition(
+            machine,
+            "ValveClosed",
+            "ValveOpen",
+            "ValveOpenRequest",
+        )
+        self.assertEqual(opened["action"], "write_valve(true)")
+        self.assertEqual(
+            opened["display_label"],
+            "ValveOpenRequest / write_valve(true)",
+        )
+
+        failure = next(
+            item
+            for item in machine["transitions"]
+            if item["source_state"] == "ValveClosed"
+            and item["target_state"] == "ValveFault"
+            and item.get("event") == "ValveOpenRequest"
+            and item.get("synthesized_failure")
+        )
+        self.assertEqual(failure["failure_type"], "ValveError")
+        self.assertEqual(
+            failure["action"],
+            "write_valve(true) ! ValveError",
+        )
+
     def test_effect_without_result_does_not_create_failure_edge(self) -> None:
         source = """\
 machine Device(state:DeviceState,event:DeviceEvent)
