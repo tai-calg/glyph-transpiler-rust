@@ -51,16 +51,12 @@ def validate_capability_model(model: CapabilityModel) -> None:
             if parameter.type.name in resources
         ]
 
-        same_type_owned = Counter(
-            item.name
-            for item in inputs
-            if item.capability is CapabilityKind.OWN
-        )
+        input_types = Counter(item.name for item in inputs)
         output_types = Counter(item.name for item in outputs)
-        for name, count in same_type_owned.items():
+        for name, count in input_types.items():
             if count > 1 and output_types[name]:
                 raise GlyphError(
-                    f"{function.line}行目: '{function.name}' は同型own resource '{name}' を"
+                    f"{function.line}行目: '{function.name}' は同型resource '{name}' を"
                     "複数受け取るため、出力identity対応をContractで明示する必要がある"
                 )
 
