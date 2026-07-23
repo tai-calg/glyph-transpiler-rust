@@ -1,7 +1,7 @@
 [project]
 name = "glyph-rust"
-version = "0.2.0"
-description = "A tiny zero-dependency DSL transpiler that maps frequent concepts to one symbol and emits Rust"
+version = "0.4.0"
+description = "A compact systems-design DSL with capability, resource, temporal, and kinded runtime contracts"
 requires-python = ">=3.10"
 
 [project.scripts]
