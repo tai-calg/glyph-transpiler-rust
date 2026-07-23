@@ -46,9 +46,14 @@ jobs:
           python3 -m unittest discover -s tests -p 'test_gradio_host_example.py' -v
 
       - name: Build the Gradio component graph
+        id: gradio_graph
+        continue-on-error: true
+        shell: bash
         run: |
-          python3 - <<'PY'
+          set -o pipefail
+          python3 - <<'PY' 2>&1 | tee gradio-build.log
           import importlib.util
+          import inspect
           from pathlib import Path
           import sys
 
@@ -59,6 +64,11 @@ jobs:
           module = importlib.util.module_from_spec(spec)
           sys.modules[spec.name] = module
           spec.loader.exec_module(module)
+
+          print("gradio", module.gr.__version__)
+          print("LinePlot", inspect.signature(module.gr.LinePlot))
+          print("Timer", inspect.signature(module.gr.Timer))
+          print("Blocks.launch", inspect.signature(module.gr.Blocks.launch))
 
           runtime = module.LivePureGlyphRuntime(
               Path("examples/gradio_temperature.glyph")
@@ -71,6 +81,17 @@ jobs:
           finally:
               runtime.stop()
           PY
+
+      - name: Upload Gradio build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gradio-build-log
+          path: gradio-build.log
+
+      - name: Stop after Gradio component build failure
+        if: steps.gradio_graph.outcome == 'failure'
+        run: exit 1
 
       - name: Verify command-line entrypoint
         run: python3 examples/gradio_temperature_app.py --help
