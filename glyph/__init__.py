@@ -22,6 +22,7 @@ from .capabilities import (
 from .compilation import (
     CompilationOutputs,
     CompilationPipeline,
+    build_host_requirement_model,
     compile_diagram_bundle,
     compile_outputs,
     write_diagram_bundle,
@@ -50,6 +51,16 @@ from .contract_semantics import (
     parse_protocol,
 )
 from .frontend import compile_file, compile_source, parse_program
+from .host_binding_codegen import render_host_binding_trait
+from .host_requirements import (
+    HostInvariant,
+    HostOperationRequirement,
+    HostPort,
+    HostRequirementModel,
+    HostTypeRef,
+    RepresentationSlot,
+    build_host_requirements,
+)
 from .incremental import CompilationSnapshot, IncrementalCompiler, IncrementalResult
 from .mermaid import DiagramBundle
 from .preprocessor import PreprocessResult, RawMacroDef, preprocess_source as _preprocess_source
@@ -104,6 +115,11 @@ __all__ = [
     "GlyphStudio",
     "HandlerContract",
     "HandlerStep",
+    "HostInvariant",
+    "HostOperationRequirement",
+    "HostPort",
+    "HostRequirementModel",
+    "HostTypeRef",
     "IncrementalCompiler",
     "IncrementalResult",
     "LawContract",
@@ -111,6 +127,7 @@ __all__ = [
     "ProtocolContract",
     "ProtocolNode",
     "RawMacroDef",
+    "RepresentationSlot",
     "ResourceDecl",
     "ResourceEndpoint",
     "ResourceFlowModel",
@@ -124,6 +141,8 @@ __all__ = [
     "VerificationReport",
     "WorldContract",
     "build_contract_semantics",
+    "build_host_requirement_model",
+    "build_host_requirements",
     "build_resource_flow",
     "build_verification_report",
     "compile_artifact_files",
@@ -140,6 +159,7 @@ __all__ = [
     "parse_program",
     "parse_protocol",
     "preprocess_source",
+    "render_host_binding_trait",
     "run_studio",
     "write_diagram_bundle",
 ]
