@@ -3,7 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Mapping
 
-from .capabilities import AggregateType, CapabilityKind, CapabilityModel, CapabilityType
+from .capabilities import AggregateType, CapabilityModel, CapabilityType
+from .schema import IR_SCHEMA_VERSION, RESOURCE_FLOW_IR_SCHEMA
 
 
 @dataclass(frozen=True)
@@ -54,8 +55,8 @@ class ResourceFlowModel:
 
     def to_dict(self) -> dict[str, object]:
         return {
-            "schema": "glyph.resource-flow-ir",
-            "version": 1,
+            "schema": RESOURCE_FLOW_IR_SCHEMA,
+            "version": IR_SCHEMA_VERSION,
             "transitions": [item.to_dict() for item in self.transitions],
         }
 
@@ -102,26 +103,34 @@ def _outputs(
     return output
 
 
+def _input_resources(
+    function_name: str,
+    parameters,
+    resources: set[str],
+) -> dict[str, list[ResourceEndpoint]]:
+    result: dict[str, list[ResourceEndpoint]] = {}
+    for parameter in parameters:
+        ty = parameter.type
+        if ty.name not in resources:
+            continue
+        endpoint = ResourceEndpoint(
+            parameter.name,
+            ty.name,
+            ty.state or "?",
+            ty.capability.value,
+            f"rho:{function_name}:{parameter.name}",
+        )
+        result.setdefault(ty.name, []).append(endpoint)
+    return result
+
+
 def build_resource_flow(model: CapabilityModel) -> ResourceFlowModel:
     resources = {item.name for item in model.resources}
     aggregates = {item.name: item for item in model.aggregates}
     transitions: list[ResourceTransition] = []
 
     for function in model.functions:
-        inputs: dict[str, ResourceEndpoint] = {}
-        for parameter in function.params:
-            ty = parameter.type
-            if ty.name not in resources:
-                continue
-            identity = f"rho:{function.name}:{parameter.name}"
-            inputs[ty.name] = ResourceEndpoint(
-                parameter.name,
-                ty.name,
-                ty.state or "?",
-                ty.capability.value,
-                identity,
-            )
-
+        inputs = _input_resources(function.name, function.params, resources)
         fresh_index = 0
         for path, ty in _outputs(
             function.result,
@@ -129,7 +138,12 @@ def build_resource_flow(model: CapabilityModel) -> ResourceFlowModel:
             aggregates,
             "return",
         ):
-            source = inputs.get(ty.name)
+            candidates = inputs.get(ty.name, [])
+            if len(candidates) > 1:
+                raise ValueError(
+                    f"ambiguous resource identity in {function.name}: {ty.name}"
+                )
+            source = candidates[0] if candidates else None
             if source is None:
                 identity = f"rho:{function.name}:fresh:{fresh_index}"
                 fresh_index += 1
