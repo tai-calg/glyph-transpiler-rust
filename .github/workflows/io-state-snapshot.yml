@@ -46,6 +46,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: state-diagram-regression
+          include-hidden-files: true
           path: |
             build/state-diagram-regression/*.png
             examples/acceptance/motor_safety.glyph
