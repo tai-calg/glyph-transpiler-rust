@@ -52,6 +52,15 @@ class GlyphStudioSemanticNavigationTests(unittest.TestCase):
         ):
             self.assertIn(entity_id, entity_id_set)
 
+        for invalid_id in (
+            "effect:process",
+            "resource:0",
+            "resource:1",
+            "type:0",
+            "type:1",
+        ):
+            self.assertNotIn(invalid_id, entity_id_set)
+
         relation_triples = {
             (item["source"], item["kind"], item["target"])
             for item in relations
@@ -76,7 +85,14 @@ class GlyphStudioSemanticNavigationTests(unittest.TestCase):
             ("function:fetch", "handled-by", "handler:RetryPolicy"),
             relation_triples,
         )
-        self.assertNotIn("effect:process", entity_id_set)
+        self.assertIn(
+            ("aggregate:ProcessError", "stores", "resource:Buffer"),
+            relation_triples,
+        )
+        self.assertIn(
+            ("aggregate:ProcessError", "stores", "type:E"),
+            relation_triples,
+        )
 
     def test_projection_is_deterministic_and_does_not_change_public_ir(self) -> None:
         source = (
