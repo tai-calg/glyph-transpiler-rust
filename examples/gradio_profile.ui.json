@@ -1,0 +1,27 @@
+{
+  "schema": "glyph.ui-manifest",
+  "version": 1,
+  "title": "Profile Access Inspector",
+  "function": "render",
+  "locale": "en",
+  "nodes": {
+    "input:profile.name": {
+      "label": "Display name",
+      "description": "Name shown in the generated result card",
+      "default": "Ada"
+    },
+    "input:profile.age": {
+      "label": "Age",
+      "minimum": 0,
+      "maximum": 130,
+      "default": 30
+    },
+    "input:profile.active": {
+      "label": "Account enabled",
+      "default": true
+    },
+    "output:return.access": {
+      "label": "Access level"
+    }
+  }
+}

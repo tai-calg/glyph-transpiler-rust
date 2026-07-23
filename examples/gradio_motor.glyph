@@ -1,0 +1,16 @@
+# Generic UI example: numeric controls, booleans, products, and unit variants.
++MotorMode=Stopped|Running|Limited
+*MotorInput(request:F,enabled:B,limit:F)
+*MotorView(command:F,mode:MotorMode,safe:B)
+
+>clamp_request(request:F,limit:F):F
+  request<0.0 >> 0.0
+  request>limit >> limit
+  _ >> request
+
+>choose_mode(request:F,enabled:B,limit:F):MotorMode
+  !enabled >> Stopped
+  request>limit >> Limited
+  _ >> Running
+
+>render(input:MotorInput):MotorView=MotorView(clamp_request(input.request,input.limit),choose_mode(input.request,input.enabled,input.limit),input.enabled&input.limit>=0.0)
