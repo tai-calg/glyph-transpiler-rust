@@ -13,6 +13,25 @@ TYPED_DESIGN_SCHEMA = "glyph.typed-design"
 SOURCE_MAP_SCHEMA = "glyph.source-map"
 STUDIO_STATE_SCHEMA = "glyph.studio-state"
 
+# Glyph 0.4 public contracts. These identifiers and version numbers are frozen
+# for the 0.4 release line; incompatible shape changes require version 2.
+CAPABILITY_IR_SCHEMA = "glyph.capability-ir"
+RESOURCE_FLOW_IR_SCHEMA = "glyph.resource-flow-ir"
+CONTRACTS_IR_SCHEMA = "glyph.contracts"
+RUNTIME_CONTRACT_IR_SCHEMA = "glyph.runtime-contract-ir"
+VERIFICATION_REPORT_SCHEMA = "glyph.verification-report"
+COMPLIANCE_REPORT_SCHEMA = "glyph.compliance-report"
+COMPATIBILITY_REPORT_SCHEMA = "glyph.compatibility-report"
+STABILIZATION_REPORT_SCHEMA = "glyph.stabilization-report"
+
+GLYPH04_PUBLIC_SCHEMAS: dict[str, tuple[str, int]] = {
+    "capability-ir.json": (CAPABILITY_IR_SCHEMA, IR_SCHEMA_VERSION),
+    "resource-flow-ir.json": (RESOURCE_FLOW_IR_SCHEMA, IR_SCHEMA_VERSION),
+    "contracts-ir.json": (CONTRACTS_IR_SCHEMA, IR_SCHEMA_VERSION),
+    "runtime-contract-ir.json": (RUNTIME_CONTRACT_IR_SCHEMA, IR_SCHEMA_VERSION),
+    "verification-report.json": (VERIFICATION_REPORT_SCHEMA, IR_SCHEMA_VERSION),
+}
+
 
 def versioned_payload(
     schema: str,
