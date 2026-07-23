@@ -6,6 +6,7 @@ from .artifacts import CompilationModel
 from .compiler import AliasDecl, ExternDecl, FunctionDecl, ProductDecl, SumDecl, TypeRef
 from .execution_ir import ExecutionStructureIR
 from .state_machine_analysis import analyze_machine
+from .state_machine_source_map import remap_machine_analysis_source_lines
 
 
 IO_STATE_VIEWS_SCHEMA = "glyph.io-state-views"
@@ -269,7 +270,10 @@ def build_io_state_views(
     else:
         systems = [_implicit_program(execution, signatures)]
 
-    machines = [analyze_machine(model, machine) for machine in execution.machines]
+    machines = [
+        remap_machine_analysis_source_lines(model, analyze_machine(model, machine))
+        for machine in execution.machines
+    ]
     warning_count = sum(
         1
         for machine in machines
