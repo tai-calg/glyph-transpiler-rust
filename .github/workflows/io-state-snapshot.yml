@@ -8,6 +8,10 @@ on:
       - "glyph/diagram_app.py"
       - "glyph/diagram_ui.py"
       - "glyph/io_state_views.py"
+      - "glyph/state_machine_analysis.py"
+      - "glyph/state_machine_source_map.py"
+      - "tests/test_io_state_diagram_app.py"
+      - "tests/test_state_machine_source_map.py"
       - "examples/acceptance/motor_safety.glyph"
       - ".github/workflows/io-state-snapshot.yml"
   workflow_dispatch:
@@ -50,11 +54,12 @@ jobs:
           cat /tmp/glyph-diagram.log
           exit 1
 
-      - name: Capture I/O and state diagrams
+      - name: Capture and verify I/O and state diagrams
         shell: bash
         run: |
           mkdir -p build
           cat >build/capture-diagram.mjs <<'JS'
+          import assert from "node:assert/strict";
           import { chromium } from "playwright";
 
           const browser = await chromium.launch({ headless: true });
@@ -67,6 +72,32 @@ jobs:
           await page.screenshot({ path: "build/motor-safety-io.png" });
           await page.click('button[data-tab="state"]');
           await page.waitForTimeout(500);
+
+          const stateNames = await page.locator(".state-name").allTextContents();
+          assert.deepEqual(new Set(stateNames), new Set(["Stopped", "Running", "Faulted"]));
+          assert.equal(await page.getByText("Any state", { exact: true }).count(), 0);
+
+          const canvas = await page.locator(".canvas-shell").boundingBox();
+          assert.ok(canvas, "state canvas must exist");
+          for (const node of await page.locator(".state-node").all()) {
+            const box = await node.boundingBox();
+            assert.ok(box, "state node must be visible");
+            assert.ok(box.y >= canvas.y, "state node must not be clipped above the canvas");
+            assert.ok(
+              box.y + box.height <= canvas.y + canvas.height,
+              "state node must not be clipped below the canvas",
+            );
+          }
+
+          const editorLineCount = await page.locator("#editor").evaluate(
+            element => element.value.split("\n").length,
+          );
+          const diagnosticLines = await page.locator(".analysis-line").allTextContents();
+          for (const text of diagnosticLines) {
+            const line = Number(text.replace(/^L/, ""));
+            assert.ok(Number.isInteger(line) && line >= 1 && line <= editorLineCount);
+          }
+
           await page.screenshot({ path: "build/motor-safety-state.png" });
           await browser.close();
           JS
