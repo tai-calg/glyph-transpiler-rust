@@ -7,35 +7,16 @@ from pathlib import Path
 
 from .algorithm_ir import build_algorithm_ir
 from .algorithm_mermaid import render_algorithm_mermaid
-from .artifacts import (
-    CompilationModel,
-    RustArtifacts,
-    _generate_host,
-    parse_compilation_model,
-)
+from .artifacts import CompilationModel, RustArtifacts, _generate_host, parse_compilation_model
 from .execution_ir import build_execution_structure_ir
-from .mermaid import (
-    DiagramBundle,
-    _slug,
-    _source_map,
-    render_architecture_mermaid,
-    render_dataflow_mermaid,
-    render_index_markdown,
-    render_machine_mermaid,
-    render_temporal_mermaid,
-)
+from .mermaid import DiagramBundle, _slug, _source_map, render_architecture_mermaid, render_dataflow_mermaid, render_index_markdown, render_machine_mermaid, render_temporal_mermaid
 from .opaque import OpaqueAwareRustGenerator, generate_manual_scaffold
 from .preprocessor import remap_source_lines
-from .schema import (
-    ALGORITHM_IR_SCHEMA,
-    EXECUTION_IR_SCHEMA,
-    SOURCE_MAP_SCHEMA,
-    TYPED_DESIGN_SCHEMA,
-    versioned_payload,
-)
+from .schema import ALGORITHM_IR_SCHEMA, EXECUTION_IR_SCHEMA, SOURCE_MAP_SCHEMA, TYPED_DESIGN_SCHEMA, versioned_payload
 from .temporal_codegen import append_temporal_rust
 from .temporal_stream_codegen import append_streaming_temporal_rust
 from .temporal_stream_safety_codegen import append_safety_streaming_temporal_rust
+from .verification import build_verification_report
 
 
 @dataclass(frozen=True)
@@ -80,24 +61,18 @@ def _has_runtime_contracts(model: CompilationModel) -> bool:
     )
 
 
-def build_rust_artifacts(model: CompilationModel) -> RustArtifacts:
-    """Generate Rust from an already parsed and validated model."""
+def _has_glyph04(model: CompilationModel) -> bool:
+    return _has_capabilities(model) or _has_contracts(model) or _has_runtime_contracts(model)
 
+
+def build_rust_artifacts(model: CompilationModel) -> RustArtifacts:
     logic = append_temporal_rust(
-        OpaqueAwareRustGenerator(
-            model.program,
-            model.opaques,
-            model.blocks,
-        ).generate(),
+        OpaqueAwareRustGenerator(model.program, model.opaques, model.blocks).generate(),
         model.program,
         model.specs,
     )
     logic = append_streaming_temporal_rust(logic, model.program, model.specs)
-    logic = append_safety_streaming_temporal_rust(
-        logic,
-        model.program,
-        model.specs,
-    )
+    logic = append_safety_streaming_temporal_rust(logic, model.program, model.specs)
     return RustArtifacts(
         logic=logic,
         host=_generate_host(model.program, model.inline_effects, model.opaques),
@@ -106,8 +81,6 @@ def build_rust_artifacts(model: CompilationModel) -> RustArtifacts:
 
 
 def build_design_json(model: CompilationModel) -> str:
-    """Serialize the complete typed design contract with an explicit schema version."""
-
     semantic = model.semantic.to_dict()
     semantic.pop("schema", None)
     semantic.pop("version", None)
@@ -129,6 +102,11 @@ def build_design_json(model: CompilationModel) -> str:
         payload["contracts"] = model.contracts.to_dict()
     if _has_runtime_contracts(model):
         payload["runtime_contracts"] = model.runtime_contracts.to_dict()
+    if _has_glyph04(model):
+        payload["verification"] = build_verification_report(
+            model.capabilities,
+            model.runtime_contracts,
+        ).to_dict()
     return json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
 
 
@@ -137,8 +115,6 @@ def build_diagram_bundle(
     source_name: str,
     source_href: str | None = None,
 ) -> DiagramBundle:
-    """Build all IR and diagram artifacts without reparsing the source."""
-
     expanded = model.expanded
     ir = build_execution_structure_ir(
         model.preprocess.source,
@@ -182,22 +158,19 @@ def build_diagram_bundle(
             model.preprocess.map_dict(source_name),
             ensure_ascii=False,
             indent=2,
-        )
-        + "\n",
+        ) + "\n",
         "architecture.mmd": architecture,
         "architecture-ir.json": json.dumps(
             architecture_payload,
             ensure_ascii=False,
             indent=2,
-        )
-        + "\n",
+        ) + "\n",
         "logic.mmd": logic,
         "algorithm-ir.json": json.dumps(
             algorithm_payload,
             ensure_ascii=False,
             indent=2,
-        )
-        + "\n",
+        ) + "\n",
         "execution.mmd": dataflow,
         **machine_files,
         "temporal.mmd": temporal,
@@ -205,14 +178,12 @@ def build_diagram_bundle(
             execution_payload,
             ensure_ascii=False,
             indent=2,
-        )
-        + "\n",
+        ) + "\n",
         "source-map.json": json.dumps(
             source_map_payload,
             ensure_ascii=False,
             indent=2,
-        )
-        + "\n",
+        ) + "\n",
     }
     if _has_capabilities(model):
         files["capability-ir.json"] = json.dumps(
@@ -229,6 +200,15 @@ def build_diagram_bundle(
     if _has_runtime_contracts(model):
         files["runtime-contract-ir.json"] = json.dumps(
             model.runtime_contracts.to_dict(),
+            ensure_ascii=False,
+            indent=2,
+        ) + "\n"
+    if _has_glyph04(model):
+        files["verification-report.json"] = json.dumps(
+            build_verification_report(
+                model.capabilities,
+                model.runtime_contracts,
+            ).to_dict(),
             ensure_ascii=False,
             indent=2,
         ) + "\n"
