@@ -1,0 +1,83 @@
+name: I/O State Diagram Snapshot
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "glyph.py"
+      - "glyph/diagram_app.py"
+      - "glyph/diagram_ui.py"
+      - "glyph/io_state_views.py"
+      - "examples/acceptance/motor_safety.glyph"
+      - ".github/workflows/io-state-snapshot.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install browser
+        run: |
+          npm install playwright@1.54.2
+          npx playwright install --with-deps chromium
+
+      - name: Start compiled Glyph diagram app
+        shell: bash
+        run: |
+          set -euo pipefail
+          GLYPH_DIAGRAM_PORT=8765 \
+          GLYPH_DIAGRAM_NO_BROWSER=1 \
+          python3 glyph.py examples/acceptance/motor_safety.glyph \
+            >/tmp/glyph-diagram.log 2>&1 &
+          echo $! >/tmp/glyph-diagram.pid
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:8765/api/state >/dev/null; then
+              exit 0
+            fi
+            sleep 0.25
+          done
+          cat /tmp/glyph-diagram.log
+          exit 1
+
+      - name: Capture I/O and state diagrams
+        shell: bash
+        run: |
+          mkdir -p build
+          cat >build/capture-diagram.mjs <<'JS'
+          import { chromium } from "playwright";
+
+          const browser = await chromium.launch({ headless: true });
+          const page = await browser.newPage({
+            viewport: { width: 1800, height: 1100 },
+            deviceScaleFactor: 1,
+          });
+          await page.goto("http://127.0.0.1:8765/", { waitUntil: "networkidle" });
+          await page.waitForFunction(() => document.querySelector("#status")?.textContent === "ready");
+          await page.screenshot({ path: "build/motor-safety-io.png" });
+          await page.click('button[data-tab="state"]');
+          await page.waitForTimeout(500);
+          await page.screenshot({ path: "build/motor-safety-state.png" });
+          await browser.close();
+          JS
+          node build/capture-diagram.mjs
+
+      - name: Upload rendered application
+        uses: actions/upload-artifact@v4
+        with:
+          name: motor-safety-rendered-diagrams
+          path: |
+            build/motor-safety-io.png
+            build/motor-safety-state.png
+            examples/acceptance/motor_safety.glyph
+            .glyph/motor_safety/io-state-views.json
