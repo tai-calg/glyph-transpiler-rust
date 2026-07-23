@@ -20,6 +20,7 @@ from .machine import MachineDecl, extract_machines, validate_machines
 from .opaque import OpaqueAwareRustGenerator, OpaqueDecl, expose_opaque_as_pure, generate_manual_scaffold, lower_opaque_to_extern, mask_opaque_as_effect, relabel_architecture, relabel_semantic_model, without_opaque_externs
 from .pipeline import LambdaLowering, join_pipeline_continuations, lower_lambda_pipelines, restore_lambda_source_lines
 from .preprocessor import PreprocessResult, preprocess_source, remap_source_lines
+from .runtime_contract_validate import validate_and_refine_runtime_contracts
 from .semantic import SemanticModel, build_semantic_model
 from .syntax import expand_compact_syntax
 from .temporal import SpecDecl, extract_specs
@@ -74,14 +75,7 @@ class CompilationModel:
 
 
 def _inline_effect_lines(source: str) -> set[int]:
-    return {
-        line_no
-        for line_no, original in enumerate(source.splitlines(), start=1)
-        if (clean := original.split("#", 1)[0].rstrip())
-        and not clean[0].isspace()
-        and clean.startswith("!")
-        and "=" in clean
-    }
+    return {line_no for line_no, original in enumerate(source.splitlines(), start=1) if (clean := original.split("#", 1)[0].rstrip()) and not clean[0].isspace() and clean.startswith("!") and "=" in clean}
 
 
 def _parse_effect_program(source: str) -> tuple[Program, tuple[FunctionDecl, ...]]:
@@ -158,6 +152,7 @@ def parse_compilation_model(source: str, source_name: str = "input.glyph") -> Co
         validate_temporal_specs(program, specs)
         validate_machines(program, machines)
         runtime_contracts = build_contract_semantics(expanded_source, canonical_contracts, canonical_capabilities, program)
+        runtime_contracts = validate_and_refine_runtime_contracts(expanded_source, runtime_contracts, canonical_contracts, canonical_capabilities, program)
     except GlyphError as exc:
         raise preprocess.remap_error(exc) from exc
 
