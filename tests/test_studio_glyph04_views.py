@@ -120,6 +120,56 @@ class Glyph04StudioViewTests(unittest.TestCase):
             "App/Task",
         )
 
+    def test_protocol_view_preserves_choice_and_parallel_paths(self) -> None:
+        design = {
+            "runtime_contracts": {
+                "worlds": [],
+                "protocols": [
+                    {
+                        "name": "Structured",
+                        "line": 4,
+                        "root": {
+                            "kind": "choice",
+                            "type": None,
+                            "children": [
+                                {
+                                    "kind": "sequence",
+                                    "type": None,
+                                    "children": [
+                                        {"kind": "send", "type": "A", "children": []},
+                                        {"kind": "receive", "type": "B", "children": []},
+                                    ],
+                                },
+                                {
+                                    "kind": "parallel",
+                                    "type": None,
+                                    "children": [
+                                        {"kind": "send", "type": "C", "children": []},
+                                        {"kind": "receive", "type": "D", "children": []},
+                                    ],
+                                },
+                            ],
+                        },
+                    }
+                ],
+                "handlers": [],
+                "laws": [],
+                "applications": [],
+            },
+            "verification": {"summary": {}, "items": []},
+        }
+
+        events = build_studio_views(design)["views"]["protocol"]["protocols"][0][
+            "events"
+        ]
+
+        self.assertEqual(
+            [event["path"] for event in events],
+            ["root.0.0", "root.0.1", "root.1.0", "root.1.1"],
+        )
+        self.assertEqual(events[0]["controls"], ["choice", "sequence"])
+        self.assertEqual(events[2]["controls"], ["choice", "parallel"])
+
 
 if __name__ == "__main__":
     unittest.main()
