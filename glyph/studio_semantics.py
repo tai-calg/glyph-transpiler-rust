@@ -355,28 +355,40 @@ class _IndexBuilder:
         }
 
 
-def _type_target(
+def _canonical_type_entity(
     builder: _IndexBuilder,
     type_value: Mapping[str, Any],
     *,
     view: str,
 ) -> str:
+    explicit_id = _text(type_value.get("type_entity_id"))
     name = _text(type_value.get("name"), "unknown")
-    is_resource = type_value.get("state") is not None
-    entity_id = resource_entity_id(name) if is_resource else type_entity_id(name)
+    state = type_value.get("state")
+    if explicit_id:
+        prefix, separator, label = explicit_id.partition(":")
+        if not separator or prefix not in {"resource", "type"} or not label:
+            raise ValueError(f"invalid canonical type entity ID: {explicit_id}")
+        entity_id = explicit_id
+        entity_kind = prefix
+        entity_label = label
+    else:
+        is_resource = state is not None
+        entity_id = resource_entity_id(name) if is_resource else type_entity_id(name)
+        entity_kind = "resource" if is_resource else "type"
+        entity_label = name
     builder.entity(
         entity_id,
-        "resource" if is_resource else "type",
-        name,
+        entity_kind,
+        entity_label,
         views=(view,),
         aliases=(_text(type_value.get("raw")),),
         details={
             "capability": _text(type_value.get("capability")),
-            "state": type_value.get("state"),
+            "state": state,
         },
     )
     for argument in _records(type_value.get("args")):
-        _type_target(builder, argument, view=view)
+        _canonical_type_entity(builder, argument, view=view)
     return entity_id
 
 
@@ -442,14 +454,14 @@ def _register_capabilities(
         known[name] = entity_id
         known[f"aggregate:{name}"] = entity_id
         for index, member in enumerate(_records(aggregate.get("members"))):
-            target = _type_target(builder, member, view="Capability")
+            target = _canonical_type_entity(builder, member, view="Capability")
             builder.relation(
                 entity_id,
                 "stores",
                 target,
                 line=_line(member.get("line")) or _line(aggregate.get("line")),
                 views=("Capability",),
-                details={"member": _text(member.get("name"), str(index))},
+                details={"member": index},
             )
 
     for function in _records(capability.get("functions")):
@@ -485,7 +497,7 @@ def _register_capabilities(
                     "type": type_value.get("raw") or type_value.get("name"),
                 },
             )
-            type_id = _type_target(builder, type_value, view="Capability")
+            type_id = _canonical_type_entity(builder, type_value, view="Capability")
             builder.relation(
                 function_id,
                 "accepts",
@@ -518,7 +530,7 @@ def _register_capabilities(
                 "type": result.get("raw") or result.get("name"),
             },
         )
-        result_type = _type_target(builder, result, view="Capability")
+        result_type = _canonical_type_entity(builder, result, view="Capability")
         builder.relation(
             function_id,
             "returns",
