@@ -1,6 +1,6 @@
 machine Pump(state:PumpState,event:PumpEvent)
   select=state.mode
-  init=PumpState(PumpOff,Receipt(false))
+  init=PumpState(PumpOff,Written(false))
   next=pump_step(state,event)
   success=PumpOff
   failure=PumpFault
@@ -8,10 +8,10 @@ machine Pump(state:PumpState,event:PumpEvent)
 +PumpEvent=PumpStart|PumpStop
 +PumpMode=PumpOff|PumpOn|PumpFault
 +WriteError=PumpIoError
-+Receipt=Receipt(B)
-*PumpState(mode:PumpMode,receipt:Receipt)
++PumpReceipt=Written(B)
+*PumpState(mode:PumpMode,receipt:PumpReceipt)
 
-!write_pump(enabled:B):Receipt|WriteError
+!write_pump(enabled:B):PumpReceipt|WriteError
 
 >pump_step(state:PumpState,event:PumpEvent):PumpState|WriteError
   event==PumpStart >> Ok(PumpState(PumpOn,write_pump(true)?))
