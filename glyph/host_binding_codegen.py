@@ -46,7 +46,7 @@ def _port_type(
     representation: str | None,
 ) -> str:
     if representation is None:
-        return "Self::OpaqueValue"
+        raise ValueError("Host operation port has no representation slot")
     try:
         associated_type = representation_types[representation]
     except KeyError as exc:
@@ -95,7 +95,6 @@ def render_host_binding_trait(model: HostRequirementModel) -> str:
         "",
         "pub trait GlyphHostBinding {",
         "    type Error;",
-        "    type OpaqueValue;",
     ]
 
     for slot in model.representations:
