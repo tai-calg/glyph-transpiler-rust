@@ -1,178 +1,257 @@
-# Glyph kinded Contract space
+# Glyph 0.4 — Capability, Resource and Kinded Contract Space
 
-この文書は、Glyph 0.4 Contract spaceの表面構文と、現在の実装範囲を定義する。
+Glyph 0.4は、既存の短いGlyphを変更せず、必要な値と処理だけへ次の契約を追加する。
 
-## 目的
-
-通常の型・値と設計Contractを、名前解決だけでなく字句上も区別する。
-
-```glyph
-Rpc          # 通常の型・値・関数名
-'Rpc         # Contract参照
+```text
+Permission     誰が保持・参照・変更できるか
+Resource       同一資源がどのstateにあるか
+World          どの実行領域・動的Regionで有効か
+Protocol       どの順序で値を交換するか
+Handler        failure/time/cancel等をどう解釈するか
+Law            trace全体が満たすべき性質
 ```
 
-Contractを使わない既存Glyphソースは、従来と同じパーサ・Rust生成経路を通る。
-
-## 定義と適用
-
-Contractの**定義**はトップレベルで行う。
+Contract名は通常の型・値名と字句的に分離する。
 
 ```glyph
+Rpc          # 通常の型・値名
+'Rpc         # Contract名
+```
+
+## 後方互換性
+
+次を含まない既存sourceは従来経路をそのまま通る。
+
+```text
+resource
+own / share / link / &mut / as
+'Name
+@{'Name}
+```
+
+Contract／Capability未使用時は、生成Rust、既存Typed Design JSONのshape、既存diagram file集合、`@NAME`／`@A`／`@E`の意味を変更しない。file単位のmodeも導入しない。
+
+## Capability
+
+```glyph
+own T
+share T
+link T
+&T
+&mut T
+```
+
+| Capability | 意味 |
+|---|---|
+| `own T` | 唯一所有。代入・by-value引数でmove |
+| `share T` | 明示clone可能な共有所有 |
+| `link T` | 寿命を維持しない長期link |
+| `&T` | 完全式内の一時読み取り |
+| `&mut T` | 完全式内の一時排他変更 |
+
+能力変換:
+
+```glyph
+shared := owner as share
+copy := &shared as share
+weak := &shared as link
+other := &weak as link
+live := (&weak as share)?
+```
+
+move後利用、borrow脱出、`share`／`link`からの`&mut`、`share -> own`、`own -> link`、不正な`as`を拒否する。
+
+Compatibility Rust backendでは共有・link操作をcloneへlowerする。実際のArc／Weak／livenessはHost adapterのtrusted contractであり、`verification-report.json`に明示する。
+
+## Resource
+
+```glyph
+resource Buffer[
+  Allocated
+ |Ready
+ |InFlight
+ |Retired
+]
+```
+
+resource使用時はCapabilityとstateを必ず明示する。
+
+```glyph
+own Buffer[Ready]
+share Buffer[Ready]
+link Buffer[Ready]
+```
+
+state遷移は`own Resource[S]`だけに許可する。`share`／`link` resourceのstateは固定し、`own Resource[S]`は全制御出口でreturn／transfer／transition／consumeされなければならない。失敗可能操作は失敗型にもresourceを保持する。
+
+```glyph
+resource Buffer[Ready|Used]
++E=Bad
+
+*WriteError(
+  buffer:own Buffer[Ready],
+  cause:E
+)
+
+!write(
+  buffer:own Buffer[Ready]
+):own Buffer[Used]|WriteError
+```
+
+`resource-flow-ir.json`ではsuccessとfailureの両経路が同一`rho:write:buffer`を保持する。
+
+## Contract定義と適用
+
+```glyph
+'@Name = ...    # World
+'>Name = ...    # Protocol
+'!Name = ...    # Handler
+'?Name = ...    # Law
+'Name  = {...}  # Bundle
+```
+
+参照は`'Name`、適用は`@{'Name}`とする。`@{Name}`のようなbare nameは認めない。
+
+## World
+
+Worldは実行locusと動的Regionの積である。
+
+```glyph
+'@UiWindow =
+  Ui * App/Window
+
 '@WorkerTask =
   Worker * App/Window/Task
+```
 
-'>ProcessImage =
-  -> Image >> <- ProcessResult
+異なるlocus間のProtocolなし直接call、異なるWorldへのborrow転送、狭いRegionの`own`／`share`を広いRegionのfieldへ保存するescapeを拒否する。`link`による長期観測は許可する。
 
-'!SafeFailure =
-  'std.timeout(30s)
+Hostは宣言locusへのdispatchとRegion生成・終了を実装する。
+
+## Protocol
+
+```text
+()          end
+-> T        callerから実行側へTを送る
+<- T        実行側からcallerへTを返す
+P >> Q      sequence
+P | Q       choice
+P || Q      parallel
+*P          repeat
+```
+
+```glyph
+'>RequestReply =
+  -> Request >> <- Response
+
+'>Events =
+  *(<- Event)
+```
+
+旧記法`>T`／`<T`は、関数宣言や比較演算との衝突を避けるため拒否する。Protocol構文、Bundle内競合、関数署名との互換性、cross-World borrow、Protocolなしcross-World callを検査する。
+
+Transport、buffer、ordering等の具体実装はProtocol traceを満たすHost adapterまたはLaw Contractへ置く。
+
+## Handler
+
+Handlerは予約語の列挙ではなく、`'std.*` Contract APIの合成として記述する。
+
+```glyph
+'!RequestPolicy =
+  'std.timeout(2s)
+  >> 'std.retry(
+       3,
+       'std.exponential,
+       'std.idempotent
+     )
   >> 'std.return_error
+```
 
-'?Complete30 =
-  @A(start >> @E 30s finish)
+標準operation:
 
-'ImageWorker = {
+```text
+'std.timeout(Duration)
+'std.cancel(...)
+'std.retry(Count,Backoff,Idempotency)
+'std.rollback(place)
+'std.compensate(effect)
+'std.fallback(function)
+'std.return_error
+```
+
+retry count、idempotency、Result型、resource failure ledger、rollback対象、compensation境界、fallback署名、最終recoveryの一意性を検査する。業務上の真の冪等性や物理rollback成功はtrusted contractとして報告する。
+
+## Law
+
+Lawは既存の`@A`／`@E`時相論理を再利用する。
+
+```glyph
+'?Safe =
+  @A(!fault >> stopped)
+
+'?Deadline =
+  @A(start >> @E 2s finish)
+```
+
+Productへ適用したLawは既存reference monitor／streaming monitorへ接続する。
+
+```glyph
+'Observed = {'Safe}
+
+*Observation(
+  fault:B,
+  stopped:B
+) @{'Observed}
+```
+
+関数lifecycle Lawは`runtime-contract-ir.json`へ保持し、Host lifecycle event monitorの義務として出力する。
+
+## Bundle
+
+```glyph
+'WorkerCall = {
   'WorkerTask,
-  'ProcessImage,
-  'SafeFailure,
-  'Complete30
+  'RequestReply,
+  'RequestPolicy,
+  'Deadline
 }
 ```
 
-Contractの**適用**は、対象宣言の後ろへ`@{'Name}`を書く。
+World、Protocol、Handlerは各最大1個、Lawは複数可とする。Handler順序はBundle列挙順へ依存させずHandler定義内で明示する。Bundle循環を拒否する。
 
-```glyph
-!process(
-  image:Image
-):ProcessResult
-  @{'ImageWorker}
-```
+## 生成IR
 
-定義と適用は次のように区別される。
+Glyph 0.4を使用した場合だけ次を追加生成する。
 
 ```text
-'@Name = ...   World Contractを定義
-'>Name = ...   Protocol Contractを定義
-'!Name = ...   Handler Contractを定義
-'?Name = ...   Law Contractを定義
-'Name = {...}  Bundle Contractを定義
-
-'Name           Contractを参照
-@{'Name}        Contractを対象へ適用
-```
-
-`@{Name}`のようなbare identifierは受理しない。
-
-## Protocol方向
-
-Protocolでは通信方向を次の記号で表す。
-
-```text
--> T    呼出し側から実行側へTを送る
-<- T    実行側から呼出し側へTを返す
-P >> Q  Pの後にQ
-```
-
-例:
-
-```glyph
-'>SubmitJob =
-  -> Job
-
-'>RequestReply =
-  -> Request >> <- Response
-```
-
-単独の`>T`と`<T`は使用しない。既存の関数宣言`>`および比較演算子`<`との認知的衝突を避けるためである。
-
-## 型名とContract名
-
-同じstemをObject spaceとContract spaceで使える。
-
-```glyph
-+Failed=Temporary|Permanent
-
-'@Failed =
-  Worker * App/Task
-```
-
-このとき、
-
-```text
-Failed     通常の型
-'Failed    Contract
-```
-
-となる。
-
-## Contract kind
-
-現在のContract parserは次のkindを区別する。
-
-```text
-World
-Protocol
-Handler
-Law
-Bundle
-```
-
-次を検査する。
-
-- Contract名の重複
-- 未定義のローカルContract参照
-- 非Bundle Contract内のkind不一致
-- Bundleおよび適用位置でのbare identifier
-- Contract依存関係の循環
-- Protocol内の旧`>T` / `<T`記法
-
-`'std.timeout(...)`のような修飾参照は外部Contract library参照として保持する。
-
-## Public IR
-
-Contractを使用したソースでは、次を出力する。
-
-```text
+capability-ir.json
+resource-flow-ir.json
 contracts-ir.json
+runtime-contract-ir.json
+verification-report.json
 ```
 
-Typed Design JSONにも`contracts`を追加する。
-
-Contractを使用しない既存ソースでは、`contracts`キーと`contracts-ir.json`を生成しない。既存Public IRのshapeを変えないためである。
-
-## 互換性
-
-次の条件を満たすソースでは、既存動作を維持する。
+`verification-report.json`は保証を次へ分類する。
 
 ```text
-resource / own / share / linkを使わない
-Contract定義を使わない
-@{...}を使わない
+static     コンパイラが決定的に検査
+model      時相式／modelで検査
+runtime    生成monitorまたはHost monitorで検査
+trusted    Host adapter・設計者が満たす証明義務
 ```
 
-現時点でContract層は既存パーサより前に抽出される。Contract行と適用部分だけを空白化し、改行数を保存してから従来のコンパイル経路へ渡す。
+新構文を使わないsourceではこれらを生成しない。
 
-そのため、Contractが付いた宣言のRust生成結果は、同じ宣言からContractを除いた場合と同一になる。
+## 完全例
 
-## 現在の実装範囲
+[`examples/acceptance/glyph04_system.glyph`](examples/acceptance/glyph04_system.glyph)は、Capability、resource state、World、Region、Protocol、timeout／retry Handler、Product Law monitor、Bundle、Rust生成、0.4 Public IRを一つのsourceで接続する。
 
-実装済み:
+CIは同sourceについて決定的再生成と生成Rustの`rustc` compileを行う。
 
-- Contract namespaceの字句分離
-- Contract定義と適用の抽出
-- Contract kindと参照関係の検査
-- Contract metadataのCompilationModel保持
-- 条件付きPublic IR出力
-- 既存Rust生成経路との互換性テスト
+## 意図的な境界
 
-未実装:
+Glyph 0.4は設計契約と静的検査を実装する。thread／executor、channel／network transport、timer／cancel primitive、Arc／Weak、物理resource解放、DB transaction／compensationの実作用はHost側に残す。
 
-- `own` / `share` / `link`の型検査
-- `resource T[State]`の状態・obligation検査
-- Worldのexecution affinityとRegion escape検査
-- Protocolのduality、能力転送、反復・並行意味論
-- HandlerのEffect、retry、rollback等の意味検査
-- Law Contractのmodel checkingおよびruntime monitor統合
-- Bundleを対象宣言へ意味論的に結合する処理
+CPU core affinity、scheduler priority、NUMA／物理メモリ配置、authentication／authorization、database isolation、replica／quorum／distributed consistency、一般的deadlock freedom、定量性能保証は0.4の保証対象外とする。
 
-Contract syntaxを受理することと、Contractの内容を完全に保証することを区別する。
+これらを`queue`、`strong`、`eventual`等の曖昧な予約語として追加せず、将来もWorld／Protocol／Handler／LawのContract libraryとして拡張する。
