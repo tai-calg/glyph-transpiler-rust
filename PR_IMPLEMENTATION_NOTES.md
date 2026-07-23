@@ -1,6 +1,6 @@
 # Glyph 0.4 PR Notes
 
-Draft PR #10 implements the opt-in Glyph 0.4 language and static contract pipeline. It remains draft and unmerged until explicit review.
+Draft PR #10 implements the complete opt-in Glyph 0.4 design-contract layer while preserving the Plain Glyph path.
 
 Implemented axes:
 
@@ -11,5 +11,7 @@ Implemented axes:
 - Law
 - Bundle and Contract application
 - Public IR and verification classification
+
+The PR remains draft and unmerged until explicit user instruction.
 
 See `CONTRACTS.md`, `IMPLEMENTATION_STATUS.md`, and `examples/acceptance/glyph04_system.glyph`.
