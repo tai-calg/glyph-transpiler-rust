@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
 import tempfile
 import threading
 import unittest
@@ -106,6 +108,25 @@ class GlyphStudioTests(unittest.TestCase):
             "Symbols",
         ):
             self.assertIn(label, STUDIO_HTML)
+
+    def test_studio_javascript_is_syntax_valid(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not installed")
+        prefix, separator, tail = STUDIO_HTML.partition("<script>")
+        self.assertTrue(separator, prefix[-80:])
+        script, separator, _ = tail.partition("</script>")
+        self.assertTrue(separator)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "studio.js"
+            path.write_text(script, encoding="utf-8")
+            result = subprocess.run(
+                [node, "--check", str(path)],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
 
 
 if __name__ == "__main__":
