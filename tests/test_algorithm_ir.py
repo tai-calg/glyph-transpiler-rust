@@ -71,7 +71,9 @@ class AlgorithmIRTests(unittest.TestCase):
         self.assertEqual(checked_stage["source"]["line"], 16)
 
         normalized_stages = function["steps"][2]["value"]["stages"]
-        self.assertEqual([stage["kind"] for stage in normalized_stages], ["lambda", "rust"])
+        self.assertEqual(
+            [stage["kind"] for stage in normalized_stages], ["lambda", "rust"]
+        )
         self.assertEqual(normalized_stages[0]["label"], "λ n → min(n,100)")
         self.assertEqual(normalized_stages[0]["source"]["line"], 20)
         self.assertEqual(normalized_stages[1]["name"], "optimize")
@@ -88,7 +90,10 @@ class AlgorithmIRTests(unittest.TestCase):
         self.assertNotIn("__glyph_", bundle.files["logic.mmd"])
         self.assertNotIn("__glyph_", bundle.files["algorithm-ir.json"])
         self.assertIn("λ n → min(n,100)", bundle.files["logic.mmd"])
-        self.assertIn("class algorithm_process_0_step_2_stage_1 rust", bundle.files["logic.mmd"])
+        self.assertIn(
+            "class algorithm_process_0_step_2_stage_1 rust",
+            bundle.files["logic.mmd"],
+        )
         self.assertIn("Err", bundle.files["logic.mmd"])
 
     def test_source_map_points_algorithm_items_to_logic_view(self) -> None:
@@ -107,8 +112,10 @@ class AlgorithmIRTests(unittest.TestCase):
     def test_studio_reads_algorithm_ir_and_supports_source_navigation(self) -> None:
         self.assertIn("algorithm-ir.json", STUDIO_HTML)
         self.assertIn("function goLine", STUDIO_HTML)
-        self.assertIn("Lowered compiler helpers are intentionally hidden", STUDIO_HTML)
-        self.assertIn("Err exits this function", STUDIO_HTML)
+        self.assertIn("async function logic", STUDIO_HTML)
+        self.assertIn("function renderPipeline", STUDIO_HTML)
+        self.assertIn("data-line-action", STUDIO_HTML)
+        self.assertIn("entityAttr('function:'+fn.name)", STUDIO_HTML)
 
 
 if __name__ == "__main__":
