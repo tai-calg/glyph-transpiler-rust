@@ -14,19 +14,27 @@ from glyph.pure_runtime import (
 
 
 TEMPERATURE_SOURCE = """\
++TemperatureBand=Invalid|Freezing|Cold|Comfortable|Warm|Hot
 *TemperatureInput(celsius:F)
-*TemperatureView(celsius:F,fahrenheit:F,kelvin:F,count:U,valid:B)
+*TemperatureView(celsius:F,fahrenheit:F,kelvin:F,count:U,valid:B,band:TemperatureBand)
 *Session(count:U)
 >to_fahrenheit(celsius:F):F=celsius*1.8+32.0
 >to_kelvin(celsius:F):F=celsius+273.15
 >next_count(count:U):U=count+1
 >is_valid(celsius:F):B=celsius>=-273.15
->render(input:TemperatureInput,session:Session):TemperatureView=TemperatureView(input.celsius,to_fahrenheit(input.celsius),to_kelvin(input.celsius),next_count(session.count),is_valid(input.celsius))
+>classify(celsius:F):TemperatureBand
+  !is_valid(celsius) >> Invalid
+  celsius<=0.0 >> Freezing
+  celsius<18.0 >> Cold
+  celsius<27.0 >> Comfortable
+  celsius<35.0 >> Warm
+  _ >> Hot
+>render(input:TemperatureInput,session:Session):TemperatureView=TemperatureView(input.celsius,to_fahrenheit(input.celsius),to_kelvin(input.celsius),next_count(session.count),is_valid(input.celsius),classify(input.celsius))
 """
 
 
 class PureGlyphProgramTests(unittest.TestCase):
-    def test_executes_nested_pure_calls_and_product_values(self) -> None:
+    def test_executes_nested_pure_calls_products_guards_and_variants(self) -> None:
         compilation = CompilationPipeline().compile_text(TEMPERATURE_SOURCE)
         program = PureGlyphProgram(compilation.model)
 
@@ -44,6 +52,7 @@ class PureGlyphProgramTests(unittest.TestCase):
         self.assertAlmostEqual(value["kelvin"], 293.15)
         self.assertEqual(value["count"], 3)
         self.assertTrue(value["valid"])
+        self.assertEqual(value["band"]["variant"], "Comfortable")
 
     def test_rejects_effect_boundary_instead_of_guessing_a_host(self) -> None:
         source = "!read_sensor():U\n>run():U=read_sensor()\n"
