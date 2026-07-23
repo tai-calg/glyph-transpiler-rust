@@ -20,6 +20,7 @@ Glyphの詳細文書をこのディレクトリへ集約しています。入口
 - [Glyph `/>` Lambda Pipeline Design](PIPELINE_DESIGN.md)
 - [Glyph raw preprocessor](PREPROCESSOR.md)
 - [PR #10 Implementation Notes](PR_IMPLEMENTATION_NOTES.md)
+- [Public Glyph UI Platform](PUBLIC_UI.md)
 - [条件分岐とRust TODO契約](RUST_TODO.md)
 - [Glyph 500文字ソフトウェアスケッチ 設計書](SKETCH_DESIGN.md)
 - [Glyph Studio 0.4 Orthogonal Views](STUDIO_04_DESIGN.md)
