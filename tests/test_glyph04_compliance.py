@@ -17,7 +17,7 @@ class Glyph04ComplianceTests(unittest.TestCase):
         report = build_compliance_report(ROOT)
 
         self.assertTrue(report.passed, "\n".join(report.errors))
-        self.assertGreaterEqual(len(report.requirements), 16)
+        self.assertGreaterEqual(len(report.requirements), 18)
 
     def test_every_static_rule_has_negative_evidence(self) -> None:
         missing = [
@@ -60,6 +60,13 @@ class Glyph04ComplianceTests(unittest.TestCase):
                 "applications",
             },
             "verification-report.json": {"schema", "version", "summary", "items"},
+            "host-requirements-ir.json": {
+                "schema",
+                "version",
+                "representations",
+                "operations",
+                "invariants",
+            },
         }
 
         for filename, (schema, version) in GLYPH04_PUBLIC_SCHEMAS.items():
