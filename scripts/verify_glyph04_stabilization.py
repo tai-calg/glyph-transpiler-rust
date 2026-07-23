@@ -79,10 +79,10 @@ def _check_release_metadata(root: Path) -> tuple[dict[str, object], list[str]]:
 
     documents = (
         "README.md",
-        "LANGUAGE.md",
-        "CONTRACTS.md",
-        "HOST_BINDING_DESIGN.md",
-        "IMPLEMENTATION_STATUS.md",
+        "docs/LANGUAGE.md",
+        "docs/CONTRACTS.md",
+        "docs/HOST_BINDING_DESIGN.md",
+        "docs/IMPLEMENTATION_STATUS.md",
     )
     document_status: dict[str, bool] = {}
     for relative in documents:

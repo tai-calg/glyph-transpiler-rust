@@ -69,7 +69,12 @@ def _safe_id(text: str) -> str:
 
 
 def extract_systems(source: str) -> tuple[str, tuple[SystemDecl, ...]]:
-    """Extract `system Name` blocks and preserve all source line numbers."""
+    """Extract file-leading `system Name` headers.
+
+    Component names are bound only after the complete Program is parsed, so a
+    header may reference declarations written later in the same file. Legacy
+    tail placement remains accepted for source compatibility.
+    """
 
     lines = source.splitlines()
     output = list(lines)

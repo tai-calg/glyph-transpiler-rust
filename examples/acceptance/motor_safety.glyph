@@ -1,3 +1,15 @@
+system MotorSafety
+  sensor -> decide
+  decide -> step
+  step -> write_motor
+
+machine Motor(state:MotorState,input:Input)
+  select=state.mode
+  init=MotorState(Stopped,Stop)
+  next=step(state,input)
+  success=Stopped
+  failure=Faulted
+
 # v0.1 acceptance: raw macro、lambda、state、effect、時間安全制約を接続する。
 @STOP_LIMIT=100ms
 
@@ -6,11 +18,6 @@
     input.raw
     /> |x| min(x,1.0)
 @end
-
-system MotorSafety
-  sensor -> decide
-  decide -> step
-  step -> write_motor
 
 *Input(raw:F,enabled,emergency,fault,stopped:B)
 +Command=Stop|Drive(F)
@@ -39,10 +46,3 @@ system MotorSafety
 
 !write_motor(command:Command):Receipt
 >cycle(state:MotorState,input:Input):Receipt=write_motor(decide(input))
-
-machine Motor(state:MotorState,input:Input)
-  select=state.mode
-  init=MotorState(Stopped,Stop)
-  next=step(state,input)
-  success=Stopped
-  failure=Faulted

@@ -244,7 +244,7 @@ trusted    Host adapter・設計者が満たす証明義務
 
 ## 完全例
 
-[`examples/acceptance/glyph04_system.glyph`](examples/acceptance/glyph04_system.glyph)は、Capability、resource state、World、Region、Protocol、timeout／retry Handler、Product Law monitor、Bundle、Rust生成、0.4 Public IRを一つのsourceで接続する。
+[`examples/acceptance/glyph04_system.glyph`](../examples/acceptance/glyph04_system.glyph)は、Capability、resource state、World、Region、Protocol、timeout／retry Handler、Product Law monitor、Bundle、Rust生成、0.4 Public IRを一つのsourceで接続する。
 
 CIは同sourceについて決定的再生成と生成Rustの`rustc` compileを行う。
 

@@ -67,7 +67,11 @@ def _reject_single_equal(expression: str, line: int) -> None:
 
 
 def extract_machines(source: str) -> tuple[str, tuple[MachineDecl, ...]]:
-    """`machine Name(params)`ブロックを抽出し、元の行番号を保つ空行へ置換する。"""
+    """ファイル先頭の`machine Name(params)`ヘッダを抽出する。
+
+    状態型とnext関数は全宣言のparse後に検証するため、ヘッダから後続
+    宣言へのforward bindingを許可する。旧来の末尾配置も互換受理する。
+    """
 
     raw_lines = source.splitlines()
     macros = _resolve_macros(_collect_macros(raw_lines))

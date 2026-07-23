@@ -1,3 +1,13 @@
+system DoorController
+  DOOR_FLOW
+
+machine Door(state:DoorState,input:Input)
+  select=state.mode
+  init=DoorState(Locked,0,KeepLocked)
+  next=step(state,input)
+  success=Locked
+  failure=Faulted
+
 # v0.1 acceptance: 認証、状態遷移、作用境界、時間制約を一つの設計にする。
 @LOCK_LIMIT=500ms
 
@@ -8,9 +18,6 @@
   step -> lock
   step -> alarm
 @end
-
-system DoorController
-  DOOR_FLOW
 
 *Input(badge_valid,request_open,forced_open,unlocked,locked,alarmed:B)
 +Action=KeepLocked|Unlock|RaiseAlarm
@@ -44,10 +51,3 @@ system DoorController
 
 !lock(state:DoorState):Receipt
 !alarm(state:DoorState):Receipt
-
-machine Door(state:DoorState,input:Input)
-  select=state.mode
-  init=DoorState(Locked,0,KeepLocked)
-  next=step(state,input)
-  success=Locked
-  failure=Faulted

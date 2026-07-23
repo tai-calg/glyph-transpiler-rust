@@ -85,6 +85,13 @@ system Door
   ctl -> lock
   ctl -> log
 
+machine Door(state:State,input:In)
+  select=state.mode
+  init=State(Idle)
+  next=ctl(state,input)
+  success=Locked
+  failure=Fault
+
 *In(open,auth,stop:B)
 +Mode=Idle|Open|Locked|Fault
 *State(mode:Mode)
@@ -97,13 +104,6 @@ system Door
 
 !lock(m:Mode):B
 !log(m:Mode):B
-
-machine Door(state:State,input:In)
-  select=state.mode
-  init=State(Idle)
-  next=ctl(state,input)
-  success=Locked
-  failure=Fault
 
 ?safe(*In)=A(!auth >> !open)
 ```

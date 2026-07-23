@@ -1,3 +1,10 @@
+machine Controller(state:System,input:Input)
+  select=state.mode
+  init=System(Idle,0,0,Stop,true,true)
+  next=step(state,input)
+  success=Stopping
+  failure=Faulted
+
 # R3-0: 型・純粋関数・作用境界・variant pattern・時相制約を接続する完全例
 # R3-1〜R3-4: machine宣言から実行構造IRとMermaid図を生成する。
 # 時計、周期実行、I/O、違反後の復旧はRustホスト側が担当する。
@@ -53,10 +60,3 @@
 !report_violation(code:U):B|Error
 
 >cycle(system:System,input:Input):Cycle|Error=write_actuator(step(system,input)?)
-
-machine Controller(state:System,input:Input)
-  select=state.mode
-  init=System(Idle,0,0,Stop,true,true)
-  next=step(state,input)
-  success=Stopping
-  failure=Faulted
