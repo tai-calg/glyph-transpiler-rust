@@ -16,6 +16,7 @@ import webbrowser
 from .compiler import GlyphError
 from .incremental import IncrementalCompiler
 from .studio_ui import STUDIO_HTML
+from .studio_views import build_studio_views
 
 
 @dataclass(frozen=True)
@@ -29,6 +30,7 @@ class StudioSnapshot:
     artifacts: dict[str, str]
     semantic: dict[str, object]
     execution_ir: dict[str, object]
+    glyph04_views: dict[str, object]
 
     def to_dict(self, source_path: Path, output_dir: Path) -> dict[str, object]:
         return {
@@ -43,6 +45,7 @@ class StudioSnapshot:
             "artifact_names": sorted(self.artifacts),
             "semantic": self.semantic,
             "execution_ir": self.execution_ir,
+            "glyph04_views": self.glyph04_views,
         }
 
 
@@ -81,6 +84,7 @@ class GlyphStudio:
             artifacts={},
             semantic={},
             execution_ir={},
+            glyph04_views=build_studio_views({}),
         )
 
     @property
@@ -111,15 +115,23 @@ class GlyphStudio:
                 source_href=str(self.input_path),
             )
             compilation = result.snapshot
+            semantic = json.loads(compilation.semantic_json)
+            glyph04_views = build_studio_views(semantic)
             artifacts = {
                 "generated.rs": compilation.artifacts.logic,
                 "host.generated.rs": compilation.artifacts.host,
+                "manual.rs": compilation.artifacts.manual_scaffold,
                 "typed-ast.json": compilation.semantic_json,
+                "studio-views.json": json.dumps(
+                    glyph04_views,
+                    ensure_ascii=False,
+                    indent=2,
+                )
+                + "\n",
                 **compilation.diagrams.files,
             }
             for name, content in artifacts.items():
                 _atomic_write(self.output_dir / name, content)
-            semantic = json.loads(compilation.semantic_json)
             execution_ir = json.loads(artifacts["execution-ir.json"])
             snapshot = StudioSnapshot(
                 version=previous.version + 1,
@@ -131,6 +143,7 @@ class GlyphStudio:
                 artifacts=artifacts,
                 semantic=semantic,
                 execution_ir=execution_ir,
+                glyph04_views=glyph04_views,
             )
         except (GlyphError, OSError, ValueError) as exc:
             snapshot = StudioSnapshot(
@@ -143,6 +156,7 @@ class GlyphStudio:
                 artifacts=previous.artifacts,
                 semantic=previous.semantic,
                 execution_ir=previous.execution_ir,
+                glyph04_views=previous.glyph04_views,
             )
 
         with self._lock:
@@ -172,10 +186,13 @@ class GlyphStudio:
                             source=current.source,
                             digest=current.digest,
                             updated_at=_utc_now(),
-                            diagnostics=({"severity": "error", "message": str(exc)},),
+                            diagnostics=(
+                                {"severity": "error", "message": str(exc)},
+                            ),
                             artifacts=current.artifacts,
                             semantic=current.semantic,
                             execution_ir=current.execution_ir,
+                            glyph04_views=current.glyph04_views,
                         )
                     continue
                 digest = _source_digest(source)
