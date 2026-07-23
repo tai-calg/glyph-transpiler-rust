@@ -117,6 +117,26 @@ class GlyphStudioUxTests(unittest.TestCase):
         ):
             self.assertIn(marker, STUDIO_HTML)
 
+    def test_ui_contains_semantic_navigation_controls(self) -> None:
+        for marker in (
+            "semantic-back",
+            "semantic-forward",
+            "semantic-clear",
+            "semantic-breadcrumb",
+            "inspector",
+            "palette-input",
+            "Search semantic design",
+            "data-entity",
+            "function selectEntity",
+            "function navigateHistory",
+            "function renderInspector",
+            "function syncUrl",
+            "Alt+Left",
+            "Alt+Right",
+            "searchParams.set('select'",
+        ):
+            self.assertIn(marker, STUDIO_HTML)
+
     @unittest.skipUnless(shutil.which("node"), "Node.js is not installed")
     def test_studio_javascript_is_syntactically_valid(self) -> None:
         match = re.search(r"<script>(.*)</script>", STUDIO_HTML, re.DOTALL)
