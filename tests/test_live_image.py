@@ -217,6 +217,34 @@ class LiveImageTests(unittest.TestCase):
             self.assertEqual(state["active_world"]["version"], 2)
             self.assertIsNone(state["pending_patch"])
 
+    def test_legacy_product_shape_change_requires_migration(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "shape.glyph"
+            source.write_text(
+                "*Pair(left:U)\n>inc(x:U):U=x+1\n",
+                encoding="utf-8",
+            )
+            studio = LiveGlyphStudio(source)
+            first = studio.rebuild()
+            self.assertEqual(first.status, "ready")
+
+            second = studio.preview_source(
+                "*Pair(left:U,right:U)\n>inc(x:U):U=x+1\n"
+            )
+
+            self.assertEqual(second.status, "ready")
+            state = studio.state_dict()["live_image"]
+            self.assertEqual(state["active_world"]["version"], 1)
+            patch = state["pending_patch"]
+            self.assertIsNotNone(patch)
+            change = next(
+                item
+                for item in patch["changes"]
+                if item["definition_id"] == "type:Pair"
+            )
+            self.assertEqual(change["safety"], "migration")
+            self.assertIn("migration-plan-required", patch["blockers"])
+
     def test_live_ui_injection_is_present(self) -> None:
         for marker in (
             "Live Image",
