@@ -17,8 +17,8 @@ class ContractLawBridgeTests(unittest.TestCase):
         generated = compile_source(source)
 
         self.assertEqual(model.specs[0].name, "contract_Safe_Observation")
-        self.assertIn("contract_Safe_Observation", generated)
-        self.assertIn("StreamingMonitor", generated)
+        self.assertIn("ContractSafeObservationMonitor", generated)
+        self.assertIn("ContractSafeObservationStreamingMonitor", generated)
 
     def test_function_lifecycle_law_stays_runtime_contract_only(self) -> None:
         source = (
