@@ -17,43 +17,20 @@ from glyph import compile_outputs  # noqa: E402
 from glyph.compliance import build_compliance_report  # noqa: E402
 from glyph.schema import (  # noqa: E402
     GLYPH04_PUBLIC_SCHEMAS,
+    GLYPH04_PUBLIC_SCHEMA_KEYS,
     IR_SCHEMA_VERSION,
     STABILIZATION_REPORT_SCHEMA,
 )
 
 
-_FROZEN_TOP_LEVEL_KEYS: dict[str, frozenset[str]] = {
-    "capability-ir.json": frozenset(
-        {"schema", "version", "resources", "functions", "aggregates", "operations"}
-    ),
-    "resource-flow-ir.json": frozenset({"schema", "version", "transitions"}),
-    "contracts-ir.json": frozenset(
-        {"schema", "version", "declarations", "applications"}
-    ),
-    "runtime-contract-ir.json": frozenset(
-        {
-            "schema",
-            "version",
-            "worlds",
-            "protocols",
-            "handlers",
-            "laws",
-            "rows",
-            "applications",
-        }
-    ),
-    "verification-report.json": frozenset(
-        {"schema", "version", "summary", "items"}
-    ),
-    "host-requirements-ir.json": frozenset(
-        {"schema", "version", "representations", "operations", "invariants"}
-    ),
-}
-
-
-def _check_public_schemas(files: dict[str, str]) -> tuple[list[dict[str, object]], list[str]]:
+def _check_public_schemas(
+    files: dict[str, str],
+) -> tuple[list[dict[str, object]], list[str]]:
     results: list[dict[str, object]] = []
     errors: list[str] = []
+    if set(GLYPH04_PUBLIC_SCHEMAS) != set(GLYPH04_PUBLIC_SCHEMA_KEYS):
+        errors.append("Glyph 0.4 schema registry and shape registry disagree")
+
     for filename, (schema, version) in GLYPH04_PUBLIC_SCHEMAS.items():
         text = files.get(filename)
         if text is None:
@@ -63,14 +40,15 @@ def _check_public_schemas(files: dict[str, str]) -> tuple[list[dict[str, object]
         actual_schema = payload.get("schema")
         actual_version = payload.get("version")
         actual_keys = frozenset(payload)
-        expected_keys = _FROZEN_TOP_LEVEL_KEYS[filename]
-        result = {
-            "file": filename,
-            "schema": actual_schema,
-            "version": actual_version,
-            "top_level_keys": sorted(actual_keys),
-        }
-        results.append(result)
+        expected_keys = GLYPH04_PUBLIC_SCHEMA_KEYS[filename]
+        results.append(
+            {
+                "file": filename,
+                "schema": actual_schema,
+                "version": actual_version,
+                "top_level_keys": sorted(actual_keys),
+            }
+        )
         if actual_schema != schema:
             errors.append(
                 f"{filename}: schema changed from {schema!r} to {actual_schema!r}"
