@@ -1,34 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import asdict
-from typing import Iterable
 
 from .artifacts import CompilationModel
-from .compiler import (
-    AliasDecl,
-    BinaryExpr,
-    CallExpr,
-    Expr,
-    ExternDecl,
-    FieldExpr,
-    FunctionDecl,
-    NameExpr,
-    ProductDecl,
-    SumDecl,
-    TryExpr,
-    TypeRef,
-    UnaryExpr,
-)
-from .execution_ir import (
-    ExecutionStructureIR,
-    MachineTransitionView,
-    SourceRef,
-    render_expr,
-)
+from .compiler import AliasDecl, ExternDecl, FunctionDecl, ProductDecl, SumDecl, TypeRef
+from .execution_ir import ExecutionStructureIR
+from .state_machine_analysis import analyze_machine
 
 
 IO_STATE_VIEWS_SCHEMA = "glyph.io-state-views"
-IO_STATE_VIEWS_VERSION = 1
+IO_STATE_VIEWS_VERSION = 2
 
 
 def empty_io_state_views() -> dict[str, object]:
@@ -36,7 +17,13 @@ def empty_io_state_views() -> dict[str, object]:
         "schema": IO_STATE_VIEWS_SCHEMA,
         "version": IO_STATE_VIEWS_VERSION,
         "source_name": "",
-        "summary": {"systems": 0, "callables": 0, "types": 0, "machines": 0},
+        "summary": {
+            "systems": 0,
+            "callables": 0,
+            "types": 0,
+            "machines": 0,
+            "state_warnings": 0,
+        },
         "io": {"systems": [], "types": []},
         "state": {"machines": []},
     }
@@ -251,277 +238,16 @@ def _unconnected_system(
     }
 
 
-def _walk_expr(expr: Expr) -> Iterable[Expr]:
-    yield expr
-    if isinstance(expr, UnaryExpr):
-        yield from _walk_expr(expr.expr)
-    elif isinstance(expr, TryExpr):
-        yield from _walk_expr(expr.expr)
-    elif isinstance(expr, BinaryExpr):
-        yield from _walk_expr(expr.left)
-        yield from _walk_expr(expr.right)
-    elif isinstance(expr, FieldExpr):
-        yield from _walk_expr(expr.base)
-    elif isinstance(expr, CallExpr):
-        yield from _walk_expr(expr.callee)
-        for argument in expr.args:
-            yield from _walk_expr(argument)
-
-
-def _unwrap_state_expr(expr: Expr) -> Expr:
-    if isinstance(expr, TryExpr):
-        return _unwrap_state_expr(expr.expr)
-    if (
-        isinstance(expr, CallExpr)
-        and isinstance(expr.callee, NameExpr)
-        and expr.callee.name == "Ok"
-        and len(expr.args) == 1
-    ):
-        return _unwrap_state_expr(expr.args[0])
-    return expr
-
-
-def _selector_comparison(
-    expr: Expr,
-    state_param: str,
-    selector_field: str,
-    variants: set[str],
-) -> set[str]:
-    found: set[str] = set()
-    for item in _walk_expr(expr):
-        if not isinstance(item, BinaryExpr) or item.op != "==":
-            continue
-        for left, right in ((item.left, item.right), (item.right, item.left)):
-            if (
-                isinstance(left, FieldExpr)
-                and isinstance(left.base, NameExpr)
-                and left.base.name == state_param
-                and left.field == selector_field
-                and isinstance(right, NameExpr)
-                and right.name in variants
-            ):
-                found.add(right.name)
-    return found
-
-
-def _state_target(
-    expr: Expr,
-    state_decl: ProductDecl,
-    selector_index: int,
-    variants: set[str],
-    state_param: str,
-) -> str | None:
-    value = _unwrap_state_expr(expr)
-    if isinstance(value, NameExpr) and value.name == state_param:
-        return "__same__"
-    if not (
-        isinstance(value, CallExpr)
-        and isinstance(value.callee, NameExpr)
-        and value.callee.name == state_decl.name
-        and len(value.args) == len(state_decl.fields)
-    ):
-        return None
-    selected = value.args[selector_index]
-    if isinstance(selected, NameExpr) and selected.name in variants:
-        return selected.name
-    return None
-
-
-def _called_functions(
-    expr: Expr,
-    functions: dict[str, FunctionDecl],
-) -> tuple[str, ...]:
-    names: list[str] = []
-    for item in _walk_expr(expr):
-        if (
-            isinstance(item, CallExpr)
-            and isinstance(item.callee, NameExpr)
-            and item.callee.name in functions
-            and item.callee.name not in names
-        ):
-            names.append(item.callee.name)
-    return tuple(names)
-
-
-def _transition_function(
-    name: str,
-    functions: dict[str, FunctionDecl],
-    state_decl: ProductDecl,
-    selector_index: int,
-    selector_field: str,
-    variants: set[str],
-    visited: set[str],
-) -> list[MachineTransitionView]:
-    if name in visited or name not in functions:
-        return []
-    visited = {*visited, name}
-    declaration = functions[name]
-    state_param = declaration.params[0].name if declaration.params else "state"
-    transitions: list[MachineTransitionView] = []
-
-    if declaration.guards:
-        for clause in declaration.guards:
-            target = _state_target(
-                clause.value,
-                state_decl,
-                selector_index,
-                variants,
-                state_param,
-            )
-            if target is None:
-                for nested_name in _called_functions(clause.value, functions):
-                    transitions.extend(
-                        _transition_function(
-                            nested_name,
-                            functions,
-                            state_decl,
-                            selector_index,
-                            selector_field,
-                            variants,
-                            visited,
-                        )
-                    )
-                continue
-            sources = (
-                _selector_comparison(
-                    clause.condition,
-                    state_param,
-                    selector_field,
-                    variants,
-                )
-                if clause.condition is not None
-                else set()
-            )
-            if not sources:
-                sources = {"*"}
-            condition = (
-                render_expr(clause.condition)
-                if clause.condition is not None
-                else "otherwise"
-            )
-            for source in sorted(sources):
-                resolved_target = source if target == "__same__" and source != "*" else target
-                if resolved_target == "__same__":
-                    resolved_target = "*"
-                transitions.append(
-                    MachineTransitionView(
-                        source,
-                        resolved_target,
-                        condition,
-                        SourceRef(clause.line),
-                    )
-                )
-        return transitions
-
-    if declaration.expression is None:
-        return transitions
-    target = _state_target(
-        declaration.expression,
-        state_decl,
-        selector_index,
-        variants,
-        state_param,
-    )
-    if target is not None:
-        return [
-            MachineTransitionView(
-                "*",
-                "*" if target == "__same__" else target,
-                "next",
-                SourceRef(declaration.line),
-            )
-        ]
-    for nested_name in _called_functions(declaration.expression, functions):
-        transitions.extend(
-            _transition_function(
-                nested_name,
-                functions,
-                state_decl,
-                selector_index,
-                selector_field,
-                variants,
-                visited,
-            )
-        )
-    return transitions
-
-
-def _machine_transitions(
-    model: CompilationModel,
-    machine_name: str,
-) -> list[dict[str, object]]:
-    machine = next((item for item in model.machines if item.name == machine_name), None)
-    if machine is None or not isinstance(machine.selector, FieldExpr):
-        return []
-    products = {
-        declaration.name: declaration
-        for declaration in model.program.declarations
-        if isinstance(declaration, ProductDecl)
-    }
-    sums = {
-        declaration.name: declaration
-        for declaration in model.program.declarations
-        if isinstance(declaration, SumDecl)
-    }
-    functions = {
-        declaration.name: declaration
-        for declaration in model.program.declarations
-        if isinstance(declaration, FunctionDecl)
-    }
-    state_decl = products.get(machine.state_param.ty.name)
-    if state_decl is None:
-        return []
-    selector_index = next(
-        (
-            index
-            for index, field in enumerate(state_decl.fields)
-            if field.name == machine.selector.field
-        ),
-        None,
-    )
-    if selector_index is None:
-        return []
-    selector_sum = sums.get(state_decl.fields[selector_index].ty.name)
-    if selector_sum is None:
-        return []
-    variants = {variant.name for variant in selector_sum.variants}
-    next_expr = machine.next_expr
-    if not isinstance(next_expr, CallExpr) or not isinstance(next_expr.callee, NameExpr):
-        return []
-    transitions = _transition_function(
-        next_expr.callee.name,
-        functions,
-        state_decl,
-        selector_index,
-        machine.selector.field,
-        variants,
-        set(),
-    )
-    unique: list[MachineTransitionView] = []
-    seen: set[tuple[str, str, str, int]] = set()
-    for transition in transitions:
-        key = (
-            transition.source_state,
-            transition.target_state,
-            transition.condition,
-            transition.source.line,
-        )
-        if key not in seen:
-            seen.add(key)
-            unique.append(transition)
-    return [asdict(transition) for transition in unique]
-
-
 def build_io_state_views(
     model: CompilationModel,
     execution: ExecutionStructureIR,
 ) -> dict[str, object]:
     """Project validated compiler IR into generic I/O and state-machine views.
 
-    This projection does not parse Glyph source and does not infer business meaning.
-    Declared systems provide the I/O topology. When no system exists, the compiler
-    call graph is used. State transitions come only from validated machine and
-    function ASTs, including compiler-generated helpers for immutable `:=` blocks.
+    I/O is derived from architecture and callable signatures. State diagrams are
+    normalized and checked before rendering: wildcard sources are expanded into
+    concrete states, unreachable ordered branches are removed, and reachability
+    is computed from the declared initial state.
     """
 
     signatures = {
@@ -543,14 +269,13 @@ def build_io_state_views(
     else:
         systems = [_implicit_program(execution, signatures)]
 
-    machines: list[dict[str, object]] = []
-    for machine in execution.machines:
-        projected = asdict(machine)
-        traced = _machine_transitions(model, machine.name)
-        if traced:
-            projected["transitions"] = traced
-        machines.append(projected)
-
+    machines = [analyze_machine(model, machine) for machine in execution.machines]
+    warning_count = sum(
+        1
+        for machine in machines
+        for diagnostic in machine.get("diagnostics", [])
+        if diagnostic.get("severity") == "warning"
+    )
     return {
         "schema": IO_STATE_VIEWS_SCHEMA,
         "version": IO_STATE_VIEWS_VERSION,
@@ -560,6 +285,7 @@ def build_io_state_views(
             "callables": len(signatures),
             "types": len(types),
             "machines": len(machines),
+            "state_warnings": warning_count,
         },
         "io": {"systems": systems, "types": types},
         "state": {"machines": machines},
