@@ -54,6 +54,7 @@ jobs:
         run: |
           set -o pipefail
           python3 - <<'PY' 2>&1 | tee gradio-build.log
+          import gradio as gr
           import importlib.util
           import inspect
           from pathlib import Path
@@ -67,10 +68,10 @@ jobs:
           sys.modules[spec.name] = module
           spec.loader.exec_module(module)
 
-          print("gradio", module.gr.__version__)
-          print("LinePlot", inspect.signature(module.gr.LinePlot))
-          print("Timer", inspect.signature(module.gr.Timer))
-          print("Blocks.launch", inspect.signature(module.gr.Blocks.launch))
+          print("gradio", gr.__version__)
+          print("LinePlot", inspect.signature(gr.LinePlot))
+          print("Timer", inspect.signature(gr.Timer))
+          print("Blocks.launch", inspect.signature(gr.Blocks.launch))
 
           runtime = module.LivePureGlyphRuntime(
               Path("examples/gradio_temperature.glyph")
