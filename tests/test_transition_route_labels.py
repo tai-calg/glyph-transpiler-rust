@@ -23,6 +23,15 @@ class TransitionInputActionLabelTests(unittest.TestCase):
         self.assertNotIn("source_state ??", html)
         self.assertNotIn("target_state ??", html)
 
+    def test_state_label_enhancer_does_not_modify_io_rendering(self) -> None:
+        html = enhance_transition_route_html(DIAGRAM_HTML)
+
+        self.assertIn(">connects</span>", html)
+        self.assertIn("port-title", html)
+        self.assertIn("port-dot", html)
+        self.assertNotIn("glyph-direct-io-layout", html)
+        self.assertNotIn("ioContractReady", html)
+
     def test_enhancer_is_idempotent(self) -> None:
         once = enhance_transition_route_html(DIAGRAM_HTML)
         twice = enhance_transition_route_html(once)
