@@ -163,6 +163,18 @@ try {
         detailIds.every(label => !/^T\d+$/.test(label.trim())),
         `${testCase.machine}: internal T identifiers leaked into transition details`,
       );
+      const detailOverlaps = await page.locator(".transition-detail").evaluateAll(rows => rows.flatMap((row, index) => {
+        const id = row.querySelector(".transition-detail-id")?.getBoundingClientRect();
+        const route = row.querySelector(".transition-detail-route")?.getBoundingClientRect();
+        if (!id || !route) return [];
+        const verticalOverlap = id.top < route.bottom && route.top < id.bottom;
+        return verticalOverlap && id.right > route.left + 1 ? [`row-${index + 1}`] : [];
+      }));
+      assert.deepEqual(
+        detailOverlaps,
+        [],
+        `${testCase.machine}: input→action labels overlap transition routes`,
+      );
 
       await page.screenshot({
         path: path.join(outputDirectory, `${testCase.slug}.png`),
