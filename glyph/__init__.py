@@ -6,79 +6,26 @@ from .artifacts import (
     parse_artifact_model,
     parse_compilation_model,
 )
-from .capabilities import (
-    AggregateType,
-    CapabilityExtraction,
-    CapabilityFunction,
-    CapabilityKind,
-    CapabilityModel,
-    CapabilityOperation,
-    CapabilityParam,
-    CapabilityType,
-    ResourceDecl,
-    extract_capabilities,
-    parse_capability_type,
-)
 from .compilation import (
     CompilationOutputs,
     CompilationPipeline,
-    build_host_requirement_model,
     compile_diagram_bundle,
     compile_outputs,
     write_diagram_bundle,
 )
 from .compiler import GlyphError
-from .contracts import (
-    ContractApplication,
-    ContractDecl,
-    ContractExtraction,
-    ContractKind,
-    ContractModel,
-    ContractRef,
-    extract_contracts,
-)
-from .contract_semantics import (
-    AppliedContract,
-    ContractRow,
-    ContractSemanticModel,
-    HandlerContract,
-    HandlerStep,
-    LawContract,
-    ProtocolContract,
-    ProtocolNode,
-    WorldContract,
-    build_contract_semantics,
-    parse_protocol,
-)
 from .frontend import compile_file, compile_source, parse_program
-from .host_binding_codegen import render_host_binding_trait
-from .host_requirements import (
-    HostInvariant,
-    HostOperationRequirement,
-    HostPort,
-    HostRequirementModel,
-    HostTypeRef,
-    RepresentationSlot,
-    build_host_requirements,
-)
 from .incremental import CompilationSnapshot, IncrementalCompiler, IncrementalResult
 from .mermaid import DiagramBundle
-from .preprocessor import PreprocessResult, RawMacroDef, preprocess_source as _preprocess_source
-from .resource_flow import (
-    ResourceEndpoint,
-    ResourceFlowModel,
-    ResourceTransition,
-    build_resource_flow,
+from .preprocessor import (
+    PreprocessResult,
+    RawMacroDef,
+    preprocess_source as _preprocess_source,
 )
 from .semantic import SemanticModel
 from .studio import GlyphStudio, StudioSnapshot, run_studio
 from .symbols import SymbolId, SymbolRecord
 from .temporal_sigils import reject_reserved_temporal_macro_names
-from .verification import (
-    VerificationItem,
-    VerificationReport,
-    build_verification_report,
-)
 
 
 def preprocess_source(source: str) -> PreprocessResult:
@@ -88,78 +35,36 @@ def preprocess_source(source: str) -> PreprocessResult:
     return _preprocess_source(source)
 
 
+# Keep the package root as the stable user-facing facade. Glyph 0.4 IR models,
+# semantic builders, validators, and code generators remain available from
+# their responsibility-specific modules but are deliberately not re-exported.
 __all__ = [
-    "AggregateType",
-    "AppliedContract",
-    "CapabilityExtraction",
-    "CapabilityFunction",
-    "CapabilityKind",
-    "CapabilityModel",
-    "CapabilityOperation",
-    "CapabilityParam",
-    "CapabilityType",
     "CompilationModel",
     "CompilationOutputs",
     "CompilationPipeline",
     "CompilationSnapshot",
-    "ContractApplication",
-    "ContractDecl",
-    "ContractExtraction",
-    "ContractKind",
-    "ContractModel",
-    "ContractRef",
-    "ContractRow",
-    "ContractSemanticModel",
     "DiagramBundle",
     "GlyphError",
     "GlyphStudio",
-    "HandlerContract",
-    "HandlerStep",
-    "HostInvariant",
-    "HostOperationRequirement",
-    "HostPort",
-    "HostRequirementModel",
-    "HostTypeRef",
     "IncrementalCompiler",
     "IncrementalResult",
-    "LawContract",
     "PreprocessResult",
-    "ProtocolContract",
-    "ProtocolNode",
     "RawMacroDef",
-    "RepresentationSlot",
-    "ResourceDecl",
-    "ResourceEndpoint",
-    "ResourceFlowModel",
-    "ResourceTransition",
     "RustArtifacts",
     "SemanticModel",
     "StudioSnapshot",
     "SymbolId",
     "SymbolRecord",
-    "VerificationItem",
-    "VerificationReport",
-    "WorldContract",
-    "build_contract_semantics",
-    "build_host_requirement_model",
-    "build_host_requirements",
-    "build_resource_flow",
-    "build_verification_report",
     "compile_artifact_files",
     "compile_artifacts",
     "compile_diagram_bundle",
     "compile_file",
     "compile_outputs",
     "compile_source",
-    "extract_capabilities",
-    "extract_contracts",
     "parse_artifact_model",
-    "parse_capability_type",
     "parse_compilation_model",
     "parse_program",
-    "parse_protocol",
     "preprocess_source",
-    "render_host_binding_trait",
     "run_studio",
     "write_diagram_bundle",
 ]
