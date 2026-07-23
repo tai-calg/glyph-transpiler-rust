@@ -3,13 +3,20 @@ from __future__ import annotations
 from pathlib import Path
 import unittest
 
-from glyph.gradio_renderer import (
-    InputBinding,
-    build_gradio_app,
-    invoke_action,
-)
+try:
+    import gradio  # noqa: F401
+except ModuleNotFoundError:
+    gradio = None
+
 from glyph.pure_runtime import LivePureGlyphRuntime
 from glyph.ui_ir import UiNode, build_ui_application
+
+if gradio is not None:
+    from glyph.gradio_renderer import (
+        InputBinding,
+        build_gradio_app,
+        invoke_action,
+    )
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -35,6 +42,7 @@ def build_runtime_and_app(example: str):
     return runtime, app
 
 
+@unittest.skipIf(gradio is None, "optional Gradio dependency is not installed")
 class GenericGradioRendererTests(unittest.TestCase):
     def test_builds_component_graph_for_three_unrelated_apps(self) -> None:
         for example in (
