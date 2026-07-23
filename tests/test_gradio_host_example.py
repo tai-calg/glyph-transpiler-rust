@@ -10,7 +10,8 @@ from glyph.pure_runtime import PureGlyphProgram, glyph_to_python
 
 ROOT = Path(__file__).resolve().parents[1]
 GLYPH_SOURCE = ROOT / "examples" / "gradio_temperature.glyph"
-GRADIO_APP = ROOT / "examples" / "gradio_temperature_app.py"
+GRADIO_ENTRYPOINT = ROOT / "examples" / "gradio_temperature_app.py"
+GRADIO_DASHBOARD = ROOT / "examples" / "gradio_temperature_dashboard.py"
 REQUIREMENTS = ROOT / "requirements-gradio.txt"
 
 
@@ -49,10 +50,13 @@ class GradioHostExampleTests(unittest.TestCase):
                 self.assertTrue(declaration.endswith(")"), declaration)
             self.assertNotIn("\n", declaration)
 
-    def test_gradio_app_is_valid_python_and_uses_live_runtime(self) -> None:
-        source = GRADIO_APP.read_text(encoding="utf-8")
-        ast.parse(source, filename=str(GRADIO_APP))
+    def test_gradio_dashboard_is_valid_python_and_uses_live_runtime(self) -> None:
+        entrypoint = GRADIO_ENTRYPOINT.read_text(encoding="utf-8")
+        dashboard = GRADIO_DASHBOARD.read_text(encoding="utf-8")
+        ast.parse(entrypoint, filename=str(GRADIO_ENTRYPOINT))
+        ast.parse(dashboard, filename=str(GRADIO_DASHBOARD))
 
+        self.assertIn("gradio_temperature_dashboard", entrypoint)
         for marker in (
             "LivePureGlyphRuntime",
             "gr.LinePlot",
@@ -62,12 +66,13 @@ class GradioHostExampleTests(unittest.TestCase):
             "TemperatureBand",
             "GLYPH × GRADIO LIVE HOST",
         ):
-            self.assertIn(marker, source)
+            self.assertIn(marker, dashboard)
 
         # Business formulas remain exclusively in the .glyph source.
-        self.assertNotIn("* 1.8", source)
-        self.assertNotIn("273.15", source)
-        self.assertNotIn("gr.get_component", source)
+        self.assertNotIn("* 1.8", dashboard)
+        self.assertNotIn("273.15", dashboard)
+        self.assertNotIn("gr.get_component", dashboard)
+        self.assertNotIn("show_api=", dashboard)
 
     def test_optional_dependencies_are_major_version_bounded(self) -> None:
         requirements = REQUIREMENTS.read_text(encoding="utf-8")
