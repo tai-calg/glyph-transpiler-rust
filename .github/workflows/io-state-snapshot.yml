@@ -43,15 +43,22 @@ jobs:
           npx playwright install --with-deps chromium
 
       - name: Compile and verify multiple state diagrams
-        run: node tests/verify_state_diagram_rendering.mjs
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p build/state-diagram-regression
+          node tests/verify_state_diagram_rendering.mjs \
+            2>&1 | tee build/state-diagram-regression/verify.log
 
       - name: Upload rendered state diagrams
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: state-diagram-regression
           include-hidden-files: true
+          if-no-files-found: warn
           path: |
-            build/state-diagram-regression/*.png
+            build/state-diagram-regression/**
             examples/acceptance/motor_safety.glyph
             examples/state_diagrams/*.glyph
             examples/acceptance/.glyph/**/io-state-views.json
