@@ -47,6 +47,46 @@ const cases = [
       "PumpStop→write_pump(false) ! WriteError",
     ],
   },
+  {
+    slug: "conveyor-action-uml",
+    file: "examples/state_diagrams/conveyor_control.glyph",
+    machine: "Conveyor",
+    labels: [
+      "ConveyorStart [input.clear] / set_conveyor(input.speed)",
+      "ConveyorStop / set_conveyor(0.0)",
+      "ConveyorReset [input.clear] / set_conveyor(0.0)",
+      "ConveyorStart [input.clear] / set_conveyor(input.speed) ! DriveError",
+    ],
+    failureLabels: [
+      "ConveyorStart [input.clear] / set_conveyor(input.speed) ! DriveError",
+      "ConveyorStop / set_conveyor(0.0) ! DriveError",
+      "ConveyorReset [input.clear] / set_conveyor(0.0) ! DriveError",
+    ],
+    compactLabels: [
+      "ConveyorStart [input.clear]→set_conveyor(input.speed)",
+      "ConveyorStop→set_conveyor(0.0)",
+      "ConveyorReset [input.clear]→set_conveyor(0.0)",
+    ],
+  },
+  {
+    slug: "valve-nested-action-uml",
+    file: "examples/state_diagrams/valve_nested_effect.glyph",
+    machine: "Valve",
+    labels: [
+      "ValveOpenRequest / write_valve(true)",
+      "ValveCloseRequest / write_valve(false)",
+      "ValveOpenRequest / write_valve(true) ! ValveError",
+      "ValveCloseRequest / write_valve(false) ! ValveError",
+    ],
+    failureLabels: [
+      "ValveOpenRequest / write_valve(true) ! ValveError",
+      "ValveCloseRequest / write_valve(false) ! ValveError",
+    ],
+    compactLabels: [
+      "ValveOpenRequest→write_valve(true)",
+      "ValveCloseRequest→write_valve(false)",
+    ],
+  },
 ];
 
 const outputDirectory = path.resolve("build/uml-transition-semantics");
