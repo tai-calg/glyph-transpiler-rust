@@ -69,7 +69,7 @@ class RepresentationSlot:
 class HostPort:
     name: str
     type: HostTypeRef
-    representation: str | None = None
+    representation: str
 
     def to_dict(self) -> dict[str, object]:
         return {
