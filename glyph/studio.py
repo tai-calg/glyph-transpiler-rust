@@ -162,6 +162,11 @@ class GlyphStudio:
             self._snapshot = snapshot
         return snapshot
 
+    def preview_source(self, source: str) -> StudioSnapshot:
+        """Compile editor text without persisting it to the Glyph source file."""
+
+        return self.rebuild(source)
+
     def save_source(self, source: str) -> StudioSnapshot:
         _atomic_write(self.input_path, source)
         return self.rebuild(source)
@@ -171,8 +176,14 @@ class GlyphStudio:
             return
         self._stop.clear()
 
+        try:
+            initial_source = self.input_path.read_text(encoding="utf-8")
+            initial_digest = _source_digest(initial_source)
+        except OSError:
+            initial_digest = ""
+
         def watch() -> None:
-            last_seen = ""
+            last_seen = initial_digest
             while not self._stop.wait(interval):
                 try:
                     source = self.input_path.read_text(encoding="utf-8")
@@ -247,6 +258,16 @@ class GlyphStudio:
                 except (ValueError, UnicodeDecodeError, json.JSONDecodeError):
                     return {}
 
+            def _source_from_body(self) -> str | None:
+                source = self._body().get("source")
+                if not isinstance(source, str):
+                    self._json(
+                        {"error": "source must be text"},
+                        HTTPStatus.BAD_REQUEST,
+                    )
+                    return None
+                return source
+
             def do_GET(self) -> None:
                 parsed = urlparse(self.path)
                 if parsed.path == "/":
@@ -275,14 +296,16 @@ class GlyphStudio:
                 self._json({"error": "not found"}, HTTPStatus.NOT_FOUND)
 
             def do_POST(self) -> None:
+                if self.path == "/api/preview":
+                    source = self._source_from_body()
+                    if source is None:
+                        return
+                    studio.preview_source(source)
+                    self._json(studio.state_dict())
+                    return
                 if self.path == "/api/save":
-                    body = self._body()
-                    source = body.get("source")
-                    if not isinstance(source, str):
-                        self._json(
-                            {"error": "source must be text"},
-                            HTTPStatus.BAD_REQUEST,
-                        )
+                    source = self._source_from_body()
+                    if source is None:
                         return
                     studio.save_source(source)
                     self._json(studio.state_dict())
