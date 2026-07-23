@@ -4,6 +4,8 @@ from dataclasses import dataclass
 
 from .capabilities import CapabilityKind, CapabilityModel
 from .contract_semantics import ContractSemanticModel
+from .schema import IR_SCHEMA_VERSION, VERIFICATION_REPORT_SCHEMA
+from .verification_classes import split_verification_classes
 
 
 @dataclass(frozen=True)
@@ -38,15 +40,11 @@ class VerificationReport:
             for verification_class in item.classes:
                 counts[verification_class] = counts.get(verification_class, 0) + 1
         return {
-            "schema": "glyph.verification-report",
-            "version": 1,
+            "schema": VERIFICATION_REPORT_SCHEMA,
+            "version": IR_SCHEMA_VERSION,
             "summary": counts,
             "items": [item.to_dict() for item in self.items],
         }
-
-
-def _classes(value: str) -> tuple[str, ...]:
-    return tuple(part for part in value.split("+") if part)
 
 
 def build_verification_report(
@@ -76,7 +74,10 @@ def build_verification_report(
         )
 
     for function in capabilities.functions:
-        if any(param.type.capability is not CapabilityKind.PLAIN for param in function.params):
+        if any(
+            parameter.type.capability is not CapabilityKind.PLAIN
+            for parameter in function.params
+        ):
             items.append(
                 VerificationItem(
                     function.name,
@@ -88,9 +89,9 @@ def build_verification_report(
             )
 
     if any(
-        param.type.capability is CapabilityKind.LINK
+        parameter.type.capability is CapabilityKind.LINK
         for function in capabilities.functions
-        for param in function.params
+        for parameter in function.params
     ):
         items.append(
             VerificationItem(
@@ -136,7 +137,7 @@ def build_verification_report(
                 protocol.name,
                 "protocol",
                 ("trusted",),
-                "Host transport must preserve the declared send/receive trace",
+                "Host transport must preserve the declared structured send/receive trace",
                 protocol.line,
             )
         )
@@ -147,7 +148,7 @@ def build_verification_report(
                 VerificationItem(
                     f"{handler.name}.{step.operation}",
                     "handler",
-                    _classes(step.verification),
+                    split_verification_classes(step.verification),
                     "Handler operation after Contract expansion",
                     step.line,
                 )
@@ -158,7 +159,7 @@ def build_verification_report(
             VerificationItem(
                 law.name,
                 "law",
-                _classes(law.verification),
+                split_verification_classes(law.verification),
                 "temporal Law verification class",
                 law.line,
             )
