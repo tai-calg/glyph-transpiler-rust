@@ -44,7 +44,7 @@ link T
 | Capability | 意味 |
 |---|---|
 | `own T` | 唯一所有。代入・by-value引数でmove |
-| `share T` | 明示clone可能な共有所有 |
+| `share T` | 明示複製可能な共有所有 |
 | `link T` | 寿命を維持しない長期link |
 | `&T` | 完全式内の一時読み取り |
 | `&mut T` | 完全式内の一時排他変更 |
@@ -61,7 +61,7 @@ live := (&weak as share)?
 
 move後利用、borrow脱出、`share`／`link`からの`&mut`、`share -> own`、`own -> link`、不正な`as`を拒否する。
 
-Compatibility Rust backendでは共有・link操作をcloneへlowerする。実際のArc／Weak／livenessはHost adapterのtrusted contractであり、`verification-report.json`に明示する。
+Compatibility Rust backendでは、Capability操作を静的検査した後、従来の値表現へ消去する。実際のArc／Weak／link livenessはHost adapterのtrusted contractであり、`verification-report.json`に明示する。
 
 ## Resource
 
