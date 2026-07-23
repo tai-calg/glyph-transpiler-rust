@@ -35,6 +35,14 @@ jobs:
             exit 1
           fi
 
+      - name: Upload test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: refactor-test-log
+          path: /tmp/glyph-tests.log
+          if-no-files-found: ignore
+
       - name: Check representative header-first sources
         run: |
           python3 glyphc.py examples/acceptance/motor_safety.glyph --check
