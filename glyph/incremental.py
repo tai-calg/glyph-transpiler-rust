@@ -6,7 +6,7 @@ from pathlib import Path
 import time
 from typing import Callable
 
-from .artifacts import RustArtifacts
+from .artifacts import CompilationModel, RustArtifacts
 from .compilation import CompilationPipeline
 from .mermaid import DiagramBundle
 
@@ -17,6 +17,7 @@ class CompilationSnapshot:
     artifacts: RustArtifacts
     diagrams: DiagramBundle
     semantic_json: str
+    model: CompilationModel
 
 
 @dataclass(frozen=True)
@@ -47,6 +48,11 @@ class IncrementalCompiler:
         self.pipeline = pipeline or CompilationPipeline()
         self._cache: dict[str, CompilationSnapshot] = {}
         self._last_digest: str | None = None
+        self._last_snapshot: CompilationSnapshot | None = None
+
+    @property
+    def last_snapshot(self) -> CompilationSnapshot | None:
+        return self._last_snapshot
 
     def compile_text(
         self,
@@ -63,10 +69,12 @@ class IncrementalCompiler:
                 outputs.artifacts,
                 outputs.diagrams,
                 outputs.design_json,
+                outputs.model,
             )
             self._cache[digest] = cached
         changed = digest != self._last_digest
         self._last_digest = digest
+        self._last_snapshot = cached
         return IncrementalResult(changed, cached, ())
 
     def compile_path(
