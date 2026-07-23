@@ -6,6 +6,7 @@ from pathlib import Path
 from .architecture import ArchitectureIR, SystemDecl, build_architecture_ir, extract_systems
 from .ast_macros import AstMacroDef, expand_function_macros, expand_machine_macros, expand_program_macros, extract_ast_macros
 from .capabilities import CapabilityModel, extract_capabilities
+from .capability_model_validate import validate_capability_model
 from .capability_surface_validate import validate_capability_surface
 from .capability_type_normalize import normalize_capability_types
 from .compiler import ExternDecl, FunctionDecl, GlyphError, Program, parse_program
@@ -14,6 +15,7 @@ from .contract_semantics import ContractSemanticModel, build_contract_semantics
 from .contract_type_normalize import normalize_contract_types
 from .function_blocks import FunctionBlockLowering, lower_function_blocks, restore_block_source_lines
 from .functional import FunctionalPatternRustGenerator, validate_function_values
+from .layout import normalize_multiline_declarations
 from .machine import MachineDecl, extract_machines, validate_machines
 from .opaque import OpaqueAwareRustGenerator, OpaqueDecl, expose_opaque_as_pure, generate_manual_scaffold, lower_opaque_to_extern, mask_opaque_as_effect, relabel_architecture, relabel_semantic_model, without_opaque_externs
 from .pipeline import LambdaLowering, join_pipeline_continuations, lower_lambda_pipelines, restore_lambda_source_lines
@@ -130,9 +132,11 @@ def parse_compilation_model(source: str, source_name: str = "input.glyph") -> Co
         expanded_source = normalize_temporal_sigils(preprocess.source)
         contract_result = extract_contracts(expanded_source)
         canonical_contracts = normalize_contract_types(contract_result.model)
-        validate_capability_surface(contract_result.source)
-        capability_result = extract_capabilities(contract_result.source)
+        layout = normalize_multiline_declarations(contract_result.source)
+        validate_capability_surface(layout.source)
+        capability_result = extract_capabilities(layout.source)
         canonical_capabilities = normalize_capability_types(capability_result.model)
+        validate_capability_model(canonical_capabilities)
         masked, opaque_seeds = mask_opaque_as_effect(capability_result.source)
         without_systems, systems = extract_systems(masked)
         joined = join_pipeline_continuations(without_systems)
