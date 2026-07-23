@@ -9,6 +9,8 @@ from .algorithm_ir import build_algorithm_ir
 from .algorithm_mermaid import render_algorithm_mermaid
 from .artifacts import CompilationModel, RustArtifacts, _generate_host, parse_compilation_model
 from .execution_ir import build_execution_structure_ir
+from .host_binding_codegen import render_host_binding_trait
+from .host_requirements import HostRequirementModel, build_host_requirements
 from .mermaid import DiagramBundle, _slug, _source_map, render_architecture_mermaid, render_dataflow_mermaid, render_index_markdown, render_machine_mermaid, render_temporal_mermaid
 from .opaque import OpaqueAwareRustGenerator, generate_manual_scaffold
 from .preprocessor import remap_source_lines
@@ -53,6 +55,17 @@ def _has_glyph04(model: CompilationModel) -> bool:
     return _has_capabilities(model) or _has_contracts(model) or _has_runtime_contracts(model)
 
 
+def build_host_requirement_model(model: CompilationModel) -> HostRequirementModel:
+    if not _has_glyph04(model):
+        return HostRequirementModel.empty()
+    resource_flow = build_resource_flow(model.capabilities)
+    return build_host_requirements(
+        model.capabilities,
+        model.runtime_contracts,
+        resource_flow,
+    )
+
+
 def build_rust_artifacts(model: CompilationModel) -> RustArtifacts:
     logic = append_temporal_rust(OpaqueAwareRustGenerator(model.program, model.opaques, model.blocks).generate(), model.program, model.specs)
     logic = append_streaming_temporal_rust(logic, model.program, model.specs)
@@ -80,6 +93,7 @@ def build_design_json(model: CompilationModel) -> str:
         payload["runtime_contracts"] = model.runtime_contracts.to_dict()
     if _has_glyph04(model):
         payload["verification"] = build_verification_report(model.capabilities, model.runtime_contracts).to_dict()
+        payload["host_requirements"] = build_host_requirement_model(model).to_dict()
     return json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
 
 
@@ -118,7 +132,10 @@ def build_diagram_bundle(model: CompilationModel, source_name: str, source_href:
     if _has_runtime_contracts(model):
         files["runtime-contract-ir.json"] = json.dumps(model.runtime_contracts.to_dict(), ensure_ascii=False, indent=2) + "\n"
     if _has_glyph04(model):
+        host_requirements = build_host_requirement_model(model)
         files["verification-report.json"] = json.dumps(build_verification_report(model.capabilities, model.runtime_contracts).to_dict(), ensure_ascii=False, indent=2) + "\n"
+        files["host-requirements-ir.json"] = json.dumps(host_requirements.to_dict(), ensure_ascii=False, indent=2) + "\n"
+        files["host-binding.generated.rs"] = render_host_binding_trait(host_requirements)
     files["index.md"] = render_index_markdown(ir, model.architecture, algorithm_ir, href, architecture, logic, dataflow, machine_files, temporal)
     return DiagramBundle(ir=ir, algorithm_ir=algorithm_ir, files=files)
 
