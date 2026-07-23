@@ -32,6 +32,7 @@ _SCRIPT = r"""
 <script id="glyph-transition-input-action-labels-v2-script">
 (() => {
   const MARKER = "glyph-transition-input-action-labels-v2";
+  const GAP = 8;
   let running = false;
   let timer = null;
 
@@ -84,6 +85,92 @@ _SCRIPT = r"""
     ].join("\u001e");
   }
 
+  function rectangle(element, centerX = null, centerY = null) {
+    const left = centerX === null ? element.offsetLeft : centerX - element.offsetWidth / 2;
+    const top = centerY === null ? element.offsetTop : centerY - element.offsetHeight / 2;
+    return {left, top, right: left + element.offsetWidth, bottom: top + element.offsetHeight};
+  }
+
+  function intersects(left, right) {
+    return !(
+      left.right + GAP <= right.left
+      || right.right + GAP <= left.left
+      || left.bottom + GAP <= right.top
+      || right.bottom + GAP <= left.top
+    );
+  }
+
+  function inside(item, width, height) {
+    return item.left >= 10 && item.top >= 10 && item.right <= width - 10 && item.bottom <= height - 10;
+  }
+
+  function candidates(x, y) {
+    const result = [[0, 0]];
+    for (const radius of [30, 54, 82, 116, 154, 196]) {
+      result.push(
+        [0, -radius], [0, radius], [-radius, 0], [radius, 0],
+        [-radius, -radius * .65], [radius, -radius * .65],
+        [-radius, radius * .65], [radius, radius * .65],
+      );
+    }
+    return result.map(([dx, dy]) => ({x: x + dx, y: y + dy}));
+  }
+
+  function reflowCompactLabels(stage) {
+    const labels = [...stage.querySelectorAll(".transition-label.compact.input-action-label")];
+    if (!labels.length) return;
+
+    const width = stage.clientWidth;
+    const baseHeight = stage.clientHeight;
+    const occupied = [
+      ...[...stage.querySelectorAll(".state-node")].map(node => rectangle(node)),
+      ...[...stage.querySelectorAll(".transition-label:not(.compact)")].map(label => rectangle(label)),
+    ];
+    let requiredHeight = baseHeight;
+    let railX = 18;
+    let railRow = 0;
+
+    labels.forEach(label => {
+      const preferredX = Number.parseFloat(label.style.left) || width / 2;
+      const preferredY = Number.parseFloat(label.style.top) || baseHeight / 2;
+      let placed = false;
+
+      for (const point of candidates(preferredX, preferredY)) {
+        label.style.left = `${point.x}px`;
+        label.style.top = `${point.y}px`;
+        const candidate = rectangle(label, point.x, point.y);
+        if (!inside(candidate, width, baseHeight)) continue;
+        if (occupied.some(item => intersects(candidate, item))) continue;
+        occupied.push(candidate);
+        placed = true;
+        break;
+      }
+
+      if (placed) return;
+
+      const itemWidth = label.offsetWidth;
+      if (railX + itemWidth > width - 18) {
+        railX = 18;
+        railRow += 1;
+      }
+      const centerX = railX + itemWidth / 2;
+      const centerY = baseHeight + 28 + railRow * Math.max(40, label.offsetHeight + 12);
+      label.style.left = `${centerX}px`;
+      label.style.top = `${centerY}px`;
+      label.classList.add("layout-fallback");
+      const fallback = rectangle(label, centerX, centerY);
+      occupied.push(fallback);
+      railX += itemWidth + 12;
+      requiredHeight = Math.max(requiredHeight, fallback.bottom + 16);
+    });
+
+    if (requiredHeight > baseHeight) {
+      stage.style.height = `${Math.ceil(requiredHeight)}px`;
+      const svg = stage.querySelector(":scope > svg.edge-svg");
+      if (svg) svg.setAttribute("height", String(Math.ceil(requiredHeight)));
+    }
+  }
+
   async function applyInputActionLabels() {
     if (running) return;
     const stage = document.querySelector(".state-node")?.closest(".graph-stage");
@@ -114,6 +201,10 @@ _SCRIPT = r"""
           detailId.dataset.inputActionLabel = summary;
         }
       });
+
+      const note = document.querySelector(".transition-index-note");
+      if (note) note.textContent = "図中は入力→アクションの要約。完全な遷移情報は各行に表示する";
+      reflowCompactLabels(stage);
 
       stage.dataset.transitionInputActionLabelsReady = "true";
       document.dispatchEvent(new CustomEvent("glyph-transition-input-action-labels-ready", {
