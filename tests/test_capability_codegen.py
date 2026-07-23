@@ -47,7 +47,8 @@ class CapabilityCodegenTests(unittest.TestCase):
                 for item in model.capabilities.operations
             )
         )
-        self.assertIn("Ok(weak)", generated)
+        self.assertIn("let live = weak;", generated)
+        self.assertIn("Ok(live)", generated)
         self.assertNotIn("(weak)?", generated)
         self.assertNotIn("as share", generated)
 
