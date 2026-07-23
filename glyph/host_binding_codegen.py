@@ -43,10 +43,8 @@ def _method_names(
 
 def _port_type(
     representation_types: dict[str, str],
-    representation: str | None,
+    representation: str,
 ) -> str:
-    if representation is None:
-        raise ValueError("Host operation port has no representation slot")
     try:
         associated_type = representation_types[representation]
     except KeyError as exc:
