@@ -177,11 +177,18 @@ def dumps_ui_application(application: UiApplication) -> str:
 
 
 def fingerprint_ui_application(application: UiApplication) -> str:
-    """Return a deterministic fingerprint for component-graph compatibility checks."""
+    """Return a deterministic component-graph compatibility fingerprint.
+
+    Source locations are deliberately excluded. Moving a declaration or changing only a
+    function body must not force a browser component rebuild when the typed UI contract is
+    unchanged.
+    """
 
     validate_ui_application(application)
+    action = application.action.to_dict()
+    action.pop("source_line", None)
     payload = json.dumps(
-        application.action.to_dict(),
+        action,
         ensure_ascii=False,
         separators=(",", ":"),
         sort_keys=True,
