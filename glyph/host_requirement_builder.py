@@ -17,6 +17,7 @@ from .host_requirements import (
     RepresentationSlot,
 )
 from .resource_flow import ResourceFlowModel
+from .verification_classes import split_verification_classes
 
 
 def _pascal(text: str) -> str:
@@ -132,17 +133,18 @@ class _Builder:
         *,
         include_plain: bool = False,
     ) -> HostPort:
-        return HostPort(
-            name,
+        representation = self._slot(
             ty,
-            self._slot(
-                ty,
-                world,
-                origin,
-                line,
-                include_plain=include_plain,
-            ),
+            world,
+            origin,
+            line,
+            include_plain=include_plain,
         )
+        if representation is None:
+            raise ValueError(
+                f"Host port '{name}' has no representation slot for {ty.canonical_key()}"
+            )
+        return HostPort(name, ty, representation)
 
     def collect_boundary_representations(self) -> None:
         """Register only values that actually cross a Host-facing boundary."""
@@ -410,8 +412,9 @@ class _Builder:
         handler = self._handlers[handler_name]
         for index, step in enumerate(handler.steps):
             preconditions, postconditions = _handler_contract(step.operation)
-            classes = tuple(
-                item for item in step.verification.split("+") if item
+            classes = split_verification_classes(
+                step.verification,
+                default=("trusted",),
             )
             self.operations.append(
                 HostOperationRequirement(
@@ -428,14 +431,17 @@ class _Builder:
                     preconditions,
                     postconditions,
                     True,
-                    classes or ("trusted",),
+                    classes,
                     step.line,
                 )
             )
 
     def _law_operation(self, application, law_name: str) -> None:
         law = self._laws[law_name]
-        classes = tuple(item for item in law.verification.split("+") if item)
+        classes = split_verification_classes(
+            law.verification,
+            default=("runtime",),
+        )
         self.operations.append(
             HostOperationRequirement(
                 f"law:{application.target}:{law_name}",
@@ -462,7 +468,7 @@ class _Builder:
                     "events reach the monitor in execution order without being fabricated or dropped",
                 ),
                 False,
-                classes or ("runtime",),
+                classes,
                 application.line,
             )
         )
