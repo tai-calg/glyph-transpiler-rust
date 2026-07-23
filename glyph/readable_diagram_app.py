@@ -4,10 +4,25 @@ from pathlib import Path
 
 from . import diagram_app
 from .transition_label_layout import enhance_diagram_html
+from .transition_semantics import enrich_io_state_views
+from .uml_transition_layout import enhance_uml_transition_html
+
+
+_BASE_BUILD_IO_STATE_VIEWS = diagram_app.build_io_state_views
+
+
+def _build_semantic_views(model, execution):
+    return enrich_io_state_views(
+        model,
+        _BASE_BUILD_IO_STATE_VIEWS(model, execution),
+    )
 
 
 def run_diagram_app(input_path: str | Path) -> int:
-    """Run the standard diagram app with the adaptive transition-label layer."""
+    """Run the diagram app with adaptive labels and UML transition semantics."""
 
-    diagram_app.DIAGRAM_HTML = enhance_diagram_html(diagram_app.DIAGRAM_HTML)
+    diagram_app.build_io_state_views = _build_semantic_views
+    diagram_app.DIAGRAM_HTML = enhance_uml_transition_html(
+        enhance_diagram_html(diagram_app.DIAGRAM_HTML)
+    )
     return diagram_app.run_diagram_app(input_path)
