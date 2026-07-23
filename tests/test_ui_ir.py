@@ -125,9 +125,11 @@ class UiIrTests(unittest.TestCase):
                 capture_output=True,
                 check=False,
             )
+            written = json.loads(output.read_text(encoding="utf-8"))
+
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertIn('"schema": "glyph.ui-ir"', completed.stdout)
-        self.assertEqual(json.loads(output.read_text(encoding="utf-8"))["version"], 1)
+        self.assertEqual(written["version"], 1)
 
 
 if __name__ == "__main__":
