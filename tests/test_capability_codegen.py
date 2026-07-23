@@ -9,14 +9,15 @@ from glyph import compile_source, parse_compilation_model
 
 
 class CapabilityCodegenTests(unittest.TestCase):
-    def test_shared_clone_lowers_to_rust_clone(self) -> None:
+    def test_shared_clone_is_checked_then_erased_for_legacy_codegen(self) -> None:
         source = (
             "*Service(id:I)\n"
             ">copy(shared:share Service):share Service=&shared as share\n"
         )
         generated = compile_source(source)
 
-        self.assertIn("shared.clone()", generated)
+        self.assertIn("pub fn copy(shared: Service) -> Service", generated)
+        self.assertNotIn(" as share", generated)
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "generated.rs"
             path.write_text(generated, encoding="utf-8")
@@ -27,7 +28,7 @@ class CapabilityCodegenTests(unittest.TestCase):
                 text=True,
             )
 
-    def test_link_resolution_is_recorded_and_generates_valid_rust(self) -> None:
+    def test_link_resolution_is_recorded_and_erased_without_dangling_try(self) -> None:
         source = (
             "*Service(id:I)\n"
             "+LinkExpired=Expired\n"
@@ -46,8 +47,9 @@ class CapabilityCodegenTests(unittest.TestCase):
                 for item in model.capabilities.operations
             )
         )
-        self.assertIn("weak.clone()", generated)
+        self.assertIn("Ok(weak)", generated)
         self.assertNotIn("(weak)?", generated)
+        self.assertNotIn("as share", generated)
 
 
 if __name__ == "__main__":
