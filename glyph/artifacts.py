@@ -11,6 +11,7 @@ from .capability_model_validate import validate_capability_model
 from .capability_surface_validate import validate_capability_surface
 from .capability_type_normalize import normalize_capability_types
 from .compiler import ExternDecl, FunctionDecl, GlyphError, Program, parse_program
+from .contract_application_binding import bind_field_applications_for_semantics
 from .contracts import ContractModel, extract_contracts, remap_contract_lines
 from .contract_law_bridge import build_contract_law_specs
 from .contract_semantics import ContractSemanticModel, build_contract_semantics
@@ -152,7 +153,8 @@ def parse_compilation_model(source: str, source_name: str = "input.glyph") -> Co
         machines = expand_machine_macros(machines, ast_macros)
         validate_function_values(without_opaque_externs(program, opaques))
         validate_machines(program, machines)
-        runtime_contracts = build_contract_semantics(expanded_source, canonical_contracts, canonical_capabilities, program)
+        semantic_binding_source = bind_field_applications_for_semantics(expanded_source)
+        runtime_contracts = build_contract_semantics(semantic_binding_source, canonical_contracts, canonical_capabilities, program)
         runtime_contracts = validate_and_refine_runtime_contracts(expanded_source, runtime_contracts, canonical_contracts, canonical_capabilities, program)
         contract_specs = build_contract_law_specs(contract_result.model, runtime_contracts, program)
         specs = (*specs, *contract_specs)
