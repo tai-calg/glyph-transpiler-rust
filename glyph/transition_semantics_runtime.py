@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 
 from .artifacts import CompilationModel
+from .nested_transition_repair import repair_nested_transition_targets
 from .transition_semantics import enrich_io_state_views
 
 
@@ -19,8 +20,9 @@ def enrich_runtime_io_state_views(
 ) -> dict[str, object]:
     """Enrich transitions and preserve only still-valid reachability warnings."""
 
-    base = deepcopy(views)
-    result = enrich_io_state_views(model, views)
+    repaired = repair_nested_transition_targets(model, views)
+    base = deepcopy(repaired)
+    result = enrich_io_state_views(model, repaired)
     base_machines = {
         str(machine.get("name")): machine
         for machine in base.get("state", {}).get("machines", [])
