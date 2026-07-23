@@ -15,18 +15,19 @@ _READ_BORROW = re.compile(rf"&\s*(?P<name>{_PATH})\b")
 
 
 def lower_capability_expression(text: str) -> str:
-    """Lower static Capability operations into compatibility Rust expressions.
+    """Erase Capability operators into the legacy value representation.
 
-    The Rust backend still uses the legacy object representation. Clone-based lowering keeps
-    affine source variables usable while `verification-report.json` records that real
-    Arc/Weak/link liveness behavior is a Host adapter obligation.
+    Capability legality and flow are checked before this pass. The existing Rust backend has
+    no Arc/Weak or borrow representation, so valid operations are lowered to their underlying
+    value expression. Concrete shared/link liveness remains an explicit trusted Host-adapter
+    obligation in ``verification-report.json``.
     """
 
-    output = _RESOLVE.sub(lambda match: f"{match.group('name')}.clone()", text)
-    output = _BORROW_CAST.sub(lambda match: f"{match.group('name')}.clone()", output)
+    output = _RESOLVE.sub(lambda match: match.group("name"), text)
+    output = _BORROW_CAST.sub(lambda match: match.group("name"), output)
     output = _PUBLISH.sub(lambda match: match.group("name"), output)
-    output = _MUT_BORROW.sub(lambda match: f"{match.group('name')}.clone()", output)
-    output = _READ_BORROW.sub(lambda match: f"{match.group('name')}.clone()", output)
+    output = _MUT_BORROW.sub(lambda match: match.group("name"), output)
+    output = _READ_BORROW.sub(lambda match: match.group("name"), output)
     return output
 
 
