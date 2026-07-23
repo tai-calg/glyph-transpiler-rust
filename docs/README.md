@@ -28,5 +28,6 @@ Glyphの詳細文書をこのディレクトリへ集約しています。入口
 - [Glyph temporal constraints](TEMPORAL.md)
 - [Glyph 時相制約設計書](TEMPORAL_DESIGN.md)
 - [Glyph 時相制約 実装状況](TEMPORAL_IMPLEMENTATION_STATUS.md)
+- [Glyph UI IR and Generic Gradio Renderer](UI_IR.md)
 - [Glyph enum variant guard patterns](VARIANT_PATTERNS.md)
 - [検証記録](VERIFICATION.md)
