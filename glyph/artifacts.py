@@ -11,6 +11,7 @@ from .capability_surface_validate import validate_capability_surface
 from .capability_type_normalize import normalize_capability_types
 from .compiler import ExternDecl, FunctionDecl, GlyphError, Program, parse_program
 from .contracts import ContractModel, extract_contracts, remap_contract_lines
+from .contract_law_bridge import build_contract_law_specs
 from .contract_semantics import ContractSemanticModel, build_contract_semantics
 from .contract_type_normalize import normalize_contract_types
 from .function_blocks import FunctionBlockLowering, lower_function_blocks, restore_block_source_lines
@@ -149,10 +150,12 @@ def parse_compilation_model(source: str, source_name: str = "input.glyph") -> Co
         inline_effects = expand_function_macros(inline_effects, ast_macros)
         machines = expand_machine_macros(machines, ast_macros)
         validate_function_values(without_opaque_externs(program, opaques))
-        validate_temporal_specs(program, specs)
         validate_machines(program, machines)
         runtime_contracts = build_contract_semantics(expanded_source, canonical_contracts, canonical_capabilities, program)
         runtime_contracts = validate_and_refine_runtime_contracts(expanded_source, runtime_contracts, canonical_contracts, canonical_capabilities, program)
+        contract_specs = build_contract_law_specs(contract_result.model, runtime_contracts, program)
+        specs = (*specs, *contract_specs)
+        validate_temporal_specs(program, specs)
     except GlyphError as exc:
         raise preprocess.remap_error(exc) from exc
 
