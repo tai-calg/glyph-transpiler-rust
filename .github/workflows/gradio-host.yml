@@ -1,0 +1,76 @@
+name: Gradio Host
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "glyph/pure_runtime.py"
+      - "examples/gradio_temperature.glyph"
+      - "examples/gradio_temperature_app.py"
+      - "requirements-gradio.txt"
+      - "tests/test_pure_runtime.py"
+      - "tests/test_gradio_host_example.py"
+      - ".github/workflows/gradio-host.yml"
+  push:
+    branches: [main]
+    paths:
+      - "glyph/pure_runtime.py"
+      - "examples/gradio_temperature.glyph"
+      - "examples/gradio_temperature_app.py"
+      - "requirements-gradio.txt"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-gradio-host:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-gradio.txt
+
+      - name: Install Gradio Host dependencies
+        run: python3 -m pip install -r requirements-gradio.txt
+
+      - name: Run Pure Runtime and Gradio example tests
+        run: |
+          python3 -m unittest discover -s tests -p 'test_pure_runtime.py' -v
+          python3 -m unittest discover -s tests -p 'test_gradio_host_example.py' -v
+
+      - name: Build the Gradio component graph
+        run: |
+          python3 - <<'PY'
+          import importlib.util
+          from pathlib import Path
+          import sys
+
+          path = Path("examples/gradio_temperature_app.py")
+          spec = importlib.util.spec_from_file_location("glyph_gradio_example", path)
+          if spec is None or spec.loader is None:
+              raise RuntimeError("could not load Gradio example module")
+          module = importlib.util.module_from_spec(spec)
+          sys.modules[spec.name] = module
+          spec.loader.exec_module(module)
+
+          runtime = module.LivePureGlyphRuntime(
+              Path("examples/gradio_temperature.glyph")
+          )
+          try:
+              demo = module.build_demo(runtime)
+              if demo is None:
+                  raise RuntimeError("build_demo returned no Blocks app")
+              print("Gradio component graph built successfully")
+          finally:
+              runtime.stop()
+          PY
+
+      - name: Verify command-line entrypoint
+        run: python3 examples/gradio_temperature_app.py --help
