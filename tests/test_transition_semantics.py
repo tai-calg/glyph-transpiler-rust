@@ -5,7 +5,7 @@ from pathlib import Path
 
 from glyph.compilation import CompilationPipeline
 from glyph.io_state_views import build_io_state_views
-from glyph.transition_semantics import enrich_io_state_views
+from glyph.transition_semantics_runtime import enrich_runtime_io_state_views
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -15,7 +15,7 @@ def compile_semantic(path: Path) -> dict[str, object]:
     source = path.read_text(encoding="utf-8")
     output = CompilationPipeline().compile_text(source, source_name=str(path))
     views = build_io_state_views(output.model, output.diagrams.ir)
-    return enrich_io_state_views(output.model, views)
+    return enrich_runtime_io_state_views(output.model, views)
 
 
 def transition(machine: dict[str, object], source: str, target: str, event: str | None = None):
@@ -182,7 +182,7 @@ machine Device(state:DeviceState,event:DeviceEvent)
   _ >> state
 """
         output = CompilationPipeline().compile_text(source, source_name="device.glyph")
-        views = enrich_io_state_views(
+        views = enrich_runtime_io_state_views(
             output.model,
             build_io_state_views(output.model, output.diagrams.ir),
         )
