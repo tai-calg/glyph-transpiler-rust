@@ -5,7 +5,8 @@ from dataclasses import dataclass
 from .capabilities import CapabilityModel
 from .contracts import ContractModel
 from .contract_semantics import ContractSemanticModel
-from .host_requirements import HostRequirementModel, build_host_requirements
+from .host_requirement_builder import build_host_requirements
+from .host_requirements import HostRequirementModel
 from .resource_flow import ResourceFlowModel, build_resource_flow
 from .verification import VerificationReport, build_verification_report
 
