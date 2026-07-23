@@ -58,6 +58,8 @@ tests/file.py::TestClass::test_method
 | Public IR | schema、version、条件付き出力 |
 | Compatibility | mainとのRust・JSON・diagram・diagnostic一致 |
 
+Host Requirement層は`tests/test_host_requirements.py`とstabilization gateによって追加検証する。これは既存静的規則の置換ではなく、静的に検証済みの意味をHostへ渡す境界の検査である。
+
 詳細な行単位対応は、CI生成物`glyph04-stabilization.json`の`compliance.requirements`に出力する。
 
 ## Frozen Glyph 0.4 schemas
@@ -70,11 +72,27 @@ glyph.resource-flow-ir
 glyph.contracts
 glyph.runtime-contract-ir
 glyph.verification-report
+glyph.host-requirements
 ```
 
 正本は`glyph/schema.py::GLYPH04_PUBLIC_SCHEMAS`である。
 
 `tests/test_glyph04_compliance.py`はschema名、version、top-level field集合、resource identity endpointのfield集合を固定する。互換性のないfield変更は、既存version 1を書き換えずversion 2として導入する。
+
+## Host Requirement verification
+
+stabilization gateは次を検査する。
+
+```text
+host-requirements-ir.jsonがversion 1の固定shapeを持つ
+host-binding.generated.rsが決定的に生成される
+生成traitがstandalone rustcを通る
+同じGlyph型を異なるWorldで別representation slotにできる
+生成traitが特定のownership・runtime・transport・device実装を選ばない
+plain sourceではHost Requirement artifactを生成しない
+```
+
+Host Requirement層の意味と非目標は`HOST_BINDING_DESIGN.md`を正本とする。
 
 ## Legacy main compatibility
 
@@ -104,6 +122,7 @@ pyproject.toml project.version == VERSION
 README.md identifies Glyph 0.4
 LANGUAGE.md identifies Glyph Language 0.4
 CONTRACTS.md identifies Glyph 0.4
+HOST_BINDING_DESIGN.md identifies Glyph 0.4
 IMPLEMENTATION_STATUS.md identifies Glyph 0.4
 ```
 
@@ -113,7 +132,7 @@ IMPLEMENTATION_STATUS.md identifies Glyph 0.4
 static   compilerが決定的に検査
 model    時相式・有限modelで検査
 runtime  生成monitorまたはHost event monitorで検査
-trusted  Host adapterまたは設計者が満たす証明義務
+trusted  Host Bindingまたは設計者が満たす証明義務
 ```
 
 `verification-report.json`とcompliance manifestは同じ4分類だけを使用する。新しい曖昧な保証分類を追加しない。
@@ -127,11 +146,12 @@ Glyph 0.4 compilerは次の全条件を満たした場合だけrelease candidate
 [ ] 全static ruleにnegative evidenceがある
 [ ] complete Glyph 0.4 exampleが決定的に生成される
 [ ] complete exampleのRustがrustcを通る
-[ ] 5個のPublic IR schemaがversion 1のまま一致する
+[ ] generated Host Binding traitがrustcを通る
+[ ] 6個のPublic IR schemaがversion 1のまま一致する
 [ ] legacy sourceがmainとbyte-for-byte一致する
 [ ] legacy diagnosticとexit statusがmainと一致する
 [ ] release metadataと文書versionが一致する
-[ ] trusted Host obligationがverification reportへ残る
+[ ] trusted Host obligationがverification reportとHost Requirement IRへ残る
 ```
 
 このgateは、PRをReady化またはmergeする操作ではない。PR #10は明示指示があるまでDraft・未マージを維持する。
