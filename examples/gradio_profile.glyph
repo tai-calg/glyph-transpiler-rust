@@ -1,0 +1,14 @@
+# Generic UI example: text, integer, boolean, nested product, and unit variants.
++AccessLevel=Guest|Member|Admin
+*ProfileInput(name:S,age:U,active:B)
+*ProfileView(name:S,age:U,adult:B,access:AccessLevel)
+
+>is_adult(age:U):B=age>=18
+
+>choose_access(age:U,active:B):AccessLevel
+  !active >> Guest
+  age>=30 >> Admin
+  age>=18 >> Member
+  _ >> Guest
+
+>render(profile:ProfileInput):ProfileView=ProfileView(profile.name,profile.age,is_adult(profile.age),choose_access(profile.age,profile.active))
