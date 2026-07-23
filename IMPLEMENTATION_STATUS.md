@@ -8,7 +8,7 @@
 - stateful `resource T[State]`
 - failure-path resource preservation and symbolic resource identity
 - apostrophe Contract namespace and `@{'Name}` application
-- World, Protocol, Handler, Law, Bundle semantics
+- World, Protocol, Handler, Law, and Bundle semantics
 - World crossing and Region escape validation
 - retry, rollback, compensation, fallback validation
 - product Law integration with temporal reference and streaming monitors
@@ -34,3 +34,7 @@
 - distributed replication/quorum consistency
 - general deadlock freedom
 - quantitative performance guarantees
+
+## Pull-request policy
+
+PR #10 remains Draft and unmerged until explicit user instruction.
