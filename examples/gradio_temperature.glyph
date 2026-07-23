@@ -1,0 +1,10 @@
+# Product declarations are one-line declarations in the current Glyph grammar.
+*TemperatureInput(celsius:F)
+*TemperatureView(celsius:F,fahrenheit:F,kelvin:F,count:U,valid:B)
+*Session(count:U)
+
+>to_fahrenheit(celsius:F):F=celsius*1.8+32.0
+>to_kelvin(celsius:F):F=celsius+273.15
+>next_count(count:U):U=count+1
+>is_valid(celsius:F):B=celsius>=-273.15
+>render(input:TemperatureInput,session:Session):TemperatureView=TemperatureView(input.celsius,to_fahrenheit(input.celsius),to_kelvin(input.celsius),next_count(session.count),is_valid(input.celsius))
