@@ -8,6 +8,7 @@ on:
       - "glyph/diagram_app.py"
       - "glyph/diagram_ui.py"
       - "glyph/readable_diagram_app.py"
+      - "glyph/direct_io_layout.py"
       - "glyph/transition_label_layout.py"
       - "glyph/transition_semantics.py"
       - "glyph/transition_semantics_runtime.py"
@@ -16,10 +17,12 @@ on:
       - "glyph/state_machine_analysis.py"
       - "glyph/state_machine_source_map.py"
       - "tests/test_io_state_diagram_app.py"
+      - "tests/test_direct_io_layout.py"
       - "tests/test_state_machine_source_map.py"
       - "tests/test_state_diagram_examples.py"
       - "tests/test_transition_label_layout.py"
       - "tests/test_transition_semantics.py"
+      - "tests/verify_direct_io_rendering.mjs"
       - "tests/verify_state_diagram_rendering.mjs"
       - "tests/verify_uml_transition_semantics.mjs"
       - "examples/acceptance/motor_safety.glyph"
@@ -47,17 +50,19 @@ jobs:
           npm install playwright@1.54.2
           npx playwright install --with-deps chromium
 
-      - name: Compile and verify multiple state diagrams
+      - name: Compile and verify diagrams
         shell: bash
         run: |
           set -o pipefail
-          mkdir -p build/state-diagram-regression build/uml-transition-semantics
+          mkdir -p build/direct-io build/state-diagram-regression build/uml-transition-semantics
+          node tests/verify_direct_io_rendering.mjs \
+            2>&1 | tee build/direct-io/verify.log
           node tests/verify_state_diagram_rendering.mjs \
             2>&1 | tee build/state-diagram-regression/verify.log
           node tests/verify_uml_transition_semantics.mjs \
             2>&1 | tee build/uml-transition-semantics/verify.log
 
-      - name: Upload rendered state diagrams
+      - name: Upload rendered diagrams
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -65,6 +70,7 @@ jobs:
           include-hidden-files: true
           if-no-files-found: warn
           path: |
+            build/direct-io/**
             build/state-diagram-regression/**
             build/uml-transition-semantics/**
             examples/acceptance/motor_safety.glyph
