@@ -24,6 +24,11 @@
 - semantic Host operations for Capability, Resource, World, Protocol, Handler, and Law
 - representation-neutral `host-binding.generated.rs` trait scaffold
 - standalone `rustc` verification of the generated Host Binding scaffold
+- Glyph Studio projection from the canonical typed design
+- Capability, Resource identity/state, World/Region, Protocol sequence, Handler exit, Law/monitor, and Verification-strength views
+- `glyph.studio-views` version 1 Studio state and `studio-views.json`
+- source-line navigation from Glyph 0.4 Studio views
+- preservation of the last successful Studio views after a compile error
 
 ## Host Binding boundary
 
@@ -40,14 +45,38 @@ The same Glyph type may have different representation slots in different Worlds.
 
 The design is documented in `HOST_BINDING_DESIGN.md`.
 
+## Glyph Studio 0.4 boundary
+
+Glyph Studio does not parse Glyph 0.4 independently. It projects the already validated typed design into seven orthogonal views:
+
+```text
+Capability
+Resource identity/state
+World/Region
+Protocol sequence
+Handler exit graph
+Law/monitor
+Verification strength
+```
+
+The projection is implemented in `glyph/studio_views.py` and exposed through `StudioSnapshot.glyph04_views`, `/api/state`, and `studio-views.json`.
+
+Protocol events retain their structured control path so choice, parallel, repeat, and sequence structure are not erased. Resource views are grouped by symbolic identity rather than only by type name.
+
+The architecture and non-goals are documented in `STUDIO_04_DESIGN.md`.
+
 ## Not yet implemented
 
 - lowering normal Glyph logic calls into generated Host Binding trait calls
 - a concrete reference Host Binding
 - automatic selection of any concrete runtime representation
 - executable dispatch, transport, timeout, retry, rollback, compensation, or lifecycle-event runtime
+- Studio round-trip editing from diagrams back into Glyph source
+- live runtime-event streaming and Law violation replay
+- cross-view linked selection and highlighting
+- a large-design automatic graph layout engine
 
-These are intentionally separate from the semantic Host Requirement layer. A future concrete adapter may use local ownership, thread-safe ownership, manager handles, actor IDs, process handles, device handles, or other mechanisms without changing Glyph semantics.
+These are intentionally separate from the semantic Host Requirement and Studio projection layers. A future concrete adapter may use local ownership, thread-safe ownership, manager handles, actor IDs, process handles, device handles, or other mechanisms without changing Glyph semantics.
 
 ## Stabilization outputs
 
