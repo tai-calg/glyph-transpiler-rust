@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 from glyph import GlyphError
-from glyph.diagram_app import run_diagram_app
+from glyph.readable_diagram_app import run_diagram_app
 
 
 def build_parser() -> argparse.ArgumentParser:
