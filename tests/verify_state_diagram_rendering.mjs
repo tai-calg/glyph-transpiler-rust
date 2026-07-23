@@ -24,7 +24,13 @@ const cases = [
         name: "Traffic",
         states: ["Red", "Green", "Yellow", "TrafficFault"],
         warnings: [],
-        labels: ["input.fault", "state.mode==Red&input.tick", "state.mode==Green&input.tick", "state.mode==Yellow&input.tick"],
+        compact: true,
+        labels: [
+          "input.fault",
+          "state.mode==Red&input.tick",
+          "state.mode==Green&input.tick",
+          "state.mode==Yellow&input.tick",
+        ],
       },
     ],
   },
@@ -36,6 +42,7 @@ const cases = [
         name: "Session",
         states: ["SessionIdle", "SessionConnecting", "SessionReady", "SessionFailed"],
         warnings: [],
+        compact: true,
         labels: [
           "state.phase==SessionIdle&event==SessionStart",
           "state.phase==SessionConnecting&event==SessionAccept",
@@ -54,6 +61,7 @@ const cases = [
         name: "Door",
         states: ["DoorClosed", "DoorOpen", "DoorJammed"],
         warnings: ["unreachable-state"],
+        compact: true,
         labels: [
           "state.mode==DoorClosed&event==DoorOpenRequest",
           "state.mode==DoorOpen&event==DoorCloseRequest",
@@ -63,7 +71,12 @@ const cases = [
         name: "Power",
         states: ["PowerOff", "PowerOn", "PowerFault"],
         warnings: [],
-        labels: ["event==PowerTrip", "state.mode==PowerOff&event==PowerStart", "state.mode==PowerOn&event==PowerStop"],
+        compact: true,
+        labels: [
+          "event==PowerTrip",
+          "state.mode==PowerOff&event==PowerStart",
+          "state.mode==PowerOn&event==PowerStop",
+        ],
       },
     ],
   },
@@ -105,27 +118,51 @@ async function stopProcess(child) {
   if (child.exitCode === null) child.kill("SIGKILL");
 }
 
-async function assertNodesInsideStage(page) {
+async function assertDiagramGeometry(page) {
   const result = await page.evaluate(() => {
     const stage = document.querySelector(".graph-stage");
     if (!stage) return { error: "graph stage is missing" };
     const stageRect = stage.getBoundingClientRect();
-    const failures = [];
-    for (const node of document.querySelectorAll(".state-node")) {
-      const rect = node.getBoundingClientRect();
-      if (
-        rect.left < stageRect.left - 1 ||
-        rect.top < stageRect.top - 1 ||
-        rect.right > stageRect.right + 1 ||
-        rect.bottom > stageRect.bottom + 1
-      ) {
-        failures.push({ name: node.textContent?.trim(), rect, stageRect });
+    const nodes = [...document.querySelectorAll(".state-node")].map((element) => ({
+      kind: "state",
+      name: element.textContent?.trim(),
+      rect: element.getBoundingClientRect(),
+    }));
+    const labels = [...document.querySelectorAll(".edge-label.transition-label")].map((element) => ({
+      kind: "label",
+      name: element.dataset.transitionId,
+      rect: element.getBoundingClientRect(),
+    }));
+    const outside = [...nodes, ...labels].filter(({rect}) => (
+      rect.left < stageRect.left - 1 ||
+      rect.top < stageRect.top - 1 ||
+      rect.right > stageRect.right + 1 ||
+      rect.bottom > stageRect.bottom + 1
+    ));
+    const intersects = (left, right) => !(
+      left.right <= right.left + 1 ||
+      right.right <= left.left + 1 ||
+      left.bottom <= right.top + 1 ||
+      right.bottom <= left.top + 1
+    );
+    const overlaps = [];
+    for (let index = 0; index < labels.length; index += 1) {
+      for (let other = index + 1; other < labels.length; other += 1) {
+        if (intersects(labels[index].rect, labels[other].rect)) {
+          overlaps.push(`${labels[index].name}/${labels[other].name}`);
+        }
+      }
+      for (const node of nodes) {
+        if (intersects(labels[index].rect, node.rect)) {
+          overlaps.push(`${labels[index].name}/${node.name}`);
+        }
       }
     }
-    return { failures };
+    return {outside: outside.map(item => `${item.kind}:${item.name}`), overlaps};
   });
   assert.equal(result.error, undefined, result.error);
-  assert.deepEqual(result.failures, [], `state nodes outside graph stage: ${JSON.stringify(result.failures)}`);
+  assert.deepEqual(result.outside, [], `items outside graph stage: ${JSON.stringify(result.outside)}`);
+  assert.deepEqual(result.overlaps, [], `transition label overlap: ${JSON.stringify(result.overlaps)}`);
 }
 
 const browser = await chromium.launch({ headless: true });
@@ -167,7 +204,18 @@ try {
         if (testCase.machines.length > 1) {
           await page.selectOption("#machine-select", { label: expected.name });
         }
-        await page.waitForTimeout(100);
+        await page.waitForFunction(
+          (machineName) => {
+            const selected = document.querySelector("#machine-select")?.selectedOptions?.[0]?.textContent;
+            const stage = document.querySelector(".graph-stage");
+            return selected === machineName && stage?.dataset.labelLayoutReady === "true";
+          },
+          expected.name,
+        );
+
+        const machine = apiState.views.state.machines.find((item) => item.name === expected.name);
+        assert.ok(machine, `${testCase.slug}/${expected.name}: API machine missing`);
+        const transitionCount = machine.transitions.length;
 
         const stateNames = await page.locator(".state-name").allTextContents();
         assert.deepEqual(sorted(stateNames), sorted(expected.states), `${testCase.slug}/${expected.name}: states`);
@@ -178,12 +226,42 @@ try {
         const warningCodes = await page.locator(".analysis-code").allTextContents();
         assert.deepEqual(sorted(warningCodes), sorted(expected.warnings), `${testCase.slug}/${expected.name}: warnings`);
 
-        const labels = await page.locator(".edge-label").allTextContents();
+        assert.equal(
+          await page.locator(".edge-label.transition-label").count(),
+          transitionCount,
+          `${testCase.slug}/${expected.name}: transition labels`,
+        );
+        assert.equal(
+          await page.locator(".transition-detail").count(),
+          transitionCount,
+          `${testCase.slug}/${expected.name}: transition details`,
+        );
+        assert.equal(
+          await page.locator(".state-transition-path").count(),
+          transitionCount,
+          `${testCase.slug}/${expected.name}: transition paths`,
+        );
+
+        const labelIds = await page.locator(".edge-label.transition-label").evaluateAll(
+          elements => elements.map(element => element.dataset.transitionId),
+        );
+        const detailIds = await page.locator(".transition-detail").evaluateAll(
+          elements => elements.map(element => element.dataset.transitionId),
+        );
+        assert.deepEqual(sorted(labelIds), sorted(detailIds));
+
+        const fullLabels = await page.locator(".transition-detail-condition").allTextContents();
         for (const expectedLabel of expected.labels ?? []) {
-          assert(labels.includes(expectedLabel), `${testCase.slug}/${expected.name}: missing transition label ${expectedLabel}`);
+          assert(fullLabels.includes(expectedLabel), `${testCase.slug}/${expected.name}: missing full transition label ${expectedLabel}`);
+        }
+        if (expected.compact) {
+          assert(
+            await page.locator(".edge-label.transition-label.compact").count() > 0,
+            `${testCase.slug}/${expected.name}: expected compact labels`,
+          );
         }
 
-        await assertNodesInsideStage(page);
+        await assertDiagramGeometry(page);
         await page.screenshot({
           path: path.join(outputDirectory, `${testCase.slug}-${expected.name.toLowerCase()}.png`),
           fullPage: true,
@@ -199,4 +277,4 @@ try {
   await browser.close();
 }
 
-console.log(`verified ${cases.length} Glyph files and ${cases.reduce((sum, item) => sum + item.machines.length, 0)} state-machine renderings`);
+console.log(`verified ${cases.length} Glyph files and ${cases.reduce((sum, item) => sum + item.machines.length, 0)} collision-free state-machine renderings`);
