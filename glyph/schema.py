@@ -20,6 +20,7 @@ RESOURCE_FLOW_IR_SCHEMA = "glyph.resource-flow-ir"
 CONTRACTS_IR_SCHEMA = "glyph.contracts"
 RUNTIME_CONTRACT_IR_SCHEMA = "glyph.runtime-contract-ir"
 VERIFICATION_REPORT_SCHEMA = "glyph.verification-report"
+HOST_REQUIREMENTS_IR_SCHEMA = "glyph.host-requirements"
 COMPLIANCE_REPORT_SCHEMA = "glyph.compliance-report"
 COMPATIBILITY_REPORT_SCHEMA = "glyph.compatibility-report"
 STABILIZATION_REPORT_SCHEMA = "glyph.stabilization-report"
@@ -30,6 +31,7 @@ GLYPH04_PUBLIC_SCHEMAS: dict[str, tuple[str, int]] = {
     "contracts-ir.json": (CONTRACTS_IR_SCHEMA, IR_SCHEMA_VERSION),
     "runtime-contract-ir.json": (RUNTIME_CONTRACT_IR_SCHEMA, IR_SCHEMA_VERSION),
     "verification-report.json": (VERIFICATION_REPORT_SCHEMA, IR_SCHEMA_VERSION),
+    "host-requirements-ir.json": (HOST_REQUIREMENTS_IR_SCHEMA, IR_SCHEMA_VERSION),
 }
 
 
