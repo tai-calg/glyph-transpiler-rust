@@ -20,7 +20,7 @@ def _build_semantic_views(model, execution):
 
 
 def run_diagram_app(input_path: str | Path) -> int:
-    """Run the diagram app with UML transition semantics and readable routes."""
+    """Run the diagram app with UML semantics and compact input→action labels."""
 
     diagram_app.build_io_state_views = _build_semantic_views
     diagram_app.DIAGRAM_HTML = enhance_transition_route_html(
