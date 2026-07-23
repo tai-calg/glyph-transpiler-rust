@@ -3,14 +3,8 @@ from __future__ import annotations
 import json
 import unittest
 
-from glyph import (
-    ContractKind,
-    GlyphError,
-    compile_outputs,
-    compile_source,
-    extract_contracts,
-    parse_compilation_model,
-)
+from glyph import GlyphError, compile_outputs, compile_source, parse_compilation_model
+from glyph.contracts import ContractKind, extract_contracts
 
 
 class ContractTests(unittest.TestCase):
@@ -154,6 +148,7 @@ class ContractTests(unittest.TestCase):
         )
         self.assertIn("pub fn double", compile_source(valid))
 
+    def test_legacy_protocol_arrows_are_rejected(self) -> None:
         with self.assertRaisesRegex(GlyphError, "'-> T'"):
             compile_source(
                 "'>RequestReply = >I >> <I\n"
