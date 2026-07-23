@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import re
-
 from .capabilities import (
     AggregateType,
     CapabilityFunction,
@@ -9,45 +7,35 @@ from .capabilities import (
     CapabilityParam,
     CapabilityType,
 )
+from .type_shortcuts import expand_type_name, expand_type_tokens
 
 
-_SHORTCUTS = {
-    "F": "f32",
-    "D": "f64",
-    "U": "u16",
-    "I": "i32",
-    "B": "bool",
-}
-_SHORTCUT_TOKEN = re.compile(r"\b(?:F|D|U|I|B)\b")
-
-
-def _raw(text: str) -> str:
-    return _SHORTCUT_TOKEN.sub(
-        lambda match: _SHORTCUTS[match.group(0)],
-        text,
-    )
-
-
-def _type(ty: CapabilityType) -> CapabilityType:
+def _normalize_type(ty: CapabilityType) -> CapabilityType:
     return CapabilityType(
         ty.capability,
-        _SHORTCUTS.get(ty.name, ty.name),
-        tuple(_type(arg) for arg in ty.args),
+        expand_type_name(ty.name),
+        tuple(_normalize_type(argument) for argument in ty.args),
         ty.state,
-        _raw(ty.raw),
+        expand_type_tokens(ty.raw),
     )
 
 
 def normalize_capability_types(model: CapabilityModel) -> CapabilityModel:
+    """Normalize Capability IR with the same shortcut rules as Plain Glyph."""
+
     functions = tuple(
         CapabilityFunction(
             function.name,
             function.marker,
             tuple(
-                CapabilityParam(param.name, _type(param.type), param.line)
-                for param in function.params
+                CapabilityParam(
+                    parameter.name,
+                    _normalize_type(parameter.type),
+                    parameter.line,
+                )
+                for parameter in function.params
             ),
-            _type(function.result),
+            _normalize_type(function.result),
             function.line,
             function.body_start,
             function.body_end,
@@ -57,7 +45,7 @@ def normalize_capability_types(model: CapabilityModel) -> CapabilityModel:
     aggregates = tuple(
         AggregateType(
             aggregate.name,
-            tuple(_type(member) for member in aggregate.members),
+            tuple(_normalize_type(member) for member in aggregate.members),
             aggregate.line,
         )
         for aggregate in model.aggregates
