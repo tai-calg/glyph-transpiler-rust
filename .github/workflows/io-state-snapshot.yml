@@ -9,6 +9,8 @@ on:
       - "glyph/diagram_ui.py"
       - "glyph/readable_diagram_app.py"
       - "glyph/transition_label_layout.py"
+      - "glyph/transition_semantics.py"
+      - "glyph/uml_transition_layout.py"
       - "glyph/io_state_views.py"
       - "glyph/state_machine_analysis.py"
       - "glyph/state_machine_source_map.py"
@@ -16,7 +18,9 @@ on:
       - "tests/test_state_machine_source_map.py"
       - "tests/test_state_diagram_examples.py"
       - "tests/test_transition_label_layout.py"
+      - "tests/test_transition_semantics.py"
       - "tests/verify_state_diagram_rendering.mjs"
+      - "tests/verify_uml_transition_semantics.mjs"
       - "examples/acceptance/motor_safety.glyph"
       - "examples/state_diagrams/**"
       - ".github/workflows/io-state-snapshot.yml"
@@ -46,9 +50,11 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          mkdir -p build/state-diagram-regression
+          mkdir -p build/state-diagram-regression build/uml-transition-semantics
           node tests/verify_state_diagram_rendering.mjs \
             2>&1 | tee build/state-diagram-regression/verify.log
+          node tests/verify_uml_transition_semantics.mjs \
+            2>&1 | tee build/uml-transition-semantics/verify.log
 
       - name: Upload rendered state diagrams
         if: always()
@@ -59,6 +65,7 @@ jobs:
           if-no-files-found: warn
           path: |
             build/state-diagram-regression/**
+            build/uml-transition-semantics/**
             examples/acceptance/motor_safety.glyph
             examples/state_diagrams/*.glyph
             examples/acceptance/.glyph/**/io-state-views.json
