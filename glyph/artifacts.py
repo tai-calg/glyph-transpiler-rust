@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+import re
 
 from .architecture import ArchitectureIR, SystemDecl, build_architecture_ir, extract_systems
 from .ast_macros import AstMacroDef, expand_function_macros, expand_machine_macros, expand_program_macros, extract_ast_macros
@@ -33,6 +34,11 @@ from .temporal_sigils import normalize_temporal_sigils, reject_reserved_temporal
 from .temporal_stream_codegen import append_streaming_temporal_rust
 from .temporal_stream_safety_codegen import append_safety_streaming_temporal_rust
 from .temporal_validate import validate_temporal_specs
+
+
+_CAPABILITY_TYPE_USE = re.compile(
+    r"(?:^|[(:,|])\s*(?:own|share|link)\s+[A-Za-z_&]"
+)
 
 
 @dataclass(frozen=True)
@@ -123,9 +129,111 @@ def _generate_host(program: Program, inline_effects: tuple[FunctionDecl, ...], o
     return "\n".join(out).rstrip() + "\n"
 
 
+def _uses_glyph04_syntax(source: str) -> bool:
+    """Detect only syntax introduced by Glyph 0.4.
+
+    Legacy boolean `&`, ordinary identifiers named `own`, and comments must not activate the
+    new pipeline. This predicate is deliberately lexical so malformed legacy input still reaches
+    the original parser and preserves its diagnostics.
+    """
+
+    for original in source.splitlines():
+        code = original.split("#", 1)[0]
+        stripped = code.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("'") or stripped.startswith("resource "):
+            return True
+        if "@{" in code or "&mut " in code:
+            return True
+        if " as share" in code or " as link" in code:
+            return True
+        if _CAPABILITY_TYPE_USE.search(code):
+            return True
+    return False
+
+
+def _parse_legacy_compilation_model(
+    source_name: str,
+    preprocess: PreprocessResult,
+) -> CompilationModel:
+    """Run the exact pre-0.4 compiler path for sources that do not opt in."""
+
+    try:
+        expanded_source = normalize_temporal_sigils(preprocess.source)
+        masked, opaque_seeds = mask_opaque_as_effect(expanded_source)
+        without_systems, systems = extract_systems(masked)
+        joined = join_pipeline_continuations(without_systems)
+        compact = expand_compact_syntax(joined)
+        without_ast_macros, ast_macros = extract_ast_macros(compact)
+        pure_source, opaques = expose_opaque_as_pure(without_ast_macros, opaque_seeds)
+        block_result = lower_function_blocks(pure_source, ast_macros)
+        pipeline_result = lower_lambda_pipelines(block_result.source)
+        parser_source = lower_opaque_to_extern(pipeline_result.source, opaque_seeds)
+        without_specs, specs = extract_specs(parser_source)
+        core, machines = extract_machines(without_specs)
+        program, inline_effects = _parse_effect_program(core)
+        program = expand_program_macros(program, ast_macros)
+        program = restore_block_source_lines(program, block_result.blocks)
+        combined_lambdas = (*block_result.lambdas, *pipeline_result.lambdas)
+        program = restore_lambda_source_lines(program, combined_lambdas)
+        inline_effects = expand_function_macros(inline_effects, ast_macros)
+        machines = expand_machine_macros(machines, ast_macros)
+        validate_function_values(without_opaque_externs(program, opaques))
+        validate_temporal_specs(program, specs)
+        validate_machines(program, machines)
+    except GlyphError as exc:
+        raise preprocess.remap_error(exc) from exc
+
+    expanded = ExpandedCompilation(
+        program,
+        inline_effects,
+        specs,
+        machines,
+        systems,
+        ast_macros,
+        block_result.blocks,
+        tuple(combined_lambdas),
+        opaques,
+    )
+    program = remap_source_lines(program, preprocess)
+    inline_effects = remap_source_lines(inline_effects, preprocess)
+    specs = remap_source_lines(specs, preprocess)
+    machines = remap_source_lines(machines, preprocess)
+    systems = remap_source_lines(systems, preprocess)
+    ast_macros = remap_source_lines(ast_macros, preprocess)
+    blocks = remap_source_lines(block_result.blocks, preprocess)
+    combined_lambdas = remap_source_lines(tuple(combined_lambdas), preprocess)
+    opaques = remap_source_lines(opaques, preprocess)
+    semantic = relabel_semantic_model(
+        build_semantic_model(program, machines, ast_macros, specs), opaques
+    )
+    architecture = relabel_architecture(
+        build_architecture_ir(source_name, program, systems), opaques
+    )
+    return CompilationModel(
+        program,
+        inline_effects,
+        specs,
+        machines,
+        systems,
+        architecture,
+        ast_macros,
+        blocks,
+        tuple(combined_lambdas),
+        opaques,
+        semantic,
+        preprocess,
+        expanded,
+    )
+
+
 def parse_compilation_model(source: str, source_name: str = "input.glyph") -> CompilationModel:
     reject_reserved_temporal_macro_names(source)
     preprocess = preprocess_source(source)
+    if not _uses_glyph04_syntax(preprocess.source):
+        return _parse_legacy_compilation_model(source_name, preprocess)
+
     try:
         expanded_source = normalize_temporal_sigils(preprocess.source)
         contract_result = extract_contracts(expanded_source)
