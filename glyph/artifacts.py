@@ -7,8 +7,8 @@ from .architecture import ArchitectureIR, SystemDecl, build_architecture_ir, ext
 from .ast_macros import AstMacroDef, expand_function_macros, expand_machine_macros, expand_program_macros, extract_ast_macros
 from .capabilities import CapabilityModel
 from .capability_codegen import lower_capability_codegen
-from .capability_constructor_bridge import extract_capabilities_with_constructors
 from .capability_model_validate import validate_capability_model
+from .capability_places import extract_capabilities_with_places
 from .capability_surface_validate import validate_capability_surface
 from .capability_type_normalize import normalize_capability_types
 from .compiler import ExternDecl, FunctionDecl, GlyphError, Program, parse_program
@@ -132,7 +132,7 @@ def parse_compilation_model(source: str, source_name: str = "input.glyph") -> Co
         canonical_contracts = normalize_contract_types(contract_result.model)
         layout = normalize_multiline_declarations(contract_result.source)
         validate_capability_surface(layout.source)
-        capability_result = extract_capabilities_with_constructors(layout.source)
+        capability_result = extract_capabilities_with_places(layout.source)
         canonical_capabilities = normalize_capability_types(capability_result.model)
         validate_capability_model(canonical_capabilities)
         codegen_source = lower_capability_codegen(layout.source, capability_result.source)
