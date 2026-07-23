@@ -1,10 +1,20 @@
-# Product declarations are one-line declarations in the current Glyph grammar.
+# Product and sum declarations are one-line declarations in the current grammar.
++TemperatureBand=Invalid|Freezing|Cold|Comfortable|Warm|Hot
 *TemperatureInput(celsius:F)
-*TemperatureView(celsius:F,fahrenheit:F,kelvin:F,count:U,valid:B)
+*TemperatureView(celsius:F,fahrenheit:F,kelvin:F,count:U,valid:B,band:TemperatureBand)
 *Session(count:U)
 
 >to_fahrenheit(celsius:F):F=celsius*1.8+32.0
 >to_kelvin(celsius:F):F=celsius+273.15
 >next_count(count:U):U=count+1
 >is_valid(celsius:F):B=celsius>=-273.15
->render(input:TemperatureInput,session:Session):TemperatureView=TemperatureView(input.celsius,to_fahrenheit(input.celsius),to_kelvin(input.celsius),next_count(session.count),is_valid(input.celsius))
+
+>classify(celsius:F):TemperatureBand
+  !is_valid(celsius) >> Invalid
+  celsius<=0.0 >> Freezing
+  celsius<18.0 >> Cold
+  celsius<27.0 >> Comfortable
+  celsius<35.0 >> Warm
+  _ >> Hot
+
+>render(input:TemperatureInput,session:Session):TemperatureView=TemperatureView(input.celsius,to_fahrenheit(input.celsius),to_kelvin(input.celsius),next_count(session.count),is_valid(input.celsius),classify(input.celsius))
