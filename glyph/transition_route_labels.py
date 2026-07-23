@@ -16,13 +16,22 @@ _STYLE = r"""
   letter-spacing:0;
   font-weight:750;
 }
+.transition-detail:has(> .transition-detail-id.input-action-label){
+  grid-template-columns:minmax(150px,270px) minmax(170px,auto) minmax(0,1fr) auto;
+}
 .transition-detail-id.input-action-label{
-  width:max-content;
+  width:100%;
+  min-width:150px;
   max-width:270px;
   padding:3px 7px;
   border-radius:7px;
   overflow-wrap:anywhere;
   text-align:center;
+}
+@media(max-width:1100px){
+  .transition-detail:has(> .transition-detail-id.input-action-label){
+    grid-template-columns:minmax(140px,220px) minmax(0,1fr) auto;
+  }
 }
 </style>
 """
