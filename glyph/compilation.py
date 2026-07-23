@@ -7,7 +7,12 @@ from pathlib import Path
 
 from .algorithm_ir import build_algorithm_ir
 from .algorithm_mermaid import render_algorithm_mermaid
-from .artifacts import CompilationModel, RustArtifacts, _generate_host, parse_compilation_model
+from .artifacts import (
+    CompilationModel,
+    RustArtifacts,
+    build_rust_artifacts,
+    parse_compilation_model,
+)
 from .execution_ir import build_execution_structure_ir
 from .glyph04_derived import Glyph04DerivedModels, derive_glyph04_models
 from .host_binding_codegen import render_host_binding_trait
@@ -22,7 +27,6 @@ from .mermaid import (
     render_machine_mermaid,
     render_temporal_mermaid,
 )
-from .opaque import OpaqueAwareRustGenerator, generate_manual_scaffold
 from .preprocessor import remap_source_lines
 from .schema import (
     ALGORITHM_IR_SCHEMA,
@@ -31,9 +35,6 @@ from .schema import (
     TYPED_DESIGN_SCHEMA,
     versioned_payload,
 )
-from .temporal_codegen import append_temporal_rust
-from .temporal_stream_codegen import append_streaming_temporal_rust
-from .temporal_stream_safety_codegen import append_safety_streaming_temporal_rust
 
 
 @dataclass(frozen=True)
@@ -65,26 +66,6 @@ def build_host_requirement_model(model: CompilationModel) -> HostRequirementMode
     """Compatibility facade for tooling that requests only Host requirements."""
 
     return _derive(model).host_requirements
-
-
-def build_rust_artifacts(model: CompilationModel) -> RustArtifacts:
-    logic = OpaqueAwareRustGenerator(
-        model.program,
-        model.opaques,
-        model.blocks,
-    ).generate()
-    logic = append_temporal_rust(logic, model.program, model.specs)
-    logic = append_streaming_temporal_rust(logic, model.program, model.specs)
-    logic = append_safety_streaming_temporal_rust(
-        logic,
-        model.program,
-        model.specs,
-    )
-    return RustArtifacts(
-        logic=logic,
-        host=_generate_host(model.program, model.inline_effects, model.opaques),
-        manual_scaffold=generate_manual_scaffold(model.program, model.opaques),
-    )
 
 
 def build_design_json(
