@@ -39,7 +39,8 @@ BackendFactory = Callable[[], UiBackend]
 
 def _is_backend(value: Any) -> bool:
     return (
-        isinstance(getattr(value, "name", None), str)
+        not isinstance(value, type)
+        and isinstance(getattr(value, "name", None), str)
         and isinstance(getattr(value, "api_version", None), int)
         and callable(getattr(value, "build", None))
         and callable(getattr(value, "launch", None))
@@ -48,7 +49,10 @@ def _is_backend(value: Any) -> bool:
 
 def _materialize_backend(value: Any) -> UiBackend:
     candidate = value
-    for _ in range(2):
+    for _ in range(3):
+        if isinstance(candidate, type):
+            candidate = candidate()
+            continue
         if _is_backend(candidate):
             return candidate
         if callable(candidate):
