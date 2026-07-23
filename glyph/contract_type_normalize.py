@@ -1,43 +1,25 @@
 from __future__ import annotations
 
-import re
-
 from .contracts import ContractDecl, ContractKind, ContractModel
-
-
-_SHORTCUTS = {
-    "F": "f32",
-    "D": "f64",
-    "U": "u16",
-    "I": "i32",
-    "B": "bool",
-}
-_WORD = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+from .type_shortcuts import expand_type_words
 
 
 def normalize_contract_types(model: ContractModel) -> ContractModel:
-    """Apply the existing Glyph type shortcuts inside Protocol Contract bodies.
+    """Normalize Protocol types while keeping the source-spelled Contract IR intact."""
 
-    Raw Contract IR keeps the source spelling. Canonical runtime Contract IR uses the same
-    expanded type names as the ordinary Glyph parser, so `I` and `i32` cannot diverge.
-    """
-
-    declarations = []
-    for declaration in model.declarations:
-        body = declaration.body
-        if declaration.kind is ContractKind.PROTOCOL:
-            body = _WORD.sub(
-                lambda match: _SHORTCUTS.get(match.group(0), match.group(0)),
-                body,
-            )
-        declarations.append(
-            ContractDecl(
-                declaration.name,
-                declaration.kind,
-                body,
-                declaration.refs,
-                declaration.line,
-                declaration.end_line,
-            )
+    declarations = tuple(
+        ContractDecl(
+            declaration.name,
+            declaration.kind,
+            (
+                expand_type_words(declaration.body)
+                if declaration.kind is ContractKind.PROTOCOL
+                else declaration.body
+            ),
+            declaration.refs,
+            declaration.line,
+            declaration.end_line,
         )
-    return ContractModel(tuple(declarations), model.applications)
+        for declaration in model.declarations
+    )
+    return ContractModel(declarations, model.applications)
