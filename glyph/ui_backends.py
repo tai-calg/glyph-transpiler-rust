@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from importlib import metadata
 import threading
-from typing import Any, Protocol, TYPE_CHECKING, runtime_checkable
+from typing import Any, Protocol, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .ui import UiProject
@@ -21,7 +21,6 @@ class UiBackendUnavailable(UiBackendError):
     """Raised when a requested backend is absent or its optional dependency is missing."""
 
 
-@runtime_checkable
 class UiBackend(Protocol):
     """Public backend contract for projecting glyph.ui-ir into a concrete UI library."""
 
@@ -36,6 +35,27 @@ class UiBackend(Protocol):
 
 
 BackendFactory = Callable[[], UiBackend]
+
+
+def _is_backend(value: Any) -> bool:
+    return (
+        isinstance(getattr(value, "name", None), str)
+        and isinstance(getattr(value, "api_version", None), int)
+        and callable(getattr(value, "build", None))
+        and callable(getattr(value, "launch", None))
+    )
+
+
+def _materialize_backend(value: Any) -> UiBackend:
+    candidate = value
+    for _ in range(2):
+        if _is_backend(candidate):
+            return candidate
+        if callable(candidate):
+            candidate = candidate()
+            continue
+        break
+    raise UiBackendError("entry point did not produce a UiBackend implementation")
 
 
 class BackendRegistry:
@@ -90,15 +110,11 @@ class BackendRegistry:
                 f"UI backend '{normalized}' is not registered; available: {available}"
             )
         try:
-            backend = factory()
+            backend = _materialize_backend(factory)
         except ImportError as exc:
             raise UiBackendUnavailable(
                 f"UI backend '{normalized}' is unavailable: {exc}"
             ) from exc
-        if not isinstance(backend, UiBackend):
-            raise UiBackendError(
-                f"backend factory '{normalized}' did not return a UiBackend implementation"
-            )
         if backend.api_version != BACKEND_API_VERSION:
             raise UiBackendError(
                 f"backend '{normalized}' uses API version {backend.api_version}; "
@@ -121,11 +137,7 @@ class BackendRegistry:
             normalized = self._normalize_name(entry_point.name)
 
             def factory(ep: Any = entry_point) -> UiBackend:
-                loaded = ep.load()
-                candidate = loaded() if callable(loaded) and not isinstance(loaded, UiBackend) else loaded
-                if callable(candidate) and not isinstance(candidate, UiBackend):
-                    candidate = candidate()
-                return candidate
+                return _materialize_backend(ep.load())
 
             with self._lock:
                 self._factories.setdefault(normalized, factory)
