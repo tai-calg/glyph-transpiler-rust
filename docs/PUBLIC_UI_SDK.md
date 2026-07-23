@@ -1,23 +1,25 @@
 # Glyph Public UI SDK
 
-## 1. Purpose
+## Purpose
 
-The public UI SDK turns a validated pure Glyph function into a backend-neutral UI contract and then delegates rendering to a registered backend.
+The public UI SDK turns a validated pure Glyph function into a backend-neutral UI contract and delegates rendering to a registered backend.
 
 ```text
 Glyph source
   -> validated CompilationModel
   -> glyph.ui-ir v1
-  -> UiProject
+  -> glyph.ui API v1 / UiProject
   -> backend protocol v1
-  -> Gradio or third-party backend
+  -> Gradio or a third-party backend
 ```
 
-The SDK does not expose compiler AST objects as a rendering contract. External renderers consume `UiApplication` / serialized `glyph.ui-ir` and the stable `UiProject` lifecycle.
+Compiler AST classes are not the public rendering contract. External renderers consume `UiApplication`, serialized `glyph.ui-ir`, and the `UiProject` lifecycle.
 
-## 2. Installation
+The existing package-root API remains unchanged. UI functionality is published under the explicit `glyph.ui` namespace.
 
-Core compiler and UI IR only:
+## Installation
+
+Core compiler and UI IR:
 
 ```bash
 python3 -m pip install glyph-rust
@@ -29,14 +31,14 @@ Built-in Gradio backend:
 python3 -m pip install "glyph-rust[ui]"
 ```
 
-The core package does not import Gradio or pandas. Optional UI dependencies are loaded only when the `gradio` backend is created.
+Importing `glyph` or `glyph.ui` does not import Gradio or pandas. Optional dependencies are loaded only when the `gradio` backend is created.
 
-## 3. Public Python API
+## Python API
 
 ### Compile UI IR without a server
 
 ```python
-from glyph import compile_ui_source
+from glyph.ui import compile_ui_source
 
 application = compile_ui_source(
     """
@@ -50,10 +52,10 @@ application = compile_ui_source(
 print(application.to_json())
 ```
 
-### Open a file-backed live application
+### Open a file-backed live project
 
 ```python
-from glyph import open_ui
+from glyph.ui import open_ui
 
 with open_ui("design.glyph", function_name="render") as project:
     project.launch("gradio")
@@ -63,21 +65,25 @@ with open_ui("design.glyph", function_name="render") as project:
 
 - `LivePureGlyphRuntime`
 - active `UiApplication`
-- schema compatibility fingerprint
+- component-schema fingerprint
 - backend registry
 - optional file watcher
-- explicit close/restart lifecycle
+- explicit restart and close lifecycle
 
 ### Build without launching
 
 ```python
+from glyph.ui import open_ui
+
 with open_ui("design.glyph") as project:
     blocks = project.build("gradio")
 ```
 
-### Invoke the exposed Glyph action directly
+### Invoke the exposed Glyph action
 
 ```python
+from glyph.ui import open_ui
+
 with open_ui("profile.glyph") as project:
     result = project.invoke(
         {"profile": {"name": "Ada", "age": 35, "active": True}}
@@ -86,7 +92,7 @@ with open_ui("profile.glyph") as project:
     print(result.to_python())
 ```
 
-## 4. Public CLI
+## CLI
 
 ```bash
 glyph-ui design.glyph
@@ -102,7 +108,7 @@ Compatibility alias:
 glyph-gradio design.glyph
 ```
 
-Backend-specific options use JSON-compatible `KEY=VALUE` values:
+Backend-specific values use `KEY=VALUE`; JSON literals are decoded when possible.
 
 ```bash
 glyph-ui design.glyph \
@@ -111,21 +117,19 @@ glyph-ui design.glyph \
   --backend-option locale=ja
 ```
 
-## 5. Compatibility contracts
-
-The public UI surface has three independent versions.
+## Independent compatibility versions
 
 | Contract | Version | Purpose |
 |---|---:|---|
-| `glyph.ui-ir` | 1 | serialized application and component semantics |
+| `glyph.ui-ir` | 1 | serialized application/component semantics |
 | Python UI API | 1 | `UiProject`, compile/open functions, lifecycle |
 | backend protocol | 1 | third-party renderer integration |
 
-A language release does not automatically change these versions. A breaking change to one contract increments only that contract.
+These versions are independent of the Glyph language version. A language release does not automatically break UI backends.
 
-## 6. UI IR serialization
+## UI IR codec and validation
 
-Use the schema codec rather than constructing dataclasses from arbitrary JSON.
+Do not construct UI dataclasses from untrusted JSON directly.
 
 ```python
 from glyph.ui_schema import loads_ui_application
@@ -133,28 +137,28 @@ from glyph.ui_schema import loads_ui_application
 application = loads_ui_application(text)
 ```
 
-The loader validates:
+The codec validates:
 
-- exact schema and version
-- node kinds and roles
-- non-empty IDs, paths, labels, and types
+- exact schema and supported version
+- node kind and input/output role
+- non-empty ID, path, label, and type
 - unique semantic IDs and paths
-- nested child paths
+- child path nesting
 - numeric range consistency
-- required choices for select/badge nodes
+- choices required by select/badge nodes
 - non-empty object nodes
 
-The component fingerprint excludes source location. Moving a declaration or changing only a function body therefore does not invalidate the browser component tree.
+The component fingerprint excludes source locations. Moving a declaration or changing only a function body therefore does not rebuild the browser component tree.
 
-## 7. Live edit behavior
+## Live schema behavior
 
-Function-body-only edit:
+Function-body edit:
 
 ```text
 source save
   -> new executable World
   -> same component fingerprint
-  -> existing browser UI remains valid
+  -> current browser UI remains valid
   -> next invocation uses the new World
 ```
 
@@ -165,23 +169,21 @@ source save
   -> candidate UI IR
   -> different component fingerprint
   -> project.requires_restart = true
-  -> existing component graph is retained
+  -> current component graph remains active
 ```
 
-Inspect explicitly:
+Explicit inspection and restart:
 
 ```python
 state = project.inspect_schema(force=True)
 if state.requires_restart:
     project.restart()
-    app = project.build("gradio")
+    rebuilt = project.build("gradio")
 ```
 
-The SDK never mutates an already-rendered component graph into an incompatible signature.
+The SDK does not silently mutate an existing component tree into an incompatible function signature.
 
-## 8. Backend protocol
-
-A backend implements two methods and declares the protocol version.
+## Backend protocol
 
 ```python
 from glyph.ui_backends import BACKEND_API_VERSION
@@ -197,11 +199,11 @@ class TerminalBackend:
         return self.build(project, **options)
 ```
 
-Register directly:
+Direct registration:
 
 ```python
+from glyph.ui import open_ui
 from glyph.ui_backends import BackendRegistry
-from glyph import open_ui
 
 registry = BackendRegistry()
 registry.register("terminal", TerminalBackend)
@@ -210,23 +212,19 @@ with open_ui("design.glyph", registry=registry) as project:
     project.launch("terminal")
 ```
 
-### Third-party package discovery
-
-External distributions can publish an entry point:
+Third-party packages can publish an entry point:
 
 ```toml
 [project.entry-points."glyph.ui_backends"]
 terminal = "my_glyph_backend:TerminalBackend"
 ```
 
-The object may be a backend instance, backend class, or zero-argument factory. Duplicate names do not overwrite explicitly registered factories.
+The target may be a backend instance, backend class, or zero-argument factory. Explicit registrations take precedence over discovered names.
 
-## 9. Built-in Gradio backend
-
-The optional backend is exposed through `GradioBackend` and `GradioOptions`.
+## Built-in Gradio backend
 
 ```python
-from glyph import open_ui
+from glyph.ui import open_ui
 from glyph.gradio_backend import GradioOptions
 
 with open_ui("design.glyph") as project:
@@ -241,43 +239,46 @@ with open_ui("design.glyph") as project:
     )
 ```
 
-The generic renderer remains conservative:
+The generic renderer is conservative:
 
-- numbers -> numeric controls / metrics
+- numbers -> numeric control / metric
 - booleans -> checkbox / status
 - text -> textbox / text card
-- products -> recursive forms / nested result cards
+- products -> recursive form / nested result card
 - unit sums -> dropdown / badge
-- payload sums and unknown structures -> explicit JSON boundary
+- payload sums, recursive types, and unknown types -> explicit JSON boundary
 
-It does not infer units, slider ranges, chart meanings, or business semantics from field names.
+It does not infer units, slider ranges, chart meaning, or business semantics from field names.
 
-## 10. Security and execution boundary
+## Security and execution boundary
 
-The public UI SDK executes only the supported pure Glyph subset through `PureGlyphProgram`.
+The SDK executes only the supported pure Glyph subset through `PureGlyphProgram`.
 
 It does not:
 
-- execute arbitrary Python callbacks from source
+- execute arbitrary Python callbacks from Glyph source
 - guess implementations for `!` effect boundaries
 - execute `~` native Rust bodies
-- dynamically import a backend merely by compiling UI IR
-- auto-approve type/resource migration
+- import a rendering backend merely to compile UI IR
+- auto-approve type or Resource migration
 - claim native/JIT hot replacement
 
-Unsupported execution boundaries fail explicitly.
+Unsupported boundaries fail explicitly.
 
-## 11. Packaging and release gates
+## Publication gates
 
 A publishable build must pass:
 
-1. ordinary compiler and Rust CI
+1. ordinary compiler, generated Rust, demos, and Clippy CI
 2. UI IR and public API tests without Gradio installed
-3. Gradio 6 component-graph tests with the optional extra installed
-4. wheel and sdist construction
-5. fresh-environment wheel import
-6. `glyph-ui` and `glyph-gradio` console-script smoke tests
-7. typed package marker inclusion
-8. serialized UI IR round-trip tests
+3. Python 3.10 and 3.12 compatibility
+4. Gradio 6 component-graph tests with the optional extra
+5. sdist and wheel construction
+6. Twine metadata validation
+7. clean-environment wheel installation
+8. `glyph-ui` and `glyph-gradio` smoke tests
+9. `py.typed` inclusion
+10. installed-wheel Gradio graph construction
+11. serialized UI IR round-trip tests
 
-The current SDK is alpha. `glyph.ui-ir v1`, Python UI API v1, and backend protocol v1 are the intended public compatibility boundaries; unsupported internals remain private.
+The current SDK is alpha. The stable public surfaces are `glyph.ui-ir v1`, `glyph.ui` API v1, and backend protocol v1. Compiler internals and backend implementation helpers remain private.
