@@ -13,6 +13,7 @@ Glyphの詳細文書をこのディレクトリへ集約しています。入口
 - [Glyph 0.4 Compliance and Stabilization Gate](GLYPH04_COMPLIANCE.md)
 - [Glyph Gradio Live Host](GRADIO_HOST.md)
 - [Glyph Host Binding Contract](HOST_BINDING_DESIGN.md)
+- [Glyph I/O and State Diagram App](IO_STATE_APP.md)
 - [Glyph 0.4 Implementation Status](IMPLEMENTATION_STATUS.md)
 - [Glyph Language 0.4](LANGUAGE.md)
 - [Glyph: expression trees and one-process development environment](LISP_CORE.md)
