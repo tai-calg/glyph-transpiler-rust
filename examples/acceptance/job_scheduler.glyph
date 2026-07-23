@@ -1,10 +1,10 @@
-@MAX_BATCH=10
-
 system BatchRuntime
   packet -> validate
   validate -> build_batch
   build_batch -> layout_lane
   build_batch -> submit_batch
+
+@MAX_BATCH=10
 
 *Packet(count:U)
 *Lanes(free:U)
