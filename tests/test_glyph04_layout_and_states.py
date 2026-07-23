@@ -25,7 +25,7 @@ class Glyph04LayoutAndStateTests(unittest.TestCase):
 
         self.assertIn("pub struct Image", generated)
         self.assertIn("pub struct App", generated)
-        self.assertIn("crate::host::process", generated)
+        self.assertIn("effect boundary: process", generated)
 
     def test_share_resource_state_cannot_change(self) -> None:
         with self.assertRaisesRegex(GlyphError, "state"):
