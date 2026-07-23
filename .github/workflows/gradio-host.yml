@@ -1,0 +1,95 @@
+name: Gradio Host
+
+on:
+  pull_request:
+    branches: [main, feature/gradio-live-host, feature/gradio-ui-ir]
+    paths:
+      - "glyph/pure_runtime.py"
+      - "glyph/ui_ir.py"
+      - "glyph/ui_manifest.py"
+      - "glyph/ui_public.py"
+      - "glyph/ui_cli.py"
+      - "glyph/gradio_renderer.py"
+      - "glyph_gradio.py"
+      - "pyproject.toml"
+      - "examples/gradio_*"
+      - "requirements-gradio.txt"
+      - "tests/test_pure_runtime.py"
+      - "tests/test_ui_ir.py"
+      - "tests/test_public_ui.py"
+      - "tests/test_gradio_host_example.py"
+      - "tests/test_gradio_auto_renderer.py"
+      - ".github/workflows/gradio-host.yml"
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-gradio-host:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-gradio.txt
+
+      - name: Install public package and build tools
+        run: |
+          python3 -m pip install --upgrade pip build
+          python3 -m pip install -e '.[ui]'
+
+      - name: Run runtime, UI IR, manifest, and renderer tests
+        run: |
+          python3 -m unittest discover -s tests -p 'test_pure_runtime.py' -v
+          python3 -m unittest discover -s tests -p 'test_ui_ir.py' -v
+          python3 -m unittest discover -s tests -p 'test_public_ui.py' -v
+          python3 -m unittest discover -s tests -p 'test_gradio_host_example.py' -v
+          python3 -m unittest discover -s tests -p 'test_gradio_auto_renderer.py' -v
+
+      - name: Build custom and generic Gradio component graphs
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          from glyph.ui_public import open_ui_project
+
+          examples = (
+              (Path("examples/gradio_temperature.glyph"), None),
+              (Path("examples/gradio_profile.glyph"), Path("examples/gradio_profile.ui.json")),
+              (Path("examples/gradio_motor.glyph"), None),
+          )
+          for source, manifest in examples:
+              with open_ui_project(source, manifest=manifest) as project:
+                  demo = project.render("gradio")
+                  if demo is None:
+                      raise RuntimeError(f"renderer returned no app for {source}")
+                  print("component graph", source, "ok")
+          PY
+
+      - name: Build wheel and source distribution
+        run: python3 -m build
+
+      - name: Smoke-test installed console entrypoint
+        run: |
+          glyph-gradio --help
+          glyph-gradio examples/gradio_profile.glyph \
+            --manifest examples/gradio_profile.ui.json \
+            --check \
+            --ui-ir-output build/profile-ui-ir.json
+          grep -q '"schema": "glyph.ui-ir"' build/profile-ui-ir.json
+          grep -q '"title": "Profile Access Inspector"' build/profile-ui-ir.json
+
+      - name: Upload distributions and UI IR
+        uses: actions/upload-artifact@v4
+        with:
+          name: glyph-ui-publication-candidate
+          path: |
+            dist/*
+            build/profile-ui-ir.json
