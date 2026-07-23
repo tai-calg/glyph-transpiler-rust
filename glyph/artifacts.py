@@ -6,6 +6,7 @@ from pathlib import Path
 from .architecture import ArchitectureIR, SystemDecl, build_architecture_ir, extract_systems
 from .ast_macros import AstMacroDef, expand_function_macros, expand_machine_macros, expand_program_macros, extract_ast_macros
 from .capabilities import CapabilityModel
+from .capability_codegen import lower_capability_codegen
 from .capability_constructor_bridge import extract_capabilities_with_constructors
 from .capability_model_validate import validate_capability_model
 from .capability_surface_validate import validate_capability_surface
@@ -134,7 +135,8 @@ def parse_compilation_model(source: str, source_name: str = "input.glyph") -> Co
         capability_result = extract_capabilities_with_constructors(layout.source)
         canonical_capabilities = normalize_capability_types(capability_result.model)
         validate_capability_model(canonical_capabilities)
-        masked, opaque_seeds = mask_opaque_as_effect(capability_result.source)
+        codegen_source = lower_capability_codegen(layout.source, capability_result.source)
+        masked, opaque_seeds = mask_opaque_as_effect(codegen_source)
         without_systems, systems = extract_systems(masked)
         joined = join_pipeline_continuations(without_systems)
         compact = expand_compact_syntax(joined)
