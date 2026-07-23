@@ -26,15 +26,6 @@ from .semantic import SemanticModel
 from .studio import GlyphStudio, StudioSnapshot, run_studio
 from .symbols import SymbolId, SymbolRecord
 from .temporal_sigils import reject_reserved_temporal_macro_names
-from .ui import (
-    UI_API_VERSION,
-    UiProject,
-    UiProjectError,
-    UiSchemaState,
-    compile_ui_file,
-    compile_ui_source,
-    open_ui,
-)
 
 
 def preprocess_source(source: str) -> PreprocessResult:
@@ -64,19 +55,12 @@ __all__ = [
     "StudioSnapshot",
     "SymbolId",
     "SymbolRecord",
-    "UI_API_VERSION",
-    "UiProject",
-    "UiProjectError",
-    "UiSchemaState",
     "compile_artifact_files",
     "compile_artifacts",
     "compile_diagram_bundle",
     "compile_file",
     "compile_outputs",
     "compile_source",
-    "compile_ui_file",
-    "compile_ui_source",
-    "open_ui",
     "parse_artifact_model",
     "parse_compilation_model",
     "parse_program",
