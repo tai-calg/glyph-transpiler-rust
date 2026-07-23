@@ -1,0 +1,32 @@
+machine Door(state:DoorState,event:DoorEvent)
+  select=state.mode
+  init=DoorState(DoorClosed)
+  next=door_step(state,event)
+  success=DoorOpen
+  failure=DoorJammed
+
+machine Power(state:PowerState,event:PowerEvent)
+  select=state.mode
+  init=PowerState(PowerOff)
+  next=power_step(state,event)
+  success=PowerOn
+  failure=PowerFault
+
++DoorEvent=DoorNone|DoorOpenRequest|DoorCloseRequest
++DoorMode=DoorClosed|DoorOpen|DoorJammed
+*DoorState(mode:DoorMode)
+
++PowerEvent=PowerNone|PowerStart|PowerStop|PowerTrip
++PowerMode=PowerOff|PowerOn|PowerFault
+*PowerState(mode:PowerMode)
+
+>door_step(state:DoorState,event:DoorEvent):DoorState
+  state.mode==DoorClosed&event==DoorOpenRequest >> DoorState(DoorOpen)
+  state.mode==DoorOpen&event==DoorCloseRequest >> DoorState(DoorClosed)
+  _ >> state
+
+>power_step(state:PowerState,event:PowerEvent):PowerState
+  event==PowerTrip >> PowerState(PowerFault)
+  state.mode==PowerOff&event==PowerStart >> PowerState(PowerOn)
+  state.mode==PowerOn&event==PowerStop >> PowerState(PowerOff)
+  _ >> state
