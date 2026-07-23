@@ -36,7 +36,8 @@ class RuntimeContractValidationTests(unittest.TestCase):
                 "'!Bad = 'std.rollback(tx) >> 'std.return_error\n"
                 "'Use = {'Bad}\n"
                 "+E=Bad\n"
-                ">run(tx:own Tx[Open]):I|E=Err(Bad) @{'Use}\n"
+                "*RunError(tx:own Tx[Open],cause:E)\n"
+                ">run(tx:own Tx[Open]):I|RunError=Err(RunError(tx,Bad)) @{'Use}\n"
             )
 
     def test_retry_count_must_be_positive(self) -> None:
