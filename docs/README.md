@@ -11,6 +11,7 @@ Glyphの詳細文書をこのディレクトリへ集約しています。入口
 - [設計書](DESIGN.md)
 - [Glyph execution structure](EXECUTION_STRUCTURE.md)
 - [Glyph 0.4 Compliance and Stabilization Gate](GLYPH04_COMPLIANCE.md)
+- [Glyph Gradio Live Host](GRADIO_HOST.md)
 - [Glyph Host Binding Contract](HOST_BINDING_DESIGN.md)
 - [Glyph 0.4 Implementation Status](IMPLEMENTATION_STATUS.md)
 - [Glyph Language 0.4](LANGUAGE.md)
