@@ -48,6 +48,16 @@ class Glyph04LayoutAndStateTests(unittest.TestCase):
                 "!bad(buffer:own Buffer[Ready]):link Buffer[Ready]\n"
             )
 
+    def test_same_type_resource_identity_must_be_explicit(self) -> None:
+        with self.assertRaisesRegex(GlyphError, "出力identity対応"):
+            compile_source(
+                "resource Buffer[Ready]\n"
+                "!choose(\n"
+                "  left:share Buffer[Ready],\n"
+                "  right:share Buffer[Ready]\n"
+                "):share Buffer[Ready]\n"
+            )
+
     def test_existing_one_line_source_is_unchanged(self) -> None:
         source = "*Point(x:I,y:I)\n>same(p:Point):Point=p\n"
         self.assertEqual(compile_source(source), compile_source(source))
