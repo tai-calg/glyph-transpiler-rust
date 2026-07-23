@@ -18,7 +18,7 @@ def enrich_runtime_io_state_views(
     model: CompilationModel,
     views: dict[str, object],
 ) -> dict[str, object]:
-    """Enrich transitions and preserve only still-valid reachability warnings."""
+    """Enrich transitions and preserve only still-valid static diagnostics."""
 
     repaired = repair_nested_transition_targets(model, views)
     base = deepcopy(repaired)
@@ -42,10 +42,26 @@ def enrich_runtime_io_state_views(
             diagnosed = _diagnosed_state(str(diagnostic.get("message", "")), state_names)
             if diagnosed in unreachable:
                 restored.append(diagnostic)
+
+        has_explicit_source = any(
+            not bool(transition.get("expanded_from_wildcard", False))
+            for transition in machine.get("transitions", [])
+        )
         non_reachability = [
             diagnostic
             for diagnostic in machine.get("diagnostics", [])
             if diagnostic.get("code") != "unreachable-state"
+            and not (
+                diagnostic.get("code") == "state-independent-transition"
+                and has_explicit_source
+            )
         ]
         machine["diagnostics"] = [*non_reachability, *restored]
+
+    summary = dict(result.get("summary", {}))
+    summary["state_warnings"] = sum(
+        len(machine.get("diagnostics", []))
+        for machine in result.get("state", {}).get("machines", [])
+    )
+    result["summary"] = summary
     return result
