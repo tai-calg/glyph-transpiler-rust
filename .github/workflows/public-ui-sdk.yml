@@ -45,10 +45,10 @@ jobs:
           python3 - <<'PY'
           import sys
           import glyph
-          import glyph.ui
+          from glyph.ui import UI_API_VERSION
           assert "gradio" not in sys.modules
           assert "pandas" not in sys.modules
-          print(glyph.UI_API_VERSION)
+          print(UI_API_VERSION)
           PY
 
   package-smoke:
@@ -86,11 +86,12 @@ jobs:
           import importlib.resources
           import sys
           import glyph
+          from glyph.ui import UI_API_VERSION
           marker = importlib.resources.files("glyph").joinpath("py.typed")
           assert marker.is_file()
           assert "gradio" not in sys.modules
           assert "pandas" not in sys.modules
-          print(glyph.UI_API_VERSION)
+          print(UI_API_VERSION)
           PY
       - name: Install wheel with UI extra and build a Gradio graph
         shell: bash
@@ -102,7 +103,7 @@ jobs:
           /tmp/glyph-ui/bin/python -m pip install "${wheel}[ui]"
           /tmp/glyph-ui/bin/python - <<'PY'
           from pathlib import Path
-          from glyph import open_ui
+          from glyph.ui import open_ui
           source = Path("/tmp/public-ui.glyph")
           with open_ui(source) as project:
               demo = project.build("gradio")
