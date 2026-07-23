@@ -11,6 +11,17 @@ IO_STATE_VIEWS_SCHEMA = "glyph.io-state-views"
 IO_STATE_VIEWS_VERSION = 1
 
 
+def empty_io_state_views() -> dict[str, object]:
+    return {
+        "schema": IO_STATE_VIEWS_SCHEMA,
+        "version": IO_STATE_VIEWS_VERSION,
+        "source_name": "",
+        "summary": {"systems": 0, "callables": 0, "types": 0, "machines": 0},
+        "io": {"systems": [], "types": []},
+        "state": {"machines": []},
+    }
+
+
 def _render_type(ty: TypeRef) -> str:
     if not ty.args:
         return ty.name
@@ -146,7 +157,11 @@ def _implicit_program(
     }
     nodes: list[dict[str, object]] = []
     for node in callable_nodes.values():
-        binding = node.label[1:] if node.kind == "effect" and node.label.startswith("!") else node.label
+        binding = (
+            node.label[1:]
+            if node.kind == "effect" and node.label.startswith("!")
+            else node.label
+        )
         nodes.append(
             _node_from_signature(
                 node.id,
@@ -257,11 +272,6 @@ def build_io_state_views(
             "types": len(types),
             "machines": len(machines),
         },
-        "io": {
-            "systems": systems,
-            "types": types,
-        },
-        "state": {
-            "machines": machines,
-        },
+        "io": {"systems": systems, "types": types},
+        "state": {"machines": machines},
     }
