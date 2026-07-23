@@ -48,7 +48,7 @@ async function waitForServer(url, child, logs) {
       const response = await fetch(`${url}/api/state`);
       if (response.ok) {
         const state = await response.json();
-        if (state.status === "ready" && state.transition_semantics_version === 1) {
+        if (state.status === "ready" && state.views?.transition_semantics_version === 1) {
           return state;
         }
       }
