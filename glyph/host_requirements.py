@@ -2,9 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .capabilities import CapabilityModel, CapabilityType
-from .contract_semantics import ContractSemanticModel
-from .resource_flow import ResourceEndpoint, ResourceFlowModel
+from .capabilities import CapabilityType
+from .resource_flow import ResourceEndpoint
 from .schema import HOST_REQUIREMENTS_IR_SCHEMA, IR_SCHEMA_VERSION
 
 
@@ -139,15 +138,3 @@ class HostRequirementModel:
             "operations": [item.to_dict() for item in self.operations],
             "invariants": [item.to_dict() for item in self.invariants],
         }
-
-
-def build_host_requirements(
-    capabilities: CapabilityModel,
-    runtime: ContractSemanticModel,
-    resource_flow: ResourceFlowModel,
-) -> HostRequirementModel:
-    """Derive Host requirements without making the IR depend on its builder."""
-
-    from .host_requirement_builder import build_host_requirements as build
-
-    return build(capabilities, runtime, resource_flow)
