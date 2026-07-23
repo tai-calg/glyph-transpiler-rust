@@ -7,6 +7,8 @@ import tempfile
 import unittest
 
 from glyph import compile_outputs
+from glyph.contract_semantics import ProtocolNode
+from glyph.host_requirement_builder import iter_protocol_events
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -52,19 +54,73 @@ class HostRequirementTests(unittest.TestCase):
             and item["type"]["capability"] == "share"
         ]
 
-        self.assertEqual({item["world"] for item in service_slots}, {"UiWorld", "WorkerWorld"})
+        self.assertEqual(
+            {item["world"] for item in service_slots},
+            {"UiWorld", "WorkerWorld"},
+        )
         self.assertEqual(len({item["associated_type"] for item in service_slots}), 2)
+
+    def test_unused_aggregate_members_do_not_leak_host_slots(self) -> None:
+        outputs = compile_outputs("*Stored(value:share Service)\n")
+        payload = json.loads(outputs.diagrams.files["host-requirements-ir.json"])
+
+        self.assertEqual(payload["representations"], [])
+        self.assertEqual(payload["operations"], [])
+
+    def test_protocol_control_structure_is_not_flattened_away(self) -> None:
+        root = ProtocolNode(
+            "parallel",
+            children=(
+                ProtocolNode("send", "Input"),
+                ProtocolNode(
+                    "choice",
+                    children=(
+                        ProtocolNode("receive", "Accepted"),
+                        ProtocolNode("receive", "Rejected"),
+                    ),
+                ),
+            ),
+        )
+
+        events = tuple(iter_protocol_events(root))
+
+        self.assertEqual(
+            [event.path_text for event in events],
+            ["root.0", "root.1.0", "root.1.1"],
+        )
+        self.assertEqual(events[0].controls, ("parallel",))
+        self.assertEqual(events[1].controls, ("parallel", "choice"))
 
     def test_generated_binding_is_representation_neutral_and_compiles(self) -> None:
         source = (ROOT / "examples" / "acceptance" / "glyph04_system.glyph").read_text(
             encoding="utf-8"
         )
-        generated = compile_outputs(source).diagrams.files["host-binding.generated.rs"]
+        outputs = compile_outputs(source)
+        generated = outputs.diagrams.files["host-binding.generated.rs"]
+        requirements = json.loads(
+            outputs.diagrams.files["host-requirements-ir.json"]
+        )
 
-        for forbidden in ("Rc<", "Arc<", "Weak<", "Mutex<", "tokio::", "cuda"):
+        for forbidden in (
+            "Rc<",
+            "Arc<",
+            "Weak<",
+            "Mutex<",
+            "tokio::",
+            "cuda",
+            "type OpaqueValue",
+            "pub id:",
+            "pub kind:",
+            "pub subject:",
+            "pub contract:",
+        ):
             self.assertNotIn(forbidden, generated)
         self.assertIn("pub trait GlyphHostBinding", generated)
+        self.assertIn("pub const fn id(&self)", generated)
         self.assertIn("type Repr", generated)
+        for operation in requirements["operations"]:
+            for port in (*operation["inputs"], *operation["outputs"]):
+                self.assertIsNotNone(port["representation"])
 
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "host_binding.rs"
