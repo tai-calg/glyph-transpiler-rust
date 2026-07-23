@@ -21,7 +21,9 @@ class GlyphStudioTests(unittest.TestCase):
             for name in (
                 "generated.rs",
                 "host.generated.rs",
+                "manual.rs",
                 "typed-ast.json",
+                "studio-views.json",
                 "execution.mmd",
                 "execution-ir.json",
                 "source-map.json",
@@ -40,6 +42,7 @@ class GlyphStudioTests(unittest.TestCase):
             self.assertEqual(broken.status, "error")
             self.assertTrue(broken.diagnostics)
             self.assertEqual(broken.artifacts["generated.rs"], ready.artifacts["generated.rs"])
+            self.assertEqual(broken.glyph04_views, ready.glyph04_views)
 
     def test_save_source_updates_file_and_compilation(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -66,6 +69,7 @@ class GlyphStudioTests(unittest.TestCase):
                 with urlopen(f"http://{host}:{port}/api/state") as response:
                     state = json.loads(response.read().decode("utf-8"))
                 self.assertEqual(state["status"], "ready")
+                self.assertIn("glyph04_views", state)
 
                 payload = json.dumps({"source": ">triple(x:U):U=x*3\n"}).encode("utf-8")
                 request = Request(
@@ -86,6 +90,13 @@ class GlyphStudioTests(unittest.TestCase):
     def test_studio_html_contains_integrated_views(self) -> None:
         for label in (
             "Glyph Studio",
+            "Capability",
+            "Resource",
+            "World/Region",
+            "Protocol",
+            "Handler",
+            "Law/Monitor",
+            "Verification",
             "Architecture",
             "State",
             "Logic",
