@@ -14,7 +14,8 @@ Glyph source
   -> CompilationModel
   -> ArchitectureIR / Program AST
   -> ExecutionStructureIR
-  -> glyph.io-state-views v1
+  -> normalized StateMachine analysis
+  -> glyph.io-state-views v2
   -> browser renderer
 ```
 
@@ -72,16 +73,35 @@ machine Motor(state:MotorState,input:Input)
   failure=Faulted
 ```
 
+Before rendering, the compiler-derived transition relation is normalized:
+
+1. the selector variants define the complete state set
+2. wildcard source `*` is expanded into one transition per concrete state
+3. wildcard target `*` is resolved as a self-transition
+4. unreachable ordered-guard branches are removed
+5. reachability is computed from the declared initial state
+6. generated helper locations are remapped to the original Glyph source lines
+
+The browser therefore never renders `Any state` as if it were a real state.
+
 The renderer displays:
 
-- initial state
+- the initial-state marker
 - every selector variant
-- success and failure states
-- statically derived transitions
+- success and failure annotations
+- concrete state-to-state transitions
 - transition conditions
-- `Any state` when the source state cannot be proven from the guard
+- unreachable states with a dashed outline
+- static-analysis warnings with source line links
 
-Immutable `:=` blocks are lowered into compiler helper functions. The view projection traces state constructors through those helpers, so ordinary block-style transition functions remain visible.
+Current static diagnostics include:
+
+- `unreachable-branch`: a later ordered guard cannot run because earlier guards already cover all variants of a finite sum type
+- `unreachable-state`: no transition path exists from the initial state
+- `state-independent-transition`: every active branch applies to every selector state
+- `no-static-transitions`: no transition relation could be derived without guessing
+
+Immutable `:=` blocks are lowered into compiler helper functions. State analysis traces state constructors through those helpers while presenting only the original Glyph source locations.
 
 If no `machine` declaration exists, the application displays an empty-state explanation and does not infer a state machine from names or types.
 
@@ -92,7 +112,7 @@ If no `machine` declaration exists, the application displays an empty-state expl
 - `Save` writes the source file and recompiles
 - external file changes are watched and recompiled
 - a compile error keeps the last valid diagrams visible
-- clicking a node moves the source editor to its declaration line
+- clicking a node, transition label, or diagnostic moves the source editor to its source line
 
 ## Output artifact
 
@@ -106,10 +126,10 @@ Schema:
 
 ```text
 schema: glyph.io-state-views
-version: 1
+version: 2
 ```
 
-The JSON model is backend-neutral and contains systems, typed component ports, type declarations, machines, states, and transitions.
+The JSON model is backend-neutral and contains systems, typed component ports, type declarations, normalized machines, concrete states, transitions, reachability, and diagnostics.
 
 ## Non-goals
 
