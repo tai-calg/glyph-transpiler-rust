@@ -2,21 +2,29 @@ name: Gradio Host
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, feature/gradio-live-host]
     paths:
       - "glyph/pure_runtime.py"
-      - "examples/gradio_temperature.glyph"
+      - "glyph/ui_ir.py"
+      - "glyph/gradio_renderer.py"
+      - "glyph_gradio.py"
+      - "examples/gradio_*.glyph"
       - "examples/gradio_temperature_app.py"
       - "examples/gradio_temperature_dashboard.py"
       - "requirements-gradio.txt"
       - "tests/test_pure_runtime.py"
+      - "tests/test_ui_ir.py"
       - "tests/test_gradio_host_example.py"
+      - "tests/test_gradio_auto_renderer.py"
       - ".github/workflows/gradio-host.yml"
   push:
     branches: [main]
     paths:
       - "glyph/pure_runtime.py"
-      - "examples/gradio_temperature.glyph"
+      - "glyph/ui_ir.py"
+      - "glyph/gradio_renderer.py"
+      - "glyph_gradio.py"
+      - "examples/gradio_*.glyph"
       - "examples/gradio_temperature_app.py"
       - "examples/gradio_temperature_dashboard.py"
       - "requirements-gradio.txt"
@@ -42,12 +50,14 @@ jobs:
       - name: Install Gradio Host dependencies
         run: python3 -m pip install -r requirements-gradio.txt
 
-      - name: Run Pure Runtime and Gradio example tests
+      - name: Run Pure Runtime, UI IR, and Gradio tests
         run: |
           python3 -m unittest discover -s tests -p 'test_pure_runtime.py' -v
+          python3 -m unittest discover -s tests -p 'test_ui_ir.py' -v
           python3 -m unittest discover -s tests -p 'test_gradio_host_example.py' -v
+          python3 -m unittest discover -s tests -p 'test_gradio_auto_renderer.py' -v
 
-      - name: Build the Gradio component graph
+      - name: Build custom and generic Gradio component graphs
         id: gradio_graph
         continue-on-error: true
         shell: bash
@@ -60,29 +70,48 @@ jobs:
           from pathlib import Path
           import sys
 
-          path = Path("examples/gradio_temperature_app.py")
-          spec = importlib.util.spec_from_file_location("glyph_gradio_example", path)
+          custom_path = Path("examples/gradio_temperature_app.py")
+          spec = importlib.util.spec_from_file_location("glyph_gradio_example", custom_path)
           if spec is None or spec.loader is None:
-              raise RuntimeError("could not load Gradio example module")
-          module = importlib.util.module_from_spec(spec)
-          sys.modules[spec.name] = module
-          spec.loader.exec_module(module)
+              raise RuntimeError("could not load custom Gradio example module")
+          custom = importlib.util.module_from_spec(spec)
+          sys.modules[spec.name] = custom
+          spec.loader.exec_module(custom)
 
           print("gradio", gr.__version__)
           print("LinePlot", inspect.signature(gr.LinePlot))
           print("Timer", inspect.signature(gr.Timer))
           print("Blocks.launch", inspect.signature(gr.Blocks.launch))
 
-          runtime = module.LivePureGlyphRuntime(
-              Path("examples/gradio_temperature.glyph")
-          )
+          runtime = custom.LivePureGlyphRuntime(Path("examples/gradio_temperature.glyph"))
           try:
-              demo = module.build_demo(runtime)
+              demo = custom.build_demo(runtime)
               if demo is None:
-                  raise RuntimeError("build_demo returned no Blocks app")
-              print("Gradio component graph built successfully")
+                  raise RuntimeError("custom build_demo returned no Blocks app")
           finally:
               runtime.stop()
+
+          from glyph.gradio_renderer import build_gradio_app
+          from glyph.pure_runtime import LivePureGlyphRuntime
+          from glyph.ui_ir import build_ui_application
+
+          for source in (
+              Path("examples/gradio_temperature.glyph"),
+              Path("examples/gradio_profile.glyph"),
+              Path("examples/gradio_motor.glyph"),
+          ):
+              generic_runtime = LivePureGlyphRuntime(source)
+              try:
+                  snapshot = generic_runtime.compiler.last_snapshot
+                  if snapshot is None:
+                      raise RuntimeError(f"no snapshot for {source}")
+                  app = build_ui_application(snapshot.model, source_name=str(source))
+                  generic_demo = build_gradio_app(generic_runtime, app)
+                  if generic_demo is None:
+                      raise RuntimeError(f"generic renderer returned no app for {source}")
+                  print("generic component graph", source, "ok")
+              finally:
+                  generic_runtime.stop()
           PY
 
       - name: Upload Gradio build diagnostics
@@ -96,5 +125,9 @@ jobs:
         if: steps.gradio_graph.outcome == 'failure'
         run: exit 1
 
-      - name: Verify command-line entrypoint
-        run: python3 examples/gradio_temperature_app.py --help
+      - name: Verify command-line entrypoints
+        run: |
+          python3 examples/gradio_temperature_app.py --help
+          python3 glyph_gradio.py examples/gradio_profile.glyph --check \
+            --ui-ir-output build/profile-ui-ir.json
+          grep -q '"schema": "glyph.ui-ir"' build/profile-ui-ir.json
