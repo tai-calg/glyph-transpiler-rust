@@ -1,21 +1,56 @@
-# Glyph Language 0.3
+# Glyph Language 0.4
 
-## 1. 設計原則
+Glyph is a compact Rust system-design DSL. Glyph 0.4 preserves the existing plain syntax and adds opt-in Capability, Resource, and kinded Contract layers.
 
-1. 記号の意味は構文位置から一意に決まる。
-2. 型、純粋計算、状態遷移、作用境界、実行履歴制約を記述する。
-3. 所有権、時計、ドライバ、非同期処理、違反後の復旧はRustホスト側へ残す。
-4. 型短縮は大文字、値識別子は通常小文字として視覚的に区別する。
-5. `=`は宣言・定義、`==`は等値比較に限定する。
-6. 時相論理の表面構文はASCIIで入力できる形にする。
+## 1. Design principles
 
-## 2. 単語マクロ
+1. A symbol has one meaning in a given syntactic position.
+2. Plain Glyph remains valid and keeps the legacy Rust generation path.
+3. Capability and Resource checks apply only when their syntax is used.
+4. Object names and Contract names are lexically distinct.
+5. Static guarantees, temporal/runtime monitoring, and trusted Host obligations are reported separately.
+6. Concrete threads, executors, transports, timers, Arc/Weak storage, drivers, and physical rollback remain Host responsibilities.
+7. `=` defines; `==` compares.
+8. Temporal syntax is ASCII and uses `@A` / `@E`.
+
+## 2. Object space and Contract space
+
+Normal identifiers belong to Object space.
+
+```glyph
+Image
+Failed
+process
+```
+
+A leading apostrophe refers to Contract space.
+
+```glyph
+'ImageWorker
+'FailurePolicy
+```
+
+The same stem may exist in both spaces.
+
+```glyph
++Failed=Temporary|Permanent
+'@Failed=Worker * App/Task
+```
+
+```text
+Failed     normal type
+'Failed    Contract
+```
+
+A bare Object name is never implicitly resolved as a Contract.
+
+## 3. Raw expression macros
 
 ```glyph
 @NAME=expression
 ```
 
-例:
+Example:
 
 ```glyph
 @LOW=10
@@ -23,73 +58,57 @@
 @BLOCK=s.v<LOW|s.t>80|s.r==0
 @LOWER=min
 
->cap(x:u16):u16=LOWER(x,MAX)
+>cap(x:U):U=LOWER(x,MAX)
 ```
 
-- 置換対象は完全一致した識別子トークンだけ
-- ファイル全体で有効
-- 別のマクロを参照可能
-- 式専用であり、型や宣言は置換しない
-- 引数付きマクロは未対応
-- `A`と`E`は時相演算子名として予約され、マクロ名には使用できない
+Rules:
 
-以下を拒否する。
+- replacement matches complete identifier tokens
+- definitions apply to the whole file
+- macros may reference other macros
+- macros replace expressions, not types or declarations
+- duplicate, cyclic, empty, or excessively expanded definitions are rejected
+- `A` and `E` are reserved from macro names because `@A` and `@E` are temporal operators
 
-- 重複
-- 空または不正な式
-- 直接・間接循環
-- 宣言名・variant名との衝突
-- 展開深さ64超過
-- 4096トークン超過
+## 4. Plain declarations
 
-## 3. 宣言
-
-### 積型
+### Product type
 
 ```glyph
 *Point(x,y:F)
 ```
 
-```rust
-pub struct Point {
-    pub x: f32,
-    pub y: f32,
-}
-```
-
-### 直和型
+### Sum type
 
 ```glyph
 +State=Idle|Run(U)|Fault{code:u8,msg:S}
 ```
 
-```rust
-pub enum State {
-    Idle,
-    Run(u16),
-    Fault { code: u8, msg: String },
-}
-```
-
-### 型別名
+### Type alias
 
 ```glyph
 =Output=U|Error
 ```
 
-```rust
-pub type Output = Result<u16, Error>;
-```
+### Pure function
 
-### 純粋関数
-
-単一式:
+Single expression:
 
 ```glyph
 >double(x:U):U=x*2
 ```
 
-ガード:
+Block expression:
+
+```glyph
+>finish(x:I):I
+  y := x+1
+  y*2
+```
+
+The final expression is the return value.
+
+### Guard function
 
 ```glyph
 >sign(x:I):I
@@ -98,41 +117,35 @@ pub type Output = Result<u16, Error>;
   _>>1
 ```
 
-`_`は最後に一つだけ必要。`=>`は内部互換構文として受理する。
+The fallback `_` clause is explicit and last.
 
-### 外部作用境界
+### External effect boundary
 
 ```glyph
 !send(x:u8):u8|Error
 ```
 
-呼出し:
-
-```rust
-crate::host::send(x)
-```
-
-試作実装:
+A prototype implementation may be attached:
 
 ```glyph
 !send(x:u8):u8|Error=Ok(x)
 ```
 
-## 4. 型
+## 5. Plain types
 
-長形式:
+Long forms:
 
 ```text
 u8 u16 u32 u64
 i8 i16 i32 i64
 f32 f64 bool String
-R<T,E>  -> Result<T,E>
-O<T>    -> Option<T>
-V<T>    -> Vec<T>
-S       -> String
+R<T,E>  Result<T,E>
+O<T>    Option<T>
+V<T>    Vec<T>
+S       String
 ```
 
-短縮形式:
+Short forms:
 
 ```text
 F -> f32
@@ -143,30 +156,314 @@ B -> bool
 T|E -> Result<T,E>
 ```
 
-旧短縮型`f/d/u/i/b`は受理しない。同名のユーザー定義型が存在する場合はユーザー定義型を優先する。
-
-積型のfield rowは関数引数へ展開できる。
+A product row can be expanded into function parameters.
 
 ```glyph
 *S(v,t:F,r:U)
 >decode(*S):S|Error
 ```
 
-内部展開:
+## 6. Capability types
 
-```text
-*S(v:f32,t:f32,r:u16)
->decode(v:f32,t:f32,r:u16):R<S,Error>
+Capability syntax is opt-in.
+
+```glyph
+own T
+share T
+link T
+&T
+&mut T
 ```
 
-## 5. 式
+| Syntax | Meaning |
+|---|---|
+| `own T` | unique affine ownership |
+| `share T` | explicitly duplicable strong shared ownership |
+| `link T` | persistent non-owning link |
+| `&T` | temporary read borrow |
+| `&mut T` | temporary exclusive write borrow |
 
-対応形:
+Plain `T` is not implicitly `own T`.
+
+### Move
+
+Assignment and by-value calls move affine values.
+
+```glyph
+next := owner
+```
+
+Using `owner` after this move is rejected.
+
+### Borrow
+
+```glyph
+digest := checksum(&buffer)
+clear(&mut buffer)
+```
+
+Temporary borrows cannot be stored in a binding, field, variant, or return value. `share` and `link` cannot yield `&mut`.
+
+### Capability conversion
+
+`as` changes the capability for the same symbolic object identity.
+
+```glyph
+shared := owner as share
+copy := &shared as share
+weak := &shared as link
+other := &weak as link
+live := (&weak as share)?
+```
+
+Allowed conversions:
+
+```text
+own -> share
+&share -> share
+&share -> link
+&link -> link
+&link -> share, with failure propagation
+```
+
+Rejected conversions include `share -> own`, `own -> link`, Resource state changes through `as`, and general data conversion through `as`.
+
+## 7. Resource types
+
+A Resource declaration defines legal states.
+
+```glyph
+resource Buffer[Allocated|Ready|InFlight|Retired]
+```
+
+Each Resource use requires both a Capability and a state.
+
+```glyph
+own Buffer[Ready]
+share Buffer[Ready]
+link Buffer[Ready]
+```
+
+The following are rejected:
+
+```glyph
+Buffer
+own Buffer
+own Buffer[Missing]
+```
+
+Only `own Resource[S]` may transition to another state. The symbolic identity is preserved across the transition.
+
+```glyph
+!submit(buffer:own Buffer[Ready]):own Buffer[InFlight]
+```
+
+An owned Resource is an obligation. Every control-flow exit must return, transfer, transition, publish, consume, or explicitly recover it.
+
+Failure types must preserve owned Resources.
+
+```glyph
+resource Buffer[Ready|Used]
++E=Bad
+
+*WriteError(
+  buffer:own Buffer[Ready],
+  cause:E
+)
+
+!write(
+  buffer:own Buffer[Ready]
+):own Buffer[Used]|WriteError
+```
+
+Aggregate fields are tracked as places such as `pair.left` and `pair.right`, so partial moves remain independent.
+
+## 8. Contract definitions and application
+
+Contract definitions are top-level declarations.
+
+```glyph
+'@Name = ...    # World
+'>Name = ...    # Protocol
+'!Name = ...    # Handler
+'?Name = ...    # Law
+'Name  = {...}  # Bundle
+```
+
+A Contract reference is written as:
+
+```glyph
+'Name
+```
+
+A Contract is applied to a declaration or supported field position with:
+
+```glyph
+@{'Name}
+```
+
+Example:
+
+```glyph
+'WorkerJob={ 'WorkerTask,'ProcessImage,'FailurePolicy,'Complete30 }
+
+!process(image:own Image[Ready]):ProcessResult
+  @{'WorkerJob}
+```
+
+`@{WorkerJob}` is rejected because Contract references require the apostrophe.
+
+## 9. World Contract
+
+A World is the product of an execution locus and a dynamic Region path.
+
+```glyph
+'@UiWindow=Ui * App/Window
+'@WorkerTask=Worker * App/Window/Task
+```
+
+World checking covers:
+
+- calls across different loci require a Protocol on the callee
+- temporary borrows cannot cross World boundaries
+- `own` and `share` values cannot escape from a narrower Region into broader storage
+- `link` may be stored beyond the target Region, but Host resolution remains fallible
+
+The Host must implement actual dispatch and Region lifetime closure.
+
+## 10. Protocol Contract
+
+Protocol direction uses explicit arrows.
+
+```text
+()          end
+-> T        caller sends T to the execution side
+<- T        execution side returns T to caller
+P >> Q      sequence
+P | Q       choice
+P || Q      parallel composition
+*P          repetition
+```
+
+Examples:
+
+```glyph
+'>SubmitJob=-> Job
+'>RequestReply=-> Request >> <- Response
+'>Events=*(<- Event)
+'>Duplex=*(-> Command || <- Event)
+```
+
+The old shorthand `>T` / `<T` is rejected because it collides visually with function declarations and comparison.
+
+The compiler checks Protocol structure, Bundle conflicts, and compatibility with the applied function signature. Concrete queueing, buffering, ordering, and transport are Host or Law concerns rather than language keywords.
+
+## 11. Handler Contract
+
+Handlers are Contract-library compositions, not a growing list of language keywords.
+
+```glyph
+'!RequestPolicy=
+  'std.timeout(2s)
+  >> 'std.retry(3,'std.exponential,'std.idempotent)
+  >> 'std.return_error
+```
+
+Standard Contract operations currently recognized:
+
+```text
+'std.timeout(Duration)
+'std.cancel(...)
+'std.retry(Count,Backoff,Idempotency)
+'std.rollback(place)
+'std.compensate(effect)
+'std.fallback(function)
+'std.return_error
+```
+
+Static checks include:
+
+- retry count is positive
+- retry target returns a Result
+- retry declares idempotency
+- retryable Resource failure paths preserve the entry ledger
+- rollback targets an owned Resource
+- compensation references an effect boundary
+- fallback has a compatible signature
+- a Handler has one terminal recovery action
+
+Actual timers, cancellation, business idempotency, rollback, and compensation are trusted Host obligations.
+
+## 12. Law Contract and temporal logic
+
+A Law Contract reuses the temporal formula language.
+
+```glyph
+'?Safe=@A(!fault >> stopped)
+'?Deadline=@A(start >> @E 2s finish)
+```
+
+Product Laws are connected to the existing reference and streaming monitor generation.
+
+```glyph
+'Observed={'Safe}
+*Observation(fault:B,stopped:B) @{'Observed}
+```
+
+Function lifecycle Laws remain in Runtime Contract IR and require Host lifecycle events.
+
+Temporal operators:
+
+```text
+!P             not
+P & Q          and
+P | Q          or
+P >> Q         implication
+@A P           always
+@E P           eventually
+@E 500ms P     bounded eventually
+P U Q          strong until
+P W Q          weak until
+```
+
+Composed unary forms:
+
+```glyph
+@A@E 1s heartbeat
+@E@A stable
+```
+
+Bare `A`, `E`, `AE`, and `EA` are not temporal syntax.
+
+## 13. Bundle Contract
+
+A Bundle compresses orthogonal Contracts under one project-level name.
+
+```glyph
+'WorkerCall={
+  'WorkerTask,
+  'RequestReply,
+  'RequestPolicy,
+  'Deadline
+}
+```
+
+After expansion:
+
+- at most one World
+- at most one Protocol
+- at most one Handler
+- any number of Laws, combined conjunctively
+
+Handler ordering is written inside the Handler definition, not inferred from Bundle order. Bundle cycles and kind conflicts are rejected.
+
+## 14. Expressions and variant patterns
+
+Expressions include:
 
 ```text
 name
-123
-12.5
+number
 true false
 f(x,y)
 x.field
@@ -179,21 +476,7 @@ cond1|cond2
 cond1&cond2
 ```
 
-単独`=`は式演算子ではない。等値比較は`==`だけを使う。
-
-優先順位:
-
-```text
-postfix: () . ?
-unary:   ! -
-product: * /
-sum:     + -
-compare: == != < > <= >=
-and:     &
-or:      |
-```
-
-## 6. variant pattern
+Variant guard example:
 
 ```glyph
 +Command=Stop|Run(U)
@@ -205,95 +488,7 @@ or:      |
   _>>system
 ```
 
-- `command==Stop`: unit variant照合
-- `command==Run(_)`: payload無視
-- `command==Run(speed)`: 新しい局所名へ束縛
-- `command==Run(system.sequence)`: 既存式との値比較
-
-## 7. 時相制約
-
-### 宣言
-
-```glyph
-?name(parameters)=formula
-```
-
-### 演算子
-
-```text
-!P             否定
-P & Q          論理積
-P | Q          論理和
-P >> Q         含意
-@A P           Always
-@E P           Eventually
-@E 500ms P     bounded eventually
-P U Q          strong until
-P W Q          weak until
-```
-
-裸の`A`、`E`、`AE`、`EA`は受理しない。Unicodeの`□/◇`も受理しない。
-
-単項演算子は、各演算子に`@`を付けて連結する。
-
-```glyph
-@A@E 1s heartbeat
-@E@A stable
-```
-
-意味:
-
-```text
-@A@E 1s heartbeat = @A(@E 1s heartbeat)
-@E@A stable       = @E(@A stable)
-```
-
-演算子と識別子の境界には空白または`(`が必要。
-
-```text
-@E@A stable    # 演算子列
-@E@A(stable)   # 演算子列
-@E@Astable     # エラー
-EAstable       # 単一識別子
-```
-
-優先順位:
-
-```text
-1. ! @A @E @E duration
-2. U W
-3. &
-4. |
-5. >> 右結合
-```
-
-例:
-
-```glyph
-?ack(*Observation)=@A(send>>@E 500ms ack)
-?safe(*Observation)=@A(!authorized>>closed)
-?wait(*Observation)=closed W authorized
-?live(*Observation)=@A@E 1s heartbeat
-?conv(*Observation)=@E@A stable
-```
-
-### 有限トレース判定
-
-```rust
-pub enum TemporalVerdict {
-    Satisfied,
-    Violated,
-    Pending,
-}
-```
-
-- `@A P`: 途中で反例が出れば違反。終了まで反例がなければ満足
-- `@E P`: P成立時に満足。終了まで成立しなければ違反
-- `@E d P`: 期限内成立で満足。期限超過または未解決終了で違反
-- `P U Q`: Q前のP違反、またはQ未到達終了で違反
-- `P W Q`: Q未到達でも終了までPが成立すれば満足
-
-## 8. 組込み関数
+## 15. Built-in constructors and functions
 
 ```text
 Ok(x)
@@ -305,28 +500,70 @@ max(a,b)
 finite(x)
 ```
 
-## 9. 文法概要
+`Failed`, `GiveUp`, `Retry`, `Stream`, `Latest`, and similar names are not language keywords. They may be normal Object names or apostrophe-prefixed Contract-library names.
+
+## 16. Public IR and guarantee classes
+
+Glyph 0.4 syntax conditionally emits:
 
 ```text
-program          := (macro | declaration | temporal-spec)*
-macro            := "@" Name "=" expr
-declaration      := product | sum | alias | function | extern
-product          := "*" Name "(" compact-fields? ")"
-sum              := "+" Name "=" variant ("|" variant)*
-alias            := "=" Name "=" compact-type
-function         := ">" signature ("=" expr | NEWLINE guard+)
-extern           := "!" signature ("=" expr)?
-signature        := Name "(" compact-params? ")" ":" compact-type
-guard            := INDENT (expr | "_") ">>" expr
-temporal-spec    := "?" Name "(" temporal-params? ")" "=" formula
-formula          := implication
-implication      := or-formula (">>" implication)?
-or-formula       := and-formula ("|" and-formula)*
-and-formula      := until-formula ("&" until-formula)*
-until-formula    := unary-formula (("U" | "W") unary-formula)*
-unary-formula    := "!" unary-formula
-                  | "@A" unary-formula
-                  | "@E" duration? unary-formula
-                  | "(" formula ")"
-                  | atom
+capability-ir.json
+resource-flow-ir.json
+contracts-ir.json
+runtime-contract-ir.json
+verification-report.json
+```
+
+Guarantee classes:
+
+```text
+static   compiler proof/check
+model    temporal/model analysis
+runtime  generated or Host event monitor
+trusted  Host adapter or designer proof obligation
+```
+
+Sources that do not use Glyph 0.4 syntax do not gain these keys or files.
+
+## 17. Compatibility
+
+No file-level mode is introduced. Existing macros, types, functions, guards, effects, systems, machines, diagrams, and temporal syntax remain valid.
+
+The Glyph 0.4 stabilization gate compares legacy source outputs and diagnostics against `main` byte-for-byte. See `GLYPH04_COMPLIANCE.md`.
+
+## 18. Grammar overview
+
+```text
+program              := (macro | declaration | temporal-spec | resource | contract)*
+macro                := "@" Name "=" expr
+declaration          := product | sum | alias | function | extern
+product              := "*" Name "(" compact-fields? ")" contract-application?
+sum                  := "+" Name "=" variant ("|" variant)*
+alias                := "=" Name "=" compact-type
+function             := ">" signature ("=" expr | NEWLINE block) contract-application?
+extern               := "!" signature ("=" expr)? contract-application?
+resource             := "resource" Name "[" State ("|" State)* "]"
+capability-type      := ("own" | "share" | "link" | "&" | "&mut") type
+contract-definition  := "'" ("@" | ">" | "!" | "?")? Name "=" contract-body
+contract-reference   := "'" Name
+contract-application := "@{" contract-reference ("," contract-reference)* "}"
+protocol             := "()" | "->" type | "<-" type
+                      | protocol ">>" protocol
+                      | protocol "|" protocol
+                      | protocol "||" protocol
+                      | "*" protocol
+block                := INDENT (binding | expr)+
+binding              := Name ":=" expr
+guard                := INDENT (expr | "_") ">>" expr
+temporal-spec        := "?" Name "(" temporal-params? ")" "=" formula
+formula              := implication
+implication          := or-formula (">>" implication)?
+or-formula           := and-formula ("|" and-formula)*
+and-formula          := until-formula ("&" until-formula)*
+until-formula        := unary-formula (("U" | "W") unary-formula)*
+unary-formula        := "!" unary-formula
+                      | "@A" unary-formula
+                      | "@E" duration? unary-formula
+                      | "(" formula ")"
+                      | atom
 ```
