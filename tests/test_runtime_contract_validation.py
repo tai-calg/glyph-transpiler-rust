@@ -66,6 +66,28 @@ class RuntimeContractValidationTests(unittest.TestCase):
                 ">run(x:own I):I=x @{'Use}\n"
             )
 
+    def test_share_value_cannot_escape_to_broader_region(self) -> None:
+        with self.assertRaisesRegex(GlyphError, "escape"):
+            parse_compilation_model(
+                "'@AppWorld = Main * App\n"
+                "'@RequestWorld = Worker * App/Request\n"
+                "*Cache(\n"
+                "  value:share Context @{'AppWorld}\n"
+                ")\n"
+                ">make(value:share Context):Cache=Cache(value) @{'RequestWorld}\n"
+            )
+
+    def test_link_may_outlive_target_region(self) -> None:
+        model = parse_compilation_model(
+            "'@AppWorld = Main * App\n"
+            "'@RequestWorld = Worker * App/Request\n"
+            "*Cache(\n"
+            "  value:link Context @{'AppWorld}\n"
+            ")\n"
+            ">make(value:link Context):Cache=Cache(value) @{'RequestWorld}\n"
+        )
+        self.assertEqual(model.runtime_contracts.applications[-1].target, "make")
+
 
 if __name__ == "__main__":
     unittest.main()
