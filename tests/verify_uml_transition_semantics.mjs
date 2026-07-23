@@ -11,6 +11,12 @@ const cases = [
     machine: "Session",
     labels: ["SessionStart", "SessionAccept", "SessionReject", "SessionReset"],
     failureLabels: ["SessionReject"],
+    compactLabels: [
+      "SessionStart→—",
+      "SessionAccept→—",
+      "SessionReject→—",
+      "SessionReset→—",
+    ],
   },
   {
     slug: "traffic-uml",
@@ -18,6 +24,7 @@ const cases = [
     machine: "Traffic",
     labels: ["[input.tick]", "[input.fault]"],
     failureLabels: ["[input.fault]"],
+    compactLabels: ["[input.tick]→—", "[input.fault]→—"],
   },
   {
     slug: "effect-failure-uml",
@@ -32,6 +39,12 @@ const cases = [
     failureLabels: [
       "PumpStart / write_pump(true) ! WriteError",
       "PumpStop / write_pump(false) ! WriteError",
+    ],
+    compactLabels: [
+      "PumpStart→write_pump(true)",
+      "PumpStop→write_pump(false)",
+      "PumpStart→write_pump(true) ! WriteError",
+      "PumpStop→write_pump(false) ! WriteError",
     ],
   },
 ];
@@ -105,7 +118,9 @@ try {
         machineName => {
           const selected = document.querySelector("#machine-select")?.selectedOptions?.[0]?.textContent;
           const stage = document.querySelector(".graph-stage");
-          return selected === machineName && stage?.dataset.umlTransitionReady === "true";
+          return selected === machineName
+            && stage?.dataset.umlTransitionReady === "true"
+            && stage?.dataset.transitionInputActionLabelsReady === "true";
         },
         testCase.machine,
       );
@@ -130,6 +145,25 @@ try {
         machine.transitions.filter(item => item.outcome === "failure").length,
       );
 
+      const compactLabels = await page.locator(".edge-label.transition-label.compact").allTextContents();
+      assert(compactLabels.length > 0, `${testCase.machine}: compact labels are missing`);
+      assert(
+        compactLabels.every(label => !/^T\d+$/.test(label.trim())),
+        `${testCase.machine}: internal T identifiers leaked into visible labels`,
+      );
+      for (const expected of testCase.compactLabels) {
+        assert(
+          compactLabels.some(label => label.includes(expected)),
+          `${testCase.machine}: missing compact input→action label ${expected}`,
+        );
+      }
+
+      const detailIds = await page.locator(".transition-detail-id.input-action-label").allTextContents();
+      assert(
+        detailIds.every(label => !/^T\d+$/.test(label.trim())),
+        `${testCase.machine}: internal T identifiers leaked into transition details`,
+      );
+
       await page.screenshot({
         path: path.join(outputDirectory, `${testCase.slug}.png`),
         fullPage: true,
@@ -144,4 +178,4 @@ try {
   await browser.close();
 }
 
-console.log(`verified ${cases.length} UML event/guard/action diagrams`);
+console.log(`verified ${cases.length} UML diagrams with compact input→action labels`);
