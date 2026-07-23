@@ -28,29 +28,7 @@ jobs:
       - name: Apply deterministic refactor
         run: |
           python3 scripts/refactor_header_docs_once.py
-          python3 - <<'PY'
-          from pathlib import Path
-
-          path = Path("tests/test_header_first_layout.py")
-          text = path.read_text(encoding="utf-8")
-          old = """>step(state:MotorState,input:Input):MotorState
-  command := decide(input)
-  command==Stop >> MotorState(Stopped,Stop)
-  command==Drive(speed) >> MotorState(Running,Drive(speed))
-  _ >> MotorState(Faulted,Stop)
-"""
-          new = """>step(state:MotorState,input:Input):MotorState
-  command := decide(input)
-  next :=
-    command==Stop >> MotorState(Stopped,Stop)
-    command==Drive(speed) >> MotorState(Running,Drive(speed))
-    _ >> MotorState(Faulted,Stop)
-  next
-"""
-          if text.count(old) != 2:
-              raise SystemExit("expected two generated step blocks")
-          path.write_text(text.replace(old, new), encoding="utf-8")
-          PY
+          python3 scripts/fix_generated_header_test.py
 
       - name: Run Python tests
         run: |
