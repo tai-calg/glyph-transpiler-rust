@@ -120,7 +120,6 @@ class GlyphStudio:
             artifacts = {
                 "generated.rs": compilation.artifacts.logic,
                 "host.generated.rs": compilation.artifacts.host,
-                "manual.rs": compilation.artifacts.manual_scaffold,
                 "typed-ast.json": compilation.semantic_json,
                 "studio-views.json": json.dumps(
                     glyph04_views,
