@@ -45,6 +45,9 @@ _FROZEN_TOP_LEVEL_KEYS: dict[str, frozenset[str]] = {
     "verification-report.json": frozenset(
         {"schema", "version", "summary", "items"}
     ),
+    "host-requirements-ir.json": frozenset(
+        {"schema", "version", "representations", "operations", "invariants"}
+    ),
 }
 
 
@@ -96,7 +99,13 @@ def _check_release_metadata(root: Path) -> tuple[dict[str, object], list[str]]:
             f"pyproject version {package_version!r} does not match VERSION {version!r}"
         )
 
-    documents = ("README.md", "LANGUAGE.md", "CONTRACTS.md", "IMPLEMENTATION_STATUS.md")
+    documents = (
+        "README.md",
+        "LANGUAGE.md",
+        "CONTRACTS.md",
+        "HOST_BINDING_DESIGN.md",
+        "IMPLEMENTATION_STATUS.md",
+    )
     document_status: dict[str, bool] = {}
     for relative in documents:
         text = (root / relative).read_text(encoding="utf-8")
@@ -130,11 +139,18 @@ def _compile_acceptance(root: Path) -> tuple[dict[str, object], list[str]]:
     errors.extend(schema_errors)
 
     design = json.loads(first.design_json)
-    for key in ("capabilities", "contracts", "runtime_contracts", "verification"):
+    for key in (
+        "capabilities",
+        "contracts",
+        "runtime_contracts",
+        "verification",
+        "host_requirements",
+    ):
         if key not in design:
             errors.append(f"typed design is missing Glyph 0.4 section {key!r}")
 
     rustc_ok = False
+    binding_rustc_ok = False
     with tempfile.TemporaryDirectory(prefix="glyph04-stabilization-") as directory:
         generated = Path(directory) / "generated.rs"
         library = Path(directory) / "libglyph04.rlib"
@@ -158,10 +174,39 @@ def _compile_acceptance(root: Path) -> tuple[dict[str, object], list[str]]:
         if not rustc_ok:
             errors.append("generated Glyph 0.4 Rust does not compile:\n" + result.stderr)
 
+        binding = Path(directory) / "host_binding.rs"
+        binding_library = Path(directory) / "libglyph04_host_binding.rlib"
+        binding.write_text(
+            first.diagrams.files["host-binding.generated.rs"],
+            encoding="utf-8",
+        )
+        binding_result = subprocess.run(
+            [
+                "rustc",
+                "--edition",
+                "2021",
+                "--crate-type",
+                "lib",
+                str(binding),
+                "-o",
+                str(binding_library),
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        binding_rustc_ok = binding_result.returncode == 0
+        if not binding_rustc_ok:
+            errors.append(
+                "generated Host Binding trait does not compile:\n"
+                + binding_result.stderr
+            )
+
     return {
         "source": str(source_path.relative_to(root)),
         "deterministic": deterministic,
         "rustc": rustc_ok,
+        "host_binding_rustc": binding_rustc_ok,
         "schemas": schema_results,
         "artifact_files": sorted(first.diagrams.files),
     }, errors
