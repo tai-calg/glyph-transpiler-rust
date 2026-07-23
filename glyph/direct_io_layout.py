@@ -84,12 +84,13 @@ _SCRIPT = r"""
     }));
   }
 
+  const root = document.getElementById("view") || document.body;
   new MutationObserver(() => {
     clearTimeout(timer);
     timer = setTimeout(enhance, 0);
-  }).observe(document.body, {childList: true, subtree: true});
+  }).observe(root, {childList: true, subtree: true});
 
-  setInterval(enhance, 400);
+  enhance();
 })();
 </script>
 """
