@@ -201,25 +201,29 @@ try {
       assert.deepEqual(sorted(options), sorted(testCase.machines.map((machine) => machine.name)));
 
       for (const expected of testCase.machines) {
-        if (testCase.machines.length > 1) {
-          await page.selectOption("#machine-select", { label: expected.name });
-        }
-        await page.waitForFunction(
-          (machineName) => {
-            const selected = document.querySelector("#machine-select")?.selectedOptions?.[0]?.textContent;
-            const stage = document.querySelector(".graph-stage");
-            return selected === machineName && stage?.dataset.labelLayoutReady === "true";
-          },
-          expected.name,
-        );
-
         const machine = apiState.views.state.machines.find((item) => item.name === expected.name);
         assert.ok(machine, `${testCase.slug}/${expected.name}: API machine missing`);
         const transitionCount = machine.transitions.length;
 
+        if (testCase.machines.length > 1) {
+          await page.selectOption("#machine-select", { label: expected.name });
+        }
+        await page.waitForFunction(
+          ({machineName, transitionCount}) => {
+            const selected = document.querySelector("#machine-select")?.selectedOptions?.[0]?.textContent;
+            const stage = document.querySelector(".graph-stage");
+            return selected === machineName
+              && stage?.dataset.labelLayoutReady === "true"
+              && stage?.dataset.initialRouteReady === "true"
+              && stage.querySelectorAll(".edge-label.transition-label").length === transitionCount;
+          },
+          {machineName: expected.name, transitionCount},
+        );
+
         const stateNames = await page.locator(".state-name").allTextContents();
         assert.deepEqual(sorted(stateNames), sorted(expected.states), `${testCase.slug}/${expected.name}: states`);
         assert.equal(await page.locator(".initial-dot").count(), 1, `${testCase.slug}/${expected.name}: initial marker`);
+        assert.equal(await page.locator(".initial-transition-path").count(), 1, `${testCase.slug}/${expected.name}: initial path`);
         assert.equal(await page.getByText("Any state", { exact: true }).count(), 0);
         assert.equal(await page.locator('.state-name:has-text("*")').count(), 0);
 
