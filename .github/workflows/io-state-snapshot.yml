@@ -28,6 +28,7 @@ on:
       - "tests/test_transition_semantics.py"
       - "tests/verify_state_diagram_rendering.mjs"
       - "tests/verify_uml_transition_semantics.mjs"
+      - "tests/verify_additional_failure_notation.mjs"
       - "examples/acceptance/motor_safety.glyph"
       - "examples/state_diagrams/**"
       - ".github/workflows/io-state-snapshot.yml"
@@ -57,11 +58,13 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          mkdir -p build/state-diagram-regression build/uml-transition-semantics
+          mkdir -p build/state-diagram-regression build/uml-transition-semantics build/additional-failure-notation
           node tests/verify_state_diagram_rendering.mjs \
             2>&1 | tee build/state-diagram-regression/verify.log
           node tests/verify_uml_transition_semantics.mjs \
             2>&1 | tee build/uml-transition-semantics/verify.log
+          node tests/verify_additional_failure_notation.mjs \
+            2>&1 | tee build/additional-failure-notation/verify.log
 
       - name: Upload rendered diagrams
         if: always()
@@ -73,6 +76,7 @@ jobs:
           path: |
             build/state-diagram-regression/**
             build/uml-transition-semantics/**
+            build/additional-failure-notation/**
             examples/acceptance/motor_safety.glyph
             examples/state_diagrams/*.glyph
             examples/acceptance/.glyph/**/io-state-views.json
