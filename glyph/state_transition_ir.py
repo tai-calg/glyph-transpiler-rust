@@ -1,12 +1,9 @@
 from __future__ import annotations
 
-from copy import deepcopy
 from dataclasses import dataclass
 from typing import Iterable, Mapping, Sequence
 
-from .artifacts import CompilationModel
 from .compiler import (
-    AliasDecl,
     BinaryExpr,
     CallExpr,
     Expr,
@@ -31,16 +28,6 @@ STATE_TRANSITION_IR_VERSION = 2
 class _Action:
     call: str
     failure_type: str | None
-
-
-@dataclass(frozen=True)
-class _ResolvedBranch:
-    condition: Expr | None
-    value: Expr
-    target: str
-    state_param: str
-    locals: Mapping[str, TypeRef]
-    line: int
 
 
 def _walk_expr(expr: Expr) -> Iterable[Expr]:
@@ -117,144 +104,6 @@ def _direct_target(
     if isinstance(selected, NameExpr) and selected.name in variants:
         return selected.name
     return None
-
-
-def _resolved_target(
-    expr: Expr,
-    *,
-    functions: Mapping[str, FunctionDecl],
-    state_decl: ProductDecl,
-    selector_index: int,
-    variants: set[str],
-    state_param: str,
-    visited: set[str] | None = None,
-) -> str | None:
-    direct = _direct_target(
-        expr,
-        state_decl=state_decl,
-        selector_index=selector_index,
-        variants=variants,
-        state_param=state_param,
-    )
-    if direct is not None:
-        return direct
-    value = _unwrap(expr)
-    if not (
-        isinstance(value, CallExpr)
-        and isinstance(value.callee, NameExpr)
-        and value.callee.name in functions
-    ):
-        return None
-    name = value.callee.name
-    visited = set() if visited is None else set(visited)
-    if name in visited:
-        return None
-    declaration = functions[name]
-    if declaration.guards or declaration.expression is None:
-        return None
-    visited.add(name)
-    nested_state_param = declaration.params[0].name if declaration.params else state_param
-    return _resolved_target(
-        declaration.expression,
-        functions=functions,
-        state_decl=state_decl,
-        selector_index=selector_index,
-        variants=variants,
-        state_param=nested_state_param,
-        visited=visited,
-    )
-
-
-def _called_function_names(expr: Expr, functions: Mapping[str, FunctionDecl]) -> tuple[str, ...]:
-    names: list[str] = []
-    for item in _walk_expr(expr):
-        if (
-            isinstance(item, CallExpr)
-            and isinstance(item.callee, NameExpr)
-            and item.callee.name in functions
-            and item.callee.name not in names
-        ):
-            names.append(item.callee.name)
-    return tuple(names)
-
-
-def _function_closure(root: str, functions: Mapping[str, FunctionDecl]) -> tuple[str, ...]:
-    ordered: list[str] = []
-    pending = [root]
-    seen: set[str] = set()
-    while pending:
-        name = pending.pop()
-        if name in seen or name not in functions:
-            continue
-        seen.add(name)
-        ordered.append(name)
-        declaration = functions[name]
-        roots: list[Expr] = []
-        if declaration.expression is not None:
-            roots.append(declaration.expression)
-        roots.extend(clause.value for clause in declaration.guards)
-        for root_expr in roots:
-            pending.extend(reversed(_called_function_names(root_expr, functions)))
-    return tuple(ordered)
-
-
-def _resolved_branches(
-    root: str,
-    *,
-    functions: Mapping[str, FunctionDecl],
-    state_decl: ProductDecl,
-    selector_index: int,
-    variants: set[str],
-) -> tuple[_ResolvedBranch, ...]:
-    result: list[_ResolvedBranch] = []
-    for name in _function_closure(root, functions):
-        declaration = functions[name]
-        state_param = declaration.params[0].name if declaration.params else "state"
-        locals_ = {parameter.name: parameter.ty for parameter in declaration.params}
-        if declaration.guards:
-            for clause in declaration.guards:
-                target = _resolved_target(
-                    clause.value,
-                    functions=functions,
-                    state_decl=state_decl,
-                    selector_index=selector_index,
-                    variants=variants,
-                    state_param=state_param,
-                )
-                if target is not None:
-                    result.append(
-                        _ResolvedBranch(
-                            clause.condition,
-                            clause.value,
-                            target,
-                            state_param,
-                            locals_,
-                            clause.line,
-                        )
-                    )
-            continue
-        if declaration.expression is None:
-            continue
-        target = _resolved_target(
-            declaration.expression,
-            functions=functions,
-            state_decl=state_decl,
-            selector_index=selector_index,
-            variants=variants,
-            state_param=state_param,
-        )
-        if target is not None:
-            result.append(
-                _ResolvedBranch(
-                    None,
-                    declaration.expression,
-                    target,
-                    state_param,
-                    locals_,
-                    declaration.line,
-                )
-            )
-    return tuple(result)
 
 
 def _flatten_and(expr: Expr) -> list[Expr]:
@@ -379,9 +228,9 @@ def _split_condition(
 ) -> tuple[str | None, str | None]:
     if condition is None:
         return None, None
+    parts = _flatten_and(condition)
     remaining: list[Expr] = []
     events: list[str] = []
-    parts = _flatten_and(condition)
     for part in parts:
         if _is_selector_predicate(
             part,
@@ -397,10 +246,10 @@ def _split_condition(
             sums=sums,
             state_param=state_param,
         )
-        if event is not None:
-            events.append(event)
-        else:
+        if event is None:
             remaining.append(part)
+        else:
+            events.append(event)
     if len(events) > 1:
         return None, "&".join(render_expr(part) for part in parts)
     guard = "&".join(render_expr(part) for part in remaining) or None
@@ -479,6 +328,8 @@ def _deduplicate(transitions: Sequence[dict[str, object]]) -> list[dict[str, obj
     result: list[dict[str, object]] = []
     seen: set[tuple[object, ...]] = set()
     for transition in transitions:
+        source = transition.get("source", {})
+        source_line = source.get("line") if isinstance(source, dict) else None
         key = (
             transition.get("source_state"),
             transition.get("target_state"),
@@ -487,284 +338,10 @@ def _deduplicate(transitions: Sequence[dict[str, object]]) -> list[dict[str, obj
             transition.get("action"),
             transition.get("failure_type"),
             transition.get("outcome"),
-            transition.get("source", {}).get("line"),
+            source_line,
         )
-        if key not in seen:
-            seen.add(key)
-            result.append(dict(transition))
-    return result
-
-
-def build_machine_state_transition_ir(
-    model: CompilationModel,
-    machine_view: dict[str, object],
-) -> dict[str, object]:
-    """Build canonical transition semantics from validated compiler AST.
-
-    The pass resolves unguarded pure helpers before expanding source states, so an
-    outer event or guard is never lost. Effect failures are synthesized only for
-    invoked effect boundaries returning Result, and transition identity includes
-    event and guard to prevent distinct failure routes from collapsing.
-    """
-
-    result = deepcopy(machine_view)
-    machine = next(
-        (item for item in model.machines if item.name == result.get("name")),
-        None,
-    )
-    if machine is None or not isinstance(machine.selector, FieldExpr):
-        return result
-
-    products = {
-        item.name: item
-        for item in model.program.declarations
-        if isinstance(item, ProductDecl)
-    }
-    sums = {
-        item.name: item
-        for item in model.program.declarations
-        if isinstance(item, SumDecl)
-    }
-    functions = {
-        item.name: item
-        for item in model.program.declarations
-        if isinstance(item, FunctionDecl)
-    }
-    externs = {
-        item.name: item
-        for item in model.program.declarations
-        if isinstance(item, ExternDecl)
-    }
-    aliases = {
-        item.name: item.target
-        for item in model.program.declarations
-        if isinstance(item, AliasDecl)
-    }
-    state_decl = products.get(machine.state_param.ty.name)
-    if state_decl is None:
-        return result
-    selector_index = next(
-        (index for index, field in enumerate(state_decl.fields) if field.name == machine.selector.field),
-        None,
-    )
-    if selector_index is None:
-        return result
-    selector_sum = sums.get(state_decl.fields[selector_index].ty.name)
-    if selector_sum is None:
-        return result
-    variants = {item.name for item in selector_sum.variants}
-    next_name = (
-        machine.next_expr.callee.name
-        if isinstance(machine.next_expr, CallExpr)
-        and isinstance(machine.next_expr.callee, NameExpr)
-        else None
-    )
-    if next_name is None or next_name not in functions:
-        return result
-
-    unreachable_lines = set(map(int, result.get("unreachable_branches", [])))
-    state_names = [str(item.get("name", "")) for item in result.get("states", [])]
-    transitions: list[dict[str, object]] = []
-
-    for branch in _resolved_branches(
-        next_name,
-        functions=functions,
-        state_decl=state_decl,
-        selector_index=selector_index,
-        variants=variants,
-    ):
-        if branch.line in unreachable_lines:
+        if key in seen:
             continue
-        explicit_sources = _selector_sources(
-            branch.condition,
-            state_param=branch.state_param,
-            selector_field=machine.selector.field,
-            variants=variants,
-        )
-        source_names = sorted(explicit_sources) if explicit_sources else state_names
-        condition_raw = "otherwise" if branch.condition is None else render_expr(branch.condition)
-        actions = _actions_in_expr(
-            branch.value,
-            functions=functions,
-            externs=externs,
-            aliases=aliases,
-        )
-        normal_action = "; ".join(action.call for action in actions) or None
-
-        for source_state in source_names:
-            target_state = source_state if branch.target == "__same__" else branch.target
-            if source_state not in state_names or target_state not in state_names:
-                continue
-            event, guard = _split_condition(
-                branch.condition,
-                state_param=branch.state_param,
-                selector_field=machine.selector.field,
-                source_state=source_state,
-                locals_=branch.locals,
-                products=products,
-                sums=sums,
-            )
-            outcome = (
-                "failure"
-                if target_state == str(result.get("failure_state", machine.failure))
-                else "success"
-                if target_state == str(result.get("success_state", machine.success))
-                else "normal"
-            )
-            normal = {
-                "source_state": source_state,
-                "target_state": target_state,
-                "condition": condition_raw,
-                "condition_raw": condition_raw,
-                "event": event,
-                "guard": guard,
-                "action": normal_action,
-                "failure_type": None,
-                "outcome": outcome,
-                "display_label": _display_label(event, guard, normal_action),
-                "source": {"line": branch.line, "column": 1},
-                "expanded_from_wildcard": not bool(explicit_sources),
-                "synthesized_failure": False,
-            }
-            transitions.append(normal)
-
-            if outcome == "failure":
-                continue
-            failure_state = str(result.get("failure_state", machine.failure))
-            if failure_state not in state_names:
-                continue
-            for action in actions:
-                if action.failure_type is None:
-                    continue
-                transitions.append(
-                    {
-                        **normal,
-                        "target_state": failure_state,
-                        "action": action.call,
-                        "failure_type": action.failure_type,
-                        "outcome": "failure",
-                        "display_label": _display_label(
-                            event,
-                            guard,
-                            action.call,
-                            action.failure_type,
-                        ),
-                        "synthesized_failure": True,
-                    }
-                )
-
-    transitions = _deduplicate(transitions)
-    initial = str(result.get("initial_state", ""))
-    reachable = _reachable(initial, transitions)
-    unreachable_states = [name for name in state_names if name not in reachable]
-
-    for index, transition in enumerate(transitions, start=1):
-        transition["id"] = f"T{index}"
-        transition["source_reachable"] = transition["source_state"] in reachable
-
-    states = []
-    for state in result.get("states", []):
-        item = dict(state)
-        item["reachable"] = str(item.get("name", "")) in reachable
-        states.append(item)
-
-    diagnostics = [
-        dict(item)
-        for item in result.get("diagnostics", [])
-        if item.get("code")
-        not in {"unreachable-state", "state-independent-transition", "no-static-transitions"}
-    ]
-    state_sources = {
-        str(item.get("name", "")): int(item.get("source", {}).get("line", 1))
-        for item in states
-    }
-    for state_name in unreachable_states:
-        diagnostics.append(
-            {
-                "severity": "warning",
-                "code": "unreachable-state",
-                "message": f"state {state_name} is unreachable from initial state {initial}",
-                "line": state_sources.get(state_name, 1),
-            }
-        )
-    if transitions and all(item.get("expanded_from_wildcard") for item in transitions):
-        diagnostics.append(
-            {
-                "severity": "warning",
-                "code": "state-independent-transition",
-                "message": (
-                    "next-state logic does not constrain any transition by the "
-                    f"selector {result.get('selector', machine.selector.field)}; "
-                    "every active branch applies to every state"
-                ),
-                "line": getattr(machine, "next_line", getattr(machine, "line", 1)),
-            }
-        )
-    if not transitions:
-        diagnostics.append(
-            {
-                "severity": "warning",
-                "code": "no-static-transitions",
-                "message": "no state transition could be derived statically",
-                "line": getattr(machine, "next_line", getattr(machine, "line", 1)),
-            }
-        )
-
-    analysis = dict(result.get("analysis", {}))
-    analysis.update(
-        {
-            "normalized_transition_count": len(transitions),
-            "reachable_state_count": len(reachable),
-            "failure_transition_count": sum(
-                1 for item in transitions if item.get("outcome") == "failure"
-            ),
-            "synthesized_failure_transition_count": sum(
-                1 for item in transitions if item.get("synthesized_failure")
-            ),
-            "transition_ir_schema": STATE_TRANSITION_IR_SCHEMA,
-            "transition_ir_version": STATE_TRANSITION_IR_VERSION,
-        }
-    )
-    result.update(
-        {
-            "states": states,
-            "transitions": transitions,
-            "unreachable_states": unreachable_states,
-            "diagnostics": diagnostics,
-            "analysis": analysis,
-            "transition_ir": {
-                "schema": STATE_TRANSITION_IR_SCHEMA,
-                "version": STATE_TRANSITION_IR_VERSION,
-            },
-        }
-    )
-    return result
-
-
-def enrich_state_transition_ir(
-    model: CompilationModel,
-    views: dict[str, object],
-) -> dict[str, object]:
-    result = deepcopy(views)
-    state = dict(result.get("state", {}))
-    state["machines"] = [
-        build_machine_state_transition_ir(model, dict(machine))
-        for machine in state.get("machines", [])
-    ]
-    result["state"] = state
-    result["state_transition_ir"] = {
-        "schema": STATE_TRANSITION_IR_SCHEMA,
-        "version": STATE_TRANSITION_IR_VERSION,
-    }
-    # Compatibility marker for existing third-party renderers. New code should use
-    # `state_transition_ir.version` or each machine's `transition_ir.version`.
-    result["transition_semantics_version"] = 1
-    summary = dict(result.get("summary", {}))
-    summary["state_warnings"] = sum(
-        1
-        for machine in state["machines"]
-        for diagnostic in machine.get("diagnostics", [])
-        if diagnostic.get("severity") == "warning"
-    )
-    result["summary"] = summary
+        seen.add(key)
+        result.append(dict(transition))
     return result
