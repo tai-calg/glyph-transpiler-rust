@@ -31,7 +31,7 @@ glyph.type-algebra-ir v1
 | `Option<Alpha>` / `O<Alpha>` | `1 + Alpha` |
 | `Result<Alpha,Error>` / `R<Alpha,Error>` | `Alpha + Error` |
 
-`Never`と`Unit`はType Algebra IRが認識する指定原子である。生成Rustで使う場合、Host側または統合crate側でそれぞれ非居住型とunit型へ対応付ける必要がある。
+`Never`と`Unit`はType Algebra IRが認識する指定原子である。生成Rustで使う場合、Host側または統合crate側でそれぞれ非居住型とunit型へ対応付ける必要がある。Rust式として自動列挙できる単位型は組み込みの`()`に限定する。
 
 積は直和へ分配し、因子順を正規化する。したがって、次の二型は同じ標準形を持つ。
 
@@ -90,13 +90,13 @@ Right = Context * Alpha + Context * Beta
 
 対象は次の構成に限定する。
 
-- `Never`
-- `Unit` / `()`
+- `Never`（値は0個）
+- Rust組み込みの`()`
 - `bool`
 - 上記だけから構成される積型・直和型・型別名
 - 列挙可能な`Option`、`Result`、tuple
 
-巨大な整数型、浮動小数点型、未知型、再帰型は列挙しない。有限性が判明しても上限を超える場合は列挙しない。
+`Unit`は値数1として解析するが、Rust式の具体表現をHostへ委ねるため自動列挙しない。巨大な整数型、浮動小数点型、未知型、再帰型も列挙しない。有限性が判明しても上限を超える場合は列挙しない。
 
 ## Generated conversions
 
