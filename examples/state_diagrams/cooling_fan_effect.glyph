@@ -1,0 +1,20 @@
+machine CoolingFan(state:FanState,input:FanInput)
+  select=state.mode
+  init=FanState(FanStopped,FanWritten(0.0))
+  next=fan_step(state,input)
+  success=FanStopped
+  failure=FanFault
+
++FanMode=FanStopped|FanRunning|FanFault
++FanWriteError=FanDriverError
++FanReceipt=FanWritten(F)
+*FanInput(enable:B,overheat:B,speed:F)
+*FanState(mode:FanMode,receipt:FanReceipt)
+
+!write_fan(speed:F):FanReceipt|FanWriteError
+
+>fan_step(state:FanState,input:FanInput):FanState|FanWriteError
+  input.overheat >> Ok(FanState(FanStopped,write_fan(0.0)?))
+  state.mode==FanStopped&input.enable >> Ok(FanState(FanRunning,write_fan(input.speed)?))
+  state.mode==FanRunning&!input.enable >> Ok(FanState(FanStopped,write_fan(0.0)?))
+  _ >> Ok(state)
