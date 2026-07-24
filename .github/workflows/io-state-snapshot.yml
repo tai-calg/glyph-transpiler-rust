@@ -1,0 +1,85 @@
+name: I/O State Diagram Snapshot
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "glyph.py"
+      - "glyph/diagram_app.py"
+      - "glyph/diagram_ui.py"
+      - "glyph/initial_transition_layout.py"
+      - "glyph/readable_diagram_app.py"
+      - "glyph/guard_distinct_failure_repair.py"
+      - "glyph/nested_transition_repair.py"
+      - "glyph/transition_label_layout.py"
+      - "glyph/transition_route_labels.py"
+      - "glyph/transition_semantics.py"
+      - "glyph/transition_semantics_runtime.py"
+      - "glyph/uml_transition_layout.py"
+      - "glyph/io_state_views.py"
+      - "glyph/state_machine_analysis.py"
+      - "glyph/state_machine_source_map.py"
+      - "tests/test_initial_transition_layout.py"
+      - "tests/test_guard_distinct_failure_repair.py"
+      - "tests/test_io_state_diagram_app.py"
+      - "tests/test_nested_transition_repair.py"
+      - "tests/test_state_machine_source_map.py"
+      - "tests/test_state_diagram_examples.py"
+      - "tests/test_transition_label_layout.py"
+      - "tests/test_transition_route_labels.py"
+      - "tests/test_transition_semantics.py"
+      - "tests/verify_state_diagram_rendering.mjs"
+      - "tests/verify_uml_transition_semantics.mjs"
+      - "tests/verify_additional_failure_notation.mjs"
+      - "examples/acceptance/motor_safety.glyph"
+      - "examples/state_diagrams/**"
+      - ".github/workflows/io-state-snapshot.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install browser
+        run: |
+          npm install playwright@1.54.2
+          npx playwright install --with-deps chromium
+
+      - name: Compile and verify state diagrams
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p build/state-diagram-regression build/uml-transition-semantics build/additional-failure-notation
+          node tests/verify_state_diagram_rendering.mjs \
+            2>&1 | tee build/state-diagram-regression/verify.log
+          node tests/verify_uml_transition_semantics.mjs \
+            2>&1 | tee build/uml-transition-semantics/verify.log
+          node tests/verify_additional_failure_notation.mjs \
+            2>&1 | tee build/additional-failure-notation/verify.log
+
+      - name: Upload rendered diagrams
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: state-diagram-regression
+          include-hidden-files: true
+          if-no-files-found: warn
+          path: |
+            build/state-diagram-regression/**
+            build/uml-transition-semantics/**
+            build/additional-failure-notation/**
+            examples/acceptance/motor_safety.glyph
+            examples/state_diagrams/*.glyph
+            examples/acceptance/.glyph/**/io-state-views.json
+            examples/state_diagrams/.glyph/**/io-state-views.json

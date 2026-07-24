@@ -1,0 +1,17 @@
+machine Traffic(state:TrafficState,input:TrafficInput)
+  select=state.mode
+  init=TrafficState(Red)
+  next=traffic_step(state,input)
+  success=Green
+  failure=TrafficFault
+
+*TrafficInput(tick:B,fault:B)
++TrafficMode=Red|Green|Yellow|TrafficFault
+*TrafficState(mode:TrafficMode)
+
+>traffic_step(state:TrafficState,input:TrafficInput):TrafficState
+  input.fault >> TrafficState(TrafficFault)
+  state.mode==Red&input.tick >> TrafficState(Green)
+  state.mode==Green&input.tick >> TrafficState(Yellow)
+  state.mode==Yellow&input.tick >> TrafficState(Red)
+  _ >> state

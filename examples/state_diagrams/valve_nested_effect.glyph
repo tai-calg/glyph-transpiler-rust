@@ -1,0 +1,22 @@
+machine Valve(state:ValveState,event:ValveEvent)
+  select=state.mode
+  init=ValveState(ValveClosed,ValveWritten(false))
+  next=valve_step(state,event)
+  success=ValveClosed
+  failure=ValveFault
+
++ValveEvent=ValveOpenRequest|ValveCloseRequest
++ValveMode=ValveClosed|ValveOpen|ValveFault
++ValveError=ValveIoError
++ValveReceipt=ValveWritten(B)
+*ValveState(mode:ValveMode,receipt:ValveReceipt)
+
+!write_valve(open:B):ValveReceipt|ValveError
+
+>open_valve(state:ValveState):ValveState|ValveError=Ok(ValveState(ValveOpen,write_valve(true)?))
+>close_valve(state:ValveState):ValveState|ValveError=Ok(ValveState(ValveClosed,write_valve(false)?))
+
+>valve_step(state:ValveState,event:ValveEvent):ValveState|ValveError
+  state.mode==ValveClosed&event==ValveOpenRequest >> open_valve(state)
+  state.mode==ValveOpen&event==ValveCloseRequest >> close_valve(state)
+  _ >> Ok(state)

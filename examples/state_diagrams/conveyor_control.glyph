@@ -1,0 +1,21 @@
+machine Conveyor(state:ConveyorState,event:ConveyorEvent,input:ConveyorInput)
+  select=state.mode
+  init=ConveyorState(ConveyorIdle,Applied(0.0))
+  next=conveyor_step(state,event,input)
+  success=ConveyorIdle
+  failure=ConveyorFault
+
++ConveyorEvent=ConveyorStart|ConveyorStop|ConveyorReset
++ConveyorMode=ConveyorIdle|ConveyorMoving|ConveyorFault
++DriveError=DriveRejected
++DriveReceipt=Applied(F)
+*ConveyorInput(clear:B,speed:F)
+*ConveyorState(mode:ConveyorMode,receipt:DriveReceipt)
+
+!set_conveyor(speed:F):DriveReceipt|DriveError
+
+>conveyor_step(state:ConveyorState,event:ConveyorEvent,input:ConveyorInput):ConveyorState|DriveError
+  state.mode==ConveyorIdle&event==ConveyorStart&input.clear >> Ok(ConveyorState(ConveyorMoving,set_conveyor(input.speed)?))
+  state.mode==ConveyorMoving&event==ConveyorStop >> Ok(ConveyorState(ConveyorIdle,set_conveyor(0.0)?))
+  state.mode==ConveyorFault&event==ConveyorReset&input.clear >> Ok(ConveyorState(ConveyorIdle,set_conveyor(0.0)?))
+  _ >> Ok(state)

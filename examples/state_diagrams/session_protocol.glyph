@@ -1,0 +1,20 @@
+machine Session(state:SessionState,event:SessionEvent)
+  select=state.phase
+  init=SessionState(SessionIdle)
+  next=session_step(state,event)
+  success=SessionReady
+  failure=SessionFailed
+
++SessionEvent=SessionNone|SessionStart|SessionAccept|SessionReject|SessionReset
++SessionPhase=SessionIdle|SessionConnecting|SessionReady|SessionFailed
+*SessionState(phase:SessionPhase)
+
+>session_step(state:SessionState,event:SessionEvent):SessionState=session_transition(state,event)
+
+>session_transition(state:SessionState,event:SessionEvent):SessionState
+  state.phase==SessionIdle&event==SessionStart >> SessionState(SessionConnecting)
+  state.phase==SessionConnecting&event==SessionAccept >> SessionState(SessionReady)
+  state.phase==SessionConnecting&event==SessionReject >> SessionState(SessionFailed)
+  state.phase==SessionReady&event==SessionReset >> SessionState(SessionIdle)
+  state.phase==SessionFailed&event==SessionReset >> SessionState(SessionIdle)
+  _ >> state
