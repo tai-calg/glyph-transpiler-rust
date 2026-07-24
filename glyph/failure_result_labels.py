@@ -37,18 +37,10 @@ _SCRIPT = r"""
       : text;
   }
 
-  function signatureOf(machine) {
-    return [
-      machine?.name || "",
-      ...(machine?.transitions || []).map(transition => [
-        transition.source_state,
-        transition.target_state,
-        transition.action ?? "",
-        transition.display_label ?? "",
-        transition.failure_type ?? "",
-        transition.synthesized_failure ? "1" : "0",
-      ].join("\u001f")),
-    ].join("\u001e");
+  function setTextIfChanged(element, value) {
+    if (!element || element.textContent === value) return false;
+    element.textContent = value;
+    return true;
   }
 
   async function applyFailureResultLabels() {
@@ -59,9 +51,6 @@ _SCRIPT = r"""
     try {
       const machine = await readMachine();
       if (!machine) return;
-      const signature = signatureOf(machine);
-      if (stage.dataset.failureResultLabels === signature) return;
-      stage.dataset.failureResultLabels = signature;
 
       (machine.transitions || []).forEach((transition, index) => {
         if (!transition.synthesized_failure || !transition.failure_type) return;
@@ -71,32 +60,35 @@ _SCRIPT = r"""
 
         const compact = stage.querySelector(`.transition-label[data-transition-id="${id}"]`);
         if (compact?.classList.contains("input-action-label")) {
-          const current = String(compact.textContent ?? "");
-          compact.textContent = withPipe(current, transition);
-          compact.dataset.inputActionLabel = compact.textContent;
+          const next = withPipe(compact.textContent, transition);
+          setTextIfChanged(compact, next);
+          compact.dataset.inputActionLabel = next;
         }
 
         const detailId = document.querySelector(
           `.transition-detail[data-transition-id="${id}"] .transition-detail-id.input-action-label`,
         );
         if (detailId) {
-          const current = String(detailId.textContent ?? "");
-          detailId.textContent = withPipe(current, transition);
-          detailId.dataset.inputActionLabel = detailId.textContent;
+          const next = withPipe(detailId.textContent, transition);
+          setTextIfChanged(detailId, next);
+          detailId.dataset.inputActionLabel = next;
         }
 
         const semantic = document.querySelector(
           `.transition-detail[data-transition-id="${id}"] .transition-detail-uml`,
         );
-        if (semantic) {
+        if (semantic && semantic.dataset.failureResultDisplay !== display) {
           const outcome = semantic.querySelector(".transition-detail-outcome")?.outerHTML || "";
           semantic.innerHTML = `${escapeHtml(display)}${outcome}`;
           semantic.dataset.failureResult = transition.failure_type;
+          semantic.dataset.failureResultDisplay = display;
         }
 
-        compact?.setAttribute("title", display);
-        compact?.setAttribute("data-full-label", display);
-        compact?.setAttribute("data-failure-action", action);
+        if (compact) {
+          compact.title = display;
+          compact.dataset.fullLabel = display;
+          compact.dataset.failureAction = action;
+        }
       });
 
       stage.dataset.failureResultNotationReady = "true";
