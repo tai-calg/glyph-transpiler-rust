@@ -12,10 +12,10 @@ const cases = [
     labels: ["SessionStart", "SessionAccept", "SessionReject", "SessionReset"],
     failureLabels: ["SessionReject"],
     compactLabels: [
-      "SessionStart→—",
-      "SessionAccept→—",
-      "SessionReject→—",
-      "SessionReset→—",
+      "SessionStart➡︎—",
+      "SessionAccept➡︎—",
+      "SessionReject➡︎—",
+      "SessionReset➡︎—",
     ],
   },
   {
@@ -24,7 +24,7 @@ const cases = [
     machine: "Traffic",
     labels: ["[input.tick]", "[input.fault]"],
     failureLabels: ["[input.fault]"],
-    compactLabels: ["[input.tick]→—", "[input.fault]→—"],
+    compactLabels: ["[input.tick]➡︎—", "[input.fault]➡︎—"],
   },
   {
     slug: "effect-failure-uml",
@@ -41,10 +41,10 @@ const cases = [
       "PumpStop / write_pump(false) ! WriteError",
     ],
     compactLabels: [
-      "PumpStart→write_pump(true)",
-      "PumpStop→write_pump(false)",
-      "PumpStart→write_pump(true) ! WriteError",
-      "PumpStop→write_pump(false) ! WriteError",
+      "PumpStart➡︎write_pump(true)",
+      "PumpStop➡︎write_pump(false)",
+      "PumpStart➡︎write_pump(true) ! WriteError",
+      "PumpStop➡︎write_pump(false) ! WriteError",
     ],
   },
   {
@@ -63,9 +63,9 @@ const cases = [
       "ConveyorReset [input.clear] / set_conveyor(0.0) ! DriveError",
     ],
     compactLabels: [
-      "ConveyorStart [input.clear]→set_conveyor(input.speed)",
-      "ConveyorStop→set_conveyor(0.0)",
-      "ConveyorReset [input.clear]→set_conveyor(0.0)",
+      "ConveyorStart [input.clear]➡︎set_conveyor(input.speed)",
+      "ConveyorStop➡︎set_conveyor(0.0)",
+      "ConveyorReset [input.clear]➡︎set_conveyor(0.0)",
     ],
   },
   {
@@ -83,8 +83,8 @@ const cases = [
       "ValveCloseRequest / write_valve(false) ! ValveError",
     ],
     compactLabels: [
-      "ValveOpenRequest→write_valve(true)",
-      "ValveCloseRequest→write_valve(false)",
+      "ValveOpenRequest➡︎write_valve(true)",
+      "ValveCloseRequest➡︎write_valve(false)",
     ],
   },
 ];
@@ -191,10 +191,14 @@ try {
         compactLabels.every(label => !/^T\d+$/.test(label.trim())),
         `${testCase.machine}: internal T identifiers leaked into visible labels`,
       );
+      assert(
+        compactLabels.every(label => !label.includes("→")),
+        `${testCase.machine}: thin arrows leaked into compact labels`,
+      );
       for (const expected of testCase.compactLabels) {
         assert(
           compactLabels.some(label => label.includes(expected)),
-          `${testCase.machine}: missing compact input→action label ${expected}`,
+          `${testCase.machine}: missing compact input➡︎action label ${expected}`,
         );
       }
 
@@ -202,6 +206,10 @@ try {
       assert(
         detailIds.every(label => !/^T\d+$/.test(label.trim())),
         `${testCase.machine}: internal T identifiers leaked into transition details`,
+      );
+      assert(
+        detailIds.every(label => !label.includes("→")),
+        `${testCase.machine}: thin arrows leaked into transition details`,
       );
       const detailOverlaps = await page.locator(".transition-detail").evaluateAll(rows => rows.flatMap((row, index) => {
         const id = row.querySelector(".transition-detail-id")?.getBoundingClientRect();
@@ -213,7 +221,7 @@ try {
       assert.deepEqual(
         detailOverlaps,
         [],
-        `${testCase.machine}: input→action labels overlap transition routes`,
+        `${testCase.machine}: input➡︎action labels overlap transition routes`,
       );
 
       await page.screenshot({
@@ -230,4 +238,4 @@ try {
   await browser.close();
 }
 
-console.log(`verified ${cases.length} UML diagrams with compact input→action labels`);
+console.log(`verified ${cases.length} UML diagrams with compact input➡︎action labels`);
