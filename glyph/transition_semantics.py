@@ -5,8 +5,8 @@ from .state_transition_compiler import (
     STATE_TRANSITION_IR_SCHEMA,
     STATE_TRANSITION_IR_VERSION,
     build_machine_state_transition_ir,
-    enrich_state_transition_ir,
 )
+from .state_transition_pipeline import enrich_state_transition_ir
 
 
 def enrich_io_state_views(
