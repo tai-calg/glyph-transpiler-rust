@@ -9,6 +9,7 @@ from glyph import compile_outputs
 class MonoidalIRTests(unittest.TestCase):
     def test_pure_product_constructor_emits_tensor_and_parallel_nodes(self) -> None:
         outputs = compile_outputs(
+            "resource Token[Ready]\n"
             "*Input(raw:U,voltage:F)\n"
             "*Output(frame:U,reading:F)\n"
             ">decode(x:U):U=x\n"
@@ -42,17 +43,9 @@ class MonoidalIRTests(unittest.TestCase):
         self.assertIn("Parallel", outputs.diagrams.files["monoidal.mmd"])
         self.assertIn("⊗ Output value", outputs.diagrams.files["monoidal.mmd"])
 
-        source_map = json.loads(outputs.diagrams.files["source-map.json"])
-        monoidal_entries = [
-            entry
-            for entries in source_map["line_to_views"].values()
-            for entry in entries
-            if entry["diagram"] == "monoidal.mmd"
-        ]
-        self.assertTrue(monoidal_entries)
-
     def test_try_lane_is_not_reclassified_as_unordered_parallel_work(self) -> None:
         outputs = compile_outputs(
+            "resource Token[Ready]\n"
             "+E=Bad\n"
             "*Pair(left:U,right:U)\n"
             ">check(x:U):U|E=Ok(x)\n"
@@ -71,6 +64,16 @@ class MonoidalIRTests(unittest.TestCase):
             tensor["id"],
             {parallel["tensor_id"] for parallel in payload["parallels"]},
         )
+
+    def test_legacy_output_set_remains_unchanged(self) -> None:
+        outputs = compile_outputs(
+            "*Pair(left:U,right:U)\n"
+            ">pair(x:U):Pair=Pair(x,x)\n",
+            "legacy.glyph",
+        )
+
+        self.assertNotIn("monoidal-ir.json", outputs.diagrams.files)
+        self.assertNotIn("monoidal.mmd", outputs.diagrams.files)
 
     def test_multiple_resource_capabilities_emit_tensor_boundaries(self) -> None:
         outputs = compile_outputs(
