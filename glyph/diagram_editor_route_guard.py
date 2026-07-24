@@ -6,32 +6,33 @@ _MARKER = "glyph-diagram-editor-route-guard-v1"
 _SCRIPT = r"""
 <script id="glyph-diagram-editor-route-guard-v1-script">
 (() => {
-  let scheduled = false;
+  let repairing = false;
   function verify() {
-    scheduled = false;
+    if (repairing) return;
     const stage = document.querySelector(".state-node")?.closest(".graph-stage");
     if (!stage || stage.dataset.initialRouteReady !== "true") return;
     const raw = stage.querySelector(":scope > svg.edge-svg > path:not(.state-transition-path)");
     const routed = stage.querySelector(":scope > svg.edge-svg > path.initial-transition-path");
     if (!raw || routed) return;
+    repairing = true;
     delete stage.dataset.initialRouteReady;
     delete stage.dataset.initialTransitionRouting;
-    document.dispatchEvent(new CustomEvent("glyph-transition-input-action-labels-ready"));
+    queueMicrotask(() => {
+      document.dispatchEvent(new CustomEvent("glyph-transition-input-action-labels-ready"));
+      repairing = false;
+    });
   }
-  function schedule() {
-    if (scheduled) return;
-    scheduled = true;
-    setTimeout(verify, 40);
-  }
-  document.addEventListener("glyph-initial-transition-route-ready", schedule);
+  document.addEventListener("glyph-initial-transition-route-ready", verify);
   document.addEventListener("change", event => {
-    if (event.target?.id === "machine-select") schedule();
+    if (event.target?.id === "machine-select") verify();
   });
-  new MutationObserver(schedule).observe(document.getElementById("view") || document.body, {
+  new MutationObserver(verify).observe(document.getElementById("view") || document.body, {
+    attributes: true,
+    attributeFilter: ["class", "data-initial-route-ready", "data-initial-transition-routing"],
     childList: true,
     subtree: true,
   });
-  schedule();
+  verify();
 })();
 </script>
 """
