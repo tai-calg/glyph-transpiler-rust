@@ -1,0 +1,21 @@
+machine DoorLock(state:DoorLockState,event:DoorEvent,input:DoorInput)
+  select=state.mode
+  init=DoorLockState(DoorLocked,DoorWritten(false))
+  next=door_lock_step(state,event,input)
+  success=DoorLocked
+  failure=DoorFault
+
++DoorEvent=DoorUnlockRequest|DoorLockRequest|DoorReset
++DoorMode=DoorLocked|DoorUnlocked|DoorFault
++DoorWriteError=DoorActuatorError
++DoorReceipt=DoorWritten(B)
++DoorInput=DoorInputData(B)
++DoorLockState=DoorStateData(DoorMode,DoorReceipt)
+
+!write_lock(unlocked:B):DoorReceipt|DoorWriteError
+
+>door_lock_step(state:DoorLockState,event:DoorEvent,input:DoorInput):DoorLockState|DoorWriteError
+  state.mode==DoorLocked&event==DoorUnlockRequest&input.authorized >> Ok(DoorLockState(DoorUnlocked,write_lock(true)?))
+  state.mode==DoorUnlocked&event==DoorLockRequest >> Ok(DoorLockState(DoorLocked,write_lock(false)?))
+  state.mode==DoorFault&event==DoorReset >> Ok(DoorLockState(DoorLocked,write_lock(false)?))
+  _ >> Ok(state)
