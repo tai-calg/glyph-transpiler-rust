@@ -22,17 +22,44 @@ Rust・Mermaid・versioned JSON IR
 
 ## 起動
 
+### ファイルを指定せず起動
+
+```bash
+python3 glyph.py
+```
+
+カレントディレクトリの`.glyph/workspace.glyph`を開きます。初回だけドア制御のサンプルGlyphを自動作成し、ブラウザのエディタへ表示します。
+
+`.glyph/workspace.glyph`が既に存在する場合は上書きしません。画面上の`Save`で保存した内容は次回起動時にも維持されます。
+
+### 既存のGlyphファイルを開く
+
 ```bash
 python3 glyph.py examples/acceptance/motor_safety.glyph
 ```
 
+従来どおり任意の`.glyph`ファイルを指定できます。
+
 Glyph Studioは次を一つの画面で扱います。
 
 - Source editorと自動診断
+- I/O topologyと状態遷移図
 - Architecture / State / Logic / Flow / Time
 - 生成Rust、host adapter、`manual.rs`
 - Typed AST、Symbol、versioned IR
 - 生成artifact一覧
+
+### 状態遷移図の編集と出力
+
+- 状態ノードとI/Oノードをドラッグして配置変更
+- 通常ドラッグは8pxグリッドへ吸着
+- `Shift`を押しながらドラッグすると1px単位で移動
+- ノード選択後、矢印キーで微調整
+- `Auto layout`で自動配置へ戻す
+- `White`と会社提出向け`Monochrome`テーマを切替
+- 表示中の図だけをSVG、2倍解像度PNG、横向きPDFへ出力
+
+配置はブラウザの`localStorage`へ保存され、Glyphソース自体とは分離されています。詳細は[`docs/DIAGRAM_EDITOR.md`](docs/DIAGRAM_EDITOR.md)を参照してください。
 
 CLI:
 

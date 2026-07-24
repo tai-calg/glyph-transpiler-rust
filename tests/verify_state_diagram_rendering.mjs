@@ -215,6 +215,8 @@ try {
             return selected === machineName
               && stage?.dataset.labelLayoutReady === "true"
               && stage?.dataset.initialRouteReady === "true"
+              && stage.querySelector(":scope > svg.edge-svg > path.initial-transition-path")
+              && stage.querySelector(".initial-dot")
               && stage.querySelectorAll(".edge-label.transition-label").length === transitionCount;
           },
           {machineName: expected.name, transitionCount},
