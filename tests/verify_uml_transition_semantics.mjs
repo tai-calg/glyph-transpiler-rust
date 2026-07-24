@@ -123,6 +123,86 @@ async function stopProcess(child) {
   if (child.exitCode === null) child.kill("SIGKILL");
 }
 
+async function assertInitialRouteClear(page, machineName) {
+  const result = await page.evaluate(() => {
+    const svg = document.querySelector(".graph-stage > svg.edge-svg");
+    const initial = svg?.querySelector(":scope > path.initial-transition-path");
+    const normals = [...(svg?.querySelectorAll(":scope > path.state-transition-path") || [])];
+    if (!svg || !initial) return {error: "initial transition path is missing"};
+
+    const point = value => ({x: value.x, y: value.y});
+    const distance = (left, right) => Math.hypot(left.x - right.x, left.y - right.y);
+    const sample = (path, step = 3) => {
+      const length = path.getTotalLength();
+      const values = [];
+      for (let offset = 0; offset < length; offset += step) {
+        values.push(point(path.getPointAtLength(offset)));
+      }
+      values.push(point(path.getPointAtLength(length)));
+      return values;
+    };
+    const orientation = (a, b, c) => (
+      (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
+    );
+    const between = (value, first, second) => (
+      value >= Math.min(first, second) - .001 && value <= Math.max(first, second) + .001
+    );
+    const intersects = (a, b, c, d) => {
+      const abC = orientation(a, b, c);
+      const abD = orientation(a, b, d);
+      const cdA = orientation(c, d, a);
+      const cdB = orientation(c, d, b);
+      if (((abC > 0 && abD < 0) || (abC < 0 && abD > 0))
+        && ((cdA > 0 && cdB < 0) || (cdA < 0 && cdB > 0))) return true;
+      const collinear = (value, p, q, r) => Math.abs(value) < .001
+        && between(r.x, p.x, q.x) && between(r.y, p.y, q.y);
+      return collinear(abC, a, b, c)
+        || collinear(abD, a, b, d)
+        || collinear(cdA, c, d, a)
+        || collinear(cdB, c, d, b);
+    };
+
+    const initialPoints = sample(initial);
+    let crossings = 0;
+    let minimum = Number.POSITIVE_INFINITY;
+    for (const normal of normals) {
+      const normalPoints = sample(normal);
+      for (let left = 1; left < initialPoints.length; left += 1) {
+        for (let right = 1; right < normalPoints.length; right += 1) {
+          if (intersects(
+            initialPoints[left - 1], initialPoints[left],
+            normalPoints[right - 1], normalPoints[right],
+          )) crossings += 1;
+        }
+      }
+      for (const left of initialPoints) {
+        for (const right of normalPoints) minimum = Math.min(minimum, distance(left, right));
+      }
+    }
+    if (!normals.length) minimum = 999;
+    return {
+      crossings,
+      minimum,
+      declaredCrossings: Number(initial.dataset.routeCrossings),
+      declaredClearance: Number(initial.dataset.routeClearance),
+      side: initial.dataset.routeSide,
+    };
+  });
+
+  assert.equal(result.error, undefined, `${machineName}: ${result.error}`);
+  assert.equal(result.crossings, 0, `${machineName}: initial route crosses normal transitions`);
+  assert.equal(result.declaredCrossings, 0, `${machineName}: router reported a crossing`);
+  assert(
+    result.minimum >= 5,
+    `${machineName}: initial route clearance is only ${result.minimum.toFixed(2)}px`,
+  );
+  assert(
+    result.declaredClearance >= 5,
+    `${machineName}: declared clearance is only ${result.declaredClearance.toFixed(2)}px`,
+  );
+  assert(result.side, `${machineName}: initial route side is missing`);
+}
+
 const browser = await chromium.launch({ headless: true });
 try {
   let port = 8865;
@@ -160,7 +240,8 @@ try {
           const stage = document.querySelector(".graph-stage");
           return selected === machineName
             && stage?.dataset.umlTransitionReady === "true"
-            && stage?.dataset.transitionInputActionLabelsReady === "true";
+            && stage?.dataset.transitionInputActionLabelsReady === "true"
+            && stage?.dataset.initialRouteReady === "true";
         },
         testCase.machine,
       );
@@ -224,6 +305,8 @@ try {
         `${testCase.machine}: input➡︎action labels overlap transition routes`,
       );
 
+      await assertInitialRouteClear(page, testCase.machine);
+
       await page.screenshot({
         path: path.join(outputDirectory, `${testCase.slug}.png`),
         fullPage: true,
@@ -238,4 +321,4 @@ try {
   await browser.close();
 }
 
-console.log(`verified ${cases.length} UML diagrams with compact input➡︎action labels`);
+console.log(`verified ${cases.length} UML diagrams with collision-free initial routing`);
