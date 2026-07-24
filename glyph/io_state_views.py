@@ -7,7 +7,7 @@ from .compiler import AliasDecl, ExternDecl, FunctionDecl, ProductDecl, SumDecl,
 from .execution_ir import ExecutionStructureIR
 from .state_machine_analysis import analyze_machine
 from .state_machine_source_map import remap_machine_analysis_source_lines
-from .state_transition_compiler import enrich_state_transition_ir
+from .state_transition_pipeline import enrich_state_transition_ir
 
 
 IO_STATE_VIEWS_SCHEMA = "glyph.io-state-views"
