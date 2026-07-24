@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
+import subprocess
+import tempfile
 import unittest
 
 from glyph import compile_outputs
@@ -55,18 +58,19 @@ class TypeAlgebraIRTests(unittest.TestCase):
     def test_distributive_normal_form_detects_symbolic_isomorphism(self) -> None:
         outputs = compile_outputs(
             "resource Token[Ready]\n"
-            "+AorB=HasA(A)|HasB(B)\n"
-            "*Left(x:X,choice:AorB)\n"
-            "*XA(x:X,a:A)\n"
-            "*XB(x:X,b:B)\n"
-            "+Right=InA(XA)|InB(XB)\n",
+            "+Choice=HasAlpha(Alpha)|HasBeta(Beta)\n"
+            "*Left(context:Context,choice:Choice)\n"
+            "*ContextAlpha(context:Context,value:Alpha)\n"
+            "*ContextBeta(context:Context,value:Beta)\n"
+            "+Right=InAlpha(ContextAlpha)|InBeta(ContextBeta)\n",
             "distribution.glyph",
         )
 
         payload = json.loads(outputs.diagrams.files["type-algebra-ir.json"])
         types = {item["name"]: item for item in payload["types"]}
-        self.assertEqual(types["Left"]["normal_form"], "A * X + B * X")
-        self.assertEqual(types["Right"]["normal_form"], "A * X + B * X")
+        expected = "Alpha * Context + Beta * Context"
+        self.assertEqual(types["Left"]["normal_form"], expected)
+        self.assertEqual(types["Right"]["normal_form"], expected)
         self.assertFalse(types["Left"]["cardinality_exact"])
 
         iso = next(
@@ -97,6 +101,56 @@ class TypeAlgebraIRTests(unittest.TestCase):
         self.assertFalse(analysis["cardinality_exact"])
         self.assertFalse(analysis["exhaustive_complete"])
         self.assertEqual(analysis["exhaustive_cases"], [])
+
+    def test_generated_conversions_and_roundtrip_tests_compile_and_run(self) -> None:
+        outputs = compile_outputs(
+            "resource Token[Ready]\n"
+            "+Bit=Off|On\n"
+            "*Pair(left:Bit,right:Bit)\n"
+            "+Quad=Q0|Q1|Q2|Q3\n",
+            "generated-rust.glyph",
+        )
+
+        with tempfile.TemporaryDirectory(prefix="glyph-type-algebra-") as directory:
+            root = Path(directory)
+            (root / "generated.rs").write_text(
+                outputs.artifacts.logic,
+                encoding="utf-8",
+            )
+            (root / "type-algebra.generated.rs").write_text(
+                outputs.diagrams.files["type-algebra.generated.rs"],
+                encoding="utf-8",
+            )
+            (root / "lib.rs").write_text(
+                "pub mod generated { include!(\"generated.rs\"); }\n"
+                "pub mod type_algebra { include!(\"type-algebra.generated.rs\"); }\n",
+                encoding="utf-8",
+            )
+            executable = root / "type-algebra-tests"
+            compile_result = subprocess.run(
+                [
+                    "rustc",
+                    "--edition",
+                    "2021",
+                    "--test",
+                    "lib.rs",
+                    "-o",
+                    str(executable),
+                ],
+                cwd=root,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(compile_result.returncode, 0, compile_result.stderr)
+            run_result = subprocess.run(
+                [str(executable)],
+                cwd=root,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(run_result.returncode, 0, run_result.stdout + run_result.stderr)
 
     def test_legacy_artifact_set_is_unchanged(self) -> None:
         outputs = compile_outputs(
