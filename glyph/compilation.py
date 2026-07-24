@@ -27,6 +27,8 @@ from .mermaid import (
     render_machine_mermaid,
     render_temporal_mermaid,
 )
+from .monoidal_ir import build_monoidal_ir
+from .monoidal_mermaid import render_monoidal_mermaid
 from .preprocessor import remap_source_lines
 from .schema import (
     ALGORITHM_IR_SCHEMA,
@@ -52,6 +54,28 @@ def _with_schema(schema: str, payload: dict[str, object]) -> dict[str, object]:
     unversioned.pop("schema", None)
     unversioned.pop("version", None)
     return versioned_payload(schema, unversioned)
+
+
+def _source_map_with_monoidal(
+    execution_ir,
+    architecture_ir,
+    algorithm_ir,
+    monoidal_ir,
+) -> dict[str, object]:
+    payload = _source_map(execution_ir, architecture_ir, algorithm_ir)
+    line_to_views = payload["line_to_views"]
+    assert isinstance(line_to_views, dict)
+
+    def add(line: int, kind: str, item_id: str) -> None:
+        line_to_views.setdefault(str(line), []).append(
+            {"kind": kind, "id": item_id, "diagram": "monoidal.mmd"}
+        )
+
+    for tensor in monoidal_ir.tensors:
+        add(tensor.source.line, "monoidal-tensor", tensor.id)
+    for parallel in monoidal_ir.parallels:
+        add(parallel.source.line, "monoidal-parallel", parallel.id)
+    return payload
 
 
 def _derive(model: CompilationModel) -> Glyph04DerivedModels:
@@ -127,10 +151,18 @@ def build_diagram_bundle(
         expanded.opaques,
     )
     algorithm_ir = remap_source_lines(algorithm_ir, model.preprocess)
+    monoidal_ir = build_monoidal_ir(
+        source_name,
+        expanded.program,
+        expanded.blocks,
+        model.capabilities,
+    )
+    monoidal_ir = remap_source_lines(monoidal_ir, model.preprocess)
 
     href = source_href or source_name
     architecture = render_architecture_mermaid(model.architecture, href)
     logic = render_algorithm_mermaid(algorithm_ir, href)
+    monoidal = render_monoidal_mermaid(monoidal_ir, href)
     dataflow = render_dataflow_mermaid(execution_ir, href)
     machine_files = {
         f"machine-{_slug(machine.name)}.mmd": render_machine_mermaid(machine)
@@ -160,6 +192,13 @@ def build_diagram_bundle(
             indent=2,
         )
         + "\n",
+        "monoidal.mmd": monoidal,
+        "monoidal-ir.json": json.dumps(
+            monoidal_ir.to_dict(),
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
         "execution.mmd": dataflow,
         **machine_files,
         "temporal.mmd": temporal,
@@ -172,7 +211,12 @@ def build_diagram_bundle(
         "source-map.json": json.dumps(
             _with_schema(
                 SOURCE_MAP_SCHEMA,
-                _source_map(execution_ir, model.architecture, algorithm_ir),
+                _source_map_with_monoidal(
+                    execution_ir,
+                    model.architecture,
+                    algorithm_ir,
+                    monoidal_ir,
+                ),
             ),
             ensure_ascii=False,
             indent=2,
@@ -218,7 +262,7 @@ def build_diagram_bundle(
             derived.host_requirements
         )
 
-    files["index.md"] = render_index_markdown(
+    index = render_index_markdown(
         execution_ir,
         model.architecture,
         algorithm_ir,
@@ -229,6 +273,15 @@ def build_diagram_bundle(
         machine_files,
         temporal,
     )
+    index += (
+        "\n## Monoidal structure\n\n"
+        "`Tensor` records product/resource composition. `Parallel` records only "
+        "proven pure structural independence; it does not schedule threads.\n\n"
+        "```mermaid\n"
+        + monoidal
+        + "```\n"
+    )
+    files["index.md"] = index
     return DiagramBundle(
         ir=execution_ir,
         algorithm_ir=algorithm_ir,
