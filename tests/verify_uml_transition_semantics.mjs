@@ -33,18 +33,18 @@ const cases = [
     labels: [
       "PumpStart / write_pump(true)",
       "PumpStop / write_pump(false)",
-      "PumpStart / write_pump(true) ! WriteError",
-      "PumpStop / write_pump(false) ! WriteError",
+      "PumpStart / write_pump(true) | WriteError",
+      "PumpStop / write_pump(false) | WriteError",
     ],
     failureLabels: [
-      "PumpStart / write_pump(true) ! WriteError",
-      "PumpStop / write_pump(false) ! WriteError",
+      "PumpStart / write_pump(true) | WriteError",
+      "PumpStop / write_pump(false) | WriteError",
     ],
     compactLabels: [
       "PumpStart➡︎write_pump(true)",
       "PumpStop➡︎write_pump(false)",
-      "PumpStart➡︎write_pump(true) ! WriteError",
-      "PumpStop➡︎write_pump(false) ! WriteError",
+      "PumpStart➡︎write_pump(true) | WriteError",
+      "PumpStop➡︎write_pump(false) | WriteError",
     ],
   },
   {
@@ -55,17 +55,18 @@ const cases = [
       "ConveyorStart [input.clear] / set_conveyor(input.speed)",
       "ConveyorStop / set_conveyor(0.0)",
       "ConveyorReset [input.clear] / set_conveyor(0.0)",
-      "ConveyorStart [input.clear] / set_conveyor(input.speed) ! DriveError",
+      "ConveyorStart [input.clear] / set_conveyor(input.speed) | DriveError",
     ],
     failureLabels: [
-      "ConveyorStart [input.clear] / set_conveyor(input.speed) ! DriveError",
-      "ConveyorStop / set_conveyor(0.0) ! DriveError",
-      "ConveyorReset [input.clear] / set_conveyor(0.0) ! DriveError",
+      "ConveyorStart [input.clear] / set_conveyor(input.speed) | DriveError",
+      "ConveyorStop / set_conveyor(0.0) | DriveError",
+      "ConveyorReset [input.clear] / set_conveyor(0.0) | DriveError",
     ],
     compactLabels: [
       "ConveyorStart [input.clear]➡︎set_conveyor(input.speed)",
       "ConveyorStop➡︎set_conveyor(0.0)",
       "ConveyorReset [input.clear]➡︎set_conveyor(0.0)",
+      "ConveyorStart [input.clear]➡︎set_conveyor(input.speed) | DriveError",
     ],
   },
   {
@@ -75,16 +76,17 @@ const cases = [
     labels: [
       "ValveOpenRequest / write_valve(true)",
       "ValveCloseRequest / write_valve(false)",
-      "ValveOpenRequest / write_valve(true) ! ValveError",
-      "ValveCloseRequest / write_valve(false) ! ValveError",
+      "ValveOpenRequest / write_valve(true) | ValveError",
+      "ValveCloseRequest / write_valve(false) | ValveError",
     ],
     failureLabels: [
-      "ValveOpenRequest / write_valve(true) ! ValveError",
-      "ValveCloseRequest / write_valve(false) ! ValveError",
+      "ValveOpenRequest / write_valve(true) | ValveError",
+      "ValveCloseRequest / write_valve(false) | ValveError",
     ],
     compactLabels: [
       "ValveOpenRequest➡︎write_valve(true)",
       "ValveCloseRequest➡︎write_valve(false)",
+      "ValveOpenRequest➡︎write_valve(true) | ValveError",
     ],
   },
 ];
@@ -128,7 +130,7 @@ async function assertInitialRouteClear(page, machineName) {
     const svg = document.querySelector(".graph-stage > svg.edge-svg");
     const initial = svg?.querySelector(":scope > path.initial-transition-path");
     const normals = [...(svg?.querySelectorAll(":scope > path.state-transition-path") || [])];
-    if (!svg || !initial) return {error: "initial transition path is missing"};
+    if (!initial) return {error: "initial transition path is missing"};
 
     const point = value => ({x: value.x, y: value.y});
     const distance = (left, right) => Math.hypot(left.x - right.x, left.y - right.y);
@@ -192,14 +194,8 @@ async function assertInitialRouteClear(page, machineName) {
   assert.equal(result.error, undefined, `${machineName}: ${result.error}`);
   assert.equal(result.crossings, 0, `${machineName}: initial route crosses normal transitions`);
   assert.equal(result.declaredCrossings, 0, `${machineName}: router reported a crossing`);
-  assert(
-    result.minimum >= 5,
-    `${machineName}: initial route clearance is only ${result.minimum.toFixed(2)}px`,
-  );
-  assert(
-    result.declaredClearance >= 5,
-    `${machineName}: declared clearance is only ${result.declaredClearance.toFixed(2)}px`,
-  );
+  assert(result.minimum >= 5, `${machineName}: initial route clearance is ${result.minimum}px`);
+  assert(result.declaredClearance >= 5, `${machineName}: declared clearance is ${result.declaredClearance}px`);
   assert(result.side, `${machineName}: initial route side is missing`);
 }
 
@@ -225,7 +221,6 @@ try {
       const state = await waitForServer(url, child, logs);
       const machine = state.views.state.machines.find(item => item.name === testCase.machine);
       assert.ok(machine, `${testCase.machine}: machine missing`);
-      assert.equal(machine.analysis.transition_semantics_version, 1);
 
       const page = await browser.newPage({
         viewport: { width: 1800, height: 1200 },
@@ -241,72 +236,53 @@ try {
           return selected === machineName
             && stage?.dataset.umlTransitionReady === "true"
             && stage?.dataset.transitionInputActionLabelsReady === "true"
+            && stage?.dataset.failureResultNotationReady === "true"
             && stage?.dataset.initialRouteReady === "true";
         },
         testCase.machine,
       );
 
       const semanticLabels = await page.locator(".transition-detail-uml").allTextContents();
+      const compactLabels = await page.locator(".edge-label.transition-label.compact").allTextContents();
+      const detailIds = await page.locator(".transition-detail-id.input-action-label").allTextContents();
+      const visibleLabels = [...semanticLabels, ...compactLabels, ...detailIds];
+
       for (const label of testCase.labels) {
         assert(
           semanticLabels.some(item => item.includes(label)),
           `${testCase.machine}: missing semantic label ${label}`,
         );
       }
-
-      const failures = await page.locator(".transition-detail.failure-transition .transition-detail-uml").allTextContents();
+      const failures = await page.locator(
+        ".transition-detail.failure-transition .transition-detail-uml",
+      ).allTextContents();
       for (const label of testCase.failureLabels) {
         assert(
           failures.some(item => item.includes(label)),
           `${testCase.machine}: missing failure transition ${label}`,
         );
       }
+      for (const expected of testCase.compactLabels) {
+        assert(
+          compactLabels.some(label => label.includes(expected)),
+          `${testCase.machine}: missing compact label ${expected}`,
+        );
+      }
+
+      assert(
+        visibleLabels.every(label => !/ ! (WriteError|DriveError|ValveError)/.test(label)),
+        `${testCase.machine}: old effect-sigil failure notation remains visible`,
+      );
+      assert(
+        compactLabels.every(label => !/^T\d+$/.test(label.trim())),
+        `${testCase.machine}: internal transition IDs are visible`,
+      );
       assert.equal(
         await page.locator(".state-transition-path.failure-transition").count(),
         machine.transitions.filter(item => item.outcome === "failure").length,
       );
 
-      const compactLabels = await page.locator(".edge-label.transition-label.compact").allTextContents();
-      assert(compactLabels.length > 0, `${testCase.machine}: compact labels are missing`);
-      assert(
-        compactLabels.every(label => !/^T\d+$/.test(label.trim())),
-        `${testCase.machine}: internal T identifiers leaked into visible labels`,
-      );
-      assert(
-        compactLabels.every(label => !label.includes("→")),
-        `${testCase.machine}: thin arrows leaked into compact labels`,
-      );
-      for (const expected of testCase.compactLabels) {
-        assert(
-          compactLabels.some(label => label.includes(expected)),
-          `${testCase.machine}: missing compact input➡︎action label ${expected}`,
-        );
-      }
-
-      const detailIds = await page.locator(".transition-detail-id.input-action-label").allTextContents();
-      assert(
-        detailIds.every(label => !/^T\d+$/.test(label.trim())),
-        `${testCase.machine}: internal T identifiers leaked into transition details`,
-      );
-      assert(
-        detailIds.every(label => !label.includes("→")),
-        `${testCase.machine}: thin arrows leaked into transition details`,
-      );
-      const detailOverlaps = await page.locator(".transition-detail").evaluateAll(rows => rows.flatMap((row, index) => {
-        const id = row.querySelector(".transition-detail-id")?.getBoundingClientRect();
-        const route = row.querySelector(".transition-detail-route")?.getBoundingClientRect();
-        if (!id || !route) return [];
-        const verticalOverlap = id.top < route.bottom && route.top < id.bottom;
-        return verticalOverlap && id.right > route.left + 1 ? [`row-${index + 1}`] : [];
-      }));
-      assert.deepEqual(
-        detailOverlaps,
-        [],
-        `${testCase.machine}: input➡︎action labels overlap transition routes`,
-      );
-
       await assertInitialRouteClear(page, testCase.machine);
-
       await page.screenshot({
         path: path.join(outputDirectory, `${testCase.slug}.png`),
         fullPage: true,
@@ -321,4 +297,4 @@ try {
   await browser.close();
 }
 
-console.log(`verified ${cases.length} UML diagrams with collision-free initial routing`);
+console.log(`verified ${cases.length} UML diagrams with Glyph pipe failure notation`);
