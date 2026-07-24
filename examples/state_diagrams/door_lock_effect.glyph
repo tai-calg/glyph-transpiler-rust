@@ -9,8 +9,8 @@ machine DoorLock(state:DoorLockState,event:DoorEvent,input:DoorInput)
 +DoorMode=DoorLocked|DoorUnlocked|DoorFault
 +DoorWriteError=DoorActuatorError
 +DoorReceipt=DoorWritten(B)
-+DoorInput=DoorInputData(B)
-+DoorLockState=DoorStateData(DoorMode,DoorReceipt)
+*DoorInput(authorized:B)
+*DoorLockState(mode:DoorMode,receipt:DoorReceipt)
 
 !write_lock(unlocked:B):DoorReceipt|DoorWriteError
 
