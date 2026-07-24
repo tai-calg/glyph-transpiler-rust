@@ -269,7 +269,7 @@ def build_diagram_bundle(
         ) + "\n"
     if derived.features.runtime_contracts:
         files["runtime-contract-ir.json"] = json.dumps(
-            derived.runtime_contracts.to_dict(),
+            model.runtime_contracts.to_dict(),
             ensure_ascii=False,
             indent=2,
         ) + "\n"
