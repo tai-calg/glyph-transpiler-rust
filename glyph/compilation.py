@@ -37,6 +37,7 @@ from .schema import (
     TYPED_DESIGN_SCHEMA,
     versioned_payload,
 )
+from .type_algebra import build_type_algebra_ir, render_type_algebra_rust
 
 
 @dataclass(frozen=True)
@@ -153,6 +154,7 @@ def build_diagram_bundle(
     algorithm_ir = remap_source_lines(algorithm_ir, model.preprocess)
     monoidal_ir = None
     monoidal = None
+    type_algebra_ir = None
     if derived.features.enabled:
         monoidal_ir = build_monoidal_ir(
             source_name,
@@ -161,6 +163,11 @@ def build_diagram_bundle(
             model.capabilities,
         )
         monoidal_ir = remap_source_lines(monoidal_ir, model.preprocess)
+        type_algebra_ir = build_type_algebra_ir(
+            source_name,
+            expanded.program,
+        )
+        type_algebra_ir = remap_source_lines(type_algebra_ir, model.preprocess)
 
     href = source_href or source_name
     architecture = render_architecture_mermaid(model.architecture, href)
@@ -233,6 +240,16 @@ def build_diagram_bundle(
             indent=2,
         ) + "\n"
 
+    if type_algebra_ir is not None:
+        files["type-algebra-ir.json"] = json.dumps(
+            type_algebra_ir.to_dict(),
+            ensure_ascii=False,
+            indent=2,
+        ) + "\n"
+        files["type-algebra.generated.rs"] = render_type_algebra_rust(
+            type_algebra_ir
+        )
+
     if derived.features.capabilities:
         files["capability-ir.json"] = json.dumps(
             model.capabilities.to_dict(),
@@ -252,7 +269,7 @@ def build_diagram_bundle(
         ) + "\n"
     if derived.features.runtime_contracts:
         files["runtime-contract-ir.json"] = json.dumps(
-            model.runtime_contracts.to_dict(),
+            derived.runtime_contracts.to_dict(),
             ensure_ascii=False,
             indent=2,
         ) + "\n"
@@ -290,6 +307,22 @@ def build_diagram_bundle(
             "```mermaid\n"
             + monoidal
             + "```\n"
+        )
+    if type_algebra_ir is not None:
+        exact = sum(item.cardinality_exact for item in type_algebra_ir.types)
+        impossible = sum(item.impossible for item in type_algebra_ir.types)
+        generated = sum(item.generated for item in type_algebra_ir.conversions)
+        index += (
+            "\n## Type algebra\n\n"
+            "Pure product and sum declarations are normalized as a commutative "
+            "semiring. See `type-algebra-ir.json` for normal forms, cardinalities, "
+            "impossible types, isomorphism classes, and exhaustive cases. "
+            "`type-algebra.generated.rs` contains bounded finite conversion functions "
+            "and round-trip tests.\n\n"
+            f"- exact cardinalities: {exact}\n"
+            f"- impossible types: {impossible}\n"
+            f"- isomorphism classes: {len(type_algebra_ir.isomorphism_classes)}\n"
+            f"- generated conversion functions: {generated}\n"
         )
     files["index.md"] = index
     return DiagramBundle(
