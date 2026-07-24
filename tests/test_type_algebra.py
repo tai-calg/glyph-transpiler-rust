@@ -158,19 +158,16 @@ class TypeAlgebraIRTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory(prefix="glyph-type-algebra-") as directory:
             root = Path(directory)
-            (root / "generated.rs").write_text(
-                outputs.artifacts.logic,
-                encoding="utf-8",
-            )
             (root / "type-algebra.generated.rs").write_text(
                 outputs.diagrams.files["type-algebra.generated.rs"],
                 encoding="utf-8",
             )
-            (root / "lib.rs").write_text(
-                "pub mod generated { include!(\"generated.rs\"); }\n"
-                "pub mod type_algebra { include!(\"type-algebra.generated.rs\"); }\n",
-                encoding="utf-8",
+            crate_source = (
+                outputs.artifacts.logic
+                + "\npub mod generated { pub use super::{Bit, Pair, Quad}; }\n"
+                + "pub mod type_algebra { include!(\"type-algebra.generated.rs\"); }\n"
             )
+            (root / "lib.rs").write_text(crate_source, encoding="utf-8")
             executable = root / "type-algebra-tests"
             compile_result = subprocess.run(
                 [
