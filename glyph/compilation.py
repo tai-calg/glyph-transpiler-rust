@@ -151,18 +151,22 @@ def build_diagram_bundle(
         expanded.opaques,
     )
     algorithm_ir = remap_source_lines(algorithm_ir, model.preprocess)
-    monoidal_ir = build_monoidal_ir(
-        source_name,
-        expanded.program,
-        expanded.blocks,
-        model.capabilities,
-    )
-    monoidal_ir = remap_source_lines(monoidal_ir, model.preprocess)
+    monoidal_ir = None
+    monoidal = None
+    if derived.features.enabled:
+        monoidal_ir = build_monoidal_ir(
+            source_name,
+            expanded.program,
+            expanded.blocks,
+            model.capabilities,
+        )
+        monoidal_ir = remap_source_lines(monoidal_ir, model.preprocess)
 
     href = source_href or source_name
     architecture = render_architecture_mermaid(model.architecture, href)
     logic = render_algorithm_mermaid(algorithm_ir, href)
-    monoidal = render_monoidal_mermaid(monoidal_ir, href)
+    if monoidal_ir is not None:
+        monoidal = render_monoidal_mermaid(monoidal_ir, href)
     dataflow = render_dataflow_mermaid(execution_ir, href)
     machine_files = {
         f"machine-{_slug(machine.name)}.mmd": render_machine_mermaid(machine)
@@ -192,13 +196,6 @@ def build_diagram_bundle(
             indent=2,
         )
         + "\n",
-        "monoidal.mmd": monoidal,
-        "monoidal-ir.json": json.dumps(
-            monoidal_ir.to_dict(),
-            ensure_ascii=False,
-            indent=2,
-        )
-        + "\n",
         "execution.mmd": dataflow,
         **machine_files,
         "temporal.mmd": temporal,
@@ -211,11 +208,15 @@ def build_diagram_bundle(
         "source-map.json": json.dumps(
             _with_schema(
                 SOURCE_MAP_SCHEMA,
-                _source_map_with_monoidal(
-                    execution_ir,
-                    model.architecture,
-                    algorithm_ir,
-                    monoidal_ir,
+                (
+                    _source_map_with_monoidal(
+                        execution_ir,
+                        model.architecture,
+                        algorithm_ir,
+                        monoidal_ir,
+                    )
+                    if monoidal_ir is not None
+                    else _source_map(execution_ir, model.architecture, algorithm_ir)
                 ),
             ),
             ensure_ascii=False,
@@ -223,6 +224,14 @@ def build_diagram_bundle(
         )
         + "\n",
     }
+
+    if monoidal_ir is not None and monoidal is not None:
+        files["monoidal.mmd"] = monoidal
+        files["monoidal-ir.json"] = json.dumps(
+            monoidal_ir.to_dict(),
+            ensure_ascii=False,
+            indent=2,
+        ) + "\n"
 
     if derived.features.capabilities:
         files["capability-ir.json"] = json.dumps(
@@ -273,14 +282,15 @@ def build_diagram_bundle(
         machine_files,
         temporal,
     )
-    index += (
-        "\n## Monoidal structure\n\n"
-        "`Tensor` records product/resource composition. `Parallel` records only "
-        "proven pure structural independence; it does not schedule threads.\n\n"
-        "```mermaid\n"
-        + monoidal
-        + "```\n"
-    )
+    if monoidal is not None:
+        index += (
+            "\n## Monoidal structure\n\n"
+            "`Tensor` records product/resource composition. `Parallel` records only "
+            "proven pure structural independence; it does not schedule threads.\n\n"
+            "```mermaid\n"
+            + monoidal
+            + "```\n"
+        )
     files["index.md"] = index
     return DiagramBundle(
         ir=execution_ir,
