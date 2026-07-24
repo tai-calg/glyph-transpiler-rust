@@ -51,7 +51,7 @@ class HostInvocationIRTests(unittest.TestCase):
         self.assertEqual(invocation["call"], "write_pump(enabled)")
         self.assertEqual(
             invocation["arguments"],
-            [{"expression": "enabled", "parameter": "enabled", "type": "B"}],
+            [{"expression": "enabled", "parameter": "enabled", "type": "bool"}],
         )
         self.assertEqual(invocation["success_type"], "PumpReceipt")
         self.assertEqual(invocation["failure_type"], "WriteError")
