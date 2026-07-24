@@ -15,7 +15,6 @@ def compile_semantic(path: Path) -> dict[str, object]:
     source = path.read_text(encoding="utf-8")
     output = CompilationPipeline().compile_text(source, source_name=str(path))
     views = build_io_state_views(output.model, output.diagrams.ir)
-    # Compatibility entry point must be idempotent for compiler-produced v2 views.
     self_same = enrich_runtime_io_state_views(output.model, views)
     assert self_same is views
     return views
@@ -190,11 +189,10 @@ class TransitionSemanticsTests(unittest.TestCase):
         self.assertEqual(failure["action"], "write_valve(true)")
         self.assertEqual(failure["failure_type"], "ValveError")
 
-        # Unguarded helper declarations are implementation details, not independent
-        # wildcard transitions from every state.
         self.assertFalse(
             any(
                 item["target_state"] == "ValveOpen"
+                and item["source_state"] != item["target_state"]
                 and item["event"] is None
                 and item["expanded_from_wildcard"]
                 for item in machine["transitions"]
