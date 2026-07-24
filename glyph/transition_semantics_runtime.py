@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 
 from .artifacts import CompilationModel
+from .guard_distinct_failure_repair import restore_guard_distinct_failures
 from .nested_transition_repair import repair_nested_transition_targets
 from .transition_semantics import enrich_io_state_views
 
@@ -22,7 +23,7 @@ def enrich_runtime_io_state_views(
 
     repaired = repair_nested_transition_targets(model, views)
     base = deepcopy(repaired)
-    result = enrich_io_state_views(model, repaired)
+    result = restore_guard_distinct_failures(enrich_io_state_views(model, repaired))
     base_machines = {
         str(machine.get("name")): machine
         for machine in base.get("state", {}).get("machines", [])
