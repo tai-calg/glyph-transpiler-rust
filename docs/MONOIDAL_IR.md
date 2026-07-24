@@ -4,6 +4,8 @@
 
 Glyphの表面文法を増やさず、既存の積型と資源能力を横方向の合成として機械可読にする。
 
+標準の図artifactへの出力はGlyph 0.4機能を使用する入力で有効になる。旧Glyph入力のartifact集合は互換性のため変更しない。`build_monoidal_ir`自体は既存の積型だけでも利用できる。
+
 生成物:
 
 - `monoidal-ir.json` — `glyph.monoidal-ir` version 1
