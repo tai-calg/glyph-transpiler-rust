@@ -7,10 +7,11 @@ from .compiler import AliasDecl, ExternDecl, FunctionDecl, ProductDecl, SumDecl,
 from .execution_ir import ExecutionStructureIR
 from .state_machine_analysis import analyze_machine
 from .state_machine_source_map import remap_machine_analysis_source_lines
+from .state_transition_ir import enrich_state_transition_ir
 
 
 IO_STATE_VIEWS_SCHEMA = "glyph.io-state-views"
-IO_STATE_VIEWS_VERSION = 2
+IO_STATE_VIEWS_VERSION = 3
 
 
 def empty_io_state_views() -> dict[str, object]:
@@ -27,6 +28,10 @@ def empty_io_state_views() -> dict[str, object]:
         },
         "io": {"systems": [], "types": []},
         "state": {"machines": []},
+        "state_transition_ir": {
+            "schema": "glyph.state-transition-ir",
+            "version": 2,
+        },
     }
 
 
@@ -243,12 +248,11 @@ def build_io_state_views(
     model: CompilationModel,
     execution: ExecutionStructureIR,
 ) -> dict[str, object]:
-    """Project validated compiler IR into generic I/O and state-machine views.
+    """Project the validated compiler model into I/O and StateTransitionIR v2.
 
-    I/O is derived from architecture and callable signatures. State diagrams are
-    normalized and checked before rendering: wildcard sources are expanded into
-    concrete states, unreachable ordered branches are removed, and reachability
-    is computed from the declared initial state.
+    State-transition semantics are completed here, before any renderer sees the
+    result. Rendering code therefore consumes structured event, guard, action,
+    failure type, outcome, and source-reference fields without semantic repair.
     """
 
     signatures = {
@@ -274,13 +278,7 @@ def build_io_state_views(
         remap_machine_analysis_source_lines(model, analyze_machine(model, machine))
         for machine in execution.machines
     ]
-    warning_count = sum(
-        1
-        for machine in machines
-        for diagnostic in machine.get("diagnostics", [])
-        if diagnostic.get("severity") == "warning"
-    )
-    return {
+    views = {
         "schema": IO_STATE_VIEWS_SCHEMA,
         "version": IO_STATE_VIEWS_VERSION,
         "source_name": execution.source_name,
@@ -289,8 +287,9 @@ def build_io_state_views(
             "callables": len(signatures),
             "types": len(types),
             "machines": len(machines),
-            "state_warnings": warning_count,
+            "state_warnings": 0,
         },
         "io": {"systems": systems, "types": types},
         "state": {"machines": machines},
     }
+    return enrich_state_transition_ir(model, views)
