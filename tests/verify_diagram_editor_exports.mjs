@@ -29,6 +29,35 @@ async function stopProcess(child) {
   if (child.exitCode === null) child.kill("SIGKILL");
 }
 
+async function dragNode(page, locator, deltaX, deltaY) {
+  const before = await locator.boundingBox();
+  assert(before, "state node has no bounding box before drag");
+  const startX = before.x + before.width / 2;
+  const startY = before.y + before.height / 2;
+
+  await page.mouse.move(startX, startY);
+  await page.mouse.down();
+  await page.mouse.move(startX + deltaX, startY + deltaY, { steps: 20 });
+  await page.mouse.up();
+
+  await page.waitForFunction(
+    ({ x, y }) => {
+      const node = document.querySelector(".state-node");
+      if (!node) return false;
+      const rect = node.getBoundingClientRect();
+      const persisted = Object.keys(localStorage).some(key => (
+        key.startsWith("glyph.diagram.positions.v1:")
+      ));
+      return persisted && (Math.abs(rect.x - x) > 20 || Math.abs(rect.y - y) > 20);
+    },
+    { x: before.x, y: before.y },
+  );
+
+  const after = await locator.boundingBox();
+  assert(after, "state node has no bounding box after drag");
+  return { before, after };
+}
+
 const logs = [];
 const port = 8894;
 const child = spawn("python3", ["glyph.py", "examples/state_diagrams/conveyor_control.glyph"], {
@@ -63,21 +92,24 @@ try {
   assert.equal(await page.locator("#diagram-theme").inputValue(), "white");
 
   const node = page.locator(".state-node").first();
-  const before = await node.boundingBox();
-  assert(before);
-  await node.dragTo(page.locator(".graph-stage"), {
-    targetPosition: { x: before.x + 170, y: before.y + 160 },
-  });
-  const after = await node.boundingBox();
-  assert(after);
-  assert(Math.abs(after.x - before.x) > 20 || Math.abs(after.y - before.y) > 20, "node did not move");
+  const { before, after } = await dragNode(page, node, 170, 160);
+  assert(
+    Math.abs(after.x - before.x) > 20 || Math.abs(after.y - before.y) > 20,
+    "node did not move",
+  );
 
-  const stored = await page.evaluate(() => Object.keys(localStorage).some(key => key.startsWith("glyph.diagram.positions.v1:")));
+  const stored = await page.evaluate(() => Object.keys(localStorage).some(
+    key => key.startsWith("glyph.diagram.positions.v1:"),
+  ));
   assert(stored, "edited node positions were not persisted");
 
   await page.selectOption("#diagram-theme", "monochrome");
-  assert(await page.locator("html").evaluate(element => element.classList.contains("theme-monochrome")));
-  const shellBackground = await page.locator(".canvas-shell").evaluate(element => getComputedStyle(element).backgroundColor);
+  assert(await page.locator("html").evaluate(
+    element => element.classList.contains("theme-monochrome"),
+  ));
+  const shellBackground = await page.locator(".canvas-shell").evaluate(
+    element => getComputedStyle(element).backgroundColor,
+  );
   assert.equal(shellBackground, "rgb(255, 255, 255)");
 
   for (const [button, extension, signature] of [
@@ -95,7 +127,10 @@ try {
     if (extension === "png") {
       assert.equal(bytes.subarray(0, 8).toString("hex"), signature);
     } else {
-      assert(bytes.toString("latin1", 0, 32).startsWith(signature), `${extension} signature is invalid`);
+      assert(
+        bytes.toString("latin1", 0, 32).startsWith(signature),
+        `${extension} signature is invalid`,
+      );
     }
     assert(bytes.length > 500, `${extension} export is unexpectedly small`);
   }
