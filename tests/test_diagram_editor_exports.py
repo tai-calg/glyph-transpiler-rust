@@ -20,8 +20,7 @@ class DiagramEditorExportTests(unittest.TestCase):
         self.assertIn('id="diagram-png"', html)
         self.assertIn('id="diagram-pdf"', html)
         self.assertIn("theme-monochrome", html)
-        self.assertIn("action_invocation_ids", html) if False else None
-        self.assertIn("localStorage.setItem(viewKey(stage)", html)
+        self.assertIn("localStorage.setItem(key(stage)", html)
         self.assertIn("state-transition-path", html)
         self.assertIn("application/pdf", html)
 
