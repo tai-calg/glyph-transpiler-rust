@@ -7,6 +7,7 @@ on:
       - "glyph.py"
       - "glyph/diagram_app.py"
       - "glyph/diagram_ui.py"
+      - "glyph/diagram_editor_exports.py"
       - "glyph/initial_transition_layout.py"
       - "glyph/readable_diagram_app.py"
       - "glyph/state_transition_ir.py"
@@ -22,10 +23,9 @@ on:
       - "glyph/io_state_views.py"
       - "glyph/state_machine_analysis.py"
       - "glyph/state_machine_source_map.py"
+      - "tests/test_diagram_editor_exports.py"
       - "tests/test_initial_transition_layout.py"
-      - "tests/test_guard_distinct_failure_repair.py"
       - "tests/test_io_state_diagram_app.py"
-      - "tests/test_nested_transition_repair.py"
       - "tests/test_state_machine_source_map.py"
       - "tests/test_state_diagram_examples.py"
       - "tests/test_state_transition_ir_renderer.py"
@@ -35,6 +35,7 @@ on:
       - "tests/verify_state_diagram_rendering.mjs"
       - "tests/verify_uml_transition_semantics.mjs"
       - "tests/verify_additional_failure_notation.mjs"
+      - "tests/verify_diagram_editor_exports.mjs"
       - "examples/acceptance/motor_safety.glyph"
       - "examples/state_diagrams/**"
       - ".github/workflows/io-state-snapshot.yml"
@@ -64,13 +65,15 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          mkdir -p build/state-diagram-regression build/uml-transition-semantics build/additional-failure-notation
+          mkdir -p build/state-diagram-regression build/uml-transition-semantics build/additional-failure-notation build/diagram-editor-exports
           node tests/verify_state_diagram_rendering.mjs \
             2>&1 | tee build/state-diagram-regression/verify.log
           node tests/verify_uml_transition_semantics.mjs \
             2>&1 | tee build/uml-transition-semantics/verify.log
           node tests/verify_additional_failure_notation.mjs \
             2>&1 | tee build/additional-failure-notation/verify.log
+          node tests/verify_diagram_editor_exports.mjs \
+            2>&1 | tee build/diagram-editor-exports/verify.log
 
       - name: Upload rendered diagrams
         if: always()
@@ -83,6 +86,7 @@ jobs:
             build/state-diagram-regression/**
             build/uml-transition-semantics/**
             build/additional-failure-notation/**
+            build/diagram-editor-exports/**
             examples/acceptance/motor_safety.glyph
             examples/state_diagrams/*.glyph
             examples/acceptance/.glyph/**/io-state-views.json
