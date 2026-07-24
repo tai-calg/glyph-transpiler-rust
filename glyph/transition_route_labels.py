@@ -77,7 +77,7 @@ _SCRIPT = r"""
   }
 
   function inputActionOf(transition) {
-    return `${inputOf(transition)}→${actionOf(transition)}`;
+    return `${inputOf(transition)}➡︎${actionOf(transition)}`;
   }
 
   function signatureOf(machine) {
@@ -212,7 +212,7 @@ _SCRIPT = r"""
       });
 
       const note = document.querySelector(".transition-index-note");
-      if (note) note.textContent = "図中は入力→アクションの要約。完全な遷移情報は各行に表示する";
+      if (note) note.textContent = "図中は入力➡︎アクションの要約。完全な遷移情報は各行に表示する";
       reflowCompactLabels(stage);
 
       stage.dataset.transitionInputActionLabelsReady = "true";
@@ -243,7 +243,7 @@ _SCRIPT = r"""
 
 
 def enhance_transition_route_html(html: str) -> str:
-    """Replace compact internal T identifiers with `input→action` summaries.
+    """Replace compact internal T identifiers with `input➡︎action` summaries.
 
     T identifiers remain internal correlation keys for hover/focus behavior. Short
     UML `event [guard] / action` labels remain unchanged. Only labels compacted by
