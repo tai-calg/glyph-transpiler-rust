@@ -18,7 +18,7 @@ class TransitionInputActionLabelTests(unittest.TestCase):
         self.assertIn("glyph-transition-input-action-labels-v2", html)
         self.assertIn("function inputOf(transition)", html)
         self.assertIn("function actionOf(transition)", html)
-        self.assertIn("return `${inputOf(transition)}→${actionOf(transition)}`", html)
+        self.assertIn("return `${inputOf(transition)}➡︎${actionOf(transition)}`", html)
         self.assertIn('label?.classList.contains("compact")', html)
         self.assertNotIn("source_state ??", html)
         self.assertNotIn("target_state ??", html)
