@@ -1,99 +1,240 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
+from typing import Mapping
 
 from .artifacts import CompilationModel
 from .compiler import (
     AliasDecl,
+    BinaryExpr,
     CallExpr,
+    Expr,
     ExternDecl,
     FieldExpr,
     FunctionDecl,
     NameExpr,
     ProductDecl,
     SumDecl,
+    TryExpr,
+    TypeRef,
+    UnaryExpr,
 )
 from .execution_ir import render_expr
 from .state_transition_ir import (
     STATE_TRANSITION_IR_SCHEMA,
     STATE_TRANSITION_IR_VERSION,
-    _ResolvedBranch,
     _actions_in_expr,
     _deduplicate,
+    _direct_target,
     _display_label,
     _reachable,
-    _resolved_target,
     _selector_sources,
     _split_condition,
 )
 
 
-def _root_branches(
-    root: str,
+@dataclass(frozen=True)
+class _Branch:
+    condition: Expr | None
+    value: Expr
+    target: str
+    line: int
+
+
+def _substitute(expr: Expr, bindings: Mapping[str, Expr]) -> Expr:
+    if isinstance(expr, NameExpr):
+        return bindings.get(expr.name, expr)
+    if isinstance(expr, UnaryExpr):
+        return UnaryExpr(expr.op, _substitute(expr.expr, bindings))
+    if isinstance(expr, TryExpr):
+        return TryExpr(_substitute(expr.expr, bindings))
+    if isinstance(expr, BinaryExpr):
+        return BinaryExpr(
+            expr.op,
+            _substitute(expr.left, bindings),
+            _substitute(expr.right, bindings),
+        )
+    if isinstance(expr, FieldExpr):
+        return FieldExpr(_substitute(expr.base, bindings), expr.field)
+    if isinstance(expr, CallExpr):
+        return CallExpr(
+            _substitute(expr.callee, bindings),
+            tuple(_substitute(argument, bindings) for argument in expr.args),
+        )
+    return expr
+
+
+def _unwrap_call(expr: Expr) -> CallExpr | None:
+    value = expr
+    if isinstance(value, TryExpr):
+        return _unwrap_call(value.expr)
+    if (
+        isinstance(value, CallExpr)
+        and isinstance(value.callee, NameExpr)
+        and value.callee.name == "Ok"
+        and len(value.args) == 1
+    ):
+        return _unwrap_call(value.args[0])
+    return value if isinstance(value, CallExpr) else None
+
+
+def _combine(left: Expr | None, right: Expr | None) -> Expr | None:
+    if left is None:
+        return right
+    if right is None:
+        return left
+    return BinaryExpr("&", left, right)
+
+
+def _call_bindings(declaration: FunctionDecl, call: CallExpr) -> dict[str, Expr] | None:
+    if len(declaration.params) != len(call.args):
+        return None
+    return {
+        parameter.name: argument
+        for parameter, argument in zip(declaration.params, call.args, strict=True)
+    }
+
+
+def _inline_unguarded(
+    expr: Expr,
+    functions: Mapping[str, FunctionDecl],
+    visited: set[str] | None = None,
+) -> Expr:
+    """Inline pure single-expression helpers while preserving actual arguments."""
+
+    visited = set() if visited is None else set(visited)
+    if isinstance(expr, UnaryExpr):
+        return UnaryExpr(expr.op, _inline_unguarded(expr.expr, functions, visited))
+    if isinstance(expr, TryExpr):
+        return TryExpr(_inline_unguarded(expr.expr, functions, visited))
+    if isinstance(expr, BinaryExpr):
+        return BinaryExpr(
+            expr.op,
+            _inline_unguarded(expr.left, functions, visited),
+            _inline_unguarded(expr.right, functions, visited),
+        )
+    if isinstance(expr, FieldExpr):
+        return FieldExpr(_inline_unguarded(expr.base, functions, visited), expr.field)
+    if not isinstance(expr, CallExpr):
+        return expr
+
+    callee = _inline_unguarded(expr.callee, functions, visited)
+    args = tuple(_inline_unguarded(argument, functions, visited) for argument in expr.args)
+    call = CallExpr(callee, args)
+    if not isinstance(callee, NameExpr):
+        return call
+    declaration = functions.get(callee.name)
+    if (
+        declaration is None
+        or declaration.guards
+        or declaration.expression is None
+        or declaration.name in visited
+    ):
+        return call
+    bindings = _call_bindings(declaration, call)
+    if bindings is None:
+        return call
+    body = _substitute(declaration.expression, bindings)
+    return _inline_unguarded(body, functions, {*visited, declaration.name})
+
+
+def _trace_function(
+    name: str,
     *,
-    functions: dict[str, FunctionDecl],
+    functions: Mapping[str, FunctionDecl],
     state_decl: ProductDecl,
     selector_index: int,
     variants: set[str],
-) -> tuple[_ResolvedBranch, ...]:
-    """Resolve transitions only from the machine's declared next function.
-
-    Unguarded helper functions may construct a target state or invoke effects, but
-    they are not independent transition sources. Their semantics stay attached to
-    the outer branch that called them.
-    """
-
-    declaration = functions.get(root)
+    root_state_param: str,
+    bindings: Mapping[str, Expr],
+    inherited_condition: Expr | None,
+    visited: tuple[str, ...],
+) -> list[_Branch]:
+    if name in visited:
+        return []
+    declaration = functions.get(name)
     if declaration is None:
-        return ()
-    state_param = declaration.params[0].name if declaration.params else "state"
-    locals_ = {parameter.name: parameter.ty for parameter in declaration.params}
-    result: list[_ResolvedBranch] = []
+        return []
+    next_visited = (*visited, name)
+    branches: list[_Branch] = []
 
-    if declaration.guards:
-        for clause in declaration.guards:
-            target = _resolved_target(
-                clause.value,
+    def trace_value(value: Expr, condition: Expr | None, line: int) -> None:
+        substituted = _substitute(value, bindings)
+        inlined = _inline_unguarded(substituted, functions)
+        target = _direct_target(
+            inlined,
+            state_decl=state_decl,
+            selector_index=selector_index,
+            variants=variants,
+            state_param=root_state_param,
+        )
+        if target is not None:
+            branches.append(_Branch(condition, inlined, target, line))
+            return
+
+        call = _unwrap_call(substituted)
+        if call is None or not isinstance(call.callee, NameExpr):
+            return
+        nested = functions.get(call.callee.name)
+        if nested is None or not nested.guards:
+            return
+        nested_bindings = _call_bindings(nested, call)
+        if nested_bindings is None:
+            return
+        branches.extend(
+            _trace_function(
+                nested.name,
                 functions=functions,
                 state_decl=state_decl,
                 selector_index=selector_index,
                 variants=variants,
-                state_param=state_param,
+                root_state_param=root_state_param,
+                bindings=nested_bindings,
+                inherited_condition=condition,
+                visited=next_visited,
             )
-            if target is not None:
-                result.append(
-                    _ResolvedBranch(
-                        clause.condition,
-                        clause.value,
-                        target,
-                        state_param,
-                        locals_,
-                        clause.line,
-                    )
-                )
-        return tuple(result)
+        )
 
-    if declaration.expression is None:
+    if declaration.guards:
+        for clause in declaration.guards:
+            condition = _combine(
+                inherited_condition,
+                None if clause.condition is None else _substitute(clause.condition, bindings),
+            )
+            trace_value(clause.value, condition, clause.line)
+        return branches
+
+    if declaration.expression is not None:
+        trace_value(declaration.expression, inherited_condition, declaration.line)
+    return branches
+
+
+def _root_branches(
+    root: str,
+    *,
+    functions: Mapping[str, FunctionDecl],
+    state_decl: ProductDecl,
+    selector_index: int,
+    variants: set[str],
+    root_state_param: str,
+) -> tuple[_Branch, ...]:
+    declaration = functions.get(root)
+    if declaration is None:
         return ()
-    target = _resolved_target(
-        declaration.expression,
-        functions=functions,
-        state_decl=state_decl,
-        selector_index=selector_index,
-        variants=variants,
-        state_param=state_param,
-    )
-    if target is None:
-        return ()
-    return (
-        _ResolvedBranch(
-            None,
-            declaration.expression,
-            target,
-            state_param,
-            locals_,
-            declaration.line,
-        ),
+    identity = {parameter.name: NameExpr(parameter.name) for parameter in declaration.params}
+    return tuple(
+        _trace_function(
+            root,
+            functions=functions,
+            state_decl=state_decl,
+            selector_index=selector_index,
+            variants=variants,
+            root_state_param=root_state_param,
+            bindings=identity,
+            inherited_condition=None,
+            visited=(),
+        )
     )
 
 
@@ -147,10 +288,10 @@ def build_machine_state_transition_ir(
     if selector_sum is None:
         return result
     variants = {item.name for item in selector_sum.variants}
+    next_call = machine.next_expr if isinstance(machine.next_expr, CallExpr) else None
     next_name = (
-        machine.next_expr.callee.name
-        if isinstance(machine.next_expr, CallExpr)
-        and isinstance(machine.next_expr.callee, NameExpr)
+        next_call.callee.name
+        if next_call is not None and isinstance(next_call.callee, NameExpr)
         else None
     )
     if next_name is None:
@@ -158,6 +299,7 @@ def build_machine_state_transition_ir(
 
     unreachable_lines = set(map(int, result.get("unreachable_branches", [])))
     state_names = [str(item.get("name", "")) for item in result.get("states", [])]
+    root_locals = {parameter.name: parameter.ty for parameter in machine.params}
     transitions: list[dict[str, object]] = []
 
     for branch in _root_branches(
@@ -166,12 +308,13 @@ def build_machine_state_transition_ir(
         state_decl=state_decl,
         selector_index=selector_index,
         variants=variants,
+        root_state_param=machine.state_param.name,
     ):
         if branch.line in unreachable_lines:
             continue
         explicit_sources = _selector_sources(
             branch.condition,
-            state_param=branch.state_param,
+            state_param=machine.state_param.name,
             selector_field=machine.selector.field,
             variants=variants,
         )
@@ -191,10 +334,10 @@ def build_machine_state_transition_ir(
                 continue
             event, guard = _split_condition(
                 branch.condition,
-                state_param=branch.state_param,
+                state_param=machine.state_param.name,
                 selector_field=machine.selector.field,
                 source_state=source_state,
-                locals_=branch.locals,
+                locals_=root_locals,
                 products=products,
                 sums=sums,
             )
