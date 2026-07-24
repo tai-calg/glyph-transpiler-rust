@@ -12,7 +12,7 @@ const cases = [
       {
         name: "Motor",
         states: ["Stopped", "Running", "Faulted"],
-        warnings: [],
+        warnings: ["state-independent-transition", "unreachable-branch", "unreachable-state"],
       },
     ],
   },
@@ -22,8 +22,15 @@ const cases = [
     machines: [
       {
         name: "Traffic",
-        states: ["Red", "Green", "Yellow", "Fault"],
+        states: ["Red", "Green", "Yellow", "TrafficFault"],
         warnings: [],
+        compact: true,
+        labels: [
+          "input.fault",
+          "state.mode==Red&input.tick",
+          "state.mode==Green&input.tick",
+          "state.mode==Yellow&input.tick",
+        ],
       },
     ],
   },
@@ -33,8 +40,16 @@ const cases = [
     machines: [
       {
         name: "Session",
-        states: ["Idle", "Pending", "Active", "Rejected"],
+        states: ["SessionIdle", "SessionConnecting", "SessionReady", "SessionFailed"],
         warnings: [],
+        compact: true,
+        labels: [
+          "state.phase==SessionIdle&event==SessionStart",
+          "state.phase==SessionConnecting&event==SessionAccept",
+          "state.phase==SessionConnecting&event==SessionReject",
+          "state.phase==SessionReady&event==SessionReset",
+          "state.phase==SessionFailed&event==SessionReset",
+        ],
       },
     ],
   },
@@ -44,13 +59,24 @@ const cases = [
     machines: [
       {
         name: "Door",
-        states: ["Closed", "Open", "Jammed"],
-        warnings: [],
+        states: ["DoorClosed", "DoorOpen", "DoorJammed"],
+        warnings: ["unreachable-state"],
+        compact: true,
+        labels: [
+          "state.mode==DoorClosed&event==DoorOpenRequest",
+          "state.mode==DoorOpen&event==DoorCloseRequest",
+        ],
       },
       {
         name: "Power",
-        states: ["Off", "On", "Fault"],
+        states: ["PowerOff", "PowerOn", "PowerFault"],
         warnings: [],
+        compact: true,
+        labels: [
+          "event==PowerTrip",
+          "state.mode==PowerOff&event==PowerStart",
+          "state.mode==PowerOn&event==PowerStop",
+        ],
       },
     ],
   },
@@ -59,12 +85,14 @@ const cases = [
 const outputDirectory = path.resolve("build/state-diagram-regression");
 await fs.mkdir(outputDirectory, { recursive: true });
 
-const sorted = values => [...values].sort((left, right) => left.localeCompare(right));
+function sorted(values) {
+  return [...values].sort((left, right) => left.localeCompare(right));
+}
 
 async function waitForServer(url, child, logs) {
-  for (let attempt = 0; attempt < 120; attempt += 1) {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
     if (child.exitCode !== null) {
-      throw new Error(`Glyph process exited early (${child.exitCode})\n${logs.join("")}`);
+      throw new Error(`Glyph diagram process exited early (${child.exitCode})\n${logs.join("")}`);
     }
     try {
       const response = await fetch(`${url}/api/state`);
@@ -75,98 +103,71 @@ async function waitForServer(url, child, logs) {
     } catch {
       // Server is still starting.
     }
-    await new Promise(resolve => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, 100));
   }
-  throw new Error(`Glyph server did not become ready\n${logs.join("")}`);
+  throw new Error(`Glyph diagram server did not become ready\n${logs.join("")}`);
 }
 
 async function stopProcess(child) {
   if (child.exitCode !== null) return;
   child.kill("SIGTERM");
   await Promise.race([
-    new Promise(resolve => child.once("exit", resolve)),
-    new Promise(resolve => setTimeout(resolve, 1500)),
+    new Promise((resolve) => child.once("exit", resolve)),
+    new Promise((resolve) => setTimeout(resolve, 1500)),
   ]);
   if (child.exitCode === null) child.kill("SIGKILL");
 }
 
-async function assertInitialRouteClear(page, machineName) {
+async function assertDiagramGeometry(page) {
   const result = await page.evaluate(() => {
-    const svg = document.querySelector(".graph-stage > svg.edge-svg");
-    const initial = svg?.querySelector(":scope > path.initial-transition-path");
-    const normals = [...(svg?.querySelectorAll(":scope > path.state-transition-path") || [])];
-    if (!initial) return {error: "initial transition path is missing"};
-
-    const point = value => ({x: value.x, y: value.y});
-    const distance = (left, right) => Math.hypot(left.x - right.x, left.y - right.y);
-    const sample = (svgPath, step = 3) => {
-      const length = svgPath.getTotalLength();
-      const values = [];
-      for (let offset = 0; offset < length; offset += step) {
-        values.push(point(svgPath.getPointAtLength(offset)));
-      }
-      values.push(point(svgPath.getPointAtLength(length)));
-      return values;
-    };
-    const orientation = (a, b, c) => (
-      (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
+    const stage = document.querySelector(".graph-stage");
+    if (!stage) return { error: "graph stage is missing" };
+    const stageRect = stage.getBoundingClientRect();
+    const nodes = [...document.querySelectorAll(".state-node")].map((element) => ({
+      kind: "state",
+      name: element.textContent?.trim(),
+      rect: element.getBoundingClientRect(),
+    }));
+    const labels = [...document.querySelectorAll(".edge-label.transition-label")].map((element) => ({
+      kind: "label",
+      name: element.dataset.transitionId,
+      rect: element.getBoundingClientRect(),
+    }));
+    const outside = [...nodes, ...labels].filter(({rect}) => (
+      rect.left < stageRect.left - 1 ||
+      rect.top < stageRect.top - 1 ||
+      rect.right > stageRect.right + 1 ||
+      rect.bottom > stageRect.bottom + 1
+    ));
+    const intersects = (left, right) => !(
+      left.right <= right.left + 1 ||
+      right.right <= left.left + 1 ||
+      left.bottom <= right.top + 1 ||
+      right.bottom <= left.top + 1
     );
-    const between = (value, first, second) => (
-      value >= Math.min(first, second) - .001 && value <= Math.max(first, second) + .001
-    );
-    const intersects = (a, b, c, d) => {
-      const abC = orientation(a, b, c);
-      const abD = orientation(a, b, d);
-      const cdA = orientation(c, d, a);
-      const cdB = orientation(c, d, b);
-      if (((abC > 0 && abD < 0) || (abC < 0 && abD > 0))
-        && ((cdA > 0 && cdB < 0) || (cdA < 0 && cdB > 0))) return true;
-      const collinear = (value, p, q, r) => Math.abs(value) < .001
-        && between(r.x, p.x, q.x) && between(r.y, p.y, q.y);
-      return collinear(abC, a, b, c)
-        || collinear(abD, a, b, d)
-        || collinear(cdA, c, d, a)
-        || collinear(cdB, c, d, b);
-    };
-
-    const initialPoints = sample(initial);
-    let crossings = 0;
-    let minimum = Number.POSITIVE_INFINITY;
-    for (const normal of normals) {
-      const normalPoints = sample(normal);
-      for (let left = 1; left < initialPoints.length; left += 1) {
-        for (let right = 1; right < normalPoints.length; right += 1) {
-          if (intersects(
-            initialPoints[left - 1], initialPoints[left],
-            normalPoints[right - 1], normalPoints[right],
-          )) crossings += 1;
+    const overlaps = [];
+    for (let index = 0; index < labels.length; index += 1) {
+      for (let other = index + 1; other < labels.length; other += 1) {
+        if (intersects(labels[index].rect, labels[other].rect)) {
+          overlaps.push(`${labels[index].name}/${labels[other].name}`);
         }
       }
-      for (const left of initialPoints) {
-        for (const right of normalPoints) minimum = Math.min(minimum, distance(left, right));
+      for (const node of nodes) {
+        if (intersects(labels[index].rect, node.rect)) {
+          overlaps.push(`${labels[index].name}/${node.name}`);
+        }
       }
     }
-    if (!normals.length) minimum = 999;
-    return {
-      crossings,
-      minimum,
-      declaredCrossings: Number(initial.dataset.routeCrossings),
-      declaredClearance: Number(initial.dataset.routeClearance),
-      side: initial.dataset.routeSide,
-    };
+    return {outside: outside.map(item => `${item.kind}:${item.name}`), overlaps};
   });
-
-  assert.equal(result.error, undefined, `${machineName}: ${result.error}`);
-  assert.equal(result.crossings, 0, `${machineName}: initial route crosses normal transitions`);
-  assert.equal(result.declaredCrossings, 0, `${machineName}: router reported a crossing`);
-  assert(result.minimum >= 5, `${machineName}: initial route clearance is ${result.minimum}px`);
-  assert(result.declaredClearance >= 5, `${machineName}: declared clearance is ${result.declaredClearance}px`);
-  assert(result.side, `${machineName}: initial route side is missing`);
+  assert.equal(result.error, undefined, result.error);
+  assert.deepEqual(result.outside, [], `items outside graph stage: ${JSON.stringify(result.outside)}`);
+  assert.deepEqual(result.overlaps, [], `transition label overlap: ${JSON.stringify(result.overlaps)}`);
 }
 
 const browser = await chromium.launch({ headless: true });
 try {
-  let port = 8850;
+  let port = 8765;
   for (const testCase of cases) {
     const logs = [];
     const child = spawn("python3", ["glyph.py", testCase.file], {
@@ -178,12 +179,14 @@ try {
       },
       stdio: ["ignore", "pipe", "pipe"],
     });
-    child.stdout.on("data", chunk => logs.push(chunk.toString()));
-    child.stderr.on("data", chunk => logs.push(chunk.toString()));
+    child.stdout.on("data", (chunk) => logs.push(chunk.toString()));
+    child.stderr.on("data", (chunk) => logs.push(chunk.toString()));
 
     const url = `http://127.0.0.1:${port}`;
     try {
       const apiState = await waitForServer(url, child, logs);
+      assert.equal(apiState.views.schema, "glyph.io-state-views");
+      assert.equal(apiState.views.version, 2);
       assert.equal(apiState.views.state.machines.length, testCase.machines.length);
 
       const page = await browser.newPage({
@@ -248,10 +251,23 @@ try {
         const labelIds = await page.locator(".edge-label.transition-label").evaluateAll(
           elements => elements.map(element => element.dataset.transitionId),
         );
-        assert.equal(new Set(labelIds).size, transitionCount, `${testCase.slug}/${expected.name}: duplicate transition ids`);
-        assert(labelIds.every(Boolean), `${testCase.slug}/${expected.name}: missing transition id`);
+        const detailIds = await page.locator(".transition-detail").evaluateAll(
+          elements => elements.map(element => element.dataset.transitionId),
+        );
+        assert.deepEqual(sorted(labelIds), sorted(detailIds));
 
-        await assertInitialRouteClear(page, expected.name);
+        const fullLabels = await page.locator(".transition-detail-condition").allTextContents();
+        for (const expectedLabel of expected.labels ?? []) {
+          assert(fullLabels.includes(expectedLabel), `${testCase.slug}/${expected.name}: missing full transition label ${expectedLabel}`);
+        }
+        if (expected.compact) {
+          assert(
+            await page.locator(".edge-label.transition-label.compact").count() > 0,
+            `${testCase.slug}/${expected.name}: expected compact labels`,
+          );
+        }
+
+        await assertDiagramGeometry(page);
         await page.screenshot({
           path: path.join(outputDirectory, `${testCase.slug}-${expected.name.toLowerCase()}.png`),
           fullPage: true,
@@ -267,4 +283,4 @@ try {
   await browser.close();
 }
 
-console.log(`verified ${cases.length} state diagram examples`);
+console.log(`verified ${cases.length} Glyph files and ${cases.reduce((sum, item) => sum + item.machines.length, 0)} collision-free state-machine renderings`);
