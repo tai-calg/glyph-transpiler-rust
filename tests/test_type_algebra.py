@@ -164,7 +164,7 @@ class TypeAlgebraIRTests(unittest.TestCase):
             )
             crate_source = (
                 outputs.artifacts.logic
-                + "\npub mod generated { pub use super::{Bit, Pair, Quad}; }\n"
+                + "\npub mod generated { pub use super::{Bit, Pair, Quad, Token}; }\n"
                 + "pub mod type_algebra { include!(\"type-algebra.generated.rs\"); }\n"
             )
             (root / "lib.rs").write_text(crate_source, encoding="utf-8")
