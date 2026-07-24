@@ -26,25 +26,29 @@ glyph.type-algebra-ir v1
 |---|---|
 | `Never` | `0` |
 | `Unit`または`()` | `1` |
-| `+Choice=A|B` | `A + B` |
-| `*Pair(left:A,right:B)` | `A * B` |
-| `Option<A>` / `O<A>` | `1 + A` |
-| `Result<A,E>` / `R<A,E>` | `A + E` |
+| `+Choice=Left(Alpha)|Right(Beta)` | `Alpha + Beta` |
+| `*Pair(left:Alpha,right:Beta)` | `Alpha * Beta` |
+| `Option<Alpha>` / `O<Alpha>` | `1 + Alpha` |
+| `Result<Alpha,Error>` / `R<Alpha,Error>` | `Alpha + Error` |
+
+`Never`と`Unit`はType Algebra IRが認識する指定原子である。生成Rustで使う場合、Host側または統合crate側でそれぞれ非居住型とunit型へ対応付ける必要がある。
 
 積は直和へ分配し、因子順を正規化する。したがって、次の二型は同じ標準形を持つ。
 
 ```glyph
-+AorB=HasA(A)|HasB(B)
-*Left(x:X,choice:AorB)
++Choice=HasAlpha(Alpha)|HasBeta(Beta)
+*Left(context:Context,choice:Choice)
 
-*XA(x:X,a:A)
-*XB(x:X,b:B)
-+Right=InA(XA)|InB(XB)
+*ContextAlpha(context:Context,value:Alpha)
+*ContextBeta(context:Context,value:Beta)
++Right=InAlpha(ContextAlpha)|InBeta(ContextBeta)
 ```
 
 ```text
-Left  = X * (A + B) = A * X + B * X
-Right = X * A + X * B = A * X + B * X
+Left  = Context * (Alpha + Beta)
+      = Alpha * Context + Beta * Context
+Right = Context * Alpha + Context * Beta
+      = Alpha * Context + Beta * Context
 ```
 
 型名、variant名、フィールド名は標準形へ含めない。標準形が等しい宣言は、純粋な値集合として同型候補になる。
@@ -75,7 +79,7 @@ Right = X * A + X * B = A * X + B * X
 ```text
 |Bit|        = 2
 |Pair|       = 2 * 2 = 4
-|Impossible| = 4 * 0 = 0
+|Impossible| = 0
 ```
 
 値数が`0`の型は`impossible: true`になる。未知の原子を含む型は`cardinality_exact: false`になり、値数を出力しない。
@@ -92,7 +96,7 @@ Right = X * A + X * B = A * X + B * X
 - 上記だけから構成される積型・直和型・型別名
 - 列挙可能な`Option`、`Result`、tuple
 
-巨大な整数型、未知型、再帰型は列挙しない。有限性が判明しても上限を超える場合は列挙しない。
+巨大な整数型、浮動小数点型、未知型、再帰型は列挙しない。有限性が判明しても上限を超える場合は列挙しない。
 
 ## Generated conversions
 
