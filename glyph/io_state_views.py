@@ -7,11 +7,11 @@ from .compiler import AliasDecl, ExternDecl, FunctionDecl, ProductDecl, SumDecl,
 from .execution_ir import ExecutionStructureIR
 from .state_machine_analysis import analyze_machine
 from .state_machine_source_map import remap_machine_analysis_source_lines
-from .state_transition_ir import enrich_state_transition_ir
+from .state_transition_compiler import enrich_state_transition_ir
 
 
 IO_STATE_VIEWS_SCHEMA = "glyph.io-state-views"
-IO_STATE_VIEWS_VERSION = 3
+IO_STATE_VIEWS_VERSION = 2
 
 
 def empty_io_state_views() -> dict[str, object]:
@@ -248,11 +248,10 @@ def build_io_state_views(
     model: CompilationModel,
     execution: ExecutionStructureIR,
 ) -> dict[str, object]:
-    """Project the validated compiler model into I/O and StateTransitionIR v2.
+    """Project validated compiler models into I/O and StateTransitionIR v2.
 
-    State-transition semantics are completed here, before any renderer sees the
-    result. Rendering code therefore consumes structured event, guard, action,
-    failure type, outcome, and source-reference fields without semantic repair.
+    Transition semantics are finalized before source-map restoration and before any
+    renderer sees the result. Renderers therefore consume only canonical fields.
     """
 
     signatures = {
@@ -274,10 +273,7 @@ def build_io_state_views(
     else:
         systems = [_implicit_program(execution, signatures)]
 
-    machines = [
-        remap_machine_analysis_source_lines(model, analyze_machine(model, machine))
-        for machine in execution.machines
-    ]
+    raw_machines = [analyze_machine(model, machine) for machine in execution.machines]
     views = {
         "schema": IO_STATE_VIEWS_SCHEMA,
         "version": IO_STATE_VIEWS_VERSION,
@@ -286,10 +282,17 @@ def build_io_state_views(
             "systems": len(systems),
             "callables": len(signatures),
             "types": len(types),
-            "machines": len(machines),
+            "machines": len(raw_machines),
             "state_warnings": 0,
         },
         "io": {"systems": systems, "types": types},
-        "state": {"machines": machines},
+        "state": {"machines": raw_machines},
     }
-    return enrich_state_transition_ir(model, views)
+    result = enrich_state_transition_ir(model, views)
+    state = dict(result["state"])
+    state["machines"] = [
+        remap_machine_analysis_source_lines(model, machine)
+        for machine in state["machines"]
+    ]
+    result["state"] = state
+    return result
