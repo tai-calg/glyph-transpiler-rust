@@ -4,7 +4,7 @@ from copy import deepcopy
 from typing import Mapping
 
 from .artifacts import CompilationModel
-from .compiler import FunctionDecl
+from .compiler import ExternDecl, FunctionDecl
 from .execution_ir import render_expr
 from .host_invocation_ir import (
     HOST_INVOCATION_IR_SCHEMA,
@@ -78,16 +78,16 @@ def link_host_invocations(
     externs = {
         declaration.name: declaration
         for declaration in model.program.declarations
-        if declaration.__class__.__name__ == "ExternDecl"
+        if isinstance(declaration, ExternDecl)
     }
 
     state = dict(result.get("state", {}))
     machines = []
-    unresolved_total = 0
-    linked_total = 0
     for machine in state.get("machines", []):
         machine_item = deepcopy(machine)
         transitions = []
+        unresolved_count = 0
+        linked_count = 0
         for transition in machine_item.get("transitions", []):
             item = dict(transition)
             action = str(item.get("action") or "")
@@ -121,7 +121,7 @@ def link_host_invocations(
                 invocation.invocation_id for invocation in selected
             ]
             if selected:
-                linked_total += len(selected)
+                linked_count += len(selected)
                 canonical_action = "; ".join(invocation.call for invocation in selected)
                 item["action"] = canonical_action
                 item["display_label"] = _display_label(
@@ -131,14 +131,14 @@ def link_host_invocations(
                     item.get("failure_type"),
                 )
             else:
-                unresolved_total += 1
+                unresolved_count += 1
             transitions.append(item)
 
         analysis = dict(machine_item.get("analysis", {}))
         analysis.update(
             {
-                "host_invocation_link_count": linked_total,
-                "unresolved_host_invocation_count": unresolved_total,
+                "host_invocation_link_count": linked_count,
+                "unresolved_host_invocation_count": unresolved_count,
                 "host_invocation_ir_schema": HOST_INVOCATION_IR_SCHEMA,
                 "host_invocation_ir_version": HOST_INVOCATION_IR_VERSION,
             }
