@@ -97,10 +97,55 @@ class TypeAlgebraIRTests(unittest.TestCase):
 
         payload = json.loads(outputs.diagrams.files["type-algebra-ir.json"])
         analysis = next(item for item in payload["types"] if item["name"] == "List")
-        self.assertIn("recursive<List>", analysis["normal_form"])
+        self.assertIn("recursive<List->List>", analysis["normal_form"])
         self.assertFalse(analysis["cardinality_exact"])
         self.assertFalse(analysis["exhaustive_complete"])
         self.assertEqual(analysis["exhaustive_cases"], [])
+
+    def test_mutual_recursion_does_not_create_a_false_isomorphism(self) -> None:
+        outputs = compile_outputs(
+            "resource Token[Ready]\n"
+            "+NodeA=ToNodeB(NodeB)\n"
+            "+NodeB=ToNodeA(NodeA)\n",
+            "mutual-recursion.glyph",
+        )
+
+        payload = json.loads(outputs.diagrams.files["type-algebra-ir.json"])
+        types = {item["name"]: item for item in payload["types"]}
+        self.assertEqual(
+            types["NodeA"]["normal_form"],
+            "recursive<NodeA->NodeB->NodeA>",
+        )
+        self.assertEqual(
+            types["NodeB"]["normal_form"],
+            "recursive<NodeB->NodeA->NodeB>",
+        )
+        self.assertFalse(
+            any(
+                set(item["members"]) == {"NodeA", "NodeB"}
+                for item in payload["isomorphism_classes"]
+            )
+        )
+
+    def test_float_domain_remains_symbolic_because_equality_is_not_set_equality(self) -> None:
+        outputs = compile_outputs(
+            "resource Token[Ready]\n"
+            "=FloatWord=f32\n"
+            "=RawWord=u32\n",
+            "float-domain.glyph",
+        )
+
+        payload = json.loads(outputs.diagrams.files["type-algebra-ir.json"])
+        types = {item["name"]: item for item in payload["types"]}
+        self.assertEqual(types["FloatWord"]["normal_form"], "f32")
+        self.assertFalse(types["FloatWord"]["cardinality_exact"])
+        self.assertEqual(types["RawWord"]["cardinality"], str(1 << 32))
+        self.assertFalse(
+            any(
+                set(item["members"]) == {"FloatWord", "RawWord"}
+                for item in payload["isomorphism_classes"]
+            )
+        )
 
     def test_generated_conversions_and_roundtrip_tests_compile_and_run(self) -> None:
         outputs = compile_outputs(
@@ -150,7 +195,11 @@ class TypeAlgebraIRTests(unittest.TestCase):
                 capture_output=True,
                 text=True,
             )
-            self.assertEqual(run_result.returncode, 0, run_result.stdout + run_result.stderr)
+            self.assertEqual(
+                run_result.returncode,
+                0,
+                run_result.stdout + run_result.stderr,
+            )
 
     def test_legacy_artifact_set_is_unchanged(self) -> None:
         outputs = compile_outputs(
