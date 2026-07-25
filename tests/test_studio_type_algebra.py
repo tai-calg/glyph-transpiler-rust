@@ -1,0 +1,81 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+import tempfile
+import unittest
+
+from glyph.studio import GlyphStudio, STUDIO_HTML
+
+
+MACHINE_SOURCE = """
+resource Token[Ready]
++Mode=Idle|Running|Stopped|Faulted
++Command=Stop|Run(U)
++Error=Bad
+*Input(tick:B)
+*System(mode:Mode,count:U,command:Command)
+
+>step(state:System,input:Input):System|Error
+  state.mode==Idle >> Ok(System(Running,state.count+1,Run(1)))
+  state.mode==Running >> Ok(System(Stopped,state.count+1,Stop))
+  _ >> Ok(state)
+
+machine Controller(state:System,input:Input)
+  select=state.mode
+  init=System(Idle,0,Stop)
+  next=step(state,input)
+  success=Stopped
+  failure=Faulted
+""".lstrip()
+
+
+class StudioTypeAlgebraTests(unittest.TestCase):
+    def test_studio_html_contains_type_algebra_view(self) -> None:
+        self.assertIn("Type Algebra", STUDIO_HTML)
+        self.assertIn("function typeAlgebraView()", STUDIO_HTML)
+        self.assertIn("Machine state-space coverage", STUDIO_HTML)
+
+    def test_successful_build_surfaces_type_algebra_warning(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="glyph-studio-type-algebra-") as directory:
+            source_path = Path(directory) / "design.glyph"
+            source_path.write_text(
+                "resource Token[Ready]\n*Impossible(value:Never)\n",
+                encoding="utf-8",
+            )
+            snapshot = GlyphStudio(source_path).rebuild()
+
+            self.assertEqual(snapshot.status, "ready")
+            self.assertTrue(
+                any(
+                    item.get("code") == "type-algebra-impossible"
+                    for item in snapshot.diagnostics
+                )
+            )
+            view = snapshot.glyph04_views["views"]["type_algebra"]
+            self.assertEqual(view["types"][0]["name"], "Impossible")
+            self.assertTrue(view["types"][0]["impossible"])
+            self.assertIn("type-algebra-tooling.json", snapshot.artifacts)
+
+    def test_machine_coverage_is_written_and_projected(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="glyph-studio-machine-coverage-") as directory:
+            source_path = Path(directory) / "controller.glyph"
+            source_path.write_text(MACHINE_SOURCE, encoding="utf-8")
+            snapshot = GlyphStudio(source_path).rebuild()
+
+            self.assertEqual(snapshot.status, "ready")
+            payload = json.loads(snapshot.artifacts["type-algebra-tooling.json"])
+            coverage = payload["machine_coverage"]
+            self.assertEqual(len(coverage), 1)
+            self.assertEqual(coverage[0]["machine"], "Controller")
+            self.assertIsNotNone(coverage[0]["possible_pairs"])
+            projected = snapshot.glyph04_views["views"]["type_algebra"]
+            self.assertEqual(projected["machine_coverage"], coverage)
+            self.assertEqual(
+                snapshot.glyph04_views["summary"]["type_algebra_machines"],
+                1,
+            )
+
+
+if __name__ == "__main__":
+    unittest.main()
