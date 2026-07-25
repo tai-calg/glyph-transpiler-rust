@@ -1,5 +1,4 @@
-system DoorController
-  DOOR_FLOW
+system DoorController=control
 
 machine Door(state:DoorState,input:Input)
   select=state.mode
@@ -8,16 +7,9 @@ machine Door(state:DoorState,input:Input)
   success=Locked
   failure=Faulted
 
-# v0.1 acceptance: 認証、状態遷移、作用境界、時間制約を一つの設計にする。
+# v0.1 acceptance: 認証、状態遷移、作用境界、時間制約を一つの実装経路にする。
 @LOCK_LIMIT=500ms
-
-@DOOR_FLOW
-  sensor -> authenticate
-  authenticate -> decide
-  decide -> step
-  step -> lock
-  step -> alarm
-@end
+@DOOR_FLOW=apply(step(state,sensor()))
 
 *Input(badge_valid,request_open,forced_open,unlocked,locked,alarmed:B)
 +Action=KeepLocked|Unlock|RaiseAlarm
@@ -29,6 +21,9 @@ machine Door(state:DoorState,input:Input)
 ?lock_deadline(*Input)=@A(unlocked>>@E LOCK_LIMIT locked)
 # こじ開けが観測されたらalarm状態でなければならない。
 ?forced_open_safe(*Input)=@A(forced_open>>alarmed)
+
+# 外部入力はextで明示する。systemはこの宣言を勝手に生成しない。
+ext sensor():Input
 
 >authenticate(input:Input):B=input.badge_valid&!input.forced_open
 
@@ -51,3 +46,10 @@ machine Door(state:DoorState,input:Input)
 
 !lock(state:DoorState):Receipt
 !alarm(state:DoorState):Receipt
+
+>apply(state:DoorState):Receipt
+  state.action==RaiseAlarm >> alarm(state)
+  _ >> lock(state)
+
+# DoorControllerのI/O図は、この式から実際の呼出しを追跡して生成される。
+>control(state:DoorState):Receipt=DOOR_FLOW
