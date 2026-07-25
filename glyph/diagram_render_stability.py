@@ -5,13 +5,13 @@ _MARKER = "glyph-diagram-render-stability-v1"
 
 _STYLE = r"""
 <style id="glyph-diagram-render-stability-v1-style">
-.canvas-shell:has(> .graph-stage:has(.state-node):not([data-render-stable="true"])){
+.canvas-shell.diagram-render-pending{
   position:relative;
 }
-.canvas-shell:has(> .graph-stage:has(.state-node):not([data-render-stable="true"])) > .graph-stage{
+.canvas-shell.diagram-render-pending > .graph-stage{
   visibility:hidden!important;
 }
-.canvas-shell:has(> .graph-stage:has(.state-node):not([data-render-stable="true"]))::after{
+.canvas-shell.diagram-render-pending::after{
   content:"Rendering adjusted state diagram…";
   position:absolute;
   inset:0;
@@ -23,7 +23,7 @@ _STYLE = r"""
   letter-spacing:.01em;
   pointer-events:none;
 }
-.canvas-shell:has(> .graph-stage:has(.state-node):not([data-render-stable="true"])) + .transition-index{
+.canvas-shell.diagram-render-pending + .transition-index{
   visibility:hidden!important;
 }
 </style>
@@ -83,6 +83,7 @@ _SCRIPT = r"""
     fallbackTimers.delete(stage);
     stage.dataset.renderStable = "true";
     stage.dataset.renderStableState = state;
+    stage.closest(".canvas-shell")?.classList.remove("diagram-render-pending");
     document.dispatchEvent(new CustomEvent("glyph-diagram-render-stable", {
       detail: {marker: MARKER, state},
     }));
@@ -101,6 +102,7 @@ _SCRIPT = r"""
     if (!stage?.querySelector(".state-node")) return;
     delete stage.dataset.renderStable;
     stage.dataset.renderStableState = "pending";
+    stage.closest(".canvas-shell")?.classList.add("diagram-render-pending");
     const previous = fallbackTimers.get(stage);
     if (previous) clearTimeout(previous);
     fallbackTimers.set(stage, setTimeout(() => {
@@ -126,7 +128,7 @@ _SCRIPT = r"""
       }
       const result = originalRender.apply(this, arguments_);
       lastRenderKey = key;
-      queueMicrotask(() => markPending());
+      markPending();
       return result;
     };
   }
@@ -137,7 +139,7 @@ _SCRIPT = r"""
     window[name] = function stableDirectRender(...arguments_) {
       const result = original.apply(this, arguments_);
       lastRenderKey = renderKey();
-      if (name === "renderState") queueMicrotask(() => markPending());
+      if (name === "renderState") markPending();
       return result;
     };
   }
@@ -171,7 +173,7 @@ _SCRIPT = r"""
     ],
   });
 
-  queueMicrotask(() => markPending());
+  markPending();
 })();
 </script>
 """
