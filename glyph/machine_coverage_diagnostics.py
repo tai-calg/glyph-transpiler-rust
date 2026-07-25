@@ -15,13 +15,21 @@ class MachineCoverageDiagnostic:
     line: int
 
 
+def _case_inputs(case: object) -> str:
+    regions = getattr(case, "regions", ())
+    bindings = regions or getattr(case, "inputs", ())
+    rendered = ", ".join(f"{item.name}={item.value}" for item in bindings)
+    multiplicity = str(getattr(case, "multiplicity", "1"))
+    return rendered + (f" ×{multiplicity}" if multiplicity != "1" else "")
+
+
 def _witnesses(coverage: MachineCoverage, outcome: str, limit: int = 3) -> str:
     selected = [case for case in coverage.cases if case.outcome == outcome][:limit]
     if not selected:
         return ""
     rendered = []
     for case in selected:
-        inputs = ", ".join(f"{item.name}={item.value}" for item in case.inputs)
+        inputs = _case_inputs(case)
         rendered.append(case.selector + (f"; {inputs}" if inputs else ""))
     return " 例: " + " | ".join(rendered)
 
@@ -32,7 +40,7 @@ def _overlap_witnesses(coverage: MachineCoverage, limit: int = 3) -> str:
         return ""
     rendered = []
     for case in selected:
-        inputs = ", ".join(f"{item.name}={item.value}" for item in case.inputs)
+        inputs = _case_inputs(case)
         clauses = ",".join(map(str, case.matching_clauses))
         rendered.append(
             case.selector
