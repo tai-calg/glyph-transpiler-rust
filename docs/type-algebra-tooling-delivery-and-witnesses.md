@@ -10,7 +10,7 @@ This design completes three internal compiler features without changing Glyph su
 
 1. emit `type-algebra-tooling.json` from the normal compilation pipeline;
 2. emit executable Rust machine-coverage witness tests when construction is provably safe;
-3. emit a warning whenever a concrete selector/input case reaches the final `_` clause.
+3. emit warnings for guards that cannot be selected for any concrete selector/input case.
 
 ## Single artifact source
 
@@ -42,17 +42,23 @@ Witness reports state, per machine and per concrete coverage case:
 
 The report does not embed Rust source. Rust remains in `machine-coverage.generated.rs`.
 
-## Fallthrough warning
+## Reachability warnings
 
-A case is `fallthrough` when no explicit guard is selected and the final `_` clause executes.
+The final `_` clause is an explicit default/else branch. Reaching it is normal program behavior and does not emit a warning.
 
-Fallthrough remains operationally covered, so it does not change `complete`. It nevertheless emits:
+A warning is emitted only when a guard cannot become the first selected branch for any concrete selector/input case:
 
 ```text
-machine-coverage-fallthrough
+machine-coverage-unreachable
 ```
 
-The warning includes a bounded set of concrete selector/input witnesses. This makes implicit default handling visible without redefining it as a missing transition.
+The unreachable classification distinguishes:
+
+- `unsatisfiable`: the guard is false for every concrete case;
+- `shadowed`: the guard is true for one or more cases, but an earlier guard always wins;
+- `default`: the final `_` branch is never selected because preceding guards cover every concrete case.
+
+`fallthrough` remains an internal coverage outcome for cases handled by `_`. It is visible in JSON and Studio, remains covered for completeness accounting, and is not a diagnostic by itself.
 
 ## Executable witness safety boundary
 
@@ -121,6 +127,8 @@ If no case is safe to construct, the artifact is still emitted with an explanato
 - no Glyph syntax changes;
 - no runtime behavior changes;
 - legacy sources without Glyph 0.4 features retain the legacy artifact set;
-- fallthrough remains covered for completeness accounting;
+- `_` remains a normal explicit default branch;
+- fallthrough remains covered and visible, without generating a warning;
+- unreachable guards emit `machine-coverage-unreachable`;
 - unsupported guards remain `unknown`, never `missing`;
 - PR #25 remains Draft.
