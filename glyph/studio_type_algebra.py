@@ -5,7 +5,7 @@ from typing import Mapping
 
 
 def _records(value: object) -> list[Mapping[str, object]]:
-    if not isinstance(value, list):
+    if not isinstance(value, (list, tuple)):
         return []
     return [item for item in value if isinstance(item, Mapping)]
 
