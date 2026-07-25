@@ -36,13 +36,16 @@ from .type_algebra_tooling import (
 )
 
 
+Diagnostic = TypeAlgebraDiagnostic | MachineCoverageDiagnostic
+
+
 class TypeAlgebraIR:
     """Backward-compatible Type Algebra IR enriched with user-facing tooling data."""
 
     def __init__(
         self,
         core: CoreTypeAlgebraIR,
-        diagnostics: tuple[TypeAlgebraDiagnostic, ...],
+        diagnostics: tuple[Diagnostic, ...],
         structural_conversions: tuple[StructuralConversion, ...],
     ) -> None:
         self.core = core
@@ -92,8 +95,19 @@ def render_type_algebra_rust(ir: TypeAlgebraIR | CoreTypeAlgebraIR) -> str:
     return rendered.rstrip() + "\n" + structural
 
 
+def _diagnostic_key(item: Diagnostic) -> tuple[object, ...]:
+    return (item.code, item.severity, item.message, item.subject, item.line)
+
+
+def _unique_diagnostics(items: Sequence[Diagnostic]) -> tuple[Diagnostic, ...]:
+    unique: dict[tuple[object, ...], Diagnostic] = {}
+    for item in items:
+        unique.setdefault(_diagnostic_key(item), item)
+    return tuple(unique.values())
+
+
 def build_machine_coverage(*args, **kwargs) -> tuple[MachineCoverage, ...]:
-    """Run coverage v2 while preserving expression-bodied function reachability."""
+    """Run coverage v2 and attach its warnings to the transient analysis model."""
 
     rows = _build_machine_coverage_v2(*args, **kwargs)
     fixed: list[MachineCoverage] = []
@@ -111,17 +125,25 @@ def build_machine_coverage(*args, **kwargs) -> tuple[MachineCoverage, ...]:
             for guard in coverage.guards
         )
         fixed.append(replace(coverage, guards=guards))
-    return tuple(fixed)
+    result = tuple(fixed)
+
+    algebra = kwargs.get("algebra")
+    if algebra is None and len(args) >= 4:
+        algebra = args[3]
+    if isinstance(algebra, TypeAlgebraIR):
+        algebra.diagnostics = _unique_diagnostics(
+            (*algebra.diagnostics, *build_machine_coverage_diagnostics(result))
+        )
+    return result
 
 
 def tooling_payload(
-    diagnostics: Sequence[TypeAlgebraDiagnostic | MachineCoverageDiagnostic],
+    diagnostics: Sequence[Diagnostic],
     structural: Sequence[StructuralConversion],
     machine_coverage: Sequence[MachineCoverage] = (),
 ) -> dict[str, object]:
-    combined = (
-        *diagnostics,
-        *build_machine_coverage_diagnostics(machine_coverage),
+    combined = _unique_diagnostics(
+        (*diagnostics, *build_machine_coverage_diagnostics(machine_coverage))
     )
     return _tooling_payload(combined, structural, machine_coverage)
 
