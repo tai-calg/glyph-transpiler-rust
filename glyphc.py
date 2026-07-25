@@ -4,9 +4,11 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 from pathlib import Path
+from typing import Mapping
 
 from glyph import GlyphError
 from glyph.compilation import CompilationPipeline
@@ -59,6 +61,29 @@ def _source_href(input_path: Path, diagram_dir: Path | None) -> str | None:
     return os.path.relpath(input_path, diagram_dir).replace(os.sep, "/")
 
 
+def _tooling_diagnostics(files: Mapping[str, str]) -> tuple[dict[str, object], ...]:
+    content = files.get("type-algebra-tooling.json")
+    if content is None:
+        return ()
+    payload = json.loads(content)
+    if not isinstance(payload, dict):
+        return ()
+    diagnostics = payload.get("diagnostics")
+    if not isinstance(diagnostics, list):
+        return ()
+    return tuple(dict(item) for item in diagnostics if isinstance(item, Mapping))
+
+
+def _emit_tooling_diagnostics(files: Mapping[str, str]) -> None:
+    for item in _tooling_diagnostics(files):
+        severity = str(item.get("severity") or "warning")
+        code = str(item.get("code") or "compiler-diagnostic")
+        message = str(item.get("message") or "")
+        line = item.get("line")
+        location = f"line {line}: " if isinstance(line, int) and line > 0 else ""
+        print(f"{severity}[{code}]: {location}{message}", file=sys.stderr)
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
@@ -78,6 +103,7 @@ def main(argv: list[str] | None = None) -> int:
                 if not result.changed:
                     return
                 print(f"compiled: {args.input} [{result.snapshot.digest[:12]}]")
+                _emit_tooling_diagnostics(result.snapshot.diagrams.files)
                 for path in result.written:
                     print(f"generated: {path}")
 
@@ -101,6 +127,7 @@ def main(argv: list[str] | None = None) -> int:
             _source_href(args.input, args.diagram_dir),
         )
         artifacts = outputs.artifacts
+        _emit_tooling_diagnostics(outputs.diagrams.files)
 
         if args.check:
             print(f"OK: {args.input}")
@@ -133,7 +160,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     except KeyboardInterrupt:
         return 0
-    except (OSError, ValueError, GlyphError) as exc:
+    except (OSError, ValueError, GlyphError, json.JSONDecodeError) as exc:
         print(f"glyphc: error: {exc}", file=sys.stderr)
         return 1
 
