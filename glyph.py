@@ -11,11 +11,7 @@ from glyph import GlyphError
 from glyph.readable_diagram_app import run_diagram_app
 
 
-DEFAULT_SOURCE = """system DoorControl
-  panel -> decide
-  sensor -> decide
-  decide -> lock
-  decide -> alarm
+DEFAULT_SOURCE = """system DoorControl=control
 
 machine Door(state:DoorState,input:Input)
   select=state.mode
@@ -24,9 +20,19 @@ machine Door(state:DoorState,input:Input)
   success=Open
   failure=Alarm
 
+*PanelInput(open_request:B,authorized:B)
+*SensorInput(obstruction:B)
 *Input(open_request:B,authorized:B,obstruction:B)
 +DoorMode=Closed|Opening|Open|Closing|Alarm
 *DoorState(mode:DoorMode)
+
+# `ext` is an explicitly declared external component. It is never invented by
+# the diagram renderer and is connected through the generated Host boundary.
+ext panel():PanelInput
+ext sensor():SensorInput
+ext actuator(state:DoorState):()
+
+>combine(panel_input:PanelInput,sensor_input:SensorInput):Input=Input(panel_input.open_request,panel_input.authorized,sensor_input.obstruction)
 
 >step(state:DoorState,input:Input):DoorState
   state.mode==Closed&input.open_request&input.authorized >> DoorState(Opening)
@@ -37,8 +43,9 @@ machine Door(state:DoorState,input:Input)
   state.mode==Closing >> DoorState(Closed)
   _ >> state
 
-!lock(state:DoorState):()
-!alarm(state:DoorState):()
+# The system graph is derived from these real calls:
+# control -> panel / sensor / combine / step / actuator.
+>control(state:DoorState):()=actuator(step(state,combine(panel(),sensor())))
 """
 
 
