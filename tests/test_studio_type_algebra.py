@@ -40,7 +40,7 @@ class StudioTypeAlgebraTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="glyph-studio-type-algebra-") as directory:
             source_path = Path(directory) / "design.glyph"
             source_path.write_text(
-                "resource Token[Ready]\n*Impossible(value:Never)\n",
+                "*Impossible(value:Never)\n",
                 encoding="utf-8",
             )
             snapshot = GlyphStudio(source_path).rebuild()
@@ -49,6 +49,7 @@ class StudioTypeAlgebraTests(unittest.TestCase):
             self.assertTrue(
                 any(
                     item.get("code") == "type-algebra-impossible"
+                    and item.get("subject") == "Impossible"
                     for item in snapshot.diagnostics
                 )
             )
