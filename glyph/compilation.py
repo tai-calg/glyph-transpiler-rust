@@ -17,6 +17,7 @@ from .execution_ir import build_execution_structure_ir
 from .glyph04_derived import Glyph04DerivedModels, derive_glyph04_models
 from .host_binding_codegen import render_host_binding_trait
 from .host_requirements import HostRequirementModel
+from .machine_coverage_witness import build_machine_witnesses, machine_witness_payload
 from .mermaid import (
     DiagramBundle,
     _slug,
@@ -37,7 +38,12 @@ from .schema import (
     TYPED_DESIGN_SCHEMA,
     versioned_payload,
 )
-from .type_algebra import build_type_algebra_ir, render_type_algebra_rust
+from .type_algebra import (
+    build_machine_coverage,
+    build_type_algebra_ir,
+    render_type_algebra_rust,
+    tooling_payload,
+)
 
 
 @dataclass(frozen=True)
@@ -155,6 +161,10 @@ def build_diagram_bundle(
     monoidal_ir = None
     monoidal = None
     type_algebra_ir = None
+    machine_coverage = ()
+    type_algebra_tooling = None
+    machine_witness_rust = None
+    machine_witness_reports = ()
     if derived.features.enabled:
         monoidal_ir = build_monoidal_ir(
             source_name,
@@ -167,7 +177,27 @@ def build_diagram_bundle(
             source_name,
             expanded.program,
         )
+        machine_coverage = build_machine_coverage(
+            expanded.program,
+            expanded.machines,
+            execution_ir,
+            type_algebra_ir,
+        )
+        machine_witness_reports, machine_witness_rust = build_machine_witnesses(
+            expanded.program,
+            expanded.machines,
+            machine_coverage,
+        )
         type_algebra_ir = remap_source_lines(type_algebra_ir, model.preprocess)
+        machine_coverage = remap_source_lines(machine_coverage, model.preprocess)
+        type_algebra_tooling = tooling_payload(
+            type_algebra_ir.diagnostics,
+            type_algebra_ir.structural_conversions,
+            machine_coverage,
+        )
+        type_algebra_tooling["machine_witnesses"] = machine_witness_payload(
+            machine_witness_reports
+        )
 
     href = source_href or source_name
     architecture = render_architecture_mermaid(model.architecture, href)
@@ -249,6 +279,14 @@ def build_diagram_bundle(
         files["type-algebra.generated.rs"] = render_type_algebra_rust(
             type_algebra_ir
         )
+        assert type_algebra_tooling is not None
+        files["type-algebra-tooling.json"] = json.dumps(
+            type_algebra_tooling,
+            ensure_ascii=False,
+            indent=2,
+        ) + "\n"
+        assert machine_witness_rust is not None
+        files["machine-coverage.generated.rs"] = machine_witness_rust
 
     if derived.features.capabilities:
         files["capability-ir.json"] = json.dumps(
@@ -312,17 +350,23 @@ def build_diagram_bundle(
         exact = sum(item.cardinality_exact for item in type_algebra_ir.types)
         impossible = sum(item.impossible for item in type_algebra_ir.types)
         generated = sum(item.generated for item in type_algebra_ir.conversions)
+        witness_tests = sum(
+            report.generated_tests for report in machine_witness_reports
+        )
         index += (
             "\n## Type algebra\n\n"
             "Pure product and sum declarations are normalized as a commutative "
             "semiring. See `type-algebra-ir.json` for normal forms, cardinalities, "
             "impossible types, isomorphism classes, and exhaustive cases. "
-            "`type-algebra.generated.rs` contains bounded finite conversion functions "
-            "and round-trip tests.\n\n"
+            "`type-algebra-tooling.json` contains diagnostics, machine coverage, and "
+            "witness generation status. `type-algebra.generated.rs` contains bounded "
+            "finite conversion functions and round-trip tests. "
+            "`machine-coverage.generated.rs` contains executable machine witnesses.\n\n"
             f"- exact cardinalities: {exact}\n"
             f"- impossible types: {impossible}\n"
             f"- isomorphism classes: {len(type_algebra_ir.isomorphism_classes)}\n"
             f"- generated conversion functions: {generated}\n"
+            f"- generated machine witness tests: {witness_tests}\n"
         )
     files["index.md"] = index
     return DiagramBundle(
