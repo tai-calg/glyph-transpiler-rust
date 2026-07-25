@@ -52,7 +52,7 @@ const browser = await chromium.launch({ headless: true });
 try {
   await waitForServer(child, logs);
   const page = await browser.newPage({ viewport: { width: 1800, height: 1100 } });
-  await page.goto(url, { waitUntil: "networkidle" });
+  await page.goto(url, { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => document.querySelector("#status")?.textContent === "ready");
   await page.click('button[data-tab="state"]');
   await page.waitForFunction(() => {

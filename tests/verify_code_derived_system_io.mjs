@@ -104,11 +104,20 @@ try {
   );
 
   const page = await browser.newPage({ viewport: { width: 1800, height: 1100 } });
-  await page.goto(url, { waitUntil: "networkidle" });
+  await page.goto(url, { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => document.querySelector("#status")?.textContent === "ready");
   await page.waitForFunction(() => {
+    const active = document.querySelector(".tab.active")?.dataset.tab;
+    const stage = document.querySelector(".state-node")?.closest(".graph-stage");
+    return active === "state" && stage?.dataset.renderStable === "true";
+  });
+  assert.equal(await page.locator(".tab.active").getAttribute("data-tab"), "state");
+
+  await page.locator('.tab[data-tab="io"]').click();
+  await page.waitForFunction(() => {
     const selected = document.querySelector("#system-select")?.selectedOptions?.[0]?.textContent;
-    return selected === "DoorController"
+    return document.querySelector(".tab.active")?.dataset.tab === "io"
+      && selected === "DoorController"
       && document.body.textContent?.includes("Checked system context")
       && document.body.textContent?.includes("Entry: control");
   });
@@ -142,4 +151,4 @@ try {
   await stopProcess(child);
 }
 
-console.log("verified checked System Context ports, semantic flow edges, and explicit boundaries");
+console.log("verified state-first startup and checked System Context boundaries");
