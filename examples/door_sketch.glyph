@@ -23,7 +23,10 @@ ext panel():In
 !lock(c:C):B=true
 !log(c:C):B=true
 
->apply(c:C):B=lock(c)&log(c)
+>apply(c:C):B
+  c==Stop >> lock(c)
+  _ >> log(c)
+
 >control():B|Error=apply(ctl(merge(sensor(),panel()))?)
 
 ?safe(*In)=@A(!auth >> !open)
