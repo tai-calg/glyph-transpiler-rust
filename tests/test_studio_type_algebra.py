@@ -41,7 +41,7 @@ class StudioTypeAlgebraTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="glyph-studio-type-algebra-") as directory:
             source_path = Path(directory) / "design.glyph"
             source_path.write_text(
-                "*Impossible(value:Never)\n",
+                "resource Token[Ready]\n*Impossible(value:Never)\n",
                 encoding="utf-8",
             )
             snapshot = GlyphStudio(source_path).rebuild()
