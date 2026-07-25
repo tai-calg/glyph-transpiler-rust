@@ -16,7 +16,8 @@ class DiagramRenderStabilityTests(unittest.TestCase):
         html = enhance_diagram_render_stability_html(DIAGRAM_HTML)
 
         self.assertIn("glyph-diagram-render-stability-v1", html)
-        self.assertIn('data-render-stable="true"', html)
+        self.assertIn('stage.dataset.renderStable = "true"', html)
+        self.assertIn("diagram-render-pending", html)
         self.assertIn("lastRenderKey", html)
         self.assertIn("REQUIRED_FLAGS", html)
         self.assertIn("stateTransitionIRV2LabelsReady", html)
