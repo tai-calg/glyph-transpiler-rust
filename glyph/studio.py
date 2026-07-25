@@ -13,15 +13,16 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 import webbrowser
 
+from . import studio_ui as _studio_ui
 from .compiler import GlyphError
 from .incremental import IncrementalCompiler
 from .studio_type_algebra import attach_type_algebra_view, extend_studio_html
-from .studio_ui import STUDIO_HTML as _BASE_STUDIO_HTML
 from .studio_views import build_studio_views
 from .type_algebra import build_machine_coverage, build_type_algebra_ir, tooling_payload
 
 
-STUDIO_HTML = extend_studio_html(_BASE_STUDIO_HTML)
+STUDIO_HTML = extend_studio_html(_studio_ui.STUDIO_HTML)
+_studio_ui.STUDIO_HTML = STUDIO_HTML
 
 
 @dataclass(frozen=True)
@@ -126,13 +127,14 @@ class GlyphStudio:
             compilation = result.snapshot
             semantic = json.loads(compilation.semantic_json)
             execution_ir = compilation.diagrams.ir
+            expanded = compilation.model.expanded
             algebra = build_type_algebra_ir(
                 str(self.input_path),
-                compilation.model.program,
+                expanded.program,
             )
             coverage = build_machine_coverage(
-                compilation.model.program,
-                compilation.model.machines,
+                expanded.program,
+                expanded.machines,
                 execution_ir,
                 algebra,
             )
