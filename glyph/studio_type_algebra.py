@@ -44,6 +44,10 @@ def attach_type_algebra_view(
         _json_value(dict(item))
         for item in _records(tooling.get("machine_coverage"))
     ]
+    state_reachability = [
+        _json_value(dict(item))
+        for item in _records(tooling.get("machine_state_reachability"))
+    ]
     isomorphism_classes = [
         _json_value(dict(item))
         for item in _records(algebra.get("isomorphism_classes"))
@@ -55,6 +59,7 @@ def attach_type_algebra_view(
         "isomorphism_classes": isomorphism_classes,
         "structural_conversions": structural,
         "machine_coverage": machine_coverage,
+        "machine_state_reachability": state_reachability,
     }
     summary.update(
         {
@@ -87,9 +92,16 @@ def attach_type_algebra_view(
                 for item in machine_coverage
                 if isinstance(item, Mapping)
             ),
+            "type_algebra_unreachable_states": sum(
+                len(item.get("definitely_unreachable") or [])
+                for item in state_reachability
+                if isinstance(item, Mapping)
+            ),
         }
     )
-    result["enabled"] = bool(result.get("enabled") or types or machine_coverage)
+    result["enabled"] = bool(
+        result.get("enabled") or types or machine_coverage or state_reachability
+    )
     return result
 
 
@@ -117,15 +129,16 @@ def extend_studio_html(html: str) -> str:
 
     renderer = r'''
 function typeAlgebraView(){
- const view=state?.glyph04_views?.type_algebra||{},types=view.types||[],diagnostics=view.diagnostics||[],classes=view.isomorphism_classes||[],structural=view.structural_conversions||[],coverage=view.machine_coverage||[];
- if(!types.length&&!coverage.length)return empty('Type Algebra analysis is not available for this source.');
+ const view=state?.glyph04_views?.type_algebra||{},types=view.types||[],diagnostics=view.diagnostics||[],classes=view.isomorphism_classes||[],structural=view.structural_conversions||[],coverage=view.machine_coverage||[],stateGraphs=view.machine_state_reachability||[];
+ if(!types.length&&!coverage.length&&!stateGraphs.length)return empty('Type Algebra analysis is not available for this source.');
  const finite=types.filter(item=>item.cardinality_exact).length,impossible=types.filter(item=>item.impossible).length,generated=structural.filter(item=>item.generated).length;
- const asBig=value=>{try{return BigInt(String(value??0))}catch{return 0n}},sumExact=(exactKey,legacyKey)=>coverage.reduce((sum,item)=>sum+asBig(item[exactKey]??item[legacyKey]),0n).toString(),missing=sumExact('missing_pairs_exact','missing_pairs'),unknown=sumExact('unknown_pairs_exact','unknown_pairs'),overlap=sumExact('overlap_pairs_exact','overlap_pairs');
- const cards=`<div class="cards"><div class="card"><div class="value">${types.length}</div><div class="label">Types</div></div><div class="card"><div class="value">${finite}</div><div class="label">Exact finite domains</div></div><div class="card"><div class="value">${impossible}</div><div class="label">Impossible types</div></div><div class="card"><div class="value">${generated}</div><div class="label">Structural conversions</div></div><div class="card"><div class="value">${missing}</div><div class="label">Missing cases</div></div><div class="card"><div class="value">${unknown}</div><div class="label">Unknown cases</div></div><div class="card"><div class="value">${overlap}</div><div class="label">Overlapping cases</div></div></div>`;
+ const asBig=value=>{try{return BigInt(String(value??0))}catch{return 0n}},sumExact=(exactKey,legacyKey)=>coverage.reduce((sum,item)=>sum+asBig(item[exactKey]??item[legacyKey]),0n).toString(),missing=sumExact('missing_pairs_exact','missing_pairs'),unknown=sumExact('unknown_pairs_exact','unknown_pairs'),overlap=sumExact('overlap_pairs_exact','overlap_pairs'),unreachableStates=stateGraphs.reduce((sum,item)=>sum+(item.definitely_unreachable||[]).length,0);
+ const cards=`<div class="cards"><div class="card"><div class="value">${types.length}</div><div class="label">Types</div></div><div class="card"><div class="value">${finite}</div><div class="label">Exact finite domains</div></div><div class="card"><div class="value">${impossible}</div><div class="label">Impossible types</div></div><div class="card"><div class="value">${generated}</div><div class="label">Structural conversions</div></div><div class="card"><div class="value">${missing}</div><div class="label">Missing cases</div></div><div class="card"><div class="value">${unknown}</div><div class="label">Unknown cases</div></div><div class="card"><div class="value">${overlap}</div><div class="label">Overlapping cases</div></div><div class="card"><div class="value">${unreachableStates}</div><div class="label">Unreachable states</div></div></div>`;
  const typeRows=types.map(item=>`<div class="row"${lineAttr(item.source?.line)}${filterAttr(item.name,item.normal_form,item.cardinality,item.declaration_kind)}><b>${esc(item.name)}</b><span class="chip ${item.impossible?'bad':item.cardinality_exact?'ok':''}">${item.impossible?'impossible':item.cardinality_exact?'finite':'symbolic'}</span><span class="mono">|T|=${esc(item.cardinality??'?')} · ${esc(item.normal_form||'?')}</span>${sourceJump(item.source?.line)}</div>`).join('');
  const diagnosticRows=diagnostics.map(item=>`<div class="error"${lineAttr(item.line)}${filterAttr(item.code,item.subject,item.message)}><b>${esc(item.code)}</b><br>${esc(item.message)}</div>`).join('');
  const classRows=classes.map(item=>`<div class="card"${filterAttr(item.id,item.members,item.normal_form)}><div class="step-head"><b>${esc((item.members||[]).join(' ≅ '))}</b><span class="chip accent">${esc(item.id)}</span></div><div class="mono">${esc(item.normal_form)}</div><div class="muted">cardinality: ${esc(item.cardinality??'?')}</div></div>`).join('');
  const structuralRows=structural.map(item=>`<div class="card"${filterAttr(item.source_type,item.target_type,(item.steps||[]).map(step=>step.law))}><div class="step-head"><b>${esc(item.source_type)} ↔ ${esc(item.target_type)}</b><span class="chip ${item.generated?'ok':'bad'}">${item.generated?'generated':'rejected'}</span></div>${(item.steps||[]).map(step=>`<div class="mono">${esc(step.law)}: ${esc(step.before)} → ${esc(step.after)}</div>`).join('')}${item.reason?`<div class="muted">${esc(item.reason)}</div>`:''}</div>`).join('');
+ const stateRows=stateGraphs.map(item=>{const definite=(item.definitely_reachable||[]).map(value=>`<span class="chip ok">${esc(value)}</span>`).join(''),maybe=(item.maybe_reachable||[]).map(value=>`<span class="chip">${esc(value)}</span>`).join(''),unreachable=(item.definitely_unreachable||[]).map(value=>`<span class="chip bad">${esc(value)}</span>`).join(''),edges=(item.definite_edges||[]).map(edge=>`${edge.source} → ${edge.target}`).join(' · '),possible=(item.possible_edges||[]).map(edge=>`${edge.source} ⇢ ${edge.target}`).join(' · ');return `<section class="section card"${lineAttr(item.line)}${filterAttr(item.machine,item.initial_state,item.states,item.definitely_unreachable)}><div class="step-head"><div><b>${esc(item.machine)}</b><div class="mono muted">init=${esc(item.initial_state??'?')} · selector=${esc(item.selector_type??'?')}</div></div><span class="chip ${item.exact?'ok':''}">${item.exact?'exact':'conservative'}</span></div><h3>Definitely reachable</h3><div class="chips">${definite||'<span class="muted">none</span>'}</div><h3>Maybe reachable</h3><div class="chips">${maybe||'<span class="muted">none</span>'}</div><h3>Definitely unreachable</h3><div class="chips">${unreachable||'<span class="muted">none</span>'}</div>${edges?`<div class="mono" style="margin-top:8px">definite: ${esc(edges)}</div>`:''}${possible?`<div class="mono">possible: ${esc(possible)}</div>`:''}${item.reason?`<div class="muted" style="margin-top:8px">${esc(item.reason)}</div>`:''}${sourceJump(item.line)}</section>`}).join('');
  const coverageRows=coverage.map(item=>{
   const outcomeCards=[['defined',item.defined_pairs_exact??item.defined_pairs,'ok'],['rejected',item.rejected_pairs_exact??item.rejected_pairs,'bad'],['default',item.fallthrough_pairs_exact??item.fallthrough_pairs,''],['missing',item.missing_pairs_exact??item.missing_pairs,'bad'],['unknown',item.unknown_pairs_exact??item.unknown_pairs,''],['overlap',item.overlap_pairs_exact??item.overlap_pairs,'bad']].map(([label,value,kind])=>`<span class="chip ${kind}">${label}: ${esc(value??'?')}</span>`).join('');
   const guards=(item.guards||[]).map(guard=>`<div class="row"${lineAttr(guard.line)}${filterAttr(guard.condition,guard.classification)}><b>#${guard.index} ${esc(guard.classification)}</b><span>→</span><span class="mono">${esc(guard.condition)}<br>true=${esc(guard.true_cases_exact??guard.true_cases)} · first=${esc(guard.first_match_cases_exact??guard.first_match_cases)} · shadowed=${esc(guard.shadowed_cases_exact??guard.shadowed_cases)} · unknown=${esc(guard.unknown_cases_exact??guard.unknown_cases)}</span>${sourceJump(guard.line)}</div>`).join('');
@@ -133,7 +146,7 @@ function typeAlgebraView(){
   const partition=item.partitioned?`symbolic regions: ${esc(item.region_count??(item.cases||[]).length)} · concrete cases: ${esc(item.concrete_case_count??item.possible_pairs??'?')}`:`possible: ${esc(item.possible_pairs??'?')}`;
   return `<section class="section card"${filterAttr(item.machine,item.selector_type,item.input_types,item.complete)}><div class="step-head"><div><b>${esc(item.machine)}</b><div class="mono muted">${esc(item.selector_field||'?')}: ${esc(item.selector_type||'?')} × ${esc((item.input_types||[]).join(' × ')||'()')}</div></div><span class="chip ${item.complete===true?'ok':item.complete===false?'bad':''}">${item.complete===true?'complete':item.complete===false?'incomplete':'unknown'}</span></div><div class="mono">domain: ${esc(item.domain_semantics||'selector×input')}<br>selector: ${esc(item.selector_cardinality??item.state_cardinality??'?')} · input: ${esc(item.input_cardinality??'?')} · ${partition}</div><div class="chips">${outcomeCards}</div>${item.reason?`<div class="muted" style="margin-top:8px">${esc(item.reason)}</div>`:''}${guards?`<h3>Guard reachability</h3><div class="card">${guards}</div>`:''}${cases?`<h3>Coverage matrix</h3><div class="card">${cases}</div>`:''}</section>`;
  }).join('');
- return `<section class="section">${sectionHeading('Type Algebra summary')}${cards}</section>${diagnosticRows?`<section class="section">${sectionHeading('Diagnostics',diagnostics.length+' warnings')}${diagnosticRows}</section>`:''}<section class="section">${sectionHeading('Types',types.length+' declarations')}<div class="card">${typeRows}</div></section>${classRows?`<section class="section">${sectionHeading('Isomorphism classes')}<div class="cards">${classRows}</div></section>`:''}${structuralRows?`<section class="section">${sectionHeading('Structural conversions')}<div class="cards">${structuralRows}</div></section>`:''}${coverageRows?`<section class="section">${sectionHeading('Machine selector × input coverage')}${coverageRows}</section>`:''}`;
+ return `<section class="section">${sectionHeading('Type Algebra summary')}${cards}</section>${diagnosticRows?`<section class="section">${sectionHeading('Diagnostics',diagnostics.length+' warnings')}${diagnosticRows}</section>`:''}<section class="section">${sectionHeading('Types',types.length+' declarations')}<div class="card">${typeRows}</div></section>${classRows?`<section class="section">${sectionHeading('Isomorphism classes')}<div class="cards">${classRows}</div></section>`:''}${structuralRows?`<section class="section">${sectionHeading('Structural conversions')}<div class="cards">${structuralRows}</div></section>`:''}${stateRows?`<section class="section">${sectionHeading('Machine init reachability')}${stateRows}</section>`:''}${coverageRows?`<section class="section">${sectionHeading('Machine selector × input coverage')}${coverageRows}</section>`:''}`;
 }
 '''.strip()
     renderer_anchor = "async function architecture()"
