@@ -18,6 +18,7 @@ from .readable_diagram_app import prepare_diagram_app
 
 
 _COOKIE_NAME = "glyph_desktop_session"
+_HEADER_NAME = "X-Glyph-Desktop-Token"
 
 
 @dataclass
@@ -40,6 +41,25 @@ class DesktopServer:
 def _cookie_contains(raw_cookie: str, token: str) -> bool:
     expected = f"{_COOKIE_NAME}={token}"
     return any(part.strip() == expected for part in raw_cookie.split(";"))
+
+
+def _authenticated_html(html: str, token: str) -> str:
+    bootstrap = f"""<script>
+(() => {{
+  const token = {json.dumps(token)};
+  const nativeFetch = window.fetch.bind(window);
+  window.fetch = (input, init = {{}}) => {{
+    const target = new URL(typeof input === 'string' ? input : input.url, window.location.href);
+    if (target.origin === window.location.origin && target.pathname.startsWith('/api/')) {{
+      const headers = new Headers(init.headers || (typeof input === 'string' ? undefined : input.headers));
+      headers.set('X-Glyph-Desktop-Token', token);
+      init = {{...init, headers}};
+    }}
+    return nativeFetch(input, init);
+  }};
+}})();
+</script>"""
+    return html.replace("</head>", bootstrap + "\n</head>", 1)
 
 
 def create_desktop_server(
@@ -71,7 +91,8 @@ def create_desktop_server(
                 "Content-Security-Policy",
                 "default-src 'self'; connect-src 'self'; img-src 'self' data: blob:; "
                 "style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; "
-                "font-src 'self' data:; frame-ancestors tauri: http://tauri.localhost",
+                "font-src 'self' data:; frame-ancestors tauri: http://tauri.localhost "
+                "http://127.0.0.1:*",
             )
 
         def _json(
@@ -88,7 +109,10 @@ def create_desktop_server(
             self.wfile.write(payload)
 
         def _authorized(self) -> bool:
-            return _cookie_contains(self.headers.get("Cookie", ""), session_token)
+            return (
+                self.headers.get(_HEADER_NAME, "") == session_token
+                or _cookie_contains(self.headers.get("Cookie", ""), session_token)
+            )
 
         def _require_auth(self) -> bool:
             if self._authorized():
@@ -110,7 +134,9 @@ def create_desktop_server(
             return source
 
         def _serve_app(self) -> None:
-            payload = diagram_app.DIAGRAM_HTML.encode("utf-8")
+            payload = _authenticated_html(diagram_app.DIAGRAM_HTML, session_token).encode(
+                "utf-8"
+            )
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(payload)))
