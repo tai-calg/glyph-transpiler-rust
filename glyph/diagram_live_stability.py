@@ -27,10 +27,12 @@ _SCRIPT = r"""
   const MARKER = "glyph-diagram-live-stability-v2";
   const RENDER_TIMEOUT_MS = 1600;
   const REQUEST_TIMEOUT_MS = 30000;
+  const POLL_INTERVAL_MS = 3000;
   const REQUIRED_FLAGS = ["labelLayoutReady", "umlTransitionReady", "transitionInputActionLabelsReady", "stateTransitionIRV2LabelsReady"];
   let renderGeneration = 0;
   let requestGeneration = 0;
   let previewController = null;
+  let lastPollAt = 0;
   const fallbackTimers = new WeakMap();
 
   function stateStage(){return document.querySelector(".state-node")?.closest(".graph-stage")||null}
@@ -63,7 +65,7 @@ _SCRIPT = r"""
 
   compile=async function stableCompile(){const generation=++requestGeneration;if(previewController)previewController.abort();const controller=new AbortController();previewController=controller;setStatus("busy");try{const next=await guardedRequest("/api/preview",{method:"POST",body:JSON.stringify({source:editor.value})},controller);if(generation!==requestGeneration)return;applySnapshot(next)}catch(error){if(error?.name==="AbortError"||generation!==requestGeneration)return;setStatus("error");diagnostics.innerHTML=`<div class="diagnostic">${esc(error.message)}</div>`}finally{if(generation===requestGeneration)previewController=null}};
   save=async function stableSave(){abortPreview();const generation=requestGeneration;setStatus("busy");try{const next=await guardedRequest("/api/save",{method:"POST",body:JSON.stringify({source:editor.value})});if(generation!==requestGeneration)return;dirty=false;applySnapshot(next)}catch(error){setStatus("error");diagnostics.innerHTML=`<div class="diagnostic">${esc(error.message)}</div>`}};
-  load=async function stableLoad(initial=false){try{const next=await guardedRequest("/api/state");if(!initial&&dirty)return;applySnapshot(next,{initial,updateEditor:initial})}catch(error){if(error?.name==="AbortError")return;setStatus("error");diagnostics.innerHTML=`<div class="diagnostic">${esc(error.message)}</div>`}};
+  load=async function stableLoad(initial=false){const now=Date.now();if(!initial&&now-lastPollAt<POLL_INTERVAL_MS)return;lastPollAt=now;try{const next=await guardedRequest("/api/state");if(!initial&&dirty)return;applySnapshot(next,{initial,updateEditor:initial})}catch(error){if(error?.name==="AbortError")return;setStatus("error");diagnostics.innerHTML=`<div class="diagnostic">${esc(error.message)}</div>`}};
   document.getElementById("compile").onclick=()=>compile();
   document.getElementById("save").onclick=()=>save();
 
