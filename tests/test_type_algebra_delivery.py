@@ -69,26 +69,49 @@ machine Controller(state:State,value:u8)
 """.lstrip()
 
 
-def _compile_and_run_witnesses(
+SCENARIO_SOURCE = """
+resource Token[Ready]
++Mode=Idle|Running|Stopped|Failed
++Event=Start|Finish|Hold
++Error=Rejected
+*State(mode:Mode)
+
+>step(state:State,event:Event):State|Error
+  state.mode==Idle & event==Start >> Ok(State(Running))
+  state.mode==Running & event==Finish >> Ok(State(Stopped))
+  _ >> Ok(state)
+
+machine Controller(state:State,event:Event)
+  select=state.mode
+  init=State(Idle)
+  next=step(state,event)
+  success=Stopped
+  failure=Failed
+""".lstrip()
+
+
+def _compile_and_run_generated(
     source: str,
     source_name: str,
     exports: str,
+    artifact_name: str,
+    module_name: str,
 ) -> tuple[object, dict[str, object]]:
     outputs = compile_outputs(source, source_name)
     payload = json.loads(outputs.diagrams.files["type-algebra-tooling.json"])
-    with tempfile.TemporaryDirectory(prefix="glyph-machine-witness-") as directory:
+    with tempfile.TemporaryDirectory(prefix="glyph-machine-generated-") as directory:
         root = Path(directory)
-        (root / "machine-coverage.generated.rs").write_text(
-            outputs.diagrams.files["machine-coverage.generated.rs"],
+        (root / artifact_name).write_text(
+            outputs.diagrams.files[artifact_name],
             encoding="utf-8",
         )
         crate_source = (
             outputs.artifacts.logic
             + f"\npub mod generated {{ pub use super::{{{exports}}}; }}\n"
-            + 'pub mod machine_coverage { include!("machine-coverage.generated.rs"); }\n'
+            + f'pub mod {module_name} {{ include!("{artifact_name}"); }}\n'
         )
         (root / "lib.rs").write_text(crate_source, encoding="utf-8")
-        executable = root / "machine-coverage-tests"
+        executable = root / "generated-tests"
         compile_result = subprocess.run(
             [
                 "rustc",
@@ -118,14 +141,31 @@ def _compile_and_run_witnesses(
     return outputs, payload
 
 
+def _compile_and_run_witnesses(
+    source: str,
+    source_name: str,
+    exports: str,
+) -> tuple[object, dict[str, object]]:
+    return _compile_and_run_generated(
+        source,
+        source_name,
+        exports,
+        "machine-coverage.generated.rs",
+        "machine_coverage",
+    )
+
+
 class TypeAlgebraDeliveryTests(unittest.TestCase):
     def test_normal_compilation_emits_tooling_defaults_and_witnesses(self) -> None:
         outputs = compile_outputs(SOURCE, "delivery.glyph")
         files = outputs.diagrams.files
         self.assertIn("type-algebra-tooling.json", files)
         self.assertIn("machine-coverage.generated.rs", files)
+        self.assertIn("machine-scenarios.generated.rs", files)
 
         payload = json.loads(files["type-algebra-tooling.json"])
+        self.assertEqual(payload["schema"], "glyph.type-algebra-tooling")
+        self.assertEqual(payload["version"], 2)
         diagnostics = {item["code"] for item in payload["diagnostics"]}
         self.assertNotIn("machine-coverage-fallthrough", diagnostics)
         coverage = payload["machine_coverage"][0]
@@ -134,6 +174,7 @@ class TypeAlgebraDeliveryTests(unittest.TestCase):
         self.assertEqual(witnesses["machine"], "Controller")
         self.assertEqual(witnesses["generated_tests"], 6)
         self.assertEqual(witnesses["skipped_cases"], 0)
+        self.assertIn("machine_scenarios", payload)
 
     def test_normal_compilation_warns_for_unreachable_guard(self) -> None:
         outputs = compile_outputs(UNREACHABLE_SOURCE, "unreachable.glyph")
@@ -182,13 +223,58 @@ class TypeAlgebraDeliveryTests(unittest.TestCase):
         self.assertIn("step(State { mode: Mode::Idle }, 0)", generated)
         self.assertIn("step(State { mode: Mode::Idle }, 10)", generated)
 
-    def test_legacy_compilation_does_not_gain_type_algebra_artifacts(self) -> None:
+    def test_multi_step_scenario_compiles_and_replays_shortest_path(self) -> None:
+        outputs, payload = _compile_and_run_generated(
+            SCENARIO_SOURCE,
+            "scenario.glyph",
+            "Mode, Event, Error, State, step, Token",
+            "machine-scenarios.generated.rs",
+            "machine_scenarios",
+        )
+        report = payload["machine_scenarios"][0]
+        self.assertEqual(report["machine"], "Controller")
+        self.assertEqual(report["generated_tests"], 2)
+        self.assertEqual(report["skipped_targets"], 0)
+        self.assertEqual(report["max_steps"], 2)
+        stopped = next(
+            item for item in report["scenarios"] if item["target_state"] == "Stopped"
+        )
+        self.assertTrue(stopped["generated"])
+        self.assertEqual(stopped["steps"], 2)
+        self.assertEqual(len(stopped["case_indices"]), 2)
+        generated = outputs.diagrams.files["machine-scenarios.generated.rs"]
+        self.assertIn("fn scenario_controller_to_stopped()", generated)
+        self.assertIn("step(state, Event::Start)", generated)
+        self.assertIn("step(state, Event::Finish)", generated)
+
+    def test_legacy_compilation_emits_empty_machine_tooling_contract(self) -> None:
         outputs = compile_outputs(
             "+Bit=Off|On\n*Pair(left:Bit,right:Bit)\n",
             "legacy-delivery.glyph",
         )
-        self.assertNotIn("type-algebra-tooling.json", outputs.diagrams.files)
-        self.assertNotIn("machine-coverage.generated.rs", outputs.diagrams.files)
+        files = outputs.diagrams.files
+        for name in (
+            "type-algebra-ir.json",
+            "type-algebra-tooling.json",
+            "type-algebra.generated.rs",
+            "machine-coverage.generated.rs",
+            "machine-scenarios.generated.rs",
+        ):
+            self.assertIn(name, files)
+        payload = json.loads(files["type-algebra-tooling.json"])
+        self.assertEqual(payload["version"], 2)
+        self.assertEqual(payload["machine_coverage"], [])
+        self.assertEqual(payload["machine_state_reachability"], [])
+        self.assertEqual(payload["machine_witnesses"], [])
+        self.assertEqual(payload["machine_scenarios"], [])
+        self.assertIn(
+            "No executable witness tests were safe to generate",
+            files["machine-coverage.generated.rs"],
+        )
+        self.assertIn(
+            "No executable multi-step scenarios were safe to generate",
+            files["machine-scenarios.generated.rs"],
+        )
 
 
 if __name__ == "__main__":
