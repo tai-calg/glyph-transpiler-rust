@@ -34,6 +34,19 @@ INVALID_LEGACY_SOURCES = {
     "duplicate-macro": "@X=1\n@X=2\n>same(x:I):I=x\n",
 }
 
+# Tooling v2 intentionally extends the artifact surface without changing legacy
+# generated Rust, typed design, diagnostics, or existing diagrams.
+ADDITIVE_TOOLING_ARTIFACTS = frozenset(
+    {
+        "diagrams/type-algebra-ir.json",
+        "diagrams/type-algebra-tooling.json",
+        "diagrams/type-algebra.generated.rs",
+        "diagrams/machine-coverage.generated.rs",
+        "diagrams/machine-scenarios.generated.rs",
+    }
+)
+_TOOLING_INDEX_MARKER = "## Tooling artifact contract v2"
+
 
 def _run(command: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
     environment = dict(os.environ)
@@ -87,6 +100,18 @@ def _normalize(text: str, replacements: tuple[tuple[str, str], ...]) -> str:
     return normalized
 
 
+def _valid_index_extension(base: bytes, head: bytes) -> bool:
+    try:
+        base_text = base.decode("utf-8").replace("\r\n", "\n").rstrip()
+        head_text = head.decode("utf-8").replace("\r\n", "\n")
+    except UnicodeDecodeError:
+        return False
+    if _TOOLING_INDEX_MARKER not in head_text:
+        return False
+    prefix, marker, _ = head_text.partition(_TOOLING_INDEX_MARKER)
+    return bool(marker) and prefix.rstrip() == base_text
+
+
 def _compare_source(
     source: Path,
     base_root: Path,
@@ -107,25 +132,42 @@ def _compare_source(
     head_files = _files(head_output) if head.returncode == 0 else {}
     base_names = set(base_files)
     head_names = set(head_files)
-    if base_names != head_names:
+    main_only = base_names - head_names
+    head_only = head_names - base_names
+    unexpected_head_only = head_only - ADDITIVE_TOOLING_ARTIFACTS
+    if main_only or unexpected_head_only:
         errors.append(
-            f"{source}: artifact set differs; "
-            f"main-only={sorted(base_names - head_names)}, "
-            f"head-only={sorted(head_names - base_names)}"
+            f"{source}: incompatible artifact set; "
+            f"main-only={sorted(main_only)}, "
+            f"unexpected-head-only={sorted(unexpected_head_only)}"
         )
+
     changed = [
         name
         for name in sorted(base_names & head_names)
         if base_files[name] != head_files[name]
     ]
-    if changed:
-        errors.append(f"{source}: byte differences in {changed}")
+    incompatible_changed = [
+        name
+        for name in changed
+        if not (
+            name == "diagrams/index.md"
+            and _valid_index_extension(base_files[name], head_files[name])
+        )
+    ]
+    if incompatible_changed:
+        errors.append(f"{source}: byte differences in {incompatible_changed}")
+
+    compatible = not main_only and not unexpected_head_only and not incompatible_changed
     return {
         "source": str(source.relative_to(ROOT)),
         "main_exit": base.returncode,
         "head_exit": head.returncode,
         "files": sorted(head_names),
         "byte_equal": not changed and base_names == head_names,
+        "compatible": compatible,
+        "additive_files": sorted(head_only & ADDITIVE_TOOLING_ARTIFACTS),
+        "extended_files": sorted(set(changed) - set(incompatible_changed)),
     }, errors
 
 
