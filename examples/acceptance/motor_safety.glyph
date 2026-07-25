@@ -1,7 +1,4 @@
-system MotorSafety
-  sensor -> decide
-  decide -> step
-  step -> write_motor
+system MotorSafety=cycle
 
 machine Motor(state:MotorState,input:Input)
   select=state.mode
@@ -45,4 +42,6 @@ machine Motor(state:MotorState,input:Input)
   next
 
 !write_motor(command:Command):Receipt
->cycle(state:MotorState,input:Input):Receipt=write_motor(decide(input))
+
+# MotorSafetyのI/O図はcycleからstep、decide、write_motorへの実呼出しを追跡する。
+>cycle(state:MotorState,input:Input):Receipt=write_motor(step(state,input).command)
