@@ -77,7 +77,7 @@ try {
   const url = `http://127.0.0.1:${port}`;
   await waitForServer(url, child, logs);
   const page = await browser.newPage({ viewport: { width: 1800, height: 1200 } });
-  await page.goto(url, { waitUntil: "networkidle" });
+  await page.goto(url, { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => document.querySelector("#status")?.textContent === "ready");
   await page.click('button[data-tab="state"]');
   await page.waitForFunction(() => (

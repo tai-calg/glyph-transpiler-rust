@@ -106,7 +106,7 @@ try {
         viewport: { width: 1800, height: 1250 },
         deviceScaleFactor: 1,
       });
-      await page.goto(url, { waitUntil: "networkidle" });
+      await page.goto(url, { waitUntil: "domcontentloaded" });
       await page.waitForFunction(() => document.querySelector("#status")?.textContent === "ready");
       await page.click('button[data-tab="state"]');
       await page.waitForFunction(
