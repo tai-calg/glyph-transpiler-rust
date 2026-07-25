@@ -77,8 +77,8 @@ resource Token[Ready]
 *State(mode:Mode)
 
 >step(state:State,event:Event):State|Error
-  state.mode==Idle&event==Start >> Ok(State(Running))
-  state.mode==Running&event==Finish >> Ok(State(Stopped))
+  state.mode==Idle >> Ok(State(Running))
+  event==Finish >> Ok(State(Stopped))
   _ >> Ok(state)
 
 machine Controller(state:State,event:Event)
