@@ -11,6 +11,37 @@ from glyph import GlyphError
 from glyph.readable_diagram_app import run_diagram_app
 
 
+LEGACY_DEFAULT_SOURCE = """system DoorControl
+  panel -> decide
+  sensor -> decide
+  decide -> lock
+  decide -> alarm
+
+machine Door(state:DoorState,input:Input)
+  select=state.mode
+  init=DoorState(Closed)
+  next=step(state,input)
+  success=Open
+  failure=Alarm
+
+*Input(open_request:B,authorized:B,obstruction:B)
++DoorMode=Closed|Opening|Open|Closing|Alarm
+*DoorState(mode:DoorMode)
+
+>step(state:DoorState,input:Input):DoorState
+  state.mode==Closed&input.open_request&input.authorized >> DoorState(Opening)
+  state.mode==Opening&input.obstruction >> DoorState(Alarm)
+  state.mode==Opening >> DoorState(Open)
+  state.mode==Open&!input.open_request >> DoorState(Closing)
+  state.mode==Closing&input.obstruction >> DoorState(Opening)
+  state.mode==Closing >> DoorState(Closed)
+  _ >> state
+
+!lock(state:DoorState):()
+!alarm(state:DoorState):()
+"""
+
+
 DEFAULT_SOURCE = """system DoorControl=control
 
 machine Door(state:DoorState,input:Input)
@@ -75,6 +106,10 @@ def resolve_input(input_path: Path | None) -> Path:
     path = default_input_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     if not path.exists():
+        path.write_text(DEFAULT_SOURCE, encoding="utf-8")
+    elif path.read_text(encoding="utf-8") == LEGACY_DEFAULT_SOURCE:
+        # Only the exact generated legacy sample is migrated. Any user edit,
+        # including comments or whitespace changes, prevents automatic overwrite.
         path.write_text(DEFAULT_SOURCE, encoding="utf-8")
     return path
 
