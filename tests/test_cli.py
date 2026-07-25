@@ -9,6 +9,25 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
+WARNING_SOURCE = """
+resource Token[Ready]
++Mode=Idle|Running|Unused
++Event=Go
+*State(mode:Mode)
+
+>step(state:State,event:Event):State
+  state.mode==Idle >> State(Running)
+  _ >> state
+
+machine Controller(state:State,event:Event)
+  select=state.mode
+  init=State(Idle)
+  next=step(state,event)
+  success=Running
+  failure=Unused
+""".lstrip()
+
+
 class CliTests(unittest.TestCase):
     def test_check_mode(self) -> None:
         result = subprocess.run(
@@ -24,6 +43,29 @@ class CliTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("OK:", result.stdout)
+
+    def test_check_mode_prints_tooling_warnings(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "warning.glyph"
+            source.write_text(WARNING_SOURCE, encoding="utf-8")
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / "glyphc.py"),
+                    str(source),
+                    "--check",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("OK:", result.stdout)
+            self.assertIn(
+                "warning[machine-state-unreachable]",
+                result.stderr,
+            )
+            self.assertIn("Unused", result.stderr)
 
     def test_output_files(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
