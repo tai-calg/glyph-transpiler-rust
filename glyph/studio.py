@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -15,8 +15,13 @@ import webbrowser
 
 from .compiler import GlyphError
 from .incremental import IncrementalCompiler
-from .studio_ui import STUDIO_HTML
+from .studio_type_algebra import attach_type_algebra_view, extend_studio_html
+from .studio_ui import STUDIO_HTML as _BASE_STUDIO_HTML
 from .studio_views import build_studio_views
+from .type_algebra import build_machine_coverage, build_type_algebra_ir, tooling_payload
+
+
+STUDIO_HTML = extend_studio_html(_BASE_STUDIO_HTML)
 
 
 @dataclass(frozen=True)
@@ -64,6 +69,10 @@ def _source_digest(source: str) -> str:
     return hashlib.sha256(source.encode("utf-8")).hexdigest()
 
 
+def _empty_studio_views() -> dict[str, object]:
+    return attach_type_algebra_view(build_studio_views({}), {}, {})
+
+
 class GlyphStudio:
     """One-process development environment for one Glyph source file."""
 
@@ -84,7 +93,7 @@ class GlyphStudio:
             artifacts={},
             semantic={},
             execution_ir={},
-            glyph04_views=build_studio_views({}),
+            glyph04_views=_empty_studio_views(),
         )
 
     @property
@@ -116,7 +125,29 @@ class GlyphStudio:
             )
             compilation = result.snapshot
             semantic = json.loads(compilation.semantic_json)
-            glyph04_views = build_studio_views(semantic)
+            execution_ir = compilation.diagrams.ir
+            algebra = build_type_algebra_ir(
+                str(self.input_path),
+                compilation.model.program,
+            )
+            coverage = build_machine_coverage(
+                compilation.model.program,
+                compilation.model.machines,
+                execution_ir,
+                algebra,
+            )
+            tooling = tooling_payload(
+                algebra.diagnostics,
+                algebra.structural_conversions,
+                coverage,
+            )
+            algebra_payload = algebra.to_dict()
+            glyph04_views = attach_type_algebra_view(
+                build_studio_views(semantic),
+                algebra_payload,
+                tooling,
+            )
+            warning_diagnostics = tuple(asdict(item) for item in algebra.diagnostics)
             artifacts = {
                 "generated.rs": compilation.artifacts.logic,
                 "host.generated.rs": compilation.artifacts.host,
@@ -127,21 +158,26 @@ class GlyphStudio:
                     indent=2,
                 )
                 + "\n",
+                "type-algebra-tooling.json": json.dumps(
+                    tooling,
+                    ensure_ascii=False,
+                    indent=2,
+                )
+                + "\n",
                 **compilation.diagrams.files,
             }
             for name, content in artifacts.items():
                 _atomic_write(self.output_dir / name, content)
-            execution_ir = json.loads(artifacts["execution-ir.json"])
             snapshot = StudioSnapshot(
                 version=previous.version + 1,
                 status="ready",
                 source=source,
                 digest=digest,
                 updated_at=_utc_now(),
-                diagnostics=(),
+                diagnostics=warning_diagnostics,
                 artifacts=artifacts,
                 semantic=semantic,
-                execution_ir=execution_ir,
+                execution_ir=json.loads(artifacts["execution-ir.json"]),
                 glyph04_views=glyph04_views,
             )
         except (GlyphError, OSError, ValueError) as exc:
