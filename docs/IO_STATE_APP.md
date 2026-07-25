@@ -12,7 +12,7 @@ The application does not execute the designed system and does not reproduce appl
 ```text
 Glyph source
   -> CompilationModel
-  -> ArchitectureIR / Program AST
+  -> checked ArchitectureIR / Program AST
   -> ExecutionStructureIR
   -> normalized StateMachine analysis
   -> glyph.io-state-views v2
@@ -39,26 +39,85 @@ GLYPH_DIAGRAM_NO_BROWSER=1 python3 glyph.py design.glyph
 
 ## I/O view
 
-When a `system` declaration exists, its component topology is used.
+A declared system names a body-bearing Glyph entry function:
 
 ```glyph
-system MotorSafety
-  sensor -> decide
-  decide -> step
-  step -> write_motor
+system MotorSafety=control
 ```
 
-Each component bound to a Glyph function or effect displays the exact declared signature:
+The compiler follows actual named calls reachable from `control`. It does not accept a second freehand topology that is unrelated to the code.
+
+```glyph
+ext sensor():Input
+
+>decide(input:Input):Command
+  ...
+
+>step(state:MotorState,input:Input):MotorState
+  command := decide(input)
+  ...
+
+!write_motor(command:Command):Receipt
+
+>control(state:MotorState):Receipt=
+  write_motor(step(state,sensor()).command)
+```
+
+The resulting I/O topology contains only code-backed relationships:
 
 ```text
-decide
-  input  input: Input
-  output Command
+control -> write_motor
+control -> step
+control -> sensor
+step    -> decide
 ```
 
-An external component such as `sensor` is displayed as external with undeclared ports. The renderer does not invent its I/O type.
+The view displays `Derived from code` and the selected entry name. Edges are labeled `calls`.
+
+### Explicit external boundaries
+
+External devices, input providers, and services are declared with typed `ext` signatures:
+
+```glyph
+ext sensor():Input
+ext panel():PanelInput
+ext database(query:Query):Record|DatabaseError
+```
+
+They are displayed as external components with their declared inputs and output. The renderer no longer creates an external component merely because an unresolved name appears in a system block.
+
+An undeclared reachable call is a compile error:
+
+```glyph
+system Broken=control
+>control():Input=sensor()  # sensor is undeclared
+```
+
+Repair:
+
+```glyph
+system Fixed=control
+ext sensor():Input
+>control():Input=sensor()
+```
+
+`ext` identifies an external component contract. `!` remains the explicit effect boundary owned by the designed system. Both require a Host implementation, but the architecture view keeps their roles distinct.
+
+### Optional checked edge assertions
+
+A system may include expected direct-call edges:
+
+```glyph
+system MotorSafety=control
+  control -> sensor
+  control -> step
+```
+
+These rows do not draw additional arrows. The compiler checks them against the call graph. Undeclared nodes and edges absent from the code are errors.
 
 When no `system` declaration exists, the compiler call graph is used as a fallback. Isolated functions are still rendered.
+
+Full semantics: [`CODE_DERIVED_SYSTEMS.md`](CODE_DERIVED_SYSTEMS.md).
 
 ## State-transition view
 
@@ -129,7 +188,7 @@ schema: glyph.io-state-views
 version: 2
 ```
 
-The JSON model is backend-neutral and contains systems, typed component ports, type declarations, normalized machines, concrete states, transitions, reachability, and diagnostics.
+The JSON model is backend-neutral and contains code-derived systems, typed component ports, type declarations, normalized machines, concrete states, transitions, reachability, and diagnostics.
 
 ## Non-goals
 
@@ -138,4 +197,5 @@ The JSON model is backend-neutral and contains systems, typed component ports, t
 - effect execution
 - business-semantic inference
 - state-machine inference without `machine`
-- external component I/O inference
+- undeclared external component inference
+- treating call edges as physical wires or runtime scheduling
