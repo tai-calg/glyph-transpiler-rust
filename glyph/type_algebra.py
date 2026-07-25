@@ -9,6 +9,8 @@ from .machine_coverage import (
     MachineCoverage,
     MachineCoverageCase,
     MachineGuardCoverage,
+)
+from .machine_coverage_partitioned import (
     build_machine_coverage as _build_machine_coverage_v2,
 )
 from .machine_coverage_diagnostics import (
