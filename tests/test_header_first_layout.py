@@ -7,10 +7,7 @@ import unittest
 from glyph import compile_artifacts, parse_compilation_model
 
 
-HEADER_FIRST = """system MotorSafety
-  sensor -> decide
-  decide -> step
-  step -> write_motor
+HEADER_FIRST = """system MotorSafety=cycle
 
 machine Motor(state:MotorState,input:Input)
   select=state.mode
@@ -25,6 +22,8 @@ machine Motor(state:MotorState,input:Input)
 *MotorState(mode:Mode,command:Command)
 *Receipt(command:Command)
 
+ext sensor():Input
+
 >decide(input:Input):Command
   input.raw==0 >> Stop
   _ >> Drive(input.raw)
@@ -38,6 +37,7 @@ machine Motor(state:MotorState,input:Input)
   next
 
 !write_motor(command:Command):Receipt
+>cycle(state:MotorState):Receipt=write_motor(step(state,sensor()).command)
 """
 
 LEGACY_TAIL = """+Mode=Stopped|Running|Faulted
@@ -46,6 +46,8 @@ LEGACY_TAIL = """+Mode=Stopped|Running|Faulted
 *MotorState(mode:Mode,command:Command)
 *Receipt(command:Command)
 
+ext sensor():Input
+
 >decide(input:Input):Command
   input.raw==0 >> Stop
   _ >> Drive(input.raw)
@@ -59,11 +61,9 @@ LEGACY_TAIL = """+Mode=Stopped|Running|Faulted
   next
 
 !write_motor(command:Command):Receipt
+>cycle(state:MotorState):Receipt=write_motor(step(state,sensor()).command)
 
-system MotorSafety
-  sensor -> decide
-  decide -> step
-  step -> write_motor
+system MotorSafety=cycle
 
 machine Motor(state:MotorState,input:Input)
   select=state.mode
@@ -86,6 +86,7 @@ class HeaderFirstLayoutTests(unittest.TestCase):
         self.assertEqual(components["sensor"], "external")
         self.assertEqual(components["decide"], "function")
         self.assertEqual(components["step"], "function")
+        self.assertEqual(components["cycle"], "function")
         self.assertEqual(components["write_motor"], "effect")
 
     def test_legacy_tail_placement_remains_compatible(self) -> None:
