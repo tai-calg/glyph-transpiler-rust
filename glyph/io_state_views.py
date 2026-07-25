@@ -41,10 +41,35 @@ def _render_type(ty: TypeRef) -> str:
     return f"{ty.name}<{','.join(_render_type(arg) for arg in ty.args)}>"
 
 
-def _signature(declaration: FunctionDecl | ExternDecl) -> dict[str, object]:
+def _source_external_names(model: CompilationModel) -> set[str]:
+    """Recover explicit `ext` declarations from the preprocessed public source."""
+
+    names: set[str] = set()
+    for original in model.preprocess.source.splitlines():
+        code = original.split("#", 1)[0].rstrip()
+        stripped = code.strip()
+        if not stripped or code[:1].isspace() or not stripped.startswith("ext "):
+            continue
+        signature = stripped[len("ext ") :].strip()
+        open_pos = signature.find("(")
+        if open_pos > 0:
+            names.add(signature[:open_pos].strip())
+    return names
+
+
+def _signature(
+    declaration: FunctionDecl | ExternDecl,
+    external_names: set[str],
+) -> dict[str, object]:
+    if isinstance(declaration, FunctionDecl):
+        kind = "function"
+    elif declaration.name in external_names:
+        kind = "external"
+    else:
+        kind = "effect"
     return {
         "name": declaration.name,
-        "kind": "effect" if isinstance(declaration, ExternDecl) else "function",
+        "kind": kind,
         "inputs": [
             {"name": parameter.name, "type": _render_type(parameter.ty)}
             for parameter in declaration.params
@@ -131,6 +156,7 @@ def _explicit_systems(
 ) -> tuple[list[dict[str, object]], set[str]]:
     systems: list[dict[str, object]] = []
     bound: set[str] = set()
+    declarations = {item.name: item for item in model.systems}
     for system in model.architecture.systems:
         nodes: list[dict[str, object]] = []
         for component in system.components:
@@ -146,14 +172,19 @@ def _explicit_systems(
                     signatures,
                 )
             )
+        declaration = declarations.get(system.name)
         systems.append(
             {
                 "id": system.id,
                 "name": system.name,
-                "kind": "declared-system",
+                "kind": "code-derived-system",
+                "entry": declaration.entry_name if declaration is not None else None,
                 "line": system.line,
                 "nodes": nodes,
-                "edges": [asdict(edge) for edge in system.edges],
+                "edges": [
+                    {**asdict(edge), "label": "calls"}
+                    for edge in system.edges
+                ],
             }
         )
     return systems, bound
@@ -203,12 +234,14 @@ def _implicit_program(
                 "source_id": edge.source_id,
                 "target_id": edge.target_id,
                 "line": edge.source.line,
+                "label": "calls",
             }
         )
     return {
         "id": "program_io",
         "name": "Program I/O",
         "kind": "derived-call-graph",
+        "entry": None,
         "line": 1,
         "nodes": nodes,
         "edges": edges,
@@ -226,6 +259,7 @@ def _unconnected_system(
         "id": "unconnected_declarations",
         "name": "Unconnected declarations",
         "kind": "declaration-set",
+        "entry": None,
         "line": min(int(item["line"]) for item in remaining),
         "nodes": [
             {
@@ -250,12 +284,14 @@ def build_io_state_views(
 ) -> dict[str, object]:
     """Project validated compiler models into I/O and StateTransitionIR v2.
 
-    Transition semantics are finalized before source-map restoration and before any
-    renderer sees the result. Renderers therefore consume only canonical fields.
+    Explicit systems are compiler-derived from actual function calls. `ext`
+    declarations remain visibly distinct from `!` effect boundaries even though
+    both lower through the Host binding layer.
     """
 
+    external_names = _source_external_names(model)
     signatures = {
-        declaration.name: _signature(declaration)
+        declaration.name: _signature(declaration, external_names)
         for declaration in model.program.declarations
         if isinstance(declaration, (FunctionDecl, ExternDecl))
     }
