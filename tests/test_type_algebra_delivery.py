@@ -50,6 +50,74 @@ machine Controller(state:State,event:Event)
 """.lstrip()
 
 
+INTEGER_SOURCE = """
+resource Token[Ready]
++Mode=Idle|Running
++Error=Rejected
+*State(mode:Mode)
+
+>step(state:State,value:u8):State|Error
+  value<10 >> Err(Rejected)
+  _ >> Ok(state)
+
+machine Controller(state:State,value:u8)
+  select=state.mode
+  init=State(Idle)
+  next=step(state,value)
+  success=Running
+  failure=Idle
+""".lstrip()
+
+
+def _compile_and_run_witnesses(
+    source: str,
+    source_name: str,
+    exports: str,
+) -> tuple[object, dict[str, object]]:
+    outputs = compile_outputs(source, source_name)
+    payload = json.loads(outputs.diagrams.files["type-algebra-tooling.json"])
+    with tempfile.TemporaryDirectory(prefix="glyph-machine-witness-") as directory:
+        root = Path(directory)
+        (root / "machine-coverage.generated.rs").write_text(
+            outputs.diagrams.files["machine-coverage.generated.rs"],
+            encoding="utf-8",
+        )
+        crate_source = (
+            outputs.artifacts.logic
+            + f"\npub mod generated {{ pub use super::{{{exports}}}; }}\n"
+            + 'pub mod machine_coverage { include!("machine-coverage.generated.rs"); }\n'
+        )
+        (root / "lib.rs").write_text(crate_source, encoding="utf-8")
+        executable = root / "machine-coverage-tests"
+        compile_result = subprocess.run(
+            [
+                "rustc",
+                "--edition",
+                "2021",
+                "--test",
+                "lib.rs",
+                "-o",
+                str(executable),
+            ],
+            cwd=root,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if compile_result.returncode != 0:
+            raise AssertionError(compile_result.stderr)
+        run_result = subprocess.run(
+            [str(executable)],
+            cwd=root,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if run_result.returncode != 0:
+            raise AssertionError(run_result.stdout + run_result.stderr)
+    return outputs, payload
+
+
 class TypeAlgebraDeliveryTests(unittest.TestCase):
     def test_normal_compilation_emits_tooling_defaults_and_witnesses(self) -> None:
         outputs = compile_outputs(SOURCE, "delivery.glyph")
@@ -84,48 +152,35 @@ class TypeAlgebraDeliveryTests(unittest.TestCase):
         )
 
     def test_generated_machine_witnesses_compile_and_run(self) -> None:
-        outputs = compile_outputs(SOURCE, "witness.glyph")
-        with tempfile.TemporaryDirectory(prefix="glyph-machine-witness-") as directory:
-            root = Path(directory)
-            (root / "machine-coverage.generated.rs").write_text(
-                outputs.diagrams.files["machine-coverage.generated.rs"],
-                encoding="utf-8",
-            )
-            crate_source = (
-                outputs.artifacts.logic
-                + "\npub mod generated { pub use super::{Mode, Event, Error, State, step, Token}; }\n"
-                + "pub mod machine_coverage { include!(\"machine-coverage.generated.rs\"); }\n"
-            )
-            (root / "lib.rs").write_text(crate_source, encoding="utf-8")
-            executable = root / "machine-coverage-tests"
-            compile_result = subprocess.run(
-                [
-                    "rustc",
-                    "--edition",
-                    "2021",
-                    "--test",
-                    "lib.rs",
-                    "-o",
-                    str(executable),
-                ],
-                cwd=root,
-                check=False,
-                capture_output=True,
-                text=True,
-            )
-            self.assertEqual(compile_result.returncode, 0, compile_result.stderr)
-            run_result = subprocess.run(
-                [str(executable)],
-                cwd=root,
-                check=False,
-                capture_output=True,
-                text=True,
-            )
-            self.assertEqual(
-                run_result.returncode,
-                0,
-                run_result.stdout + run_result.stderr,
-            )
+        _, payload = _compile_and_run_witnesses(
+            SOURCE,
+            "witness.glyph",
+            "Mode, Event, Error, State, step, Token",
+        )
+        witnesses = payload["machine_witnesses"][0]
+        self.assertEqual(witnesses["generated_tests"], 6)
+        self.assertEqual(witnesses["skipped_cases"], 0)
+
+    def test_partitioned_integer_witnesses_compile_and_run(self) -> None:
+        outputs, payload = _compile_and_run_witnesses(
+            INTEGER_SOURCE,
+            "integer-witness.glyph",
+            "Mode, Error, State, step, Token",
+        )
+        coverage = payload["machine_coverage"][0]
+        self.assertTrue(coverage["partitioned"])
+        self.assertEqual(coverage["region_count"], 4)
+        self.assertEqual(coverage["concrete_case_count"], "512")
+        self.assertEqual(
+            {item["value"] for case in coverage["cases"] for item in case["regions"]},
+            {"0..=9", "10..=255"},
+        )
+        witnesses = payload["machine_witnesses"][0]
+        self.assertEqual(witnesses["generated_tests"], 4)
+        self.assertEqual(witnesses["skipped_cases"], 0)
+        generated = outputs.diagrams.files["machine-coverage.generated.rs"]
+        self.assertIn("step(State { mode: Mode::Idle }, 0)", generated)
+        self.assertIn("step(State { mode: Mode::Idle }, 10)", generated)
 
     def test_legacy_compilation_does_not_gain_type_algebra_artifacts(self) -> None:
         outputs = compile_outputs(
