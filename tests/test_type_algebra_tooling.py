@@ -192,6 +192,142 @@ class TypeAlgebraToolingTests(unittest.TestCase):
         self.assertIn("machine-coverage-unknown", codes)
         self.assertNotIn("machine-coverage-missing", codes)
 
+    def test_u8_input_is_partitioned_by_guard_boundaries(self) -> None:
+        source = (
+            "resource Token[Ready]\n"
+            "+Mode=Idle|Running\n"
+            "+Error=Rejected\n"
+            "*State(mode:Mode)\n"
+            ">next(state:State,value:u8):State|Error\n"
+            "  value<10 >> Err(Rejected)\n"
+            "  value==100 >> Ok(State(Running))\n"
+            "  _ >> Ok(state)\n"
+            "machine Controller(state:State,value:u8)\n"
+            "  select=state.mode\n"
+            "  init=State(Idle)\n"
+            "  next=next(state,value)\n"
+            "  success=Running\n"
+            "  failure=Idle\n"
+        )
+        _, coverage = _coverage(source)
+        result = coverage[0]
+        self.assertTrue(result.partitioned)
+        self.assertEqual(
+            result.domain_semantics,
+            "selector×symbolic-input-partition",
+        )
+        self.assertEqual(result.input_cardinality, "256")
+        self.assertEqual(result.possible_pairs, "512")
+        self.assertEqual(result.region_count, 8)
+        self.assertEqual(result.rejected_pairs, 20)
+        self.assertEqual(result.defined_pairs, 2)
+        self.assertEqual(result.fallthrough_pairs, 490)
+        self.assertEqual(result.missing_pairs, "0")
+        self.assertEqual(result.unknown_pairs, 0)
+        self.assertTrue(result.complete)
+        self.assertTrue(result.exact)
+        regions = {
+            binding.value
+            for case in result.cases
+            for binding in case.regions
+            if binding.name == "value"
+        }
+        self.assertEqual(
+            regions,
+            {"0..=9", "10..=99", "100", "101..=255"},
+        )
+        self.assertEqual(
+            sum(int(case.multiplicity) for case in result.cases),
+            512,
+        )
+
+    def test_u64_domain_keeps_exact_concrete_counts_without_enumeration(self) -> None:
+        source = (
+            "resource Token[Ready]\n"
+            "+Mode=Idle|Running\n"
+            "*State(mode:Mode)\n"
+            ">next(state:State,value:u64):State\n"
+            "  value==0 >> State(Running)\n"
+            "  _ >> state\n"
+            "machine Controller(state:State,value:u64)\n"
+            "  select=state.mode\n"
+            "  init=State(Idle)\n"
+            "  next=next(state,value)\n"
+            "  success=Running\n"
+            "  failure=Idle\n"
+        )
+        _, coverage = _coverage(source)
+        result = coverage[0]
+        concrete = 2 * (1 << 64)
+        self.assertTrue(result.partitioned)
+        self.assertEqual(result.input_cardinality, str(1 << 64))
+        self.assertEqual(result.possible_pairs, str(concrete))
+        self.assertEqual(result.region_count, 4)
+        self.assertEqual(result.defined_pairs, 2)
+        self.assertEqual(result.fallthrough_pairs, concrete - 2)
+        self.assertEqual(result.unknown_pairs, 0)
+        self.assertTrue(result.complete)
+        self.assertTrue(result.exact)
+
+    def test_large_product_groups_unobserved_finite_fields(self) -> None:
+        source = (
+            "resource Token[Ready]\n"
+            "+Mode=Idle|Running\n"
+            "*Input(active:bool,b:bool,c:bool,d:bool,e:bool,f:bool,g:bool,h:bool,i:bool,j:bool)\n"
+            "*State(mode:Mode)\n"
+            ">next(state:State,input:Input):State\n"
+            "  input.active==true >> State(Running)\n"
+            "  _ >> state\n"
+            "machine Controller(state:State,input:Input)\n"
+            "  select=state.mode\n"
+            "  init=State(Idle)\n"
+            "  next=next(state,input)\n"
+            "  success=Running\n"
+            "  failure=Idle\n"
+        )
+        _, coverage = _coverage(source)
+        result = coverage[0]
+        self.assertTrue(result.partitioned)
+        self.assertEqual(result.input_cardinality, "1024")
+        self.assertEqual(result.possible_pairs, "2048")
+        self.assertEqual(result.region_count, 4)
+        self.assertEqual(result.defined_pairs, 1024)
+        self.assertEqual(result.fallthrough_pairs, 1024)
+        self.assertEqual(result.unknown_pairs, 0)
+        self.assertTrue(result.complete)
+        self.assertTrue(result.exact)
+
+    def test_unsupported_integer_arithmetic_remains_unknown(self) -> None:
+        source = (
+            "resource Token[Ready]\n"
+            "+Mode=Idle|Running\n"
+            "*State(mode:Mode)\n"
+            ">next(state:State,value:u8):State\n"
+            "  value+1<10 >> State(Running)\n"
+            "  _ >> state\n"
+            "machine Controller(state:State,value:u8)\n"
+            "  select=state.mode\n"
+            "  init=State(Idle)\n"
+            "  next=next(state,value)\n"
+            "  success=Running\n"
+            "  failure=Idle\n"
+        )
+        algebra, coverage = _coverage(source)
+        result = coverage[0]
+        self.assertTrue(result.partitioned)
+        self.assertEqual(result.missing_pairs, "0")
+        self.assertEqual(result.unknown_pairs, 512)
+        self.assertFalse(result.complete)
+        self.assertFalse(result.exact)
+        payload = tooling_payload(
+            algebra.diagnostics,
+            algebra.structural_conversions,
+            coverage,
+        )
+        codes = {item["code"] for item in payload["diagnostics"]}
+        self.assertIn("machine-coverage-unknown", codes)
+        self.assertNotIn("machine-coverage-missing", codes)
+
 
 if __name__ == "__main__":
     unittest.main()
