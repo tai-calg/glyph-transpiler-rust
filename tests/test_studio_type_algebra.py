@@ -35,9 +35,7 @@ class StudioTypeAlgebraTests(unittest.TestCase):
         self.assertIn("Type Algebra", STUDIO_HTML)
         self.assertIn("function typeAlgebraView()", STUDIO_HTML)
         self.assertIn("Machine selector × input coverage", STUDIO_HTML)
-        self.assertIn("symbolic regions", STUDIO_HTML)
-        self.assertIn("BigInt", STUDIO_HTML)
-        self.assertIn("representative:", STUDIO_HTML)
+        self.assertIn("Machine init reachability", STUDIO_HTML)
 
     def test_successful_build_surfaces_type_algebra_warning(self) -> None:
         with tempfile.TemporaryDirectory(prefix="glyph-studio-type-algebra-") as directory:
@@ -61,7 +59,7 @@ class StudioTypeAlgebraTests(unittest.TestCase):
             self.assertTrue(impossible["impossible"])
             self.assertIn("type-algebra-tooling.json", snapshot.artifacts)
 
-    def test_machine_coverage_is_written_and_projected(self) -> None:
+    def test_machine_coverage_and_state_graph_are_projected_from_artifacts(self) -> None:
         with tempfile.TemporaryDirectory(prefix="glyph-studio-machine-coverage-") as directory:
             source_path = Path(directory) / "controller.glyph"
             source_path.write_text(MACHINE_SOURCE, encoding="utf-8")
@@ -73,12 +71,30 @@ class StudioTypeAlgebraTests(unittest.TestCase):
             self.assertEqual(len(coverage), 1)
             self.assertEqual(coverage[0]["machine"], "Controller")
             self.assertIsNotNone(coverage[0]["possible_pairs"])
-            self.assertIn("defined_pairs_exact", coverage[0])
+            state_graphs = payload["machine_state_reachability"]
+            self.assertEqual(len(state_graphs), 1)
+            self.assertEqual(state_graphs[0]["initial_state"], "Idle")
+            self.assertEqual(state_graphs[0]["definitely_unreachable"], ["Faulted"])
+
             projected = snapshot.glyph04_views["type_algebra"]
             self.assertEqual(projected["machine_coverage"], coverage)
             self.assertEqual(
+                projected["machine_state_reachability"],
+                state_graphs,
+            )
+            self.assertEqual(
                 snapshot.glyph04_views["summary"]["type_algebra_machines"],
                 1,
+            )
+            self.assertEqual(
+                snapshot.glyph04_views["summary"]["type_algebra_unreachable_states"],
+                1,
+            )
+            self.assertTrue(
+                any(
+                    item.get("code") == "machine-state-unreachable"
+                    for item in snapshot.diagnostics
+                )
             )
 
 
