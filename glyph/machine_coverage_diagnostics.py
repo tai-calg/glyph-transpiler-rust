@@ -69,20 +69,6 @@ def build_machine_coverage_diagnostics(
                     line=line,
                 )
             )
-        if coverage.fallthrough_pairs:
-            diagnostics.append(
-                MachineCoverageDiagnostic(
-                    code="machine-coverage-fallthrough",
-                    severity="warning",
-                    message=(
-                        f"machine `{coverage.machine}` で明示ガードではなく末尾 `_` 節に"
-                        f"到達するselector×inputケースが {coverage.fallthrough_pairs}件ある"
-                        + _witnesses(coverage, "fallthrough")
-                    ),
-                    subject=coverage.machine,
-                    line=line,
-                )
-            )
         if coverage.overlap_pairs:
             diagnostics.append(
                 MachineCoverageDiagnostic(
