@@ -42,6 +42,7 @@ class DiagramLiveStabilityTests(unittest.TestCase):
         self.assertIn('activeTab="state"', html)
         self.assertIn("requestGeneration", html)
         self.assertIn("previewController.abort()", html)
+        self.assertIn("POLL_INTERVAL_MS = 3000", html)
         script = re.search(
             r'<script id="glyph-diagram-live-stability-v2-script">(.*?)</script>',
             html,
