@@ -17,11 +17,12 @@ from . import studio_ui as _studio_ui
 from .compiler import GlyphError
 from .incremental import IncrementalCompiler
 from .studio_type_algebra import attach_type_algebra_view, extend_studio_html
+from .studio_ui import STUDIO_HTML as _AUTHORITATIVE_STUDIO_HTML
 from .studio_views import build_studio_views
 from .type_algebra import build_machine_coverage, build_type_algebra_ir, tooling_payload
 
 
-STUDIO_HTML = extend_studio_html(_studio_ui.STUDIO_HTML)
+STUDIO_HTML = extend_studio_html(_AUTHORITATIVE_STUDIO_HTML)
 _studio_ui.STUDIO_HTML = STUDIO_HTML
 
 
