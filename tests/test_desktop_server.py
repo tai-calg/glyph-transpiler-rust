@@ -31,7 +31,7 @@ SOURCE = """machine Counter(state:State,input:Input)
 
 
 class DesktopServerTests(unittest.TestCase):
-    def test_launch_sets_session_cookie_and_api_rejects_unauthenticated_clients(self) -> None:
+    def test_launch_bootstraps_header_auth_and_api_rejects_unauthenticated_clients(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             source_path = Path(directory) / "counter.glyph"
             source_path.write_text(SOURCE, encoding="utf-8")
@@ -47,6 +47,9 @@ class DesktopServerTests(unittest.TestCase):
 
                 launch = urlopen(desktop.launch_url, timeout=3)
                 self.assertEqual(launch.status, HTTPStatus.OK)
+                html = launch.read().decode("utf-8")
+                self.assertIn("X-Glyph-Desktop-Token", html)
+                self.assertIn('const token = "test-token"', html)
                 cookie = launch.headers.get("Set-Cookie")
                 self.assertIsNotNone(cookie)
                 assert cookie is not None
@@ -55,7 +58,7 @@ class DesktopServerTests(unittest.TestCase):
 
                 request = Request(
                     api_url,
-                    headers={"Cookie": "glyph_desktop_session=test-token"},
+                    headers={"X-Glyph-Desktop-Token": "test-token"},
                 )
                 state = json.loads(urlopen(request, timeout=3).read().decode("utf-8"))
                 self.assertEqual(state["status"], "ready")
