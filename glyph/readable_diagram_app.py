@@ -6,6 +6,7 @@ from . import diagram_app
 from .diagram_editor_exports import enhance_diagram_editor_exports_html
 from .diagram_editor_render_guard import enhance_diagram_editor_render_guard_html
 from .diagram_editor_route_guard import enhance_diagram_editor_route_guard_html
+from .diagram_render_stability import enhance_diagram_render_stability_html
 from .initial_transition_layout import enhance_initial_transition_html
 from .state_transition_ir_renderer import enhance_state_transition_ir_html
 from .transition_label_layout import enhance_diagram_html
@@ -16,14 +17,16 @@ from .uml_transition_layout import enhance_uml_transition_html
 def run_diagram_app(input_path: str | Path) -> int:
     """Run the editable diagram app from compiler-produced StateTransitionIR v2."""
 
-    diagram_app.DIAGRAM_HTML = enhance_diagram_editor_render_guard_html(
-        enhance_diagram_editor_route_guard_html(
-            enhance_diagram_editor_exports_html(
-                enhance_state_transition_ir_html(
-                    enhance_initial_transition_html(
-                        enhance_transition_route_html(
-                            enhance_uml_transition_html(
-                                enhance_diagram_html(diagram_app.DIAGRAM_HTML)
+    diagram_app.DIAGRAM_HTML = enhance_diagram_render_stability_html(
+        enhance_diagram_editor_render_guard_html(
+            enhance_diagram_editor_route_guard_html(
+                enhance_diagram_editor_exports_html(
+                    enhance_state_transition_ir_html(
+                        enhance_initial_transition_html(
+                            enhance_transition_route_html(
+                                enhance_uml_transition_html(
+                                    enhance_diagram_html(diagram_app.DIAGRAM_HTML)
+                                )
                             )
                         )
                     )
