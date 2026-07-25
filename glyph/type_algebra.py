@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict, replace
+from dataclasses import asdict, dataclass, replace
 from typing import Sequence
 
 from .compiler import Program
@@ -16,6 +16,12 @@ from .machine_coverage_partitioned import (
 from .machine_coverage_diagnostics import (
     MachineCoverageDiagnostic,
     build_machine_coverage_diagnostics,
+)
+from .machine_state_reachability import (
+    MachineStateReachability,
+    MachineStateReachabilityDiagnostic,
+    build_machine_state_reachability,
+    build_machine_state_reachability_diagnostics,
 )
 from .type_algebra_impl import (
     AlgebraMonomial,
@@ -38,7 +44,21 @@ from .type_algebra_tooling import (
 )
 
 
-Diagnostic = TypeAlgebraDiagnostic | MachineCoverageDiagnostic
+Diagnostic = (
+    TypeAlgebraDiagnostic
+    | MachineCoverageDiagnostic
+    | MachineStateReachabilityDiagnostic
+)
+
+
+@dataclass(frozen=True)
+class EnrichedMachineCoverage(MachineCoverage):
+    """Coverage plus optional partition and init-based state-graph metadata."""
+
+    partitioned: bool = False
+    region_count: int = 0
+    concrete_case_count: str | None = None
+    state_reachability: MachineStateReachability | None = None
 
 
 class TypeAlgebraIR:
@@ -108,8 +128,41 @@ def _unique_diagnostics(items: Sequence[Diagnostic]) -> tuple[Diagnostic, ...]:
     return tuple(unique.values())
 
 
+def _enriched_coverage(
+    coverage: MachineCoverage,
+    reachability: MachineStateReachability | None,
+) -> EnrichedMachineCoverage:
+    return EnrichedMachineCoverage(
+        machine=coverage.machine,
+        state_type=coverage.state_type,
+        input_types=coverage.input_types,
+        state_cardinality=coverage.state_cardinality,
+        input_cardinality=coverage.input_cardinality,
+        possible_pairs=coverage.possible_pairs,
+        defined_pairs=coverage.defined_pairs,
+        missing_pairs=coverage.missing_pairs,
+        complete=coverage.complete,
+        reason=coverage.reason,
+        domain_semantics=coverage.domain_semantics,
+        selector_field=coverage.selector_field,
+        selector_type=coverage.selector_type,
+        selector_cardinality=coverage.selector_cardinality,
+        rejected_pairs=coverage.rejected_pairs,
+        fallthrough_pairs=coverage.fallthrough_pairs,
+        overlap_pairs=coverage.overlap_pairs,
+        unknown_pairs=coverage.unknown_pairs,
+        exact=coverage.exact,
+        cases=coverage.cases,
+        guards=coverage.guards,
+        partitioned=bool(getattr(coverage, "partitioned", False)),
+        region_count=int(getattr(coverage, "region_count", 0)),
+        concrete_case_count=getattr(coverage, "concrete_case_count", None),
+        state_reachability=reachability,
+    )
+
+
 def build_machine_coverage(*args, **kwargs) -> tuple[MachineCoverage, ...]:
-    """Run coverage v2 and attach its warnings to the transient analysis model."""
+    """Run coverage v2 and attach guard and init-based reachability warnings."""
 
     rows = _build_machine_coverage_v2(*args, **kwargs)
     fixed: list[MachineCoverage] = []
@@ -127,14 +180,33 @@ def build_machine_coverage(*args, **kwargs) -> tuple[MachineCoverage, ...]:
             for guard in coverage.guards
         )
         fixed.append(replace(coverage, guards=guards))
-    result = tuple(fixed)
+
+    program = kwargs.get("program")
+    if program is None and args:
+        program = args[0]
+    machines = kwargs.get("machines")
+    if machines is None and len(args) >= 2:
+        machines = args[1]
+
+    reachability: tuple[MachineStateReachability, ...] = ()
+    if isinstance(program, Program) and machines is not None:
+        reachability = build_machine_state_reachability(program, machines, tuple(fixed))
+    reachability_by_machine = {item.machine: item for item in reachability}
+    result = tuple(
+        _enriched_coverage(coverage, reachability_by_machine.get(coverage.machine))
+        for coverage in fixed
+    )
 
     algebra = kwargs.get("algebra")
     if algebra is None and len(args) >= 4:
         algebra = args[3]
     if isinstance(algebra, TypeAlgebraIR):
         algebra.diagnostics = _unique_diagnostics(
-            (*algebra.diagnostics, *build_machine_coverage_diagnostics(result))
+            (
+                *algebra.diagnostics,
+                *build_machine_coverage_diagnostics(result),
+                *build_machine_state_reachability_diagnostics(reachability),
+            )
         )
     return result
 
@@ -180,15 +252,39 @@ def _add_exact_coverage_counts(
     return payload
 
 
+def _extract_state_reachability(payload: dict[str, object]) -> dict[str, object]:
+    rows = payload.get("machine_coverage")
+    state_rows: list[object] = []
+    if isinstance(rows, list):
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            state = row.pop("state_reachability", None)
+            if state is not None:
+                state_rows.append(state)
+    payload["machine_state_reachability"] = state_rows
+    return payload
+
+
 def tooling_payload(
     diagnostics: Sequence[Diagnostic],
     structural: Sequence[StructuralConversion],
     machine_coverage: Sequence[MachineCoverage] = (),
 ) -> dict[str, object]:
+    state_reachability = tuple(
+        state
+        for coverage in machine_coverage
+        if (state := getattr(coverage, "state_reachability", None)) is not None
+    )
     combined = _unique_diagnostics(
-        (*diagnostics, *build_machine_coverage_diagnostics(machine_coverage))
+        (
+            *diagnostics,
+            *build_machine_coverage_diagnostics(machine_coverage),
+            *build_machine_state_reachability_diagnostics(state_reachability),
+        )
     )
     payload = _tooling_payload(combined, structural, machine_coverage)
+    payload = _extract_state_reachability(payload)
     return _add_exact_coverage_counts(payload, machine_coverage)
 
 
@@ -196,12 +292,15 @@ __all__ = [
     "AlgebraMonomial",
     "ConversionFunction",
     "CoverageBinding",
+    "EnrichedMachineCoverage",
     "ExhaustiveCase",
     "IsomorphismClass",
     "MachineCoverage",
     "MachineCoverageCase",
     "MachineCoverageDiagnostic",
     "MachineGuardCoverage",
+    "MachineStateReachability",
+    "MachineStateReachabilityDiagnostic",
     "StructuralConversion",
     "TypeAlgebraDiagnostic",
     "TypeAlgebraIR",
@@ -209,6 +308,8 @@ __all__ = [
     "TypeAlgebraType",
     "build_machine_coverage",
     "build_machine_coverage_diagnostics",
+    "build_machine_state_reachability",
+    "build_machine_state_reachability_diagnostics",
     "build_structural_conversions",
     "build_type_algebra_diagnostics",
     "build_type_algebra_ir",
