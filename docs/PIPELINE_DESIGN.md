@@ -2,14 +2,12 @@
 
 ## Purpose
 
-`system` draws the outer software architecture. `/>` draws the ordered logic inside one component.
+`system Name=entry` selects the executable entry whose real call graph forms the outer software architecture. `/>` expresses ordered value transformation inside one function.
 
 ```glyph
-system Door
-  sensor -> ctl
-  panel -> ctl
-  ctl -> lock
-  ctl -> log
+system Door=control
+
+ext sensor():In
 
 >ctl(i:In):C|Error=
   i
@@ -17,9 +15,27 @@ system Door
   /> |x| x.value
   /> |n| min(n,MAX)
   /> command
+
+!lock(c:C):B
+!log(c:C):B
+
+>apply(c:C):B=lock(c)&log(c)
+>control():B|Error=apply(ctl(sensor())?)
 ```
 
-The first block answers “which responsibilities are connected?”. The second answers “what happens inside `ctl`, and in which order?”.
+The compiler derives:
+
+```text
+control -> apply
+control -> ctl
+control -> sensor
+apply   -> lock
+apply   -> log
+ctl     -> validate
+ctl     -> command
+```
+
+There is no independent freehand architecture block. The outer graph and inner pipeline come from the same functions.
 
 ## Core semantics
 
@@ -74,7 +90,7 @@ R1 lowers each lambda to a deterministic internal pure function and then uses th
 __glyph_lambda_L<source-line>_<index>
 ```
 
-The declaration is assigned back to the source line where the lambda appeared.
+The declaration is assigned back to the source line where the lambda appeared. Code-derived system traversal flattens these compiler helpers so they do not appear as public architecture components.
 
 ## Capture and purity
 
@@ -115,35 +131,52 @@ Blank continuation lines are preserved during lowering so existing source line r
 
 ## Architecture declaration
 
-Architecture uses one connection per line.
+Canonical syntax:
 
 ```glyph
-system Door
-  sensor -> ctl
-  panel -> ctl
-  ctl -> lock
-  ctl -> log
+system Door=control
 ```
 
-Binding is automatic by name:
+`control` must be a body-bearing `>` function. The compiler resolves declarations after parsing the complete source and follows reachable named calls.
 
-- same-name `>` declaration: `function`
-- same-name `!` declaration: `effect`
-- same-name type declaration: `data`
-- no declaration: `external`
+External components are explicit:
 
-A component that matches multiple declaration kinds is rejected as ambiguous. Unresolved conceptual or external components are allowed.
+```glyph
+ext sensor():In
+ext panel():In
+```
+
+Binding rules:
+
+- `>` declaration: `function`
+- `ext` declaration: `external`
+- `!` declaration: `effect`
+- relabeled `~` declaration: `rust`
+- type declaration: never a callable system node
+- no declaration: compiler error
+
+Optional indented edges are assertions only:
+
+```glyph
+system Door=control
+  control -> sensor
+  control -> ctl
+```
+
+They must match actual direct calls. They cannot create a node or edge.
+
+Full semantics: [`CODE_DERIVED_SYSTEMS.md`](CODE_DERIVED_SYSTEMS.md).
 
 ## Generated views
 
 A source containing `system`, `machine`, `/>`, guards, and `?` temporal constraints produces:
 
 ```text
-Architecture  system connections
+Architecture  entry-reachable declared calls
 State         machine initial/transitions/success/failure
 Logic         named calls, guards, and lowered lambda stages
 Time          temporal constraints
-Rust          types, pure functions, effect adapters, monitors
+Rust          types, functions, Host adapters, monitors
 ```
 
 Generated files include:
@@ -166,7 +199,9 @@ typed-ast.json
 
 Implemented:
 
-- one-connection-per-line `system`
+- entry-bound, code-derived systems
+- explicit typed `ext` boundaries
+- checked optional architecture assertions
 - Architecture IR and Mermaid
 - Architecture Studio view
 - left-associative `/>`
@@ -184,3 +219,4 @@ Not implemented in R1:
 - standalone lambdas outside a `/>` pipeline
 - nested pipelines inside a lambda body
 - runtime `eval`
+- treating system call edges as process placement or physical wiring
