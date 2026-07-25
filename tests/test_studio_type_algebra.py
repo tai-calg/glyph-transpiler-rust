@@ -52,9 +52,9 @@ class StudioTypeAlgebraTests(unittest.TestCase):
                     for item in snapshot.diagnostics
                 )
             )
-            view = snapshot.glyph04_views["views"]["type_algebra"]
-            self.assertEqual(view["types"][0]["name"], "Impossible")
-            self.assertTrue(view["types"][0]["impossible"])
+            view = snapshot.glyph04_views["type_algebra"]
+            impossible = next(item for item in view["types"] if item["name"] == "Impossible")
+            self.assertTrue(impossible["impossible"])
             self.assertIn("type-algebra-tooling.json", snapshot.artifacts)
 
     def test_machine_coverage_is_written_and_projected(self) -> None:
@@ -69,7 +69,7 @@ class StudioTypeAlgebraTests(unittest.TestCase):
             self.assertEqual(len(coverage), 1)
             self.assertEqual(coverage[0]["machine"], "Controller")
             self.assertIsNotNone(coverage[0]["possible_pairs"])
-            projected = snapshot.glyph04_views["views"]["type_algebra"]
+            projected = snapshot.glyph04_views["type_algebra"]
             self.assertEqual(projected["machine_coverage"], coverage)
             self.assertEqual(
                 snapshot.glyph04_views["summary"]["type_algebra_machines"],
