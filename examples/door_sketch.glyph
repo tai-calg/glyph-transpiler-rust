@@ -1,8 +1,4 @@
-system Door
-  sensor -> ctl
-  panel -> ctl
-  ctl -> lock
-  ctl -> log
+system Door=control
 
 @MAX=1000
 
@@ -10,6 +6,10 @@ system Door
 +C=Stop|Run(U)
 +Error=Bad
 
+ext sensor():In
+ext panel():In
+
+>merge(sensor_input:In,panel_input:In):In=In(panel_input.open,panel_input.auth,sensor_input.stop,max(sensor_input.value,panel_input.value))
 >validate(i:In):In|Error=Ok(i)
 >command(n:U):C|Error=Ok(Run(n))
 
@@ -22,5 +22,8 @@ system Door
 
 !lock(c:C):B=true
 !log(c:C):B=true
+
+>apply(c:C):B=lock(c)&log(c)
+>control():B|Error=apply(ctl(merge(sensor(),panel()))?)
 
 ?safe(*In)=@A(!auth >> !open)
