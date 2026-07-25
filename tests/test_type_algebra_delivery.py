@@ -30,8 +30,28 @@ machine Controller(state:State,event:Event)
 """.lstrip()
 
 
+UNREACHABLE_SOURCE = """
+resource Token[Ready]
++Mode=Idle|Running
++Event=Start|Stop
+*State(mode:Mode)
+
+>step(state:State,event:Event):State
+  state.mode==Idle >> State(Running)
+  state.mode==Idle >> State(Idle)
+  _ >> state
+
+machine Controller(state:State,event:Event)
+  select=state.mode
+  init=State(Idle)
+  next=step(state,event)
+  success=Running
+  failure=Idle
+""".lstrip()
+
+
 class TypeAlgebraDeliveryTests(unittest.TestCase):
-    def test_normal_compilation_emits_tooling_fallthrough_and_witnesses(self) -> None:
+    def test_normal_compilation_emits_tooling_defaults_and_witnesses(self) -> None:
         outputs = compile_outputs(SOURCE, "delivery.glyph")
         files = outputs.diagrams.files
         self.assertIn("type-algebra-tooling.json", files)
@@ -39,13 +59,29 @@ class TypeAlgebraDeliveryTests(unittest.TestCase):
 
         payload = json.loads(files["type-algebra-tooling.json"])
         diagnostics = {item["code"] for item in payload["diagnostics"]}
-        self.assertIn("machine-coverage-fallthrough", diagnostics)
+        self.assertNotIn("machine-coverage-fallthrough", diagnostics)
         coverage = payload["machine_coverage"][0]
         self.assertEqual(coverage["fallthrough_pairs"], 2)
         witnesses = payload["machine_witnesses"][0]
         self.assertEqual(witnesses["machine"], "Controller")
         self.assertEqual(witnesses["generated_tests"], 6)
         self.assertEqual(witnesses["skipped_cases"], 0)
+
+    def test_normal_compilation_warns_for_unreachable_guard(self) -> None:
+        outputs = compile_outputs(UNREACHABLE_SOURCE, "unreachable.glyph")
+        payload = json.loads(outputs.diagrams.files["type-algebra-tooling.json"])
+        diagnostics = payload["diagnostics"]
+        unreachable = [
+            item
+            for item in diagnostics
+            if item["code"] == "machine-coverage-unreachable"
+        ]
+        self.assertEqual(len(unreachable), 1)
+        self.assertIn("ガード#2", unreachable[0]["message"])
+        self.assertNotIn(
+            "machine-coverage-fallthrough",
+            {item["code"] for item in diagnostics},
+        )
 
     def test_generated_machine_witnesses_compile_and_run(self) -> None:
         outputs = compile_outputs(SOURCE, "witness.glyph")
