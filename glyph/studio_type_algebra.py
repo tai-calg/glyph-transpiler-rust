@@ -10,36 +10,46 @@ def _records(value: object) -> list[Mapping[str, object]]:
     return [item for item in value if isinstance(item, Mapping)]
 
 
+def _json_value(value: object) -> object:
+    if isinstance(value, tuple):
+        return [_json_value(item) for item in value]
+    if isinstance(value, list):
+        return [_json_value(item) for item in value]
+    if isinstance(value, Mapping):
+        return {str(key): _json_value(item) for key, item in value.items()}
+    return value
+
+
 def attach_type_algebra_view(
     studio_views: Mapping[str, object],
     algebra: Mapping[str, object],
     tooling: Mapping[str, object],
 ) -> dict[str, object]:
-    """Attach Type Algebra data to the Studio-only projection.
-
-    Compiler Public IR is not changed. This function only enriches the Studio state
-    that is served to the browser.
-    """
+    """Attach Type Algebra data without changing the seven orthogonal view contract."""
 
     result = deepcopy(dict(studio_views))
-    views = result.setdefault("views", {})
     summary = result.setdefault("summary", {})
-    if not isinstance(views, dict) or not isinstance(summary, dict):
-        raise ValueError("invalid Studio view payload")
+    if not isinstance(summary, dict):
+        raise ValueError("invalid Studio summary payload")
 
-    types = [dict(item) for item in _records(algebra.get("types"))]
-    diagnostics = [dict(item) for item in _records(tooling.get("diagnostics"))]
+    types = [_json_value(dict(item)) for item in _records(algebra.get("types"))]
+    diagnostics = [
+        _json_value(dict(item)) for item in _records(tooling.get("diagnostics"))
+    ]
     structural = [
-        dict(item) for item in _records(tooling.get("structural_conversions"))
+        _json_value(dict(item))
+        for item in _records(tooling.get("structural_conversions"))
     ]
     machine_coverage = [
-        dict(item) for item in _records(tooling.get("machine_coverage"))
+        _json_value(dict(item))
+        for item in _records(tooling.get("machine_coverage"))
     ]
     isomorphism_classes = [
-        dict(item) for item in _records(algebra.get("isomorphism_classes"))
+        _json_value(dict(item))
+        for item in _records(algebra.get("isomorphism_classes"))
     ]
 
-    views["type_algebra"] = {
+    result["type_algebra"] = {
         "types": types,
         "diagnostics": diagnostics,
         "isomorphism_classes": isomorphism_classes,
@@ -49,11 +59,17 @@ def attach_type_algebra_view(
     summary.update(
         {
             "type_algebra_types": len(types),
-            "type_algebra_impossible": sum(bool(item.get("impossible")) for item in types),
+            "type_algebra_impossible": sum(
+                bool(item.get("impossible"))
+                for item in types
+                if isinstance(item, Mapping)
+            ),
             "type_algebra_diagnostics": len(diagnostics),
             "type_algebra_isomorphisms": len(isomorphism_classes),
             "type_algebra_structural_conversions": sum(
-                bool(item.get("generated")) for item in structural
+                bool(item.get("generated"))
+                for item in structural
+                if isinstance(item, Mapping)
             ),
             "type_algebra_machines": len(machine_coverage),
         }
@@ -86,7 +102,7 @@ def extend_studio_html(html: str) -> str:
 
     renderer = r'''
 function typeAlgebraView(){
- const view=studioView('type_algebra'),types=view.types||[],diagnostics=view.diagnostics||[],classes=view.isomorphism_classes||[],structural=view.structural_conversions||[],coverage=view.machine_coverage||[];
+ const view=state?.glyph04_views?.type_algebra||{},types=view.types||[],diagnostics=view.diagnostics||[],classes=view.isomorphism_classes||[],structural=view.structural_conversions||[],coverage=view.machine_coverage||[];
  if(!types.length&&!coverage.length)return empty('Type Algebra analysis is not available for this source.');
  const finite=types.filter(item=>item.cardinality_exact).length,impossible=types.filter(item=>item.impossible).length,generated=structural.filter(item=>item.generated).length;
  const cards=`<div class="cards"><div class="card"><div class="value">${types.length}</div><div class="label">Types</div></div><div class="card"><div class="value">${finite}</div><div class="label">Exact finite domains</div></div><div class="card"><div class="value">${impossible}</div><div class="label">Impossible types</div></div><div class="card"><div class="value">${generated}</div><div class="label">Structural conversions</div></div></div>`;
