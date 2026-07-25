@@ -13,6 +13,24 @@ _SCRIPT = r"""
     return systems[systemIndex] || null;
   }
 
+  function normalizeDeclaredPorts(system) {
+    const cards = [...document.querySelectorAll(".canvas-shell .graph-node")];
+    const nodes = system?.nodes || [];
+    cards.forEach((card, index) => {
+      const node = nodes[index];
+      if (!node?.declared_io) return;
+      const groups = [...card.querySelectorAll(".port-group")];
+      if (!(node.inputs || []).length) {
+        const emptyInput = groups[0]?.querySelector(".unknown");
+        if (emptyInput) emptyInput.textContent = "none";
+      }
+      if (node.output === null || node.output === undefined) {
+        const emptyOutput = groups[1]?.querySelector(".unknown");
+        if (emptyOutput) emptyOutput.textContent = "none";
+      }
+    });
+  }
+
   function enhance() {
     if (activeTab !== "io") return;
     const system = selectedSystem();
@@ -30,6 +48,7 @@ _SCRIPT = r"""
       if (label.textContent !== text) label.textContent = text;
       label.title = text;
     });
+    normalizeDeclaredPorts(system);
 
     const current = document.querySelector('[data-system-meta-owner="code-derived"]');
     if (!system?.entry) {
