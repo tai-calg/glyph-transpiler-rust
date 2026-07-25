@@ -204,6 +204,30 @@ Example:
 
 `inputs` contains executable representative values. `regions` describes the complete represented subset.
 
+### Exact large-count interchange
+
+Existing numeric count fields are retained for compatibility. Because JavaScript numbers cannot exactly represent every integer above `2^53 - 1`, tooling JSON also emits authoritative decimal-string fields:
+
+```text
+defined_pairs_exact
+rejected_pairs_exact
+fallthrough_pairs_exact
+missing_pairs_exact
+overlap_pairs_exact
+unknown_pairs_exact
+```
+
+Guard counters likewise emit:
+
+```text
+true_cases_exact
+first_match_cases_exact
+shadowed_cases_exact
+unknown_cases_exact
+```
+
+Consumers that require exact arithmetic must prefer the `*_exact` field. Glyph Studio parses these strings with `BigInt`; it does not convert them through an IEEE-754 number first.
+
 ## Executable Rust witnesses
 
 One Rust witness is generated per deterministic symbolic region, using its representative value.
@@ -241,5 +265,6 @@ If symbolic region count itself exceeds the configured limit, analysis returns `
 6. Source order and default-branch semantics are unchanged.
 7. Exact counts are weighted by region cardinality.
 8. No input value is fabricated outside its declared type.
-9. No Glyph syntax or runtime behavior changes.
-10. PR #25 remains Draft until explicitly changed.
+9. Exact interchange uses decimal strings beyond JavaScript's safe-integer range.
+10. No Glyph syntax or runtime behavior changes.
+11. PR #25 remains Draft until explicitly changed.
