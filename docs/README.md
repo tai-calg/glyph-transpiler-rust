@@ -19,6 +19,7 @@ Glyphの詳細文書をこのディレクトリへ集約しています。入口
 - [Glyph: expression trees and one-process development environment](LISP_CORE.md)
 - [Glyph Maintainability Boundaries](MAINTAINABILITY.md)
 - [Glyph Monoidal IR](MONOIDAL_IR.md)
+- [Glyph Type Algebra IR](TYPE_ALGEBRA_IR.md)
 - [Glyph `/>` Lambda Pipeline Design](PIPELINE_DESIGN.md)
 - [Glyph raw preprocessor](PREPROCESSOR.md)
 - [PR #10 Implementation Notes](PR_IMPLEMENTATION_NOTES.md)

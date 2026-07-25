@@ -24,6 +24,12 @@
 - semantic Host operations for Capability, Resource, World, Protocol, Handler, and Law
 - representation-neutral `host-binding.generated.rs` trait scaffold
 - standalone `rustc` verification of the generated Host Binding scaffold
+- `glyph.type-algebra-ir` version 1 for pure product, sum, and alias declarations
+- commutative-semiring normalization, exact finite cardinality, and impossible-type detection
+- conservative symbolic handling of unknown, floating-point, and recursive type domains
+- structural type-isomorphism classes from equal normal forms
+- bounded exhaustive value generation and deterministic finite bijection generation
+- generated uniqueness and bidirectional round-trip Rust tests
 - Glyph Studio projection from the canonical typed design
 - Capability, Resource identity/state, World/Region, Protocol sequence, Handler exit, Law/monitor, and Verification-strength views
 - `glyph.studio-views` version 2 Studio state and `studio-views.json`
@@ -52,6 +58,21 @@ These artifacts specify which semantic operations a project Host must provide. T
 The same Glyph type may have different representation slots in different Worlds. For example, `share Service @ UiWindow` and `share Service @ WorkerTask` are independent associated types in the generated trait.
 
 The design is documented in `HOST_BINDING_DESIGN.md`.
+
+## Type Algebra boundary
+
+Glyph 0.4 opt-in compilation additionally emits:
+
+```text
+type-algebra-ir.json
+type-algebra.generated.rs
+```
+
+The IR treats sum types as addition, product types as multiplication, `Never` as zero, and `Unit` or `()` as one. It distributes products over sums and compares the resulting canonical polynomials. Equal normal forms mean only that the pure value sets are structurally isomorphic candidates; they do not imply equal field meaning, Rust layout, ABI, ownership behavior, or runtime cost.
+
+Automatic conversion generation is restricted to non-empty types whose complete value sets can be enumerated within the configured bound. Unknown types, floating-point domains, recursive references, Capability, Resource, World, Protocol, Handler, and Law remain outside automatic conversion generation.
+
+The design is documented in `TYPE_ALGEBRA_IR.md`.
 
 ## Glyph Studio 0.4 boundary
 
