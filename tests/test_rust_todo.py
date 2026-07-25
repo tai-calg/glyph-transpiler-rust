@@ -57,16 +57,19 @@ class GuardAndRustTodoTests(unittest.TestCase):
 
     def test_architecture_marks_manual_rust_component(self) -> None:
         source = """
-system Planner
-  input -> solve
-  solve -> output
+system Planner=run
 
+ext input():U
+ext output(x:U):U
 ~solve(x:U):U
+>run():U=output(solve(input()))
 """
         model = parse_compilation_model(source)
         components = model.architecture.systems[0].components
         solve = next(item for item in components if item.name == "solve")
         self.assertEqual(solve.kind, "rust")
+        external = {item.name for item in components if item.kind == "external"}
+        self.assertEqual(external, {"input", "output"})
 
     def test_studio_creates_manual_once_and_preserves_edits(self) -> None:
         source_text = """
