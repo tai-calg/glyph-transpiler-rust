@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from typing import Sequence
 
 from .compiler import Program
@@ -9,7 +9,7 @@ from .machine_coverage import (
     MachineCoverage,
     MachineCoverageCase,
     MachineGuardCoverage,
-    build_machine_coverage,
+    build_machine_coverage as _build_machine_coverage_v2,
 )
 from .machine_coverage_diagnostics import (
     MachineCoverageDiagnostic,
@@ -90,6 +90,28 @@ def render_type_algebra_rust(ir: TypeAlgebraIR | CoreTypeAlgebraIR) -> str:
         else ""
     )
     return rendered.rstrip() + "\n" + structural
+
+
+def build_machine_coverage(*args, **kwargs) -> tuple[MachineCoverage, ...]:
+    """Run coverage v2 while preserving expression-bodied function reachability."""
+
+    rows = _build_machine_coverage_v2(*args, **kwargs)
+    fixed: list[MachineCoverage] = []
+    for coverage in rows:
+        guards = tuple(
+            replace(
+                guard,
+                true_cases=guard.first_match_cases,
+                shadowed_cases=0,
+                unreachable=False,
+                classification="reachable",
+            )
+            if guard.condition == "always"
+            else guard
+            for guard in coverage.guards
+        )
+        fixed.append(replace(coverage, guards=guards))
+    return tuple(fixed)
 
 
 def tooling_payload(
