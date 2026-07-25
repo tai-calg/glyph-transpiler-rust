@@ -6,7 +6,7 @@ import { chromium } from "playwright";
 
 const port = 8886;
 const url = `http://127.0.0.1:${port}`;
-const outputDirectory = path.resolve("build/code-derived-system-io");
+const outputDirectory = path.resolve("build/checked-system-context-io");
 await fs.mkdir(outputDirectory, { recursive: true });
 
 async function waitForServer(child, logs) {
@@ -56,31 +56,52 @@ try {
   const apiState = await waitForServer(child, logs);
   const system = apiState.views.io.systems.find(item => item.name === "DoorController");
   assert(system, "DoorController system is missing");
-  assert.equal(system.kind, "code-derived-system");
+  assert.equal(system.kind, "checked-system-context");
   assert.equal(system.entry, "control");
 
+  assert.deepEqual(
+    new Set(system.ports.map(port => `${port.direction}:${port.name}:${port.type}`)),
+    new Set([
+      "input:state:DoorState",
+      "input:sensor:Input",
+      "output:receipt:Receipt",
+    ]),
+  );
+
   const nodes = new Map(system.nodes.map(node => [node.name, node]));
+  assert.deepEqual(
+    new Set(nodes.keys()),
+    new Set(["state", "sensor", "control", "receipt", "lock", "alarm"]),
+  );
+  assert.equal(nodes.get("state")?.kind, "input");
   assert.equal(nodes.get("sensor")?.kind, "external");
   assert.equal(nodes.get("sensor")?.declared_io, true);
-  assert.equal(nodes.get("sensor")?.output, "Input");
+  assert.equal(nodes.get("sensor")?.port_type, "Input");
+  assert.equal(nodes.get("receipt")?.kind, "output");
+  assert.equal(nodes.get("receipt")?.port_type, "Receipt");
   assert.equal(nodes.get("control")?.kind, "function");
   assert.equal(nodes.get("lock")?.kind, "effect");
   assert.equal(nodes.get("alarm")?.kind, "effect");
-  assert.equal(system.nodes.some(node => node.declared_io === false), false);
 
   const names = new Map(system.nodes.map(node => [node.id, node.name]));
-  const edges = new Set(system.edges.map(edge => `${names.get(edge.source_id)}->${names.get(edge.target_id)}`));
+  const edges = new Set(
+    system.edges.map(
+      edge => `${names.get(edge.source_id)}->${names.get(edge.target_id)}:${edge.label}`,
+    ),
+  );
   for (const expected of [
-    "control->apply",
-    "control->step",
-    "control->sensor",
-    "step->decide",
-    "decide->authenticate",
-    "apply->lock",
-    "apply->alarm",
+    "state->control:data",
+    "sensor->control:data",
+    "control->receipt:returns",
+    "control->lock:effect",
+    "control->alarm:effect",
   ]) {
-    assert(edges.has(expected), `missing code-derived edge ${expected}`);
+    assert(edges.has(expected), `missing checked boundary edge ${expected}`);
   }
+  assert.deepEqual(
+    new Set(system.evidence.map(item => item.kind)),
+    new Set(["entry-parameter", "external-input-read", "return-type", "effect-reachability"]),
+  );
 
   const page = await browser.newPage({ viewport: { width: 1800, height: 1100 } });
   await page.goto(url, { waitUntil: "networkidle" });
@@ -88,7 +109,7 @@ try {
   await page.waitForFunction(() => {
     const selected = document.querySelector("#system-select")?.selectedOptions?.[0]?.textContent;
     return selected === "DoorController"
-      && document.body.textContent?.includes("Derived from code")
+      && document.body.textContent?.includes("Checked system context")
       && document.body.textContent?.includes("Entry: control");
   });
 
@@ -103,14 +124,16 @@ try {
     })),
   }));
 
-  assert(result.note?.includes("実際の関数呼出しを追跡"));
-  assert(result.edgeLabels.length > 0);
-  assert(result.edgeLabels.every(label => label === "calls"));
-  assert.equal(result.nodes.some(node => node.input?.includes("undeclared") || node.output?.includes("undeclared")), false);
+  assert(result.note?.includes("call graphとは別のview"));
+  assert.deepEqual(new Set(result.edgeLabels), new Set(["data", "returns", "effect"]));
+  assert.equal(
+    result.nodes.some(node => node.input?.includes("undeclared") || node.output?.includes("undeclared")),
+    false,
+  );
   assert(result.nodes.some(node => node.name === "sensor" && node.kind?.startsWith("external")));
 
   await page.screenshot({
-    path: path.join(outputDirectory, "door-controller-code-derived-io.png"),
+    path: path.join(outputDirectory, "door-controller-checked-system-context.png"),
     fullPage: true,
   });
   await page.close();
@@ -119,4 +142,4 @@ try {
   await stopProcess(child);
 }
 
-console.log("verified code-derived system topology, explicit ext ports, and call-only edges");
+console.log("verified checked System Context ports, semantic flow edges, and explicit boundaries");

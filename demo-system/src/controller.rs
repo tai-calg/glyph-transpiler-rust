@@ -6,38 +6,147 @@ use crate::generated::{
 };
 use crate::host;
 
-pub const VIOLATION_ACK_TIMEOUT: u16 = 1;
-pub const VIOLATION_HEARTBEAT_LOSS: u16 = 2;
-pub const VIOLATION_UNAUTHORIZED_OPEN: u16 = 3;
-pub const VIOLATION_EMERGENCY_OPEN: u16 = 4;
-pub const VIOLATION_FAULT_OPEN: u16 = 5;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ViolationCode {
+    AckTimeout,
+    HeartbeatLoss,
+    UnauthorizedOpen,
+    EmergencyOpen,
+    FaultOpen,
+}
+
+impl ViolationCode {
+    pub(crate) const fn wire_code(self) -> u16 {
+        match self {
+            Self::AckTimeout => 1,
+            Self::HeartbeatLoss => 2,
+            Self::UnauthorizedOpen => 3,
+            Self::EmergencyOpen => 4,
+            Self::FaultOpen => 5,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SystemSnapshot {
+    mode: Mode,
+    sequence: u16,
+    last_speed: u16,
+    command: Command,
+    closed: bool,
+    stable: bool,
+}
+
+impl SystemSnapshot {
+    fn from_system(system: &System) -> Self {
+        Self {
+            mode: system.mode.clone(),
+            sequence: system.sequence,
+            last_speed: system.last_speed,
+            command: system.command.clone(),
+            closed: system.closed,
+            stable: system.stable,
+        }
+    }
+
+    pub const fn mode(&self) -> &Mode {
+        &self.mode
+    }
+
+    pub const fn sequence(&self) -> u16 {
+        self.sequence
+    }
+
+    pub const fn last_speed(&self) -> u16 {
+        self.last_speed
+    }
+
+    pub const fn command(&self) -> &Command {
+        &self.command
+    }
+
+    pub const fn closed(&self) -> bool {
+        self.closed
+    }
+
+    pub const fn stable(&self) -> bool {
+        self.stable
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ReceiptSnapshot {
+    command: Command,
+    sequence: u16,
+}
+
+impl ReceiptSnapshot {
+    fn from_cycle(cycle: &Cycle) -> Self {
+        Self {
+            command: cycle.receipt.command.clone(),
+            sequence: cycle.receipt.sequence,
+        }
+    }
+
+    pub const fn command(&self) -> &Command {
+        &self.command
+    }
+
+    pub const fn sequence(&self) -> u16 {
+        self.sequence
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MonitorSnapshot {
-    pub ack_deadline: TemporalVerdict,
-    pub heartbeat_live: TemporalVerdict,
-    pub authorization_safe: TemporalVerdict,
-    pub emergency_safe: TemporalVerdict,
-    pub fault_safe: TemporalVerdict,
-    pub convergence: TemporalVerdict,
+    ack_deadline: TemporalVerdict,
+    heartbeat_live: TemporalVerdict,
+    authorization_safe: TemporalVerdict,
+    emergency_safe: TemporalVerdict,
+    fault_safe: TemporalVerdict,
+    convergence: TemporalVerdict,
 }
 
 impl MonitorSnapshot {
-    fn recovery(self) -> Option<(u16, Command)> {
+    pub const fn ack_deadline(&self) -> TemporalVerdict {
+        self.ack_deadline
+    }
+
+    pub const fn heartbeat_live(&self) -> TemporalVerdict {
+        self.heartbeat_live
+    }
+
+    pub const fn authorization_safe(&self) -> TemporalVerdict {
+        self.authorization_safe
+    }
+
+    pub const fn emergency_safe(&self) -> TemporalVerdict {
+        self.emergency_safe
+    }
+
+    pub const fn fault_safe(&self) -> TemporalVerdict {
+        self.fault_safe
+    }
+
+    pub const fn convergence(&self) -> TemporalVerdict {
+        self.convergence
+    }
+
+    fn recovery(&self) -> Option<(ViolationCode, Command)> {
         if self.emergency_safe == TemporalVerdict::Violated {
-            return Some((VIOLATION_EMERGENCY_OPEN, Command::EmergencyStop));
+            return Some((ViolationCode::EmergencyOpen, Command::EmergencyStop));
         }
         if self.fault_safe == TemporalVerdict::Violated {
-            return Some((VIOLATION_FAULT_OPEN, Command::EmergencyStop));
+            return Some((ViolationCode::FaultOpen, Command::EmergencyStop));
         }
         if self.authorization_safe == TemporalVerdict::Violated {
-            return Some((VIOLATION_UNAUTHORIZED_OPEN, Command::EmergencyStop));
+            return Some((ViolationCode::UnauthorizedOpen, Command::EmergencyStop));
         }
         if self.ack_deadline == TemporalVerdict::Violated {
-            return Some((VIOLATION_ACK_TIMEOUT, Command::Stop));
+            return Some((ViolationCode::AckTimeout, Command::Stop));
         }
         if self.heartbeat_live == TemporalVerdict::Violated {
-            return Some((VIOLATION_HEARTBEAT_LOSS, Command::Stop));
+            return Some((ViolationCode::HeartbeatLoss, Command::Stop));
         }
         None
     }
@@ -45,8 +154,26 @@ impl MonitorSnapshot {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct StepOutcome {
-    pub cycle: Cycle,
-    pub monitors: MonitorSnapshot,
+    cycle: Cycle,
+    monitors: MonitorSnapshot,
+}
+
+impl StepOutcome {
+    pub fn system(&self) -> SystemSnapshot {
+        SystemSnapshot::from_system(&self.cycle.system)
+    }
+
+    pub fn receipt(&self) -> ReceiptSnapshot {
+        ReceiptSnapshot::from_cycle(&self.cycle)
+    }
+
+    pub const fn monitors(&self) -> &MonitorSnapshot {
+        &self.monitors
+    }
+
+    pub(crate) const fn raw_cycle(&self) -> &Cycle {
+        &self.cycle
+    }
 }
 
 /// Glyph生成ロジックと、時刻・I/O・違反復旧を接続するホスト側制御器。
@@ -72,7 +199,7 @@ impl Controller {
         })
     }
 
-    pub fn with_state(state: System) -> Self {
+    pub(crate) fn with_state(state: System) -> Self {
         Self {
             state,
             ack_deadline: AckDeadlineStreamingMonitor::new(),
@@ -84,7 +211,11 @@ impl Controller {
         }
     }
 
-    pub fn state(&self) -> &System {
+    pub fn state(&self) -> SystemSnapshot {
+        SystemSnapshot::from_system(&self.state)
+    }
+
+    pub(crate) const fn raw_state(&self) -> &System {
         &self.state
     }
 
@@ -93,7 +224,7 @@ impl Controller {
     pub fn tick(&mut self, at_ms: u64, input: Input) -> Result<StepOutcome, Error> {
         let monitors = self.step_monitors(at_ms, &input);
         let cycle = if let Some((code, command)) = monitors.recovery() {
-            host::report_violation(code)?;
+            host::report_violation(code.wire_code())?;
             let next = transition(self.state.clone(), command);
             host::write_actuator(next)?
         } else {
@@ -112,15 +243,6 @@ impl Controller {
             fault_safe: self.fault_safe.finish(),
             convergence: self.convergence.finish(),
         }
-    }
-
-    pub fn reset_monitors(&mut self) {
-        self.ack_deadline.reset();
-        self.heartbeat_live.reset();
-        self.authorization_safe.reset();
-        self.emergency_safe.reset();
-        self.fault_safe.reset();
-        self.convergence.reset();
     }
 
     fn step_monitors(&mut self, at_ms: u64, input: &Input) -> MonitorSnapshot {

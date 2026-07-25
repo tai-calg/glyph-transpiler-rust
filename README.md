@@ -94,131 +94,33 @@ Contract名は`'Name`、適用は`@{'Name}`で通常の型・値名と区別し�
 
 完全な仕様、保証範囲、Host責任、コード例は[`docs/CONTRACTS.md`](docs/CONTRACTS.md)を参照してください。全層を接続した受入例は[`examples/acceptance/glyph04_system.glyph`](examples/acceptance/glyph04_system.glyph)です。
 
-## コードに基づく`system`ヘッダ
+## 検証付きSystem Context
 
-`system`は自由記述の構成図ではありません。**本体を持つ入口関数を指定し、その関数から実際に到達する呼出しだけをコンパイラがI/O図へ投影します。**
-
-```glyph
-system MotorSafety=cycle
-
-machine Motor(state:MotorState,input:Input)
-  select=state.mode
-  init=MotorState(Stopped,Stop)
-  next=step(state,input)
-  success=Stopped
-  failure=Faulted
-
-# 以降に型・関数・作用境界を宣言する
-```
-
-`cycle`は後ろに宣言して構いません。ファイル全体を解析してからforward bindingします。
+`system`はcall graphを生成する入口指定ではなく、**外部境界、typed port、主要なデータ・戻り値・作用flowを先に示すArchitecture contract**です。
 
 ```glyph
->decide(input:Input):Command
-  ...
+system MotorSafety
+  entry cycle
 
->step(state:MotorState,input:Input):MotorState
-  command := decide(input)
-  ...
+  in state:MotorState
+  in input:Input
+  out receipt:Receipt
 
-!write_motor(command:Command):Receipt
-
->cycle(state:MotorState,input:Input):Receipt=write_motor(step(state,input).command)
+  state -> cycle
+  input -> cycle
+  cycle -> receipt
+  cycle -> write_motor
 ```
 
-このコードからI/O図は次を導出します。
-
-```text
-cycle -> write_motor
-cycle -> step
-step  -> decide
-```
-
-コードに存在しないnodeや接続を`system`だけで作ることはできません。
-
-### `ext`: 明示的な外部境界
-
-センサー、パネル、外部サービスなど、Glyph外部から値を受け取るcomponentは`ext`で宣言します。
+`entry`は後ろに宣言した本体付き`>`関数へforward bindingできます。`system MotorSafety=cycle`は廃止されています。
 
 ```glyph
-ext sensor():Input
-ext panel():PanelInput
-```
-
-`ext`は型付きHost境界です。未宣言の名前をsystem内に書いても自動的にexternalにはなりません。
-
-```glyph
-system Door=control
->control():Input=sensor()  # sensorが未宣言ならコンパイルエラー
-```
-
-修正:
-
-```glyph
-system Door=control
-ext sensor():Input
->control():Input=sensor()
-```
-
-`ext`と`!`はどちらもHostへ接続されますが、設計上の役割を区別します。
-
-| 宣言 | 意味 |
-|---|---|
-| `ext read_sensor():Input` | 外部component・外部入力契約 |
-| `!write_motor(command:Command):Receipt` | 明示的な作用境界 |
-| `~layout(input:Input):Layout` | Rust実装へ委譲する純粋契約 |
-
-### 接続行は検証用assertion
-
-必要なら、systemヘッダの下に期待する直接呼出しを書けます。
-
-```glyph
-system Door=control
-  control -> sensor
-  control -> step
-```
-
-これは矢印を追加する命令ではありません。コンパイラが実コードから同じ直接呼出しを導出できなければエラーになります。新規コードでは通常、`system Name=entry`だけで十分です。
-
-詳細は[`docs/CODE_DERIVED_SYSTEMS.md`](docs/CODE_DERIVED_SYSTEMS.md)を参照してください。
-
-## 全体例
-
-```glyph
-system MotorSafety=control
-
-machine Motor(state:MotorState,input:Input)
-  select=state.mode
-  init=MotorState(Stopped,Stop)
-  next=step(state,input)
-  success=Stopped
-  failure=Faulted
-
-@MAX=100
-@STOP_LIMIT=100ms
-
-*Input(raw:F,enabled,emergency,fault,stopped:B)
-+Command=Stop|Drive(F)
-+Mode=Stopped|Running|Faulted
-*MotorState(mode:Mode,command:Command)
-*Receipt(command:Command)
-
-?emergency_stop(*Input)=@A(emergency >> @E STOP_LIMIT stopped)
-?fault_stop(*Input)=@A(fault >> @E STOP_LIMIT stopped)
-
-ext sensor():Input
+>normalize(raw:F):F=min(raw,1.0)
 
 >decide(input:Input):Command
-  normalized :=
-    input.raw
-    /> |x| min(x,1.0)
-
-  command :=
-    input.emergency|input.fault >> Stop
-    !input.enabled >> Stop
-    _ >> Drive(normalized)
-
-  command
+  input.emergency|input.fault >> Stop
+  !input.enabled >> Stop
+  _ >> Drive(normalize(input.raw))
 
 >step(state:MotorState,input:Input):MotorState
   command := decide(input)
@@ -229,8 +131,60 @@ ext sensor():Input
   next
 
 !write_motor(command:Command):Receipt
->control(state:MotorState):Receipt=write_motor(step(state,sensor()).command)
+>cycle(state:MotorState,input:Input):Receipt=write_motor(step(state,input).command)
 ```
+
+System Flowとcall graphは別物です。
+
+```text
+System Context: input -> cycle -> receipt / write_motor
+Call graph:     cycle -> step -> decide -> normalize
+```
+
+明示`system`のI/O図には公開境界だけを表示し、内部helperを自動混入させません。各edgeは次のtyped code evidenceを必要とします。
+
+| flow | label | compiler evidence |
+|---|---|---|
+| caller input → entry | `data` | entry parameter名と型 |
+| `ext` input → function | `data` | external readへの到達pathと成功型 |
+| function → output | `returns` | 正常戻り型とentryからの到達性 |
+| function → `!` | `effect` | effect boundaryへの到達path |
+| function → function / `~` | `flow` | declared call path |
+
+### `ext`: 明示的な外部入力境界
+
+センサー、パネル、外部serviceなど、システム外部が所有するproviderは`ext`で宣言します。
+
+```glyph
+ext sensor():Input
+ext database(query:Query):Record|DatabaseError
+```
+
+`ext`はoutside → system、`!`はsystem → outsideの極性を持ちます。未宣言名をdiagramだけでexternalへ補うことはありません。
+
+```glyph
+system Door
+  entry control
+  in sensor:Input
+  out receipt:Receipt
+  sensor -> control
+  control -> receipt
+  control -> lock
+
+ext sensor():Input
+!lock(state:DoorState):Receipt
+>control():Receipt=lock(step(sensor()))
+```
+
+| declaration | role |
+|---|---|
+| `ext read_sensor():Input` | external input / provider |
+| `!write_motor(command:Command):Receipt` | external effect |
+| `~layout(input:Input):Layout` | logically pure manual Rust dependency |
+
+一回の実行順序は通常の`>`関数で表します。新しい`runtime`宣言子は追加しません。永続状態だけを`machine`へ置きます。
+
+詳細は[`docs/CODE_DERIVED_SYSTEMS.md`](docs/CODE_DERIVED_SYSTEMS.md)と[`docs/IO_STATE_APP.md`](docs/IO_STATE_APP.md)を参照してください。
 
 ## `@`: rawマクロと時相sigil
 
@@ -256,7 +210,6 @@ ext sensor():Input
 使用側には裸の識別子を書きます。
 
 ```glyph
-system Demo=control
 *TYPE(value:U)
 >control(state:State):Receipt=CONTROL
 ```

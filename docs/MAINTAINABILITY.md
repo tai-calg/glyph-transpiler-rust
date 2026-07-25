@@ -142,7 +142,43 @@ studio_ui.py
 - 未知のverification classを黙って受理しない。
 - Studio viewはsource lineを保持し、表示要素から元sourceへ戻れるようにする。
 
-## 8. Remaining debt
+## 8. System Context and example boundaries
+
+`glyph/architecture.py`はSystem Contextのsymbol resolution、typed port、edge evidenceを所有する。`glyph/io_state_views.py`とbrowserは検証済みIRのprojectionだけを行い、sourceを再parseしたりnodeを推測したりしない。
+
+```text
+source system block
+    ↓
+ArchitectureIR + evidence
+    ↓
+Mermaid / I/O View / Studio
+```
+
+保守性規則:
+
+- `system`をcall graphとして扱わない。
+- 明示systemへ内部helperを自動公開しない。
+- principal execution pathをraw macroへ隠さない。
+- exampleのファイル名、内容、acceptance testの責務を一致させる。
+- generated module、Host adapter、test controlsを無条件に`pub mod`または`pub fn`へしない。
+- crate外にはselective facadeとread-only accessorだけを公開する。
+- migration payload、workflow、`*.egg-info`を最終差分へ残さない。
+
+`demo-system`の依存方向は次へ固定する。
+
+```text
+public caller
+    ↓
+lib.rs selective facade
+    ↓
+controller.rs
+    ├── private generated.rs
+    └── crate-private host.rs
+```
+
+Host故障注入とcall logはcrate内unit testだけが利用する。
+
+## 9. Remaining debt
 
 以下は今後の分割対象だが、今回のrefactorでは動作リスクを避けて一括変更していない。
 
@@ -155,7 +191,7 @@ studio_ui.py
 
 これらは、既存のmain byte-compatibility gateを維持しながら、小さいPRまたは独立commit単位で分割する。
 
-## 9. Change acceptance
+## 10. Change acceptance
 
 refactorおよびStudio変更は次をすべて満たす必要がある。
 

@@ -7,16 +7,26 @@ import unittest
 from glyph import compile_artifacts, parse_compilation_model
 
 
-HEADER_FIRST = """system MotorSafety=cycle
+SYSTEM_HEADER = """system MotorSafety
+  entry cycle
+  in state:MotorState
+  in sensor:Input
+  out receipt:Receipt
+  state -> cycle
+  sensor -> cycle
+  cycle -> receipt
+  cycle -> write_motor
+"""
 
-machine Motor(state:MotorState,input:Input)
+MACHINE_HEADER = """machine Motor(state:MotorState,input:Input)
   select=state.mode
   init=MotorState(Stopped,Stop)
   next=step(state,input)
   success=Stopped
   failure=Faulted
+"""
 
-+Mode=Stopped|Running|Faulted
+BODY = """+Mode=Stopped|Running|Faulted
 +Command=Stop|Drive(U)
 *Input(raw:U)
 *MotorState(mode:Mode,command:Command)
@@ -40,38 +50,8 @@ ext sensor():Input
 >cycle(state:MotorState):Receipt=write_motor(step(state,sensor()).command)
 """
 
-LEGACY_TAIL = """+Mode=Stopped|Running|Faulted
-+Command=Stop|Drive(U)
-*Input(raw:U)
-*MotorState(mode:Mode,command:Command)
-*Receipt(command:Command)
-
-ext sensor():Input
-
->decide(input:Input):Command
-  input.raw==0 >> Stop
-  _ >> Drive(input.raw)
-
->step(state:MotorState,input:Input):MotorState
-  command := decide(input)
-  next :=
-    command==Stop >> MotorState(Stopped,Stop)
-    command==Drive(speed) >> MotorState(Running,Drive(speed))
-    _ >> MotorState(Faulted,Stop)
-  next
-
-!write_motor(command:Command):Receipt
->cycle(state:MotorState):Receipt=write_motor(step(state,sensor()).command)
-
-system MotorSafety=cycle
-
-machine Motor(state:MotorState,input:Input)
-  select=state.mode
-  init=MotorState(Stopped,Stop)
-  next=step(state,input)
-  success=Stopped
-  failure=Faulted
-"""
+HEADER_FIRST = SYSTEM_HEADER + "\n" + MACHINE_HEADER + "\n" + BODY
+TAIL_PLACEMENT = BODY + "\n" + SYSTEM_HEADER + "\n" + MACHINE_HEADER
 
 
 class HeaderFirstLayoutTests(unittest.TestCase):
@@ -84,21 +64,23 @@ class HeaderFirstLayoutTests(unittest.TestCase):
             for component in model.architecture.systems[0].components
         }
         self.assertEqual(components["sensor"], "external")
-        self.assertEqual(components["decide"], "function")
-        self.assertEqual(components["step"], "function")
         self.assertEqual(components["cycle"], "function")
         self.assertEqual(components["write_motor"], "effect")
+        self.assertEqual(components["state"], "external")
+        self.assertEqual(components["receipt"], "data")
+        self.assertNotIn("decide", components)
+        self.assertNotIn("step", components)
 
-    def test_legacy_tail_placement_remains_compatible(self) -> None:
+    def test_tail_placement_remains_compatible(self) -> None:
         header = compile_artifacts(HEADER_FIRST)
-        legacy = compile_artifacts(LEGACY_TAIL)
+        tail = compile_artifacts(TAIL_PLACEMENT)
         normalize = lambda value: re.sub(
             r"__glyph_([A-Za-z]+)_L?\d+_",
             r"__glyph_\1_LINE_",
             value,
         )
-        self.assertEqual(normalize(header.logic), normalize(legacy.logic))
-        self.assertEqual(header.host, legacy.host)
+        self.assertEqual(normalize(header.logic), normalize(tail.logic))
+        self.assertEqual(header.host, tail.host)
 
     def test_official_examples_keep_headers_before_body(self) -> None:
         root = Path(__file__).resolve().parents[1]

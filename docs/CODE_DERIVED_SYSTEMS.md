@@ -1,243 +1,207 @@
-# Code-derived systems and explicit external boundaries
+# Checked System Context and explicit boundaries
 
-## Purpose
+この文書は、Glyph 0.4における`system`、`ext`、`!`、通常関数、`machine`の責務を定義する。
 
-A Glyph `system` is a checked projection of executable Glyph structure. It is not a
-second, freehand description of the architecture.
+旧仕様の`system Name=entry`と、entryからcall graphを自動的にSystem Contextへ転用する設計は廃止された。
 
-The canonical declaration is:
-
-```glyph
-system DoorControl=control
-```
-
-`control` is the system entry. After the complete file is parsed and validated, the
-compiler follows named calls reachable from that function and constructs the system
-nodes and edges from those declarations and call sites.
+## 1. 基本原則
 
 ```text
-Glyph declarations and expressions
-  -> symbol resolution
-  -> entry-function call traversal
-  -> checked system graph
-  -> ArchitectureIR
-  -> I/O topology
+system   システム境界、公開port、主要なデータ・戻り値・作用flow
+machine  呼出しをまたいで意味を持つドメイン状態
+>        一回の同期処理、純粋計算、分岐、処理順序
+ext      外部所有の入力・provider境界
+!        システムから外部へ要求する作用境界
 ```
 
-## Why the previous form was rejected
-
-The earlier form allowed undeclared names to create diagram nodes:
-
-```glyph
-system DoorControl
-  panel -> decide
-  sensor -> decide
-  decide -> lock
-```
-
-`panel`, `sensor`, and `decide` could be absent from the rest of the source. The
-renderer silently displayed them as external components with unknown ports. The
-result looked executable but was only unrelated diagram metadata.
-
-This is no longer permitted. A system node must resolve to one of:
-
-- a body-bearing Glyph function declared with `>`;
-- an explicit external boundary declared with `ext`;
-- an effect boundary declared with `!`;
-- a pure Rust implementation contract declared with `~` after compiler relabeling.
-
-Types and variants are not callable system nodes.
-
-## Canonical example
-
-```glyph
-system DoorControl=control
-
-*PanelInput(open_request:B,authorized:B)
-*SensorInput(obstruction:B)
-*Input(open_request:B,authorized:B,obstruction:B)
-+DoorMode=Closed|Opening|Open|Closing|Alarm
-*DoorState(mode:DoorMode)
-
-ext panel():PanelInput
-ext sensor():SensorInput
-ext actuator(state:DoorState):()
-
->combine(panel_input:PanelInput,sensor_input:SensorInput):Input=
-  Input(
-    panel_input.open_request,
-    panel_input.authorized,
-    sensor_input.obstruction
-  )
-
->step(state:DoorState,input:Input):DoorState
-  state.mode==Closed&input.open_request&input.authorized >> DoorState(Opening)
-  state.mode==Opening&input.obstruction >> DoorState(Alarm)
-  state.mode==Opening >> DoorState(Open)
-  _ >> state
-
->control(state:DoorState):()=
-  actuator(step(state,combine(panel(),sensor())))
-```
-
-The compiler derives:
+System Flowとcall graphは同じではない。
 
 ```text
-control -> actuator
-control -> step
-control -> combine
-control -> panel
-control -> sensor
+code call: control -> sensor
+data flow: sensor -> control
 ```
 
-It also follows calls inside reachable user functions. If `step` calls `decide`, the
-graph contains `step -> decide`.
+`system`は前者を生成する命令ではなく、後者を含むArchitecture assertionである。コンパイラは、宣言された各edgeに型付きコード証拠を付与できる場合だけ受理する。
 
-Compiler-generated helpers such as `__glyph_block_*` and `__glyph_lambda_*` are
-flattened. They do not appear as architecture components merely because the surface
-syntax used `:=` or a pipeline lambda.
-
-## `ext` declaration
-
-Syntax:
+## 2. 正規構文
 
 ```glyph
-ext name(parameter:Type,...):ReturnType
-```
+system DoorController
+  entry control
 
-Examples:
+  in state:DoorState
+  in sensor:Input
+  out receipt:Receipt
 
-```glyph
-ext read_sensor():Input
-ext panel():PanelInput
-ext database(request:Query):Record|DatabaseError
-```
-
-Rules:
-
-1. `ext` has a required typed signature.
-2. `ext` has no Glyph body.
-3. duplicate names are rejected by ordinary symbol validation.
-4. calls lower through the Host boundary; Glyph does not invent an implementation.
-5. the I/O and Architecture views classify the component as `external`, not as an
-   undeclared placeholder.
-
-`ext` and `!` are both Host-facing contracts but state different design roles:
-
-```text
-ext  external component or externally supplied input/service
-!    explicit side-effect operation owned by the designed system
-~    logically pure contract whose implementation is supplied in Rust
-```
-
-The runtime adapter may ultimately bind an `ext` and a `!` through similar Host
-mechanisms. Their architecture meaning remains distinct.
-
-## Diagnostics
-
-### Undeclared entry
-
-```glyph
-system Broken=missing
->present(x:U):U=x
-```
-
-```text
-error: system `Broken` entry `missing` is undeclared
-```
-
-### Undeclared reachable call
-
-```glyph
-system Broken=control
->control(x:U):U=driver(x)
-```
-
-```text
-error: call `driver` reachable from system `Broken` is undeclared;
-declare an external boundary with `ext driver(...):...`
-```
-
-### External declaration repair
-
-```glyph
-system Fixed=control
-ext driver(x:U):U
->control(x:U):U=driver(x)
-```
-
-### Entry is not executable Glyph code
-
-```glyph
-system Broken=driver
-ext driver(x:U):U
-```
-
-The compiler rejects this because an external contract has no Glyph body from which
-to derive an implementation graph. The system entry must be a `>` function.
-
-## Optional edge assertions
-
-Indented edges remain available as assertions for architecture tests or reviewed
-contracts:
-
-```glyph
-system DoorControl=control
-  control -> sensor
-  control -> step
-```
-
-They do not add edges. Every endpoint must be declared and every row must match an
-actual direct call derived from the entry graph. This is valid only when `control`
-really calls both `sensor` and `step`.
-
-The following is an error even though both declarations exist:
-
-```glyph
-system Broken=control
+  state -> control
+  sensor -> control
+  control -> receipt
+  control -> lock
   control -> alarm
-
-!alarm():()
->control():()=()
 ```
 
-No `control -> alarm` call exists in the code.
+必須要素:
 
-Legacy `system Name` blocks without an entry are accepted only as checked assertion
-sets. A bare system with neither an entry nor assertions is rejected. New source
-should use `system Name=entry`.
+1. `entry`は本体を持つ`>`関数である。
+2. 一つ以上の`in` portを持つ。
+3. R1では一つの`out` portを持つ。
+4. すべてのendpointはportまたは宣言済みsymbolへ解決される。
+5. すべてのedgeはコードから証明可能である。
 
-## I/O view contract
+次は拒否される。
 
-For a declared system the I/O view exposes:
+```glyph
+system DoorController=control
+```
+
+診断は、新しい`system` blockへの移行方法を示す。
+
+## 3. 境界の極性
+
+### 外部入力
+
+```glyph
+ext sensor():Input|ControlError
+```
+
+- 所有者はシステム外部である。
+- System Context上の主方向はoutside → systemである。
+- Glyph本体を持たない。
+- 未宣言名を`ext`として推定しない。
+
+### 外部作用
+
+```glyph
+!lock(state:DoorState):Receipt|ControlError
+!alarm(state:DoorState):Receipt|ControlError
+```
+
+- システムが外部へ作用を要求する境界である。
+- System Context上の主方向はsystem → outsideである。
+- Host adapterが実装を所有する。
+
+### 手書きRust依存
+
+```glyph
+~layout_lane(input:BatchInput):BatchLayout
+```
+
+`~`は論理上純粋だが、実装をRust側へ委譲する依存である。System Contextへ含める場合は明示edgeを宣言する。
+
+## 4. 一回の実行とReceipt
+
+新しい`runtime`宣言子は導入しない。一回の実行順序は通常関数で記述する。
+
+```glyph
+>control(state:DoorState):Receipt|ControlError
+  input := sensor()?
+  next := step(state,input)
+  apply(next)
+```
+
+```glyph
+>apply(state:DoorState):Receipt|ControlError
+  state.action==RaiseAlarm >> alarm(state)
+  _ >> lock(state)
+```
+
+意味:
+
+```text
+external input
+  -> pure decision and state transition
+  -> exactly one selected external effect
+  -> confirmed Receipt or typed ControlError
+```
+
+`Receipt`は単なる要求受付ではなく、Hostが外部作用の完了を確認した結果として型設計する。受付だけを表す場合は`Acknowledgement`など別型を使用する。
+
+## 5. edgeと証拠
+
+ArchitectureIRはedgeごとに証拠を保存する。
+
+| edge | kind | 必要な証拠 |
+|---|---|---|
+| caller port → entry | `data` | entry parameter名と型 |
+| ext port → function | `data` | external input readへの到達pathと成功型 |
+| function → out port | `return` | 正常戻り型とentryからの到達性 |
+| function → `!` | `effect` | effect boundaryへの到達pathと引数型 |
+| function → function / `~` | `responsibility` | 宣言済みcall path |
+
+edgeは実行コードを生成しない。コードとArchitectureの整合性を要求する。
+
+## 6. 検査
+
+コンパイラは少なくとも次を拒否する。
+
+- 未宣言entry
+- 未宣言endpoint
+- 未宣言の到達可能call
+- `ext`を出力作用として使う極性逆転
+- `!`を入力providerとして使う極性逆転
+- port型と関数型の不一致
+- コードに存在しないedge
+- 到達可能な外部入力または作用境界の記載漏れ
+- 一つのguard branchから複数effectを実行する構造
+- output portへ到達しないentry
+
+Glyphの短縮型`U/B/F/I`と正規化後の`u16/bool/f32/i16`は、System Context型検査で同じcanonical typeとして扱う。
+
+## 7. View分離
+
+Studioと生成artifactは次を分ける。
+
+```text
+Checked System Context
+  public boundary and semantic flow
+
+Call Graph
+  implementation call dependency
+
+Machine
+  persistent domain-state transition
+
+Outcome / Logic
+  one-call evaluation and failure paths
+```
+
+明示`system`がある場合、内部helperをSystem Contextへ自動混入させない。境界へ接続されていない宣言は別の`Internal and unconnected declarations` viewへ置く。
+
+I/O viewのsystem contract:
 
 ```json
 {
-  "kind": "code-derived-system",
+  "kind": "checked-system-context",
   "entry": "control",
+  "ports": [],
   "nodes": [],
-  "edges": []
+  "edges": [],
+  "evidence": []
 }
 ```
 
-Every node has a declared signature. The renderer no longer creates `EXTERNAL` nodes
-with `none / undeclared` ports from unresolved names. Edges are call relationships and
-are labeled `calls` rather than the ambiguous `connects`.
+edge labelは`data`、`returns`、`effect`、`flow`を使用する。`calls`はsystem宣言がない場合のderived call graphだけで使用する。
 
-When no `system` declaration exists, the existing whole-program call graph remains
-the fallback view.
+## 8. 保守性規則
 
-## Scope and non-goals
+- system blockはソース先頭へ置き、第三者が境界を先に読めるようにする。
+- 主実行経路をraw macroへ隠さない。
+- 永続状態だけを`machine` stateへ保持する。
+- 一時的な判断結果はlocal bindingまたは専用値型にする。
+- Host adapter、生成module、test controlsを無条件にpublicへしない。
+- public facadeは利用者が必要な型と操作だけを再公開する。
+- test専用の故障注入・観測関数はcrate内testへ閉じる。
+- Example名、内容、Acceptance testの目的を一致させる。
+- generated metadataや一時migration payloadをrepositoryへ残さない。
 
-The system graph currently represents named call dependency, not runtime scheduling.
-An edge does not claim:
+## 9. 非目標
 
-- that a branch executes on every invocation;
-- that two calls run concurrently;
-- message transport or process placement;
-- temporal order beyond expression semantics;
-- a dataflow wire between selected output and input ports.
+`system` edgeは次を主張しない。
 
-Those require dedicated IR. The important guarantee here is narrower and strict:
-**every displayed system node and edge has a corresponding declared symbol and code
-call.**
+- schedulerやthread配置
+- async task lifecycle
+- process間transport
+- branchが毎回実行されること
+- 物理装置の停止性の形式証明
+
+これらは専用IRまたはHost契約で扱う。`system`の保証は、表示された境界とflowが宣言済みsymbol、型、到達pathに対応することである。

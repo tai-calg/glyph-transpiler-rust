@@ -9,17 +9,20 @@ from tests.acceptance_support import EXAMPLES, compile_example, load
 
 
 class AcceptanceOwnershipTests(unittest.TestCase):
-    def test_motor_macro_points_to_invocation_line(self) -> None:
+    def test_motor_normalization_is_an_explicit_helper(self) -> None:
         path = EXAMPLES["motor"]
-        lines = path.read_text(encoding="utf-8").splitlines()
-        invocation = next(i for i, line in enumerate(lines, 1) if line.strip() == "NORMALIZE")
+        source = path.read_text(encoding="utf-8")
+        self.assertIn(">normalize(raw:F):F", source)
+        self.assertNotIn("@NORMALIZE", source)
+
         outputs = compile_example("motor")
-        algorithm = load(outputs, "algorithm-ir.json")
-        decide = next(item for item in algorithm["functions"] if item["name"] == "decide")
-        normalized = next(item for item in decide["steps"] if item.get("name") == "normalized")
-        self.assertEqual(normalized["source"]["line"], invocation)
+        self.assertIn("pub fn normalize", outputs.artifacts.logic)
+        self.assertIn("pub fn decide", outputs.artifacts.logic)
+
         mapping = load(outputs, "preprocessor-map.json")
-        self.assertTrue(any("NORMALIZE" in item["macro_stack"] for item in mapping["expanded_lines"]))
+        self.assertFalse(
+            any("NORMALIZE" in item["macro_stack"] for item in mapping["expanded_lines"])
+        )
 
     def test_manual_rust_is_not_overwritten(self) -> None:
         source_text = EXAMPLES["batch"].read_text(encoding="utf-8")

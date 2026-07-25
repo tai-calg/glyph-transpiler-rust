@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 
-_MARKER = "glyph-code-derived-system-ui-v1"
+_MARKER = "glyph-checked-system-context-ui-v2"
 
 _SCRIPT = r"""
-<script id="glyph-code-derived-system-ui-v1-script">
+<script id="glyph-checked-system-context-ui-v2-script">
 (() => {
-  const MARKER = "glyph-code-derived-system-ui-v1";
+  const MARKER = "glyph-checked-system-context-ui-v2";
 
   function selectedSystem() {
     const systems = snapshot?.views?.io?.systems || [];
@@ -34,24 +34,27 @@ _SCRIPT = r"""
   function enhance() {
     if (activeTab !== "io") return;
     const system = selectedSystem();
+    const checked = system?.kind === "checked-system-context";
     const note = document.querySelector(".view-controls .note");
     if (note) {
-      note.textContent = system?.kind === "code-derived-system"
-        ? "system entryから実際の関数呼出しを追跡して生成。図だけの未宣言nodeや架空の接続は受理しない。"
-        : "system宣言がないため、コンパイラの呼出しグラフを表示する。";
+      note.textContent = checked
+        ? "system宣言の境界・データ・戻り値・作用flowを、型付きコード証拠に照らして表示する。call graphとは別のviewである。"
+        : system?.kind === "derived-call-graph"
+          ? "system宣言がないため、コンパイラの呼出しグラフを表示する。"
+          : "境界に接続されていない内部宣言を表示する。";
     }
 
     const labels = [...document.querySelectorAll(".canvas-shell .edge-label")];
     const edges = system?.edges || [];
     labels.forEach((label, index) => {
-      const text = edges[index]?.label || "calls";
+      const text = edges[index]?.label || "flow";
       if (label.textContent !== text) label.textContent = text;
       label.title = text;
     });
     normalizeDeclaredPorts(system);
 
-    const current = document.querySelector('[data-system-meta-owner="code-derived"]');
-    if (!system?.entry) {
+    const current = document.querySelector('[data-system-meta-owner="checked-context"]');
+    if (!checked || !system?.entry) {
       current?.remove();
       return;
     }
@@ -62,18 +65,18 @@ _SCRIPT = r"""
     if (!controls) return;
     controls.insertAdjacentHTML(
       "afterend",
-      `<div class="machine-meta" data-system-meta-owner="code-derived" ` +
+      `<div class="machine-meta" data-system-meta-owner="checked-context" ` +
       `data-system-meta-signature="${esc(signature)}">` +
-      `<span class="pill">Derived from code</span>` +
+      `<span class="pill">Checked system context</span>` +
       `<span class="pill">Entry: ${esc(system.entry)}</span>` +
-      `<span class="pill">Edges: ${(system.edges || []).length}</span>` +
+      `<span class="pill">Boundary edges: ${(system.edges || []).length}</span>` +
       `</div>`,
     );
   }
 
   const originalRenderIo = window.renderIo;
   if (typeof originalRenderIo === "function") {
-    window.renderIo = function renderCodeDerivedSystem(...arguments_) {
+    window.renderIo = function renderCheckedSystemContext(...arguments_) {
       const result = originalRenderIo.apply(this, arguments_);
       enhance();
       return result;
@@ -90,7 +93,7 @@ _SCRIPT = r"""
 
 
 def enhance_code_derived_system_html(html: str) -> str:
-    """Explain that I/O systems are checked projections of real Glyph calls."""
+    """Add checked-System-Context guidance while preserving the public helper name."""
 
     if _MARKER in html:
         return html

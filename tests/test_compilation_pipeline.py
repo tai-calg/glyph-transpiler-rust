@@ -13,7 +13,13 @@ from glyph.artifacts import parse_compilation_model
 
 
 SOURCE = """@LIMIT=100
-system Demo=run
+system Demo
+  entry run
+  in input:U
+  out result:U
+  input -> run
+  run -> result
+  run -> output
 
 ext input():U
 

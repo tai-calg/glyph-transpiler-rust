@@ -1,7 +1,0 @@
-
-[dev]
-build<2,>=1.2
-
-[ui]
-gradio<7,>=6.0
-pandas<3,>=2.0
