@@ -35,6 +35,9 @@ class StudioTypeAlgebraTests(unittest.TestCase):
         self.assertIn("Type Algebra", STUDIO_HTML)
         self.assertIn("function typeAlgebraView()", STUDIO_HTML)
         self.assertIn("Machine selector × input coverage", STUDIO_HTML)
+        self.assertIn("symbolic regions", STUDIO_HTML)
+        self.assertIn("BigInt", STUDIO_HTML)
+        self.assertIn("representative:", STUDIO_HTML)
 
     def test_successful_build_surfaces_type_algebra_warning(self) -> None:
         with tempfile.TemporaryDirectory(prefix="glyph-studio-type-algebra-") as directory:
@@ -70,6 +73,7 @@ class StudioTypeAlgebraTests(unittest.TestCase):
             self.assertEqual(len(coverage), 1)
             self.assertEqual(coverage[0]["machine"], "Controller")
             self.assertIsNotNone(coverage[0]["possible_pairs"])
+            self.assertIn("defined_pairs_exact", coverage[0])
             projected = snapshot.glyph04_views["type_algebra"]
             self.assertEqual(projected["machine_coverage"], coverage)
             self.assertEqual(
