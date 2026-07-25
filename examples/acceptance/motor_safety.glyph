@@ -1,47 +1,10 @@
-system MotorSafety=cycle
+*TemperatureInput(celsius:F)
+*TemperatureView(celsius:F,fahrenheit:F,kelvin:F,count:U,valid:B)
+*Session(count:U)
 
-machine Motor(state:MotorState,input:Input)
-  select=state.mode
-  init=MotorState(Stopped,Stop)
-  next=step(state,input)
-  success=Stopped
-  failure=Faulted
+>to_fahrenheit(celsius:F):F=celsius*1.8+32.0
+>to_kelvin(celsius:F):F=celsius+273.15
+>next_count(count:U):U=count+1
+>is_valid(celsius:F):B=celsius>=-273.15
 
-# v0.1 acceptance: raw macro、lambda、state、effect、時間安全制約を接続する。
-@STOP_LIMIT=100ms
-
-@NORMALIZE
-  normalized :=
-    input.raw
-    /> |x| min(x,1.0)
-@end
-
-*Input(raw:F,enabled,emergency,fault,stopped:B)
-+Command=Stop|Drive(F)
-+Mode=Stopped|Running|Faulted
-*MotorState(mode:Mode,command:Command)
-*Receipt(command:Command)
-
-?emergency_stop(*Input)=@A(emergency>>@E STOP_LIMIT stopped)
-?fault_stop(*Input)=@A(fault>>@E STOP_LIMIT stopped)
-
->decide(input:Input):Command
-  NORMALIZE
-  command :=
-    input.emergency|input.fault >> Stop
-    !input.enabled >> Stop
-    _ >> Drive(normalized)
-  command
-
->step(state:MotorState,input:Input):MotorState
-  command := decide(input)
-  next :=
-    command==Stop >> MotorState(Stopped,Stop)
-    command==Drive(speed) >> MotorState(Running,Drive(speed))
-    _ >> MotorState(Faulted,Stop)
-  next
-
-!write_motor(command:Command):Receipt
-
-# MotorSafetyのI/O図はcycleからstep、decide、write_motorへの実呼出しを追跡する。
->cycle(state:MotorState,input:Input):Receipt=write_motor(step(state,input).command)
+>render(input:TemperatureInput,session:Session):TemperatureView=TemperatureView(input.celsius,to_fahrenheit(input.celsius),to_kelvin(input.celsius),next_count(session.count),is_valid(input.celsius))
