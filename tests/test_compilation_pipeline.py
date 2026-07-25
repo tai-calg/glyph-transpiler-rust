@@ -13,17 +13,18 @@ from glyph.artifacts import parse_compilation_model
 
 
 SOURCE = """@LIMIT=100
-system Demo
-  input -> process
-  process -> output
+system Demo=run
 
-*Input(value:U)
+ext input():U
+
 >process(x:U):U
   limited :=
     x>LIMIT >> LIMIT
     _ >> x
   limited
+
 !output(x:U):U
+>run():U=output(process(input()))
 """
 
 

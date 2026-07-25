@@ -11,7 +11,7 @@ from glyph import GlyphError
 from glyph.readable_diagram_app import run_diagram_app
 
 
-DEFAULT_SOURCE = """system DoorControl
+LEGACY_DEFAULT_SOURCE = """system DoorControl
   panel -> decide
   sensor -> decide
   decide -> lock
@@ -42,6 +42,44 @@ machine Door(state:DoorState,input:Input)
 """
 
 
+DEFAULT_SOURCE = """system DoorControl=control
+
+machine Door(state:DoorState,input:Input)
+  select=state.mode
+  init=DoorState(Closed)
+  next=step(state,input)
+  success=Open
+  failure=Alarm
+
+*PanelInput(open_request:B,authorized:B)
+*SensorInput(obstruction:B)
+*Input(open_request:B,authorized:B,obstruction:B)
++DoorMode=Closed|Opening|Open|Closing|Alarm
+*DoorState(mode:DoorMode)
+
+# `ext` is an explicitly declared external component. It is never invented by
+# the diagram renderer and is connected through the generated Host boundary.
+ext panel():PanelInput
+ext sensor():SensorInput
+ext actuator(state:DoorState):()
+
+>combine(panel_input:PanelInput,sensor_input:SensorInput):Input=Input(panel_input.open_request,panel_input.authorized,sensor_input.obstruction)
+
+>step(state:DoorState,input:Input):DoorState
+  state.mode==Closed&input.open_request&input.authorized >> DoorState(Opening)
+  state.mode==Opening&input.obstruction >> DoorState(Alarm)
+  state.mode==Opening >> DoorState(Open)
+  state.mode==Open&!input.open_request >> DoorState(Closing)
+  state.mode==Closing&input.obstruction >> DoorState(Opening)
+  state.mode==Closing >> DoorState(Closed)
+  _ >> state
+
+# The system graph is derived from these real calls:
+# control -> panel / sensor / combine / step / actuator.
+>control(state:DoorState):()=actuator(step(state,combine(panel(),sensor())))
+"""
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="glyph",
@@ -68,6 +106,10 @@ def resolve_input(input_path: Path | None) -> Path:
     path = default_input_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     if not path.exists():
+        path.write_text(DEFAULT_SOURCE, encoding="utf-8")
+    elif path.read_text(encoding="utf-8") == LEGACY_DEFAULT_SOURCE:
+        # Only the exact generated legacy sample is migrated. Any user edit,
+        # including comments or whitespace changes, prevents automatic overwrite.
         path.write_text(DEFAULT_SOURCE, encoding="utf-8")
     return path
 

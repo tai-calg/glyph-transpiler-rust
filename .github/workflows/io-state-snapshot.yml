@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - "glyph.py"
+      - "glyph/architecture.py"
+      - "glyph/code_derived_system_ui.py"
       - "glyph/diagram_app.py"
       - "glyph/diagram_ui.py"
       - "glyph/diagram_editor_exports.py"
@@ -24,6 +26,7 @@ on:
       - "glyph/io_state_views.py"
       - "glyph/state_machine_analysis.py"
       - "glyph/state_machine_source_map.py"
+      - "tests/test_code_derived_system_ui.py"
       - "tests/test_diagram_editor_exports.py"
       - "tests/test_diagram_render_stability.py"
       - "tests/test_initial_transition_layout.py"
@@ -34,11 +37,13 @@ on:
       - "tests/test_transition_label_layout.py"
       - "tests/test_transition_route_labels.py"
       - "tests/test_transition_semantics.py"
+      - "tests/verify_code_derived_system_io.mjs"
       - "tests/verify_state_diagram_rendering.mjs"
       - "tests/verify_state_diagram_stability.mjs"
       - "tests/verify_uml_transition_semantics.mjs"
       - "tests/verify_additional_failure_notation.mjs"
       - "tests/verify_diagram_editor_exports.mjs"
+      - "examples/acceptance/door_controller.glyph"
       - "examples/acceptance/motor_safety.glyph"
       - "examples/state_diagrams/**"
       - ".github/workflows/io-state-snapshot.yml"
@@ -68,7 +73,9 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          mkdir -p build/state-diagram-regression build/state-diagram-stability build/uml-transition-semantics build/additional-failure-notation build/diagram-editor-exports
+          mkdir -p build/code-derived-system-io build/state-diagram-regression build/state-diagram-stability build/uml-transition-semantics build/additional-failure-notation build/diagram-editor-exports
+          node tests/verify_code_derived_system_io.mjs \
+            2>&1 | tee build/code-derived-system-io/verify.log
           node tests/verify_state_diagram_rendering.mjs \
             2>&1 | tee build/state-diagram-regression/verify.log
           node tests/verify_state_diagram_stability.mjs \
@@ -88,11 +95,13 @@ jobs:
           include-hidden-files: true
           if-no-files-found: warn
           path: |
+            build/code-derived-system-io/**
             build/state-diagram-regression/**
             build/state-diagram-stability/**
             build/uml-transition-semantics/**
             build/additional-failure-notation/**
             build/diagram-editor-exports/**
+            examples/acceptance/door_controller.glyph
             examples/acceptance/motor_safety.glyph
             examples/state_diagrams/*.glyph
             examples/acceptance/.glyph/**/io-state-views.json

@@ -1,8 +1,4 @@
-system BatchRuntime
-  packet -> validate
-  validate -> build_batch
-  build_batch -> layout_lane
-  build_batch -> submit_batch
+system BatchRuntime=run
 
 @MAX_BATCH=10
 
@@ -34,6 +30,7 @@ system BatchRuntime
 
 !submit_batch(layout:BatchLayout):SubmitReceipt
 
+# BatchRuntimeの図はrunからbuild_batch、validate、layout_lane、submit_batchを導出する。
 >run(input:BatchInput):SubmitReceipt|Error
   batch :=
     input
