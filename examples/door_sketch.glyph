@@ -27,6 +27,6 @@ ext panel():In
   c==Stop >> lock(c)
   _ >> log(c)
 
->control():B|Error=apply(ctl(merge(sensor(),panel()))?)
+>control():B|Error=Ok(apply(ctl(merge(sensor(),panel()))?))
 
 ?safe(*In)=@A(!auth >> !open)
