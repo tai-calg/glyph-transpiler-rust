@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from itertools import product as cartesian_product
-from typing import Mapping, Sequence
+from typing import Sequence
 
 from .compiler import (
     AliasDecl,
@@ -36,7 +36,6 @@ from .machine_coverage import (
     _machine_parts,
     _target_state,
     _truth,
-    _unknown_coverage,
     _unwrap_result,
     build_machine_coverage as _build_enumerated_coverage,
 )
@@ -192,21 +191,6 @@ def _constraints(
                     )
                 )
     return tuple(output)
-
-
-def _root_is_referenced(
-    clauses: Sequence[tuple[Expr | None, Expr, int, bool]],
-    roots: Sequence[str],
-) -> bool:
-    root_set = set(roots)
-    for condition, _, _, _ in clauses:
-        if condition is None:
-            continue
-        for expr in _walk(condition):
-            path = _expr_path(expr)
-            if path is not None and path[0] in root_set:
-                return True
-    return False
 
 
 def _condition_partition_safe(expr: Expr, parameter_names: set[str]) -> bool:
@@ -462,7 +446,6 @@ class _PartitionDomain:
                 if path is not None and (
                     path in paths
                     or any(path[: len(item)] == item for item in paths)
-                    or any(item[: len(path)] == path for item in paths)
                 ):
                     return True
         return False
