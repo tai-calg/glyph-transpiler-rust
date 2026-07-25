@@ -17,14 +17,13 @@ if str(ROOT) not in sys.path:
 from glyph.schema import COMPATIBILITY_REPORT_SCHEMA, IR_SCHEMA_VERSION  # noqa: E402
 
 
+# These sources remain valid inputs for both the main-branch compiler and the
+# current compiler. Examples migrated to `system Name=entry` or `ext` are
+# intentionally excluded because an old compiler cannot parse the new language.
 LEGACY_SOURCES = (
-    "examples/acceptance/door_controller.glyph",
-    "examples/acceptance/job_scheduler.glyph",
-    "examples/acceptance/motor_safety.glyph",
     "examples/controller.glyph",
     "examples/system_controller.glyph",
     "examples/lisp_core.glyph",
-    "examples/door_sketch.glyph",
     "examples/algorithm_sketch.glyph",
 )
 
