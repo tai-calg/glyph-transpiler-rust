@@ -25,7 +25,7 @@ _INSTALLED = False
 def _namespace(value: Any) -> Any:
     if isinstance(value, dict):
         return SimpleNamespace(**{key: _namespace(item) for key, item in value.items()})
-    if isinstance(value, list):
+    if isinstance(value, (list, tuple)):
         return [_namespace(item) for item in value]
     return value
 
