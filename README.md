@@ -94,15 +94,12 @@ Contract名は`'Name`、適用は`@{'Name}`で通常の型・値名と区別し�
 
 完全な仕様、保証範囲、Host責任、コード例は[`docs/CONTRACTS.md`](docs/CONTRACTS.md)を参照してください。全層を接続した受入例は[`examples/acceptance/glyph04_system.glyph`](examples/acceptance/glyph04_system.glyph)です。
 
-## ファイル先頭の設計ヘッダ
+## コードに基づく`system`ヘッダ
 
-`system`と`machine`は、宣言本体を包むブロックではなく、ファイル全体の設計を先に示すヘッダです。正規形では、ファイル先頭に`system`、続けて`machine`を書き、その後に型・純粋関数・作用境界を記述します。
+`system`は自由記述の構成図ではありません。**本体を持つ入口関数を指定し、その関数から実際に到達する呼出しだけをコンパイラがI/O図へ投影します。**
 
 ```glyph
-system MotorSafety
-  sensor -> decide
-  decide -> step
-  step -> write_motor
+system MotorSafety=cycle
 
 machine Motor(state:MotorState,input:Input)
   select=state.mode
@@ -114,15 +111,81 @@ machine Motor(state:MotorState,input:Input)
 # 以降に型・関数・作用境界を宣言する
 ```
 
-component、状態型、`next`関数はファイル全体を解析した後に名前解決するため、ヘッダから後続宣言へのforward bindingが可能です。既存sourceとの互換性のため末尾配置も受理しますが、README・examples・新規コードは先頭配置へ統一します。
+`cycle`は後ろに宣言して構いません。ファイル全体を解析してからforward bindingします。
+
+```glyph
+>decide(input:Input):Command
+  ...
+
+>step(state:MotorState,input:Input):MotorState
+  command := decide(input)
+  ...
+
+!write_motor(command:Command):Receipt
+
+>cycle(state:MotorState,input:Input):Receipt=write_motor(step(state,input).command)
+```
+
+このコードからI/O図は次を導出します。
+
+```text
+cycle -> write_motor
+cycle -> step
+step  -> decide
+```
+
+コードに存在しないnodeや接続を`system`だけで作ることはできません。
+
+### `ext`: 明示的な外部境界
+
+センサー、パネル、外部サービスなど、Glyph外部から値を受け取るcomponentは`ext`で宣言します。
+
+```glyph
+ext sensor():Input
+ext panel():PanelInput
+```
+
+`ext`は型付きHost境界です。未宣言の名前をsystem内に書いても自動的にexternalにはなりません。
+
+```glyph
+system Door=control
+>control():Input=sensor()  # sensorが未宣言ならコンパイルエラー
+```
+
+修正:
+
+```glyph
+system Door=control
+ext sensor():Input
+>control():Input=sensor()
+```
+
+`ext`と`!`はどちらもHostへ接続されますが、設計上の役割を区別します。
+
+| 宣言 | 意味 |
+|---|---|
+| `ext read_sensor():Input` | 外部component・外部入力契約 |
+| `!write_motor(command:Command):Receipt` | 明示的な作用境界 |
+| `~layout(input:Input):Layout` | Rust実装へ委譲する純粋契約 |
+
+### 接続行は検証用assertion
+
+必要なら、systemヘッダの下に期待する直接呼出しを書けます。
+
+```glyph
+system Door=control
+  control -> sensor
+  control -> step
+```
+
+これは矢印を追加する命令ではありません。コンパイラが実コードから同じ直接呼出しを導出できなければエラーになります。新規コードでは通常、`system Name=entry`だけで十分です。
+
+詳細は[`docs/CODE_DERIVED_SYSTEMS.md`](docs/CODE_DERIVED_SYSTEMS.md)を参照してください。
 
 ## 全体例
 
 ```glyph
-system MotorSafety
-  sensor -> decide
-  decide -> step
-  step -> write_motor
+system MotorSafety=control
 
 machine Motor(state:MotorState,input:Input)
   select=state.mode
@@ -142,6 +205,8 @@ machine Motor(state:MotorState,input:Input)
 
 ?emergency_stop(*Input)=@A(emergency >> @E STOP_LIMIT stopped)
 ?fault_stop(*Input)=@A(fault >> @E STOP_LIMIT stopped)
+
+ext sensor():Input
 
 >decide(input:Input):Command
   normalized :=
@@ -164,6 +229,7 @@ machine Motor(state:MotorState,input:Input)
   next
 
 !write_motor(command:Command):Receipt
+>control(state:MotorState):Receipt=write_motor(step(state,sensor()).command)
 ```
 
 ## `@`: rawマクロと時相sigil
@@ -184,16 +250,15 @@ machine Motor(state:MotorState,input:Input)
 ```glyph
 @MAX=100
 @TYPE=SensorInput
-@EDGE=sensor -> ctl
+@CONTROL=write_motor(step(state,sensor()).command)
 ```
 
 使用側には裸の識別子を書きます。
 
 ```glyph
-system Demo
-  EDGE
-
+system Demo=control
 *TYPE(value:U)
+>control(state:State):Receipt=CONTROL
 ```
 
 置換は完全な識別子トークン単位です。`IN`を定義しても`Input`や`MIN`の一部分は置換しません。
@@ -257,214 +322,3 @@ T|E  Result<T,E>
 ## 純粋関数とガード
 
 単一式:
-
-```glyph
->double(x:U):U=x*2
-```
-
-ordered guard:
-
-```glyph
-+Kind=Negative|Zero|Positive
-
->classify(x:I):Kind
-  x<0 >> Negative
-  x==0 >> Zero
-  _ >> Positive
-```
-
-上から最初に成立した枝を返します。最後の`_`は必須です。
-
-variant pattern:
-
-```glyph
-+Command=Stop|Run(U)|Fault(Error)
-
->speed(command:Command):U
-  command==Stop >> 0
-  command==Run(n) >> n
-  command==Fault(_) >> 0
-  _ >> 0
-```
-
-## `:=`: 不変の中間値
-
-`:=`は可変代入ではなく、一度だけ定義する不変値です。
-
-```glyph
->normalize(x:I):I
-  positive :=
-    x<0 >> -x
-    _ >> x
-
-  limited :=
-    positive>100 >> 100
-    _ >> positive
-
-  limited
-```
-
-同名再定義と引数shadowingはコンパイルエラーです。
-
-## `/>`: pipelineとラムダ
-
-```glyph
-normalized :=
-  value
-  /> validate?
-  /> |x| min(x,MAX)
-  /> encode
-```
-
-```text
-value /> f /> g = g(f(value))
-```
-
-pipeline lambdaは現在、1引数・単一式・non-capturing・pureに限定しています。
-
-- 一度しか使わない短い変換: lambda
-- 分岐の合流点、再利用する値、意味のある節目: `:=`
-
-## `?`: Result伝播と時相制約
-
-式末尾の`?`はResult失敗伝播です。
-
-```glyph
->checked(x:U):U|Error
-  value := validate(x)?
-  Ok(value)
-```
-
-トップレベル行頭の`?name(...)=formula`は時相制約です。
-
-```glyph
-?always_safe(*Input)=@A !unsafe
-?deadline(*Input)=@A(request >> @E 500ms response)
-?heartbeat(*Input)=@A@E 1s heartbeat
-?converges(*Input)=@E@A stable
-?hold(*Input)=closed U authorized
-?weak_hold(*Input)=closed W authorized
-```
-
-時相演算子:
-
-| 記法 | 意味 |
-|---|---|
-| `@A P` | 常にP |
-| `@E P` | いつかP |
-| `@E 500ms P` | 500ms以内にP |
-| `@A@E P` | 常に、再びPへ到達する |
-| `@E@A P` | いつか、それ以降は常にP |
-| `P U Q` | strong until |
-| `P W Q` | weak until |
-
-裸の`A`、`E`、`AE`、`EA`は受理しません。Unicodeの`□`、`◇`も受理しません。各Always/Eventually演算子に必ず`@`を付けます。
-
-詳細: [`docs/TEMPORAL.md`](docs/TEMPORAL.md)
-
-## `system`: Architecture
-
-```glyph
-system Door
-  sensor -> authenticate
-  authenticate -> decide
-  decide -> lock
-  decide -> alarm
-```
-
-componentは同名宣言へbindingされます。
-
-| 宣言 | Architecture上の種類 |
-|---|---|
-| `>name` | Glyph pure function |
-| `~name` | Rust pure implementation |
-| `!name` | effect boundary |
-| 型名 | data |
-| 未定義名 | external component |
-
-## `machine`: 状態機械
-
-```glyph
-machine Motor(state:MotorState,input:Input)
-  select=state.mode
-  init=MotorState(Stopped,Stop)
-  next=step(state,input)
-  success=Stopped
-  failure=Faulted
-```
-
-状態遷移は純粋関数としてGlyphへ書き、時計、周期実行、I/O、違反後の復旧はhost側へ残します。
-
-## `~`: Rust実装の純粋境界
-
-```glyph
-*Graph(nodes:U,edges:U)
-*Path(cost:U)
-
-~shortest_path(graph:Graph,start:U,goal:U):Path
-
->plan(graph:Graph,start:U,goal:U):Path
-  path := shortest_path(graph,start,goal)
-  path
-```
-
-`~`は型、call graph、Architecture上の位置だけをGlyphに残し、実装を`manual.rs`へ委譲します。Studioは`manual.rs`を初回だけ作成し、その後は上書きしません。
-
-## `!`: 外部作用境界
-
-```glyph
-!read_sensor():Input
-!write_motor(command:Command):Receipt
-```
-
-通信、GPIO、ファイル、DB、デバイスI/Oなどは`!`でhost adapterへ分離します。
-
-## Source-level Logic IR
-
-`:=`、分岐、pipeline、lambda、`~`、`!`、`?`から、lowering前のAlgorithm IRを生成します。
-
-```text
-algorithm-ir.json
-logic.mmd
-```
-
-人間向けLogicには`__glyph_*`内部helperを表示しません。lowering後のcall graphは別の`execution-ir.json` / `execution.mmd`へ保存します。
-
-## 生成物
-
-```text
-.glyph/<source-stem>/
-├── preprocessed.glyph
-├── preprocessor-map.json
-├── architecture.mmd
-├── architecture-ir.json
-├── logic.mmd
-├── algorithm-ir.json
-├── execution.mmd
-├── execution-ir.json
-├── machine-<name>.mmd
-├── temporal.mmd
-├── source-map.json
-├── index.md
-├── typed-ast.json
-├── generated.rs
-├── host.generated.rs
-├── manual.rs
-├── capability-ir.json             # Glyph 0.4使用時
-├── resource-flow-ir.json          # Glyph 0.4 resource使用時
-├── contracts-ir.json              # Contract使用時
-├── runtime-contract-ir.json       # 意味付きContract使用時
-└── verification-report.json       # Glyph 0.4使用時
-```
-
-公開JSONには`schema`と整数`version`があります。
-
-## Acceptance examples
-
-```bash
-python3 glyphc.py examples/acceptance/door_controller.glyph --check
-python3 glyphc.py examples/acceptance/job_scheduler.glyph --check
-python3 glyphc.py examples/acceptance/motor_safety.glyph --check
-python3 glyphc.py examples/acceptance/glyph04_system.glyph --check
-python3 -m unittest discover -s tests -p 'test_acceptance_*.py' -v
-```
