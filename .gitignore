@@ -3,3 +3,4 @@ __pycache__/
 target/
 demo/target/
 **/.glyph/
+.venv/
