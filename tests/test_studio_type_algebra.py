@@ -34,7 +34,7 @@ class StudioTypeAlgebraTests(unittest.TestCase):
     def test_studio_html_contains_type_algebra_view(self) -> None:
         self.assertIn("Type Algebra", STUDIO_HTML)
         self.assertIn("function typeAlgebraView()", STUDIO_HTML)
-        self.assertIn("Machine state-space coverage", STUDIO_HTML)
+        self.assertIn("Machine selector × input coverage", STUDIO_HTML)
 
     def test_successful_build_surfaces_type_algebra_warning(self) -> None:
         with tempfile.TemporaryDirectory(prefix="glyph-studio-type-algebra-") as directory:
