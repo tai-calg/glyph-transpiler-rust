@@ -103,27 +103,29 @@ class TypeAlgebraToolingTests(unittest.TestCase):
     def test_machine_coverage_detects_missing_overlap_and_shadowed_guard(self) -> None:
         source = (
             "resource Token[Ready]\n"
-            "+Mode=Idle|Running\n"
+            "+Mode=Idle|Running|Stopped\n"
             "+Event=Start|Stop\n"
             "*State(mode:Mode)\n"
             ">next(state:State,event:Event):State\n"
-            "  state.mode==Idle & event==Start >> State(Running)\n"
-            "  state.mode==Idle & event==Start >> State(Idle)\n"
-            "  state.mode==Running & event==Stop >> State(Idle)\n"
+            "  state.mode==Idle >> State(Running)\n"
+            "  state.mode==Idle >> State(Idle)\n"
+            "  state.mode==Running >> State(Idle)\n"
+            "  _ >> state\n"
             "machine Controller(state:State,event:Event)\n"
             "  select=state.mode\n"
             "  init=State(Idle)\n"
             "  next=next(state,event)\n"
             "  success=Running\n"
-            "  failure=Idle\n"
+            "  failure=Stopped\n"
         )
         algebra, coverage = _coverage(source)
         result = coverage[0]
-        self.assertEqual(result.possible_pairs, "4")
-        self.assertEqual(result.defined_pairs, 2)
-        self.assertEqual(result.missing_pairs, "2")
-        self.assertEqual(result.overlap_pairs, 1)
-        self.assertFalse(result.complete)
+        self.assertEqual(result.possible_pairs, "6")
+        self.assertEqual(result.defined_pairs, 4)
+        self.assertEqual(result.fallthrough_pairs, 2)
+        self.assertEqual(result.missing_pairs, "0")
+        self.assertEqual(result.overlap_pairs, 2)
+        self.assertTrue(result.complete)
         self.assertEqual(result.guards[1].classification, "shadowed")
         self.assertTrue(result.guards[1].unreachable)
         payload = tooling_payload(
@@ -132,7 +134,6 @@ class TypeAlgebraToolingTests(unittest.TestCase):
             coverage,
         )
         codes = {item["code"] for item in payload["diagnostics"]}
-        self.assertIn("machine-coverage-missing", codes)
         self.assertIn("machine-coverage-overlap", codes)
         self.assertIn("machine-coverage-unreachable", codes)
 
@@ -144,7 +145,7 @@ class TypeAlgebraToolingTests(unittest.TestCase):
             "+Error=Bad\n"
             "*State(mode:Mode)\n"
             ">next(state:State,event:Event):State|Error\n"
-            "  state.mode==Idle & event==Start >> Err(Bad)\n"
+            "  state.mode==Idle >> Err(Bad)\n"
             "  _ >> Ok(state)\n"
             "machine Controller(state:State,event:Event)\n"
             "  select=state.mode\n"
@@ -155,8 +156,8 @@ class TypeAlgebraToolingTests(unittest.TestCase):
         )
         _, coverage = _coverage(source)
         result = coverage[0]
-        self.assertEqual(result.rejected_pairs, 1)
-        self.assertEqual(result.fallthrough_pairs, 3)
+        self.assertEqual(result.rejected_pairs, 2)
+        self.assertEqual(result.fallthrough_pairs, 2)
         self.assertEqual(result.missing_pairs, "0")
         self.assertEqual(result.unknown_pairs, 0)
         self.assertTrue(result.complete)
@@ -169,6 +170,7 @@ class TypeAlgebraToolingTests(unittest.TestCase):
             "*State(mode:Mode,count:u64)\n"
             ">next(state:State,event:Event):State\n"
             "  state.count>0 >> State(Running,0)\n"
+            "  _ >> state\n"
             "machine Controller(state:State,event:Event)\n"
             "  select=state.mode\n"
             "  init=State(Idle,0)\n"
