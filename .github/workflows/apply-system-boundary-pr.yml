@@ -21,13 +21,13 @@ jobs:
         shell: bash
         run: |
           awk '/^PAYLOAD$/{exit} capture{print} /cat > \/tmp\/system-boundary-payload.b64/{capture=1}' \
-            .github/workflows/apply-system-boundary-migration.yml \
+            .github/system-boundary-payload.txt \
             > /tmp/system-boundary-payload.b64
           base64 --decode /tmp/system-boundary-payload.b64 > /tmp/system-boundary-payload.tar.gz
           tar -xzf /tmp/system-boundary-payload.tar.gz -C .
           python3 scripts/apply_system_boundary_patch.py
           rm -f scripts/apply_system_boundary_patch.py
-          rm -f .github/workflows/apply-system-boundary-migration.yml
+          rm -f .github/system-boundary-payload.txt
           rm -f .github/workflows/apply-system-boundary-pr.yml
       - name: Commit implementation
         shell: bash
