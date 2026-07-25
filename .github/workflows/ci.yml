@@ -118,7 +118,9 @@ jobs:
           grep -q '"analysis": "structural"' build/lisp-core/typed-ast.json
 
       - name: Verify architecture and slash-pipe lambdas
+        shell: bash
         run: |
+          set -o pipefail
           python3 glyphc.py examples/door_sketch.glyph \
             -o build/door-sketch/generated.rs \
             --host-output build/door-sketch/host.generated.rs \
@@ -130,7 +132,8 @@ jobs:
           pub mod host;
           RS
           rustc --edition 2021 --crate-type lib build/door-sketch/lib.rs \
-            -o build/door-sketch/libglyph_door_sketch.rlib
+            -o build/door-sketch/libglyph_door_sketch.rlib \
+            2>&1 | tee build/door-sketch/rustc.log
           test -s build/door-sketch/diagrams/architecture.mmd
           test -s build/door-sketch/diagrams/architecture-ir.json
           grep -q 'sensor' build/door-sketch/diagrams/architecture.mmd
