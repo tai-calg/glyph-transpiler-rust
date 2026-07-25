@@ -198,15 +198,18 @@ class TypeAlgebraIRTests(unittest.TestCase):
                 run_result.stdout + run_result.stderr,
             )
 
-    def test_legacy_artifact_set_is_unchanged(self) -> None:
+    def test_legacy_compilation_emits_type_algebra_artifacts(self) -> None:
         outputs = compile_outputs(
             "+Bit=Off|On\n"
             "*Pair(left:Bit,right:Bit)\n",
             "legacy.glyph",
         )
 
-        self.assertNotIn("type-algebra-ir.json", outputs.diagrams.files)
-        self.assertNotIn("type-algebra.generated.rs", outputs.diagrams.files)
+        self.assertIn("type-algebra-ir.json", outputs.diagrams.files)
+        self.assertIn("type-algebra.generated.rs", outputs.diagrams.files)
+        tooling = json.loads(outputs.diagrams.files["type-algebra-tooling.json"])
+        self.assertEqual(tooling["version"], 2)
+        self.assertEqual(tooling["machine_coverage"], [])
 
 
 if __name__ == "__main__":
