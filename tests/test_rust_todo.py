@@ -55,12 +55,19 @@ class GuardAndRustTodoTests(unittest.TestCase):
         with self.assertRaisesRegex(GlyphError, "Rust側で実装"):
             compile_artifacts(source)
 
-    def test_architecture_marks_manual_rust_component(self) -> None:
+    def test_architecture_marks_manual_rust_dependency(self) -> None:
         source = """
-system Planner=run
+system Planner
+  entry run
+  in input:U
+  out result:U
+  input -> run
+  run -> result
+  run -> solve
+  run -> output
 
 ext input():U
-ext output(x:U):U
+!output(x:U):U
 ~solve(x:U):U
 >run():U=output(solve(input()))
 """
@@ -69,7 +76,9 @@ ext output(x:U):U
         solve = next(item for item in components if item.name == "solve")
         self.assertEqual(solve.kind, "rust")
         external = {item.name for item in components if item.kind == "external"}
-        self.assertEqual(external, {"input", "output"})
+        effects = {item.name for item in components if item.kind == "effect"}
+        self.assertEqual(external, {"input"})
+        self.assertEqual(effects, {"output"})
 
     def test_studio_creates_manual_once_and_preserves_edits(self) -> None:
         source_text = """

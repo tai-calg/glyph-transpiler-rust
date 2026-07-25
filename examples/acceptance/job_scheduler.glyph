@@ -1,6 +1,13 @@
-system BatchRuntime=run
+system BatchRuntime
+  entry run
 
-@MAX_BATCH=10
+  in input:BatchInput
+  out receipt:SubmitReceipt
+
+  input -> run
+  run -> receipt
+  run -> layout_lane
+  run -> submit_batch
 
 *Packet(count:U)
 *Lanes(free:U)
@@ -14,28 +21,19 @@ system BatchRuntime=run
   input.lanes.free==0 >> Err(NoLane)
   _ >> Ok(input)
 
-~layout_lane(input:BatchInput):BatchLayout # TODO: Rust implementation
+# レイアウト戦略だけをRust側の手書き実装へ分離する。
+~layout_lane(input:BatchInput):BatchLayout
 
 >build_batch(input:BatchInput):BatchLayout|Error
-  checked :=
-    input
-    /> validate?
-  layout :=
-    checked
-    /> layout_lane
-  limited :=
-    layout
-    /> |x| BatchLayout(x.lane,min(x.size,MAX_BATCH))
+  checked := input /> validate?
+  layout := checked /> layout_lane
+  limited := layout /> |x| BatchLayout(x.lane,min(x.size,10))
   Ok(limited)
 
 !submit_batch(layout:BatchLayout):SubmitReceipt
 
-# BatchRuntimeの図はrunからbuild_batch、validate、layout_lane、submit_batchを導出する。
+# public entryは検証・layout・submitの三段だけを接続する。
 >run(input:BatchInput):SubmitReceipt|Error
-  batch :=
-    input
-    /> build_batch?
-  receipt :=
-    batch
-    /> submit_batch
+  batch := input /> build_batch?
+  receipt := batch /> submit_batch
   Ok(receipt)

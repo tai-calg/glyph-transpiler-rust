@@ -1,4 +1,15 @@
-system DoorController=control
+system DoorController
+  entry control
+
+  in state:DoorState
+  in sensor:Input
+  out receipt:Receipt
+
+  state -> control
+  sensor -> control
+  control -> receipt
+  control -> lock
+  control -> alarm
 
 machine Door(state:DoorState,input:Input)
   select=state.mode
@@ -7,49 +18,52 @@ machine Door(state:DoorState,input:Input)
   success=Locked
   failure=Faulted
 
-# v0.1 acceptance: 認証、状態遷移、作用境界、時間制約を一つの実装経路にする。
 @LOCK_LIMIT=500ms
-@DOOR_FLOW=apply(step(state,sensor()))
 
 *Input(badge_valid,request_open,forced_open,unlocked,locked,alarmed:B)
 +Action=KeepLocked|Unlock|RaiseAlarm
 +Mode=Locked|Unlocked|Alarmed|Faulted
 *DoorState(mode:Mode,failures:U,action:Action)
-*Receipt(action:Action)
+
++EffectKind=LockConfirmed|AlarmConfirmed
+*Receipt(effect:EffectKind,state:DoorState)
+
++ControlError=SensorFailure|LockFailure|AlarmFailure|EffectTimeout|InvalidReceipt
 
 # 解錠が観測されたら500ms以内に施錠されなければならない。
 ?lock_deadline(*Input)=@A(unlocked>>@E LOCK_LIMIT locked)
 # こじ開けが観測されたらalarm状態でなければならない。
 ?forced_open_safe(*Input)=@A(forced_open>>alarmed)
 
-# 外部入力はextで明示する。systemはこの宣言を勝手に生成しない。
-ext sensor():Input
+# 外部所有の入力境界。未宣言名をsystemが補うことはない。
+ext sensor():Input|ControlError
 
 >authenticate(input:Input):B=input.badge_valid&!input.forced_open
 
 >decide(input:Input):Action
-  allowed := authenticate(input)
-  action :=
-    input.forced_open >> RaiseAlarm
-    allowed&input.request_open >> Unlock
-    _ >> KeepLocked
-  action
+  input.forced_open >> RaiseAlarm
+  authenticate(input)&input.request_open >> Unlock
+  _ >> KeepLocked
 
 >step(state:DoorState,input:Input):DoorState
   action := decide(input)
   next :=
-    action==RaiseAlarm >> DoorState(Alarmed,state.failures+1,action)
-    action==Unlock >> DoorState(Unlocked,state.failures,action)
-    action==KeepLocked >> DoorState(Locked,state.failures,action)
+    action==RaiseAlarm >> DoorState(Alarmed,state.failures+1,RaiseAlarm)
+    action==Unlock >> DoorState(Unlocked,state.failures,Unlock)
+    action==KeepLocked >> DoorState(Locked,state.failures,KeepLocked)
     _ >> DoorState(Faulted,state.failures+1,KeepLocked)
   next
 
-!lock(state:DoorState):Receipt
-!alarm(state:DoorState):Receipt
+# Receiptは要求受付ではなく、Hostが外部作用の完了を確認した結果である。
+!lock(state:DoorState):Receipt|ControlError
+!alarm(state:DoorState):Receipt|ControlError
 
->apply(state:DoorState):Receipt
+>apply(state:DoorState):Receipt|ControlError
   state.action==RaiseAlarm >> alarm(state)
   _ >> lock(state)
 
-# DoorControllerのI/O図は、この式から実際の呼出しを追跡して生成される。
->control(state:DoorState):Receipt=DOOR_FLOW
+# 一回の同期制御。正常経路はReceipt、失敗経路はControlErrorへ到達する。
+>control(state:DoorState):Receipt|ControlError
+  input := sensor()?
+  next := step(state,input)
+  apply(next)

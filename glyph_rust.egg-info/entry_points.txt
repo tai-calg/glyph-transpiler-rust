@@ -1,4 +1,0 @@
-[console_scripts]
-glyph-gradio = glyph.ui_cli:main
-glyph-ui = glyph.ui_cli:main
-glyphc = glyphc:main

@@ -18,11 +18,10 @@ from glyph.schema import COMPATIBILITY_REPORT_SCHEMA, IR_SCHEMA_VERSION  # noqa:
 
 
 # These sources remain valid inputs for both the main-branch compiler and the
-# current compiler. Examples migrated to `system Name=entry` or `ext` are
-# intentionally excluded because an old compiler cannot parse the new language.
+# current compiler. Examples migrated to checked `system` blocks or `ext` are
+# intentionally excluded because the old compiler cannot parse the new language.
 LEGACY_SOURCES = (
     "examples/controller.glyph",
-    "examples/system_controller.glyph",
     "examples/lisp_core.glyph",
     "examples/algorithm_sketch.glyph",
 )

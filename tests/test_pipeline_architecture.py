@@ -40,17 +40,12 @@ class PipelineAndArchitectureTests(unittest.TestCase):
         self.assertIn("inc(x)", rust)
 
     def test_pipeline_lambda_cannot_capture_outer_parameter(self) -> None:
-        source = """
->run(x:U,limit:U):U=x /> |n| min(n,limit)
-"""
+        source = ">run(x:U,limit:U):U=x /> |n| min(n,limit)\n"
         with self.assertRaisesRegex(GlyphError, "捕捉"):
             compile_source(source)
 
     def test_pipeline_question_requires_result(self) -> None:
-        source = """
->inc(x:U):U=x+1
->run(x:U):U=x /> inc?
-"""
+        source = ">inc(x:U):U=x+1\n>run(x:U):U=x /> inc?\n"
         with self.assertRaisesRegex(GlyphError, "Result"):
             compile_source(source)
 
@@ -60,9 +55,18 @@ class PipelineAndArchitectureTests(unittest.TestCase):
         self.assertEqual(len(source.splitlines()), len(joined.splitlines()))
         self.assertIn(">run(x:U):U=x /> |n| n+1", joined)
 
-    def test_system_is_derived_from_entry_calls_and_ext_is_explicit(self) -> None:
+    def test_system_context_uses_boundary_flow_and_explicit_ext(self) -> None:
         source = """
-system Door=control
+system Door
+  entry control
+  in sensor:U
+  in panel:U
+  out result:B
+  sensor -> control
+  panel -> control
+  control -> result
+  control -> lock
+  control -> log
 
 ext sensor():U
 ext panel():U
@@ -73,31 +77,31 @@ ext panel():U
 >control():B=log(lock(sum_inputs()))
 """
         model = parse_compilation_model(source, "door.glyph")
-        self.assertEqual(len(model.architecture.systems), 1)
         system = model.architecture.systems[0]
         kinds = {component.name: component.kind for component in system.components}
         self.assertEqual(kinds["sensor"], "external")
         self.assertEqual(kinds["panel"], "external")
         self.assertEqual(kinds["control"], "function")
-        self.assertEqual(kinds["sum_inputs"], "function")
         self.assertEqual(kinds["lock"], "effect")
         self.assertEqual(kinds["log"], "effect")
+        self.assertNotIn("sum_inputs", kinds)
 
         names = {component.id: component.name for component in system.components}
-        edges = {
-            (names[edge.source_id], names[edge.target_id])
-            for edge in system.edges
-        }
+        edges = {(names[e.source_id], names[e.target_id], e.kind) for e in system.edges}
         self.assertEqual(
             edges,
             {
-                ("control", "log"),
-                ("control", "lock"),
-                ("control", "sum_inputs"),
-                ("sum_inputs", "sensor"),
-                ("sum_inputs", "panel"),
+                ("sensor", "control", "data"),
+                ("panel", "control", "data"),
+                ("control", "result", "return"),
+                ("control", "lock", "effect"),
+                ("control", "log", "effect"),
             },
         )
+        evidence_kinds = {item.kind for item in system.evidence}
+        self.assertIn("external-input-read", evidence_kinds)
+        self.assertIn("return-type", evidence_kinds)
+        self.assertIn("effect-reachability", evidence_kinds)
 
         bundle = compile_diagram_bundle(source, "door.glyph")
         self.assertIn("architecture.mmd", bundle.files)
@@ -105,20 +109,34 @@ ext panel():U
         self.assertIn("sensor", bundle.files["architecture.mmd"])
         self.assertIn("control", bundle.files["architecture.mmd"])
 
-    def test_system_edge_rows_are_checked_assertions_not_freehand_edges(self) -> None:
+    def test_system_edges_are_checked_architecture_assertions(self) -> None:
         source = """
-system Door=control
+system Door
+  entry control
+  in x:U
+  out result:()
+  x -> control
+  control -> result
   control -> actuator
 
-ext actuator(x:U):()
+!actuator(x:U):()
 >control(x:U):()=actuator(x)
 """
         model = parse_compilation_model(source, "door.glyph")
-        self.assertEqual(len(model.architecture.systems[0].edges), 1)
+        self.assertEqual(len(model.architecture.systems[0].edges), 3)
+
+    def test_removed_equals_entry_syntax_is_rejected(self) -> None:
+        with self.assertRaisesRegex(GlyphError, "system Name=entry.*廃止"):
+            parse_compilation_model("system Broken=control\n>control(x:U):U=x\n")
 
     def test_undeclared_system_entry_is_rejected(self) -> None:
         source = """
-system Broken=missing
+system Broken
+  entry missing
+  in x:U
+  out result:U
+  x -> missing
+  missing -> result
 >present(x:U):U=x
 """
         with self.assertRaisesRegex(GlyphError, "entry 'missing' は未宣言"):
@@ -126,45 +144,54 @@ system Broken=missing
 
     def test_undeclared_reachable_call_requires_ext(self) -> None:
         source = """
-system Broken=control
+system Broken
+  entry control
+  in x:U
+  out result:U
+  x -> control
+  control -> result
 >control(x:U):U=driver(x)
 """
         with self.assertRaisesRegex(GlyphError, "ext name\\(args\\):Type"):
             parse_compilation_model(source)
 
-    def test_undeclared_assertion_node_is_rejected(self) -> None:
+    def test_undeclared_system_endpoint_is_rejected(self) -> None:
         source = """
-system Broken=control
+system Broken
+  entry control
+  in x:U
+  out result:U
+  x -> control
   ghost -> control
+  control -> result
 >control(x:U):U=x
 """
-        with self.assertRaisesRegex(GlyphError, "node 'ghost' は未宣言"):
+        with self.assertRaisesRegex(GlyphError, "endpoint 'ghost' は未宣言"):
             parse_compilation_model(source)
 
-    def test_asserted_edge_must_exist_in_code(self) -> None:
+    def test_asserted_effect_edge_must_exist_in_code(self) -> None:
         source = """
-system Broken=control
+system Broken
+  entry control
+  in x:U
+  out result:U
+  x -> control
+  control -> result
   control -> alarm
 !alarm(x:U):()
 >control(x:U):U=x
 """
-        with self.assertRaisesRegex(GlyphError, "直接呼出しに存在しない"):
+        with self.assertRaisesRegex(GlyphError, "到達可能なコードpathが存在しない"):
             parse_compilation_model(source)
-
-    def test_legacy_system_assertions_cannot_invent_topology(self) -> None:
-        source = """
-system Checked
-  control -> alarm
-!alarm(x:U):()
->control(x:U):()=alarm(x)
-"""
-        model = parse_compilation_model(source)
-        system = model.architecture.systems[0]
-        self.assertEqual(len(system.edges), 1)
 
     def test_duplicate_system_assertion_is_rejected(self) -> None:
         source = """
-system Broken=control
+system Broken
+  entry control
+  in x:U
+  out result:()
+  x -> control
+  control -> result
   control -> alarm
   control -> alarm
 !alarm(x:U):()
@@ -173,8 +200,8 @@ system Broken=control
         with self.assertRaisesRegex(GlyphError, "重複"):
             parse_compilation_model(source)
 
-    def test_bare_system_without_entry_or_assertions_is_rejected(self) -> None:
-        with self.assertRaisesRegex(GlyphError, "system Empty=entry"):
+    def test_bare_system_requires_explicit_entry_ports_and_flow(self) -> None:
+        with self.assertRaisesRegex(GlyphError, "entry function_name"):
             parse_compilation_model("system Empty\n>entry(x:U):U=x\n")
 
     def test_studio_has_architecture_logic_and_time_views(self) -> None:

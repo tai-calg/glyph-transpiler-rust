@@ -1,6 +1,8 @@
 __pycache__/
 *.pyc
+*.egg-info/
 target/
 demo/target/
+demo-system/target/
 **/.glyph/
 .venv/

@@ -61,8 +61,19 @@ def render_architecture_mermaid(
                 f'    click {component.id} "{_source_url(source_href, component.line)}" '
                 f'"Open {architecture.source_name}:{component.line}"'
             )
+        labels = {
+            "data": "data",
+            "return": "returns",
+            "effect": "effect",
+            "responsibility": "flow",
+        }
         for edge in system.edges:
-            lines.append(f"    {edge.source_id} --> {edge.target_id}")
+            label = labels.get(edge.kind, edge.kind)
+            if edge.payload_type:
+                label = f"{label}: {edge.payload_type}"
+            lines.append(
+                f'    {edge.source_id} -->|"{_escape(label)}"| {edge.target_id}'
+            )
         lines.append("  end")
     return "\n".join(lines) + "\n"
 

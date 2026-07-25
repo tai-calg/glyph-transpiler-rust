@@ -7,18 +7,28 @@ from tests.acceptance_support import compile_example, load, stages
 
 
 class AcceptanceSystemTests(unittest.TestCase):
-    def test_door_connects_architecture_machine_and_time(self) -> None:
+    def test_door_connects_boundary_machine_and_time(self) -> None:
         outputs = compile_example("door")
         architecture = load(outputs, "architecture-ir.json")
         execution = load(outputs, "execution-ir.json")
         self.assertEqual([item["name"] for item in architecture["systems"]], ["DoorController"])
+        system = architecture["systems"][0]
+        self.assertEqual(system["entry"], "control")
+        self.assertEqual(
+            {(item["name"], item["direction"], item["type"]) for item in system["ports"]},
+            {
+                ("state", "input", "DoorState"),
+                ("sensor", "input", "Input"),
+                ("receipt", "output", "Receipt"),
+            },
+        )
         self.assertEqual([item["name"] for item in execution["machines"]], ["Door"])
         self.assertEqual(
             {item["name"] for item in execution["temporal"]},
             {"lock_deadline", "forced_open_safe"},
         )
         mapping = load(outputs, "preprocessor-map.json")
-        self.assertTrue(any("DOOR_FLOW" in item["macro_stack"] for item in mapping["expanded_lines"]))
+        self.assertFalse(any("DOOR_FLOW" in item["macro_stack"] for item in mapping["expanded_lines"]))
 
     def test_batch_separates_rust_effect_and_error_paths(self) -> None:
         outputs = compile_example("batch")

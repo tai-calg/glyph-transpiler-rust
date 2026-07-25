@@ -73,9 +73,9 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          mkdir -p build/code-derived-system-io build/state-diagram-regression build/state-diagram-stability build/uml-transition-semantics build/additional-failure-notation build/diagram-editor-exports
+          mkdir -p build/checked-system-context-io build/state-diagram-regression build/state-diagram-stability build/uml-transition-semantics build/additional-failure-notation build/diagram-editor-exports
           node tests/verify_code_derived_system_io.mjs \
-            2>&1 | tee build/code-derived-system-io/verify.log
+            2>&1 | tee build/checked-system-context-io/verify.log
           node tests/verify_state_diagram_rendering.mjs \
             2>&1 | tee build/state-diagram-regression/verify.log
           node tests/verify_state_diagram_stability.mjs \
@@ -95,7 +95,7 @@ jobs:
           include-hidden-files: true
           if-no-files-found: warn
           path: |
-            build/code-derived-system-io/**
+            build/checked-system-context-io/**
             build/state-diagram-regression/**
             build/state-diagram-stability/**
             build/uml-transition-semantics/**

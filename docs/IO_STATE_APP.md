@@ -2,17 +2,17 @@
 
 ## Purpose
 
-`python3 glyph.py <file.glyph>` compiles one Glyph source file and renders two compiler-derived views:
+`python3 glyph.py <file.glyph>`は、一つのGlyph sourceから次の二つのcompiler-derived viewを表示する。
 
-1. I/O topology
-2. state transitions
+1. Checked System Context / I/O topology
+2. State transitions
 
-The application does not execute the designed system and does not reproduce application logic in Python or JavaScript.
+アプリケーションは設計対象を実行しない。PythonやJavaScript側でGlyphの業務ロジックを再実装せず、検証済みIRだけを表示する。
 
 ```text
 Glyph source
   -> CompilationModel
-  -> checked ArchitectureIR / Program AST
+  -> checked ArchitectureIR
   -> ExecutionStructureIR
   -> normalized StateMachine analysis
   -> glyph.io-state-views v2
@@ -25,58 +25,60 @@ Glyph source
 python3 glyph.py examples/acceptance/motor_safety.glyph
 ```
 
-The process binds to `127.0.0.1` and opens the browser. Set a fixed port when necessary:
+既定では`127.0.0.1`へbindしてブラウザを開く。portを固定する場合:
 
 ```bash
 GLYPH_DIAGRAM_PORT=7860 python3 glyph.py design.glyph
 ```
 
-Disable automatic browser opening:
+ブラウザの自動起動を止める場合:
 
 ```bash
 GLYPH_DIAGRAM_NO_BROWSER=1 python3 glyph.py design.glyph
 ```
 
-## I/O view
+## Checked System Context view
 
-A declared system names a body-bearing Glyph entry function:
-
-```glyph
-system MotorSafety=control
-```
-
-The compiler follows actual named calls reachable from `control`. It does not accept a second freehand topology that is unrelated to the code.
+正規の`system` declarationは、entry、typed port、主要なデータ・戻り値・作用flowを宣言する。
 
 ```glyph
-ext sensor():Input
+system MotorSafety
+  entry control
 
->decide(input:Input):Command
-  ...
+  in state:MotorState
+  in sensor:Input
+  out receipt:Receipt
 
->step(state:MotorState,input:Input):MotorState
-  command := decide(input)
-  ...
-
-!write_motor(command:Command):Receipt
-
->control(state:MotorState):Receipt=
-  write_motor(step(state,sensor()).command)
+  state -> control
+  sensor -> control
+  control -> receipt
+  control -> write_motor
 ```
 
-The resulting I/O topology contains only code-backed relationships:
+`system MotorSafety=control`は廃止されている。
+
+### System Flowとcall graph
+
+System Flowとcall graphは同一ではない。
 
 ```text
-control -> write_motor
-control -> step
-control -> sensor
-step    -> decide
+code call: control -> sensor
+data flow: sensor -> control
 ```
 
-The view displays `Derived from code` and the selected entry name. Edges are labeled `calls`.
+明示`system`がある場合、I/O viewはSystem Contextを表示する。内部の`decide`や`step`をentry call graphから自動的に境界へ混入させない。
+
+```text
+state  --data--> control --returns--> receipt
+sensor --data--> control
+control --effect--> write_motor
+```
+
+call graphが必要な場合は別viewとして扱う。`system`宣言がないsourceに限り、whole-program call graphをfallback I/O viewとして表示する。
 
 ### Explicit external boundaries
 
-External devices, input providers, and services are declared with typed `ext` signatures:
+外部装置、入力provider、外部serviceはtyped `ext` signatureで宣言する。
 
 ```glyph
 ext sensor():Input
@@ -84,44 +86,72 @@ ext panel():PanelInput
 ext database(query:Query):Record|DatabaseError
 ```
 
-They are displayed as external components with their declared inputs and output. The renderer no longer creates an external component merely because an unresolved name appears in a system block.
-
-An undeclared reachable call is a compile error:
+`ext`はoutside → systemの極性を持つ。未宣言名をrendererがexternal componentとして補うことはない。
 
 ```glyph
-system Broken=control
->control():Input=sensor()  # sensor is undeclared
+system Broken
+  entry control
+  in sensor:Input
+  out result:Input
+  sensor -> control
+  control -> result
+
+>control():Input=sensor()  # sensorが未宣言なのでコンパイルエラー
 ```
 
-Repair:
+修正:
 
 ```glyph
-system Fixed=control
+system Fixed
+  entry control
+  in sensor:Input
+  out result:Input
+  sensor -> control
+  control -> result
+
 ext sensor():Input
 >control():Input=sensor()
 ```
 
-`ext` identifies an external component contract. `!` remains the explicit effect boundary owned by the designed system. Both require a Host implementation, but the architecture view keeps their roles distinct.
+`ext`と`!`はHostへ接続されるが、Architecture上の意味は異なる。
 
-### Optional checked edge assertions
+| declaration | polarity | role |
+|---|---|---|
+| `ext sensor():Input` | outside → system | external input / provider |
+| `!write_motor(command:Command):Receipt` | system → outside | effect boundary |
+| `~layout(input:Input):Layout` | system → manual Rust dependency | logically pure implementation contract |
 
-A system may include expected direct-call edges:
+### Checked flow evidence
 
-```glyph
-system MotorSafety=control
-  control -> sensor
-  control -> step
-```
+System edgeはarrowを生成する命令ではない。Architecture assertionであり、コンパイラがtyped code evidenceを付与できる場合だけ受理する。
 
-These rows do not draw additional arrows. The compiler checks them against the call graph. Undeclared nodes and edges absent from the code are errors.
+| edge kind | browser label | evidence |
+|---|---|---|
+| input data | `data` | entry parameterまたはexternal input read |
+| successful return | `returns` | return typeとentryからの到達性 |
+| external effect | `effect` | effect boundaryへの到達path |
+| internal/manual responsibility | `flow` | declared call path |
 
-When no `system` declaration exists, the compiler call graph is used as a fallback. Isolated functions are still rendered.
+次はコンパイルエラーになる。
 
-Full semantics: [`CODE_DERIVED_SYSTEMS.md`](CODE_DERIVED_SYSTEMS.md).
+- undeclared entry
+- undeclared endpoint
+- codeに存在しないflow edge
+- port型とfunction型の不一致
+- `ext`と`!`の極性逆転
+- reachable external boundaryのsystem記載漏れ
+
+Glyph短縮型`U/B/F/I`と、正規化後の`u16/bool/f32/i16`は同じcanonical typeとして比較する。
+
+### Internal declarations
+
+明示systemに接続されていないhelperや別entryは、`Internal and unconnected declarations`へ分離する。これは未宣言という意味ではなく、選択中のpublic System Contextに含めていないという意味である。
+
+完全な意味論は[`CODE_DERIVED_SYSTEMS.md`](CODE_DERIVED_SYSTEMS.md)を参照する。ファイル名は既存link互換のため維持している。
 
 ## State-transition view
 
-A state diagram is generated only from a validated `machine` declaration.
+状態遷移図は、検証済み`machine` declarationからだけ生成する。
 
 ```glyph
 machine Motor(state:MotorState,input:Input)
@@ -132,50 +162,50 @@ machine Motor(state:MotorState,input:Input)
   failure=Faulted
 ```
 
-Before rendering, the compiler-derived transition relation is normalized:
+描画前に、compiler-derived transition relationを正規化する。
 
-1. the selector variants define the complete state set
-2. wildcard source `*` is expanded into one transition per concrete state
-3. wildcard target `*` is resolved as a self-transition
-4. unreachable ordered-guard branches are removed
-5. reachability is computed from the declared initial state
-6. generated helper locations are remapped to the original Glyph source lines
+1. selector variantから完全なstate集合を得る
+2. wildcard source `*`をconcrete stateへ展開する
+3. wildcard target `*`をself-transitionへ解決する
+4. ordered guardで到達不能なbranchを除く
+5. initial stateからreachabilityを計算する
+6. compiler helperのsource locationを元Glyph lineへ戻す
 
-The browser therefore never renders `Any state` as if it were a real state.
+ブラウザは`Any state`を実stateとして描画しない。
 
-The renderer displays:
+表示内容:
 
-- the initial-state marker
-- every selector variant
-- success and failure annotations
-- concrete state-to-state transitions
-- transition conditions
-- unreachable states with a dashed outline
-- static-analysis warnings with source line links
+- initial-state marker
+- selectorの全variant
+- success / failure annotation
+- concrete state-to-state transition
+- transition condition
+- unreachable stateのdashed outline
+- source line link付きstatic diagnostic
 
-Current static diagnostics include:
+主な診断:
 
-- `unreachable-branch`: a later ordered guard cannot run because earlier guards already cover all variants of a finite sum type
-- `unreachable-state`: no transition path exists from the initial state
-- `state-independent-transition`: every active branch applies to every selector state
-- `no-static-transitions`: no transition relation could be derived without guessing
+- `unreachable-branch`
+- `unreachable-state`
+- `state-independent-transition`
+- `no-static-transitions`
 
-Immutable `:=` blocks are lowered into compiler helper functions. State analysis traces state constructors through those helpers while presenting only the original Glyph source locations.
+`:=` blockはcompiler helperへloweringされるが、state analysisはconstructorを追跡し、UIには元のGlyph source locationだけを示す。
 
-If no `machine` declaration exists, the application displays an empty-state explanation and does not infer a state machine from names or types.
+`machine`がない場合、state machineを名前や型から推測しない。
 
 ## Live editing
 
-- editing triggers a debounced compile preview
-- `Compile` runs an immediate preview without saving
-- `Save` writes the source file and recompiles
-- external file changes are watched and recompiled
-- a compile error keeps the last valid diagrams visible
-- clicking a node, transition label, or diagnostic moves the source editor to its source line
+- editはdebounce付きcompile previewを開始する
+- `Compile`は保存せず即時previewする
+- `Save`はsourceを書き込み、再compileする
+- external file changeをwatchする
+- compile error時も最後のvalid diagramを保持する
+- node、transition label、diagnosticからsource lineへ移動できる
 
 ## Output artifact
 
-A successful compile writes:
+compile成功時:
 
 ```text
 .glyph/<source-stem>/io-state-views.json
@@ -188,14 +218,24 @@ schema: glyph.io-state-views
 version: 2
 ```
 
-The JSON model is backend-neutral and contains code-derived systems, typed component ports, type declarations, normalized machines, concrete states, transitions, reachability, and diagnostics.
+JSON modelには次を含む。
+
+- checked systems
+- typed ports
+- semantic edges and evidence
+- external/effect/manual boundary classification
+- fallback call graph
+- type declarations
+- normalized machines
+- concrete states and transitions
+- reachability and diagnostics
 
 ## Non-goals
 
-- Gradio form generation
 - runtime invocation
 - effect execution
+- scheduler / thread / process placement
 - business-semantic inference
-- state-machine inference without `machine`
+- `machine`なしのstate-machine inference
 - undeclared external component inference
-- treating call edges as physical wires or runtime scheduling
+- call edgeをphysical wireまたはSystem Contextとみなすこと

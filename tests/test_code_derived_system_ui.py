@@ -11,14 +11,15 @@ from glyph.code_derived_system_ui import enhance_code_derived_system_html
 from glyph.diagram_ui import DIAGRAM_HTML
 
 
-class CodeDerivedSystemUiTests(unittest.TestCase):
-    def test_enhancer_explains_derived_systems_and_call_edges(self) -> None:
+class CheckedSystemContextUiTests(unittest.TestCase):
+    def test_enhancer_explains_checked_context_and_semantic_edges(self) -> None:
         html = enhance_code_derived_system_html(DIAGRAM_HTML)
-        self.assertIn("glyph-code-derived-system-ui-v1", html)
-        self.assertIn("実際の関数呼出しを追跡", html)
-        self.assertIn("Derived from code", html)
+        self.assertIn("glyph-checked-system-context-ui-v2", html)
+        self.assertIn("call graphとは別のview", html)
+        self.assertIn("Checked system context", html)
         self.assertIn("Entry:", html)
-        self.assertIn('edges[index]?.label || "calls"', html)
+        self.assertIn("Boundary edges:", html)
+        self.assertIn('edges[index]?.label || "flow"', html)
 
     def test_enhancer_is_idempotent(self) -> None:
         once = enhance_code_derived_system_html(DIAGRAM_HTML)
@@ -30,7 +31,7 @@ class CodeDerivedSystemUiTests(unittest.TestCase):
         html = enhance_code_derived_system_html(DIAGRAM_HTML)
         scripts = re.findall(r"<script[^>]*>(.*?)</script>", html, re.DOTALL)
         with tempfile.TemporaryDirectory() as directory:
-            script = Path(directory) / "code-derived-system-ui.js"
+            script = Path(directory) / "checked-system-context-ui.js"
             script.write_text("\n".join(scripts), encoding="utf-8")
             result = subprocess.run(
                 ["node", "--check", str(script)],

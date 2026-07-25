@@ -30,18 +30,22 @@ DECL
         self.assertIn("if x > 100", rust)
         self.assertIn("SensorInput { value: x }", rust)
 
-    def test_raw_macro_expands_checked_system_edge_assertion(self) -> None:
+    def test_raw_macro_expands_checked_system_flow_assertion(self) -> None:
         source = """
-@EDGE=ctl -> sensor
-system Demo=ctl
+@EDGE=sensor -> ctl
+system Demo
+  entry ctl
+  in sensor:U
+  out result:U
   EDGE
+  ctl -> result
 ext sensor():U
 >ctl():U=sensor()
 """
         model = parse_compilation_model(source)
         edge = model.systems[0].edges[0]
-        self.assertEqual((edge.source_name, edge.target_name), ("ctl", "sensor"))
-        self.assertEqual(edge.line, 4)
+        self.assertEqual((edge.source_name, edge.target_name), ("sensor", "ctl"))
+        self.assertEqual(edge.line, 7)
 
     def test_multiline_macro_expands_immutable_algorithm_block(self) -> None:
         source = """@MAX=100

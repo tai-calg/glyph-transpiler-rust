@@ -44,9 +44,22 @@ class GlyphLauncherTests(unittest.TestCase):
                 self.assertEqual(launcher.resolve_input(None), path)
 
             self.assertEqual(path.read_text(encoding="utf-8"), launcher.DEFAULT_SOURCE)
-            self.assertIn("system DoorControl=control", launcher.DEFAULT_SOURCE)
-            self.assertIn("ext panel():PanelInput", launcher.DEFAULT_SOURCE)
-            self.assertIn(">control(state:DoorState)", launcher.DEFAULT_SOURCE)
+            self.assertIn("system DoorControl\n  entry control", launcher.DEFAULT_SOURCE)
+            self.assertIn("in panel:PanelInput", launcher.DEFAULT_SOURCE)
+            self.assertIn("out receipt:Receipt", launcher.DEFAULT_SOURCE)
+            self.assertIn("!actuator(state:DoorState):Receipt", launcher.DEFAULT_SOURCE)
+
+    def test_untouched_code_derived_default_is_migrated(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = launcher.default_input_path(root)
+            path.parent.mkdir(parents=True)
+            path.write_text(launcher.CODE_DERIVED_DEFAULT_SOURCE, encoding="utf-8")
+
+            with patch.object(launcher.Path, "cwd", return_value=root):
+                self.assertEqual(launcher.resolve_input(None), path)
+
+            self.assertEqual(path.read_text(encoding="utf-8"), launcher.DEFAULT_SOURCE)
 
     def test_user_modified_legacy_workspace_is_not_migrated(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

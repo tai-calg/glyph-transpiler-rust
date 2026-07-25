@@ -1,5 +1,4 @@
-use glyph_system_demo::controller::Controller;
-use glyph_system_demo::generated::Input;
+use glyph_system_demo::{Controller, Input};
 
 fn main() {
     let mut controller = Controller::new();
@@ -22,7 +21,7 @@ fn main() {
         )
         .expect("normal controller cycle must succeed");
 
-    println!("state    = {:?}", outcome.cycle.system);
-    println!("receipt  = {:?}", outcome.cycle.receipt);
-    println!("monitors = {:?}", outcome.monitors);
+    println!("state    = {:?}", outcome.system());
+    println!("receipt  = {:?}", outcome.receipt());
+    println!("monitors = {:?}", outcome.monitors());
 }

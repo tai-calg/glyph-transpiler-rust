@@ -117,37 +117,62 @@ def _type_declaration(
     }
 
 
-def _node_from_signature(
-    node_id: str,
-    display_name: str,
-    component_kind: str,
-    binding: str | None,
-    line: int,
+def _node_from_component(
+    component: object,
+    port: object | None,
     signatures: dict[str, dict[str, object]],
 ) -> dict[str, object]:
+    binding = getattr(component, "binding")
     signature = signatures.get(binding or "")
+    port_direction = getattr(port, "direction", None)
+    port_type = getattr(port, "type", None)
+
     if signature is None:
+        kind = (
+            "input"
+            if port_direction == "input"
+            else "output"
+            if port_direction == "output"
+            else getattr(component, "kind")
+        )
         return {
-            "id": node_id,
-            "name": display_name,
-            "kind": component_kind,
+            "id": getattr(component, "id"),
+            "name": getattr(component, "name"),
+            "kind": kind,
             "binding": binding,
             "inputs": [],
-            "output": None,
-            "line": line,
-            "declared_io": False,
+            "output": port_type,
+            "line": getattr(component, "line"),
+            "declared_io": port is not None,
+            "port_direction": port_direction,
+            "port_type": port_type,
         }
+
     return {
-        "id": node_id,
-        "name": display_name,
+        "id": getattr(component, "id"),
+        "name": getattr(component, "name"),
         "kind": signature["kind"],
         "binding": binding,
         "inputs": signature["inputs"],
         "output": signature["output"],
-        "line": line,
+        "line": getattr(component, "line"),
         "declaration_line": signature["line"],
         "declared_io": True,
+        "port_direction": port_direction,
+        "port_type": port_type,
     }
+
+
+def _system_edge(edge: object) -> dict[str, object]:
+    labels = {
+        "data": "data",
+        "return": "returns",
+        "effect": "effect",
+        "responsibility": "flow",
+    }
+    payload = asdict(edge)
+    payload["label"] = labels.get(payload.get("kind"), str(payload.get("kind", "flow")))
+    return payload
 
 
 def _explicit_systems(
@@ -158,17 +183,15 @@ def _explicit_systems(
     bound: set[str] = set()
     declarations = {item.name: item for item in model.systems}
     for system in model.architecture.systems:
+        ports = {item.id: item for item in system.ports}
         nodes: list[dict[str, object]] = []
         for component in system.components:
             if component.binding is not None:
                 bound.add(component.binding)
             nodes.append(
-                _node_from_signature(
-                    component.id,
-                    component.name,
-                    component.kind,
-                    component.binding,
-                    component.line,
+                _node_from_component(
+                    component,
+                    ports.get(component.id),
                     signatures,
                 )
             )
@@ -177,14 +200,13 @@ def _explicit_systems(
             {
                 "id": system.id,
                 "name": system.name,
-                "kind": "code-derived-system",
+                "kind": "checked-system-context",
                 "entry": declaration.entry_name if declaration is not None else None,
                 "line": system.line,
+                "ports": [asdict(item) for item in system.ports],
                 "nodes": nodes,
-                "edges": [
-                    {**asdict(edge), "label": "calls"}
-                    for edge in system.edges
-                ],
+                "edges": [_system_edge(edge) for edge in system.edges],
+                "evidence": [asdict(item) for item in system.evidence],
             }
         )
     return systems, bound
@@ -206,15 +228,21 @@ def _implicit_program(
             if node.kind == "effect" and node.label.startswith("!")
             else node.label
         )
+        signature = signatures.get(binding)
         nodes.append(
-            _node_from_signature(
-                node.id,
-                binding,
-                node.kind,
-                binding,
-                node.source.line,
-                signatures,
-            )
+            {
+                "id": node.id,
+                "name": binding,
+                "kind": signature["kind"] if signature else node.kind,
+                "binding": binding,
+                "inputs": signature["inputs"] if signature else [],
+                "output": signature["output"] if signature else None,
+                "line": node.source.line,
+                "declaration_line": signature["line"] if signature else node.source.line,
+                "declared_io": signature is not None,
+                "port_direction": None,
+                "port_type": None,
+            }
         )
 
     seen: set[tuple[str, str]] = set()
@@ -257,7 +285,7 @@ def _unconnected_system(
         return None
     return {
         "id": "unconnected_declarations",
-        "name": "Unconnected declarations",
+        "name": "Internal and unconnected declarations",
         "kind": "declaration-set",
         "entry": None,
         "line": min(int(item["line"]) for item in remaining),
@@ -271,6 +299,8 @@ def _unconnected_system(
                 "output": item["output"],
                 "line": item["line"],
                 "declared_io": True,
+                "port_direction": None,
+                "port_type": None,
             }
             for item in remaining
         ],
@@ -282,11 +312,10 @@ def build_io_state_views(
     model: CompilationModel,
     execution: ExecutionStructureIR,
 ) -> dict[str, object]:
-    """Project validated compiler models into I/O and StateTransitionIR v2.
+    """Project validated System Context and state-machine models for the UI.
 
-    Explicit systems are compiler-derived from actual function calls. `ext`
-    declarations remain visibly distinct from `!` effect boundaries even though
-    both lower through the Host binding layer.
+    Explicit `system` blocks describe checked boundary flow, not a call graph.
+    Sources without a system declaration still receive a derived call-graph view.
     """
 
     external_names = _source_external_names(model)
