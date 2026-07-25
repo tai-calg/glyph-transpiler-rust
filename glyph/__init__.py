@@ -13,6 +13,11 @@ from .compilation import (
     compile_outputs,
     write_diagram_bundle,
 )
+from .tooling_delivery_v2 import install_tooling_delivery_v2 as _install_tooling_delivery_v2
+
+_install_tooling_delivery_v2()
+del _install_tooling_delivery_v2
+
 from .compiler import GlyphError
 from .frontend import compile_file, compile_source, parse_program
 from .incremental import CompilationSnapshot, IncrementalCompiler, IncrementalResult
