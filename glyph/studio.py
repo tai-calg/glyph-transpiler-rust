@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -9,7 +9,7 @@ import json
 import os
 from pathlib import Path
 import threading
-from typing import Any
+from typing import Any, Mapping
 from urllib.parse import parse_qs, urlparse
 import webbrowser
 
@@ -19,7 +19,6 @@ from .incremental import IncrementalCompiler
 from .studio_type_algebra import attach_type_algebra_view, extend_studio_html
 from .studio_ui import STUDIO_HTML as _AUTHORITATIVE_STUDIO_HTML
 from .studio_views import build_studio_views
-from .type_algebra import build_machine_coverage, build_type_algebra_ir, tooling_payload
 
 
 STUDIO_HTML = extend_studio_html(_AUTHORITATIVE_STUDIO_HTML)
@@ -75,6 +74,23 @@ def _empty_studio_views() -> dict[str, object]:
     return attach_type_algebra_view(build_studio_views({}), {}, {})
 
 
+def _artifact_object(artifacts: Mapping[str, str], name: str) -> dict[str, object]:
+    content = artifacts.get(name)
+    if content is None:
+        return {}
+    value = json.loads(content)
+    if not isinstance(value, dict):
+        raise ValueError(f"artifact `{name}` must contain a JSON object")
+    return value
+
+
+def _tooling_diagnostics(tooling: Mapping[str, object]) -> tuple[dict[str, object], ...]:
+    value = tooling.get("diagnostics")
+    if not isinstance(value, list):
+        return ()
+    return tuple(dict(item) for item in value if isinstance(item, Mapping))
+
+
 class GlyphStudio:
     """One-process development environment for one Glyph source file."""
 
@@ -127,48 +143,22 @@ class GlyphStudio:
             )
             compilation = result.snapshot
             semantic = json.loads(compilation.semantic_json)
-            execution_ir = compilation.diagrams.ir
-            expanded = compilation.model.expanded
-            algebra = build_type_algebra_ir(
-                str(self.input_path),
-                expanded.program,
-            )
-            coverage = build_machine_coverage(
-                expanded.program,
-                expanded.machines,
-                execution_ir,
-                algebra,
-            )
-            tooling = tooling_payload(
-                algebra.diagnostics,
-                algebra.structural_conversions,
-                coverage,
-            )
-            algebra_payload = algebra.to_dict()
+            artifacts = {
+                "generated.rs": compilation.artifacts.logic,
+                "host.generated.rs": compilation.artifacts.host,
+                "typed-ast.json": compilation.semantic_json,
+                **compilation.diagrams.files,
+            }
+            algebra_payload = _artifact_object(artifacts, "type-algebra-ir.json")
+            tooling = _artifact_object(artifacts, "type-algebra-tooling.json")
             glyph04_views = attach_type_algebra_view(
                 build_studio_views(semantic),
                 algebra_payload,
                 tooling,
             )
-            warning_diagnostics = tuple(asdict(item) for item in algebra.diagnostics)
-            artifacts = {
-                "generated.rs": compilation.artifacts.logic,
-                "host.generated.rs": compilation.artifacts.host,
-                "typed-ast.json": compilation.semantic_json,
-                "studio-views.json": json.dumps(
-                    glyph04_views,
-                    ensure_ascii=False,
-                    indent=2,
-                )
-                + "\n",
-                "type-algebra-tooling.json": json.dumps(
-                    tooling,
-                    ensure_ascii=False,
-                    indent=2,
-                )
-                + "\n",
-                **compilation.diagrams.files,
-            }
+            artifacts["studio-views.json"] = (
+                json.dumps(glyph04_views, ensure_ascii=False, indent=2) + "\n"
+            )
             for name, content in artifacts.items():
                 _atomic_write(self.output_dir / name, content)
             snapshot = StudioSnapshot(
@@ -177,7 +167,7 @@ class GlyphStudio:
                 source=source,
                 digest=digest,
                 updated_at=_utc_now(),
-                diagnostics=warning_diagnostics,
+                diagnostics=_tooling_diagnostics(tooling),
                 artifacts=artifacts,
                 semantic=semantic,
                 execution_ir=json.loads(artifacts["execution-ir.json"]),
