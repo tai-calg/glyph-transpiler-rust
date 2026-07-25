@@ -32,11 +32,15 @@ ui = [
 dev = [
   "build>=1.2,<2",
 ]
+desktop = [
+  "pyinstaller>=6.10,<7",
+]
 
 [project.scripts]
 glyphc = "glyphc:main"
 glyph-ui = "glyph.ui_cli:main"
 glyph-gradio = "glyph.ui_cli:main"
+glyph-desktop-server = "glyph.desktop_server:main"
 
 [build-system]
 requires = ["setuptools>=69"]
