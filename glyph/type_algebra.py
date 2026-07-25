@@ -139,6 +139,47 @@ def build_machine_coverage(*args, **kwargs) -> tuple[MachineCoverage, ...]:
     return result
 
 
+def _add_exact_coverage_counts(
+    payload: dict[str, object],
+    machine_coverage: Sequence[MachineCoverage],
+) -> dict[str, object]:
+    rows = payload.get("machine_coverage")
+    if not isinstance(rows, list):
+        return payload
+    for coverage, row in zip(machine_coverage, rows):
+        if not isinstance(row, dict):
+            continue
+        row.update(
+            {
+                "defined_pairs_exact": str(coverage.defined_pairs),
+                "rejected_pairs_exact": str(coverage.rejected_pairs),
+                "fallthrough_pairs_exact": str(coverage.fallthrough_pairs),
+                "missing_pairs_exact": (
+                    None
+                    if coverage.missing_pairs is None
+                    else str(coverage.missing_pairs)
+                ),
+                "overlap_pairs_exact": str(coverage.overlap_pairs),
+                "unknown_pairs_exact": str(coverage.unknown_pairs),
+            }
+        )
+        guard_rows = row.get("guards")
+        if not isinstance(guard_rows, list):
+            continue
+        for guard, guard_row in zip(coverage.guards, guard_rows):
+            if not isinstance(guard_row, dict):
+                continue
+            guard_row.update(
+                {
+                    "true_cases_exact": str(guard.true_cases),
+                    "first_match_cases_exact": str(guard.first_match_cases),
+                    "shadowed_cases_exact": str(guard.shadowed_cases),
+                    "unknown_cases_exact": str(guard.unknown_cases),
+                }
+            )
+    return payload
+
+
 def tooling_payload(
     diagnostics: Sequence[Diagnostic],
     structural: Sequence[StructuralConversion],
@@ -147,7 +188,8 @@ def tooling_payload(
     combined = _unique_diagnostics(
         (*diagnostics, *build_machine_coverage_diagnostics(machine_coverage))
     )
-    return _tooling_payload(combined, structural, machine_coverage)
+    payload = _tooling_payload(combined, structural, machine_coverage)
+    return _add_exact_coverage_counts(payload, machine_coverage)
 
 
 __all__ = [
