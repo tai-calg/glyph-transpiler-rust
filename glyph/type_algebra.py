@@ -1,8 +1,20 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from typing import Sequence
 
 from .compiler import Program
+from .machine_coverage import (
+    CoverageBinding,
+    MachineCoverage,
+    MachineCoverageCase,
+    MachineGuardCoverage,
+    build_machine_coverage,
+)
+from .machine_coverage_diagnostics import (
+    MachineCoverageDiagnostic,
+    build_machine_coverage_diagnostics,
+)
 from .type_algebra_impl import (
     AlgebraMonomial,
     ConversionFunction,
@@ -15,14 +27,12 @@ from .type_algebra_impl import (
     render_type_algebra_rust as _render_core_type_algebra_rust,
 )
 from .type_algebra_tooling import (
-    MachineCoverage,
     StructuralConversion,
     TypeAlgebraDiagnostic,
-    build_machine_coverage,
     build_structural_conversions,
     build_type_algebra_diagnostics,
     render_structural_conversion_rust,
-    tooling_payload,
+    tooling_payload as _tooling_payload,
 )
 
 
@@ -82,18 +92,35 @@ def render_type_algebra_rust(ir: TypeAlgebraIR | CoreTypeAlgebraIR) -> str:
     return rendered.rstrip() + "\n" + structural
 
 
+def tooling_payload(
+    diagnostics: Sequence[TypeAlgebraDiagnostic | MachineCoverageDiagnostic],
+    structural: Sequence[StructuralConversion],
+    machine_coverage: Sequence[MachineCoverage] = (),
+) -> dict[str, object]:
+    combined = (
+        *diagnostics,
+        *build_machine_coverage_diagnostics(machine_coverage),
+    )
+    return _tooling_payload(combined, structural, machine_coverage)
+
+
 __all__ = [
     "AlgebraMonomial",
     "ConversionFunction",
+    "CoverageBinding",
     "ExhaustiveCase",
     "IsomorphismClass",
     "MachineCoverage",
+    "MachineCoverageCase",
+    "MachineCoverageDiagnostic",
+    "MachineGuardCoverage",
     "StructuralConversion",
     "TypeAlgebraDiagnostic",
     "TypeAlgebraIR",
     "TypeAlgebraSourceRef",
     "TypeAlgebraType",
     "build_machine_coverage",
+    "build_machine_coverage_diagnostics",
     "build_structural_conversions",
     "build_type_algebra_diagnostics",
     "build_type_algebra_ir",
