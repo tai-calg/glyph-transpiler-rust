@@ -124,7 +124,12 @@ jobs:
             --host-output build/door-sketch/host.generated.rs \
             --diagram-dir build/door-sketch/diagrams \
             --ast-json build/door-sketch/typed-ast.json
-          rustc --edition 2021 --crate-type lib build/door-sketch/generated.rs \
+          cat > build/door-sketch/lib.rs <<'RS'
+          pub mod generated;
+          #[path = "host.generated.rs"]
+          pub mod host;
+          RS
+          rustc --edition 2021 --crate-type lib build/door-sketch/lib.rs \
             -o build/door-sketch/libglyph_door_sketch.rlib
           test -s build/door-sketch/diagrams/architecture.mmd
           test -s build/door-sketch/diagrams/architecture-ir.json
@@ -144,12 +149,12 @@ jobs:
           (root / 'generated.rs').write_text(artifacts.logic, encoding='utf-8')
           (root / 'manual.rs').write_text(artifacts.manual_scaffold, encoding='utf-8')
           (root / 'lib.rs').write_text(
-              'pub mod generated;\npub mod manual;\n', encoding='utf-8'
+            'pub mod generated;\npub mod manual;\n', encoding='utf-8'
           )
           model = parse_compilation_model(source)
           (root / 'rust-todos.txt').write_text(
-              '\n'.join(item.name for item in model.opaques) + '\n',
-              encoding='utf-8',
+            '\n'.join(item.name for item in model.opaques) + '\n',
+            encoding='utf-8',
           )
           PY
           rustc --edition 2021 --crate-type lib build/algorithm-sketch/lib.rs \
