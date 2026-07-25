@@ -1,6 +1,6 @@
 # Glyph v0.1 Acceptance Campaign
 
-このcampaignは、新しい構文を増やすためのものではない。Glyphが実システムの設計骨格を一つのsource of truthとして保持し、Rust・IR・図へ決定的に変換できることを固定する。
+このcampaignは、Glyphが実システムの設計骨格を一つのsource of truthとして保持し、Rust・IR・図へ決定的に変換できることを固定する。
 
 ## 実行
 
@@ -23,20 +23,24 @@ python3 -m unittest discover -s tests -v
 
 検証対象:
 
-- `system`による外部構造
-- 複数行rawマクロによる接続定義
+- `system DoorController=control`から実呼出しだけを導出する
+- `ext sensor():Input`が型付き外部componentとして解決される
 - 認証と判断を分離した`:=`アルゴリズム
 - 状態機械
 - 施錠期限とこじ開け安全条件
 - `!lock`と`!alarm`の作用境界
+- raw macro `DOOR_FLOW`が実行式へ展開される
 
 期待される設計view:
 
 ```text
-sensor -> authenticate -> decide -> step
-                                   ├-> lock
-                                   └-> alarm
+control -> sensor
+control -> step -> decide -> authenticate
+control -> apply -> lock
+                 -> alarm
 ```
+
+図中のすべてのnodeとedgeは実際の宣言とcall siteを持つ。未宣言名をexternalとして補うことはない。
 
 ## Compute batch runtime
 
@@ -46,17 +50,19 @@ sensor -> authenticate -> decide -> step
 
 検証対象:
 
+- `system BatchRuntime=run`から実呼出しを導出する
 - `/> validate?`と`/> build_batch?`のErr経路
 - `~layout_lane`というRust実装の純粋境界
 - `!submit_batch`という外部作用境界
 - pipeline lambdaによるbatch size制限
 - `manual.rs`のuser ownership
 
-`~`と`!`は同じexternとして扱ってはならない。
+`~`、`ext`、`!`は同じ設計境界として扱ってはならない。
 
 ```text
 layout_lane   rust / pure / manual.rs
 submit_batch  effect / host adapter
+ext           external component / host adapter
 ```
 
 ## Motor safety
@@ -65,6 +71,7 @@ submit_batch  effect / host adapter
 
 検証対象:
 
+- `system MotorSafety=cycle`から`cycle -> step -> decide`を導出する
 - `@NORMALIZE ... @end`による複数行アルゴリズム展開
 - lambda pipeline
 - emergency/fault時の停止判断
@@ -80,12 +87,14 @@ submit_batch  effect / host adapter
 1. 同一sourceからRust・typed design・全diagram artifactが決定的に生成される。
 2. 公開JSONは`schema`と`version`を持つ。
 3. `logic.mmd`と`algorithm-ir.json`へ`__glyph_*`が漏れない。
-4. DoorのArchitecture、Machine、Temporal constraintsが同時に存在する。
-5. Compute batch runtimeでRust境界、effect境界、Err経路が区別される。
-6. `manual.rs`は再buildで上書きされない。
-7. Motorの複数行macroは元の呼出し行へremapされる。
-8. Motorの外部作用は`write_motor`だけである。
-9. Algorithm IRのbinding順と生成Rustの`let`順が一致する。
+4. system nodeはすべて宣言済みcallableへ解決される。
+5. system edgeはentryから到達する実call siteだけで構成される。
+6. 未宣言entry、未宣言call、架空assertion edgeはコンパイルエラーになる。
+7. DoorのArchitecture、Machine、Temporal constraintsが同時に存在する。
+8. Compute batch runtimeでRust境界、effect境界、Err経路が区別される。
+9. `manual.rs`は再buildで上書きされない。
+10. Motorの複数行macroは元の呼出し行へremapされる。
+11. Algorithm IRのbinding順と生成Rustの`let`順が一致する。
 
 ## Machine-readable artifacts
 
@@ -108,10 +117,11 @@ manual.rs scaffold
 
 Golden fileの全文を固定するのではなく、schema、順序、境界、source ownershipなどの意味的不変条件を検査する。整形だけの変更で大量のsnapshot更新を発生させないためである。
 
-## v0.1完了条件
+## 完了条件
 
 - 3 exampleが`glyphc --check`を通る
 - acceptance testsが通る
+- system/extのnegative testsが通る
+- Chromium I/O検証が通る
 - 全CIが成功する
-- 新しい文法を追加しない
 - Draft解除とmergeは人間が明示的に判断する
