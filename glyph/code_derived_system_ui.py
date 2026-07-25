@@ -26,17 +26,25 @@ _SCRIPT = r"""
     const labels = [...document.querySelectorAll(".canvas-shell .edge-label")];
     const edges = system?.edges || [];
     labels.forEach((label, index) => {
-      label.textContent = edges[index]?.label || "calls";
-      label.title = label.textContent;
+      const text = edges[index]?.label || "calls";
+      if (label.textContent !== text) label.textContent = text;
+      label.title = text;
     });
 
-    document.querySelectorAll('[data-system-meta-owner="code-derived"]').forEach(item => item.remove());
-    if (!system?.entry) return;
+    const current = document.querySelector('[data-system-meta-owner="code-derived"]');
+    if (!system?.entry) {
+      current?.remove();
+      return;
+    }
+    const signature = `${system.name}\u001f${system.entry}\u001f${(system.edges || []).length}`;
+    if (current?.dataset.systemMetaSignature === signature) return;
+    current?.remove();
     const controls = document.querySelector(".view-controls");
     if (!controls) return;
     controls.insertAdjacentHTML(
       "afterend",
-      `<div class="machine-meta" data-system-meta-owner="code-derived">` +
+      `<div class="machine-meta" data-system-meta-owner="code-derived" ` +
+      `data-system-meta-signature="${esc(signature)}">` +
       `<span class="pill">Derived from code</span>` +
       `<span class="pill">Entry: ${esc(system.entry)}</span>` +
       `<span class="pill">Edges: ${(system.edges || []).length}</span>` +
@@ -56,11 +64,6 @@ _SCRIPT = r"""
   document.addEventListener("change", event => {
     if (event.target?.id === "system-select") queueMicrotask(enhance);
   });
-  document.addEventListener("glyph-diagram-render-stable", enhance);
-  new MutationObserver(() => queueMicrotask(enhance)).observe(
-    document.getElementById("view") || document.body,
-    {childList: true, subtree: true},
-  );
   enhance();
 })();
 </script>
