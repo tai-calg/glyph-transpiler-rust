@@ -18,29 +18,34 @@ machine Door(state:DoorState,input:Input)
   success=Locked
   failure=Faulted
 
-*Input(badge_valid:B,request_open:B,forced_open:B)
+*Input(badge_valid,request_open,forced_open,unlocked,locked,alarmed:B)
 +Action=KeepLocked|Unlock|RaiseAlarm
 +Mode=Locked|Unlocked|Alarmed|Faulted
 *DoorState(mode:Mode,failures:U,action:Action)
 +EffectKind=LockConfirmed|AlarmConfirmed
 *Receipt(effect:EffectKind,state:DoorState)
-+ControlError=SensorFailure|LockFailure|AlarmFailure|EffectTimeout
++ControlError=SensorFailure|LockFailure|AlarmFailure|EffectTimeout|InvalidReceipt
 
 ext sensor():Input|ControlError
-!lock(state:DoorState):Receipt|ControlError
-!alarm(state:DoorState):Receipt|ControlError
+
+>authenticate(input:Input):B=input.badge_valid&!input.forced_open
 
 >decide(input:Input):Action
   input.forced_open >> RaiseAlarm
-  input.badge_valid&input.request_open >> Unlock
+  authenticate(input)&input.request_open >> Unlock
   _ >> KeepLocked
 
 >step(state:DoorState,input:Input):DoorState
   action := decide(input)
-  action==RaiseAlarm >> DoorState(Alarmed,state.failures+1,RaiseAlarm)
-  action==Unlock >> DoorState(Unlocked,state.failures,Unlock)
-  action==KeepLocked >> DoorState(Locked,state.failures,KeepLocked)
-  _ >> DoorState(Faulted,state.failures+1,KeepLocked)
+  next :=
+    action==RaiseAlarm >> DoorState(Alarmed,state.failures+1,RaiseAlarm)
+    action==Unlock >> DoorState(Unlocked,state.failures,Unlock)
+    action==KeepLocked >> DoorState(Locked,state.failures,KeepLocked)
+    _ >> DoorState(Faulted,state.failures+1,KeepLocked)
+  next
+
+!lock(state:DoorState):Receipt|ControlError
+!alarm(state:DoorState):Receipt|ControlError
 
 >apply(state:DoorState):Receipt|ControlError
   state.action==RaiseAlarm >> alarm(state)
