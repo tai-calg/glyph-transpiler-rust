@@ -18,7 +18,7 @@ _SCRIPT = r"""
 <script id="glyph-diagram-locale-v1-script">
 (()=>{
 const KEY="glyph.ui.locale",DEFAULT_LOCALE="ja";
-let locale=localStorage.getItem(KEY)||DEFAULT_LOCALE,scheduled=false;
+let locale=localStorage.getItem(KEY)||DEFAULT_LOCALE,localeTimer=null;
 const pair=(ja,en)=>locale==="ja"?ja:en;
 const set=(element,value)=>{if(element&&element.textContent!==value)element.textContent=value};
 function diagnosticText(item){return locale==="ja"?(item?.message_ja||item?.message):(item?.message_en||item?.message)}
@@ -86,8 +86,8 @@ function applyStatic(){
   set(document.querySelector(".glyph-diagram-settings-title"),pair("表示設定","Display settings"));set(document.querySelector(".glyph-diagram-settings-row > span"),pair("言語","Language"));
 }
 function apply(){ensureSettings();applyStatic();applyDiagnostics()}
-function schedule(){if(scheduled)return;scheduled=true;queueMicrotask(()=>{scheduled=false;apply()})}
-new MutationObserver(schedule).observe(document.body,{childList:true,subtree:true,characterData:true});
+function schedule(){if(localeTimer!==null)return;localeTimer=setTimeout(()=>{localeTimer=null;apply()},16)}
+new MutationObserver(schedule).observe(document.body,{childList:true,subtree:true});
 document.addEventListener("DOMContentLoaded",apply,{once:true});apply();
 })();
 </script>
