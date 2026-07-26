@@ -9,7 +9,10 @@ on:
       - "glyph/code_derived_system_ui.py"
       - "glyph/diagram_app.py"
       - "glyph/diagram_ui.py"
+      - "glyph/diagram_canvas_navigation.py"
+      - "glyph/diagram_canvas_viewport.py"
       - "glyph/diagram_editor_exports.py"
+      - "glyph/diagram_label_editor.py"
       - "glyph/diagram_render_stability.py"
       - "glyph/initial_transition_layout.py"
       - "glyph/readable_diagram_app.py"
@@ -27,6 +30,7 @@ on:
       - "glyph/state_machine_analysis.py"
       - "glyph/state_machine_source_map.py"
       - "tests/test_code_derived_system_ui.py"
+      - "tests/test_diagram_canvas_viewport.py"
       - "tests/test_diagram_editor_exports.py"
       - "tests/test_diagram_render_stability.py"
       - "tests/test_initial_transition_layout.py"
@@ -43,6 +47,7 @@ on:
       - "tests/verify_uml_transition_semantics.mjs"
       - "tests/verify_additional_failure_notation.mjs"
       - "tests/verify_diagram_editor_exports.mjs"
+      - "tests/verify_diagram_canvas_viewport.mjs"
       - "examples/acceptance/door_controller.glyph"
       - "examples/acceptance/motor_safety.glyph"
       - "examples/state_diagrams/**"
@@ -73,7 +78,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          mkdir -p build/checked-system-context-io build/state-diagram-regression build/state-diagram-stability build/uml-transition-semantics build/additional-failure-notation build/diagram-editor-exports
+          mkdir -p build/checked-system-context-io build/state-diagram-regression build/state-diagram-stability build/uml-transition-semantics build/additional-failure-notation build/diagram-editor-exports build/diagram-canvas-viewport
           node tests/verify_code_derived_system_io.mjs \
             2>&1 | tee build/checked-system-context-io/verify.log
           node tests/verify_state_diagram_rendering.mjs \
@@ -86,6 +91,8 @@ jobs:
             2>&1 | tee build/additional-failure-notation/verify.log
           node tests/verify_diagram_editor_exports.mjs \
             2>&1 | tee build/diagram-editor-exports/verify.log
+          node tests/verify_diagram_canvas_viewport.mjs \
+            2>&1 | tee build/diagram-canvas-viewport/verify.log
 
       - name: Upload rendered diagrams
         if: always()
@@ -101,6 +108,7 @@ jobs:
             build/uml-transition-semantics/**
             build/additional-failure-notation/**
             build/diagram-editor-exports/**
+            build/diagram-canvas-viewport/**
             examples/acceptance/door_controller.glyph
             examples/acceptance/motor_safety.glyph
             examples/state_diagrams/*.glyph
