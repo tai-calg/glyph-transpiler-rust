@@ -15,7 +15,7 @@ _STYLE = r"""
 """
 
 _SCRIPT = r"""
-<script id="glyph-studio-locale-v1-script">
+// glyph-studio-locale-v1-script
 (()=>{
 const KEY="glyph.ui.locale",DEFAULT_LOCALE="ja";
 let locale=localStorage.getItem(KEY)||DEFAULT_LOCALE,scheduled=false;
@@ -84,7 +84,6 @@ function schedule(){if(scheduled)return;scheduled=true;queueMicrotask(()=>{sched
 new MutationObserver(schedule).observe(document.body,{childList:true,subtree:true,characterData:true});
 document.addEventListener("DOMContentLoaded",apply,{once:true});apply();
 })();
-</script>
 """
 
 
@@ -93,6 +92,8 @@ def enhance_studio_locale_html(html: str) -> str:
 
     if _MARKER in html:
         return html
-    return html.replace("</head>", _STYLE + "\n</head>").replace(
-        "</body>", _SCRIPT + "\n</body>"
-    )
+    styled = html.replace("</head>", _STYLE + "\n</head>", 1)
+    if "</script>" not in styled:
+        raise ValueError("Studio HTML has no script closing tag")
+    script, tail = styled.rsplit("</script>", 1)
+    return script + "\n" + _SCRIPT + "\n</script>" + tail
