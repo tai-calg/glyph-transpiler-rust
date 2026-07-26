@@ -5,11 +5,12 @@
   "type": "module",
   "scripts": {
     "tauri": "tauri",
+    "icons": "tauri icon src-tauri/icons/icon.svg",
     "dev:web": "vite --config vite.config.js",
     "build:web": "vite build --config vite.config.js",
-    "dev": "python3 scripts/build_sidecar.py --development && tauri dev",
-    "build": "python3 scripts/build_sidecar.py && tauri build",
-    "check": "python3 scripts/build_sidecar.py --placeholder && npm run build:web && cargo check --manifest-path src-tauri/Cargo.toml"
+    "dev": "npm run icons && python3 scripts/build_sidecar.py --development && tauri dev",
+    "build": "npm run icons && python3 scripts/build_sidecar.py && tauri build",
+    "check": "npm run icons && python3 scripts/build_sidecar.py --placeholder && npm run build:web && cargo check --manifest-path src-tauri/Cargo.toml"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.8.0"
