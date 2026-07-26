@@ -23,8 +23,8 @@ class DiagramLocaleNavigationTests(unittest.TestCase):
         self.assertIn('value="en">English', html)
         self.assertIn('localStorage.getItem(STORAGE_KEY)', html)
         self.assertIn('?localStorage.getItem(STORAGE_KEY):"ja"', compact)
-        self.assertIn("message_ja", html)
-        self.assertIn("message_en", html)
+        self.assertIn('`message_${locale}`', html)
+        self.assertIn('`help_${locale}`', html)
         self.assertIn('const STORAGE_KEY="glyph.ui.locale"', html)
 
     def test_canvas_navigation_hands_residual_scroll_to_preview(self) -> None:
