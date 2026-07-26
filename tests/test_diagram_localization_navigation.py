@@ -66,13 +66,13 @@ class DiagramLocalizationNavigationTests(unittest.TestCase):
         payload = snapshot.to_dict(Path("example.glyph"), Path("views.json"))
         self.assertEqual(
             payload["diagnostics"][0]["message_ja"],
-            "予期しない 識別子",
+            "予期しない識別子",
         )
         self.assertEqual(
             payload["views"]["state"]["machines"][0]["diagnostics"][0][
                 "message_ja"
             ],
-            "到達不能な 状態",
+            "到達不能な状態",
         )
 
 
