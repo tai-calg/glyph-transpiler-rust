@@ -54,7 +54,8 @@ function blankTarget(event,shell){const target=event.target;if(target.closest?.(
 function help(shell){
   let element=shell.querySelector(":scope > .canvas-pan-help");
   if(!element){element=document.createElement("div");element.className="canvas-pan-help";shell.appendChild(element)}
-  element.textContent=locale()==="ja"?"空白をドラッグしてキャンバスを移動":"Drag empty canvas to pan";
+  const value=locale()==="ja"?"空白をドラッグしてキャンバスを移動":"Drag empty canvas to pan";
+  if(element.textContent!==value)element.textContent=value;
 }
 function bind(shell){
   if(shell.dataset.canvasPanReady==="true"){help(shell);return}
