@@ -101,7 +101,7 @@ function ensureTools(){
   const tools=document.getElementById("diagram-tools");if(!tools||document.getElementById("diagram-viewport-tools"))return;
   const group=document.createElement("span");group.id="diagram-viewport-tools";group.className="diagram-viewport-tools";
   group.innerHTML='<button id="diagram-zoom-out" type="button">−</button><button id="diagram-zoom-value" class="zoom-value" type="button" tabindex="-1">100%</button><button id="diagram-zoom-in" type="button">＋</button><button id="diagram-fit" type="button"></button><button id="diagram-view-reset" type="button"></button><span class="separator"></span>';
-  const exportSeparator=tools.querySelector(".separator");tools.insertBefore(group,exportSeparator||tools.firstChild);
+  const themeSeparator=tools.querySelector(".separator");if(themeSeparator)themeSeparator.after(group);else tools.prepend(group);
   document.getElementById("diagram-zoom-out").onclick=()=>{const shell=activeShell||document.querySelector(".canvas-shell");const stage=shell?.querySelector(".graph-stage");if(stage)applyScale(shell,scaleFor(stage)-STEP)};
   document.getElementById("diagram-zoom-in").onclick=()=>{const shell=activeShell||document.querySelector(".canvas-shell");const stage=shell?.querySelector(".graph-stage");if(stage)applyScale(shell,scaleFor(stage)+STEP)};
   document.getElementById("diagram-fit").onclick=()=>fit(activeShell||document.querySelector(".canvas-shell"));
