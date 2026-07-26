@@ -1,0 +1,37 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Glyph Studio",
+  "version": "0.4.0",
+  "identifier": "io.github.tai-calg.glyph-studio",
+  "build": {
+    "beforeDevCommand": "npm run dev:web",
+    "devUrl": "http://127.0.0.1:1420",
+    "beforeBuildCommand": "npm run build:web",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "security": {
+      "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost; frame-src http://127.0.0.1:*; img-src 'self' data:; style-src 'self'; script-src 'self'"
+    },
+    "windows": [
+      {
+        "label": "main",
+        "title": "Glyph Studio",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 960,
+        "minHeight": 640,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ]
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "externalBin": ["binaries/glyph-studio-server"],
+    "resources": ["../resources/default.glyph"],
+    "shortDescription": "Compiler-backed systems design editor",
+    "longDescription": "Glyph Studio desktop application with state-transition, I/O and architecture views."
+  }
+}

@@ -18,8 +18,8 @@ from .transition_route_labels import enhance_transition_route_html
 from .uml_transition_layout import enhance_uml_transition_html
 
 
-def run_diagram_app(input_path: str | Path) -> int:
-    """Run the editable diagram app from compiler-produced StateTransitionIR v2."""
+def prepare_diagram_app() -> None:
+    """Install the shared compiler and browser presentation layers once per process."""
 
     install_serial_compilation()
     diagram_app.DIAGRAM_HTML = enhance_diagram_live_stability_html(
@@ -41,4 +41,10 @@ def run_diagram_app(input_path: str | Path) -> int:
             )
         )
     )
+
+
+def run_diagram_app(input_path: str | Path) -> int:
+    """Run the editable diagram app from compiler-produced StateTransitionIR v2."""
+
+    prepare_diagram_app()
     return diagram_app.run_diagram_app(input_path)

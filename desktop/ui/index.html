@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Glyph Studio</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <header class="titlebar">
+      <div>
+        <strong>Glyph Studio</strong>
+        <span id="source-label">starting…</span>
+      </div>
+      <nav>
+        <button id="open-file" type="button">Open Glyph…</button>
+        <button id="restart" type="button">Restart engine</button>
+      </nav>
+    </header>
+    <main>
+      <section id="loading" class="loading">
+        <div class="spinner" aria-hidden="true"></div>
+        <h1>Starting Glyph compiler</h1>
+        <p id="status">Preparing the local compiler sidecar.</p>
+      </section>
+      <iframe
+        id="studio-frame"
+        title="Glyph Studio editor and diagrams"
+        sandbox="allow-scripts allow-same-origin allow-downloads allow-forms"
+      ></iframe>
+    </main>
+  </div>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
