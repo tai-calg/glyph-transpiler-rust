@@ -9,34 +9,62 @@
 html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
 button { font: inherit; }
 
-.app-shell { height: 100%; display: grid; grid-template-rows: 52px 1fr; }
+.app-shell {
+  width: 100%;
+  height: 100dvh;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+}
 .titlebar {
+  min-width: 0;
+  min-height: 52px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  padding: 0 14px;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  padding: 8px 14px;
   border-bottom: 1px solid #293447;
   background: #111824;
+  overflow: hidden;
 }
-.titlebar strong { margin-right: 12px; }
+.titlebar > div { min-width: 0; flex: 1 1 280px; }
+.titlebar strong { margin-right: 12px; white-space: nowrap; }
 .titlebar span {
+  display: inline-block;
+  max-width: min(62vw, 820px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
   color: #9aa9bd;
   font: 12px ui-monospace, SFMono-Regular, Menlo, monospace;
 }
-.titlebar nav { display: flex; gap: 8px; }
+.titlebar nav {
+  min-width: 0;
+  display: flex;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
 .titlebar button {
+  flex: 0 1 auto;
+  min-height: 34px;
   border: 1px solid #34445d;
   border-radius: 7px;
-  padding: 7px 11px;
+  padding: 6px 10px;
+  white-space: nowrap;
   color: #eef4ff;
   background: #182235;
   cursor: pointer;
 }
 .titlebar button:hover:not(:disabled) { background: #22314a; }
 .titlebar button:disabled { opacity: .5; cursor: default; }
-main { position: relative; min-height: 0; }
-#studio-frame { width: 100%; height: 100%; border: 0; background: #0b0f16; }
+main { position: relative; min-width: 0; min-height: 0; overflow: hidden; }
+#studio-frame { display: block; width: 100%; height: 100%; border: 0; background: #0b0f16; }
 .loading {
   position: absolute;
   inset: 0;
@@ -58,5 +86,15 @@ main { position: relative; min-height: 0; }
   border-top-color: #67a8ff;
   border-radius: 50%;
   animation: spin .8s linear infinite;
+}
+@media (max-width: 1040px) {
+  .titlebar > div { flex-basis: 220px; }
+  .titlebar span { max-width: 42vw; }
+  .titlebar button { padding-inline: 8px; }
+}
+@media (max-width: 760px) {
+  .titlebar > div { flex-basis: 100%; }
+  .titlebar span { max-width: calc(100vw - 150px); }
+  .titlebar nav { width: 100%; justify-content: flex-start; }
 }
 @keyframes spin { to { transform: rotate(360deg); } }
