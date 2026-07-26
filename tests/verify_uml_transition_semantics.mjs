@@ -22,9 +22,9 @@ const cases = [
     slug: "traffic-uml",
     file: "examples/state_diagrams/traffic_light.glyph",
     machine: "Traffic",
-    labels: ["[input.tick]", "[input.fault]"],
-    failureLabels: ["[input.fault]"],
-    compactLabels: ["[input.tick]➡︎—", "[input.fault]➡︎—"],
+    labels: ["? input.tick", "? input.fault"],
+    failureLabels: ["? input.fault"],
+    compactLabels: ["? input.tick➡︎—", "? input.fault➡︎—"],
   },
   {
     slug: "effect-failure-uml",

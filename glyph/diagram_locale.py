@@ -5,98 +5,70 @@ _MARKER = "glyph-diagram-locale-v1"
 
 _STYLE = r"""
 <style id="glyph-diagram-locale-v1-style">
-.glyph-diagram-settings{position:relative;flex:0 0 auto}
-.glyph-diagram-settings-panel{position:absolute;right:0;top:calc(100% + 8px);z-index:120;display:none;min-width:235px;padding:13px;border:1px solid var(--line);border-radius:10px;background:var(--panel);box-shadow:var(--shadow)}
-.glyph-diagram-settings-panel.open{display:block}
-.glyph-diagram-settings-title{font-weight:720;margin-bottom:10px}
-.glyph-diagram-settings-row{display:grid;grid-template-columns:72px minmax(0,1fr);align-items:center;gap:10px;color:var(--muted);font-size:12px}
-.glyph-diagram-settings-row select{width:100%;min-width:0}
+.glyph-settings-button{min-width:38px}
+.glyph-settings-dialog{width:min(440px,calc(100vw - 32px));border:1px solid var(--line);border-radius:14px;padding:0;background:var(--panel);color:var(--text);box-shadow:0 24px 70px rgba(0,0,0,.42)}
+.glyph-settings-dialog::backdrop{background:rgba(3,7,18,.52);backdrop-filter:blur(3px)}
+.glyph-settings-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px;border-bottom:1px solid var(--line)}
+.glyph-settings-head h2{margin:0;font-size:17px}.glyph-settings-close{padding:5px 9px}
+.glyph-settings-body{display:grid;gap:14px;padding:16px}.glyph-settings-row{display:grid;grid-template-columns:minmax(120px,1fr) minmax(170px,1.3fr);align-items:center;gap:14px}
+.glyph-settings-row label{font-weight:700}.glyph-settings-row select{width:100%}.glyph-settings-note{margin:0;color:var(--muted);font-size:12px;line-height:1.6}
+.diagnostic{display:grid;gap:3px}.diagnostic-code{font:700 10px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--amber)}.diagnostic-help{color:var(--muted);font-size:11px}
+.analysis-item{grid-template-columns:auto minmax(0,1fr) auto}.analysis-message{min-width:0}.analysis-help{display:block;margin-top:3px;color:var(--muted);font-size:10px}
+@media(max-width:640px){.glyph-settings-row{grid-template-columns:1fr}.glyph-settings-dialog{width:calc(100vw - 20px)}}
 </style>
 """
 
 _SCRIPT = r"""
 <script id="glyph-diagram-locale-v1-script">
 (()=>{
-const KEY="glyph.ui.locale",DEFAULT_LOCALE="ja";
-let locale=localStorage.getItem(KEY)||DEFAULT_LOCALE,localeTimer=null;
-const pair=(ja,en)=>locale==="ja"?ja:en;
-const set=(element,value)=>{if(element&&element.textContent!==value)element.textContent=value};
-function diagnosticText(item){return locale==="ja"?(item?.message_ja||item?.message):(item?.message_en||item?.message)}
-function selectedMachine(){const machines=(typeof snapshot!=="undefined"?snapshot?.views?.state?.machines:[])||[];return machines[typeof machineIndex!=="undefined"?machineIndex:0]||null}
-function ensureSettings(){
-  const header=document.querySelector(".app > header");if(!header||document.getElementById("glyph-diagram-settings-button"))return;
-  const wrap=document.createElement("div");wrap.className="glyph-diagram-settings";
-  wrap.innerHTML=`<button id="glyph-diagram-settings-button" type="button" aria-haspopup="true" aria-expanded="false">⚙ <span></span></button><div class="glyph-diagram-settings-panel"><div class="glyph-diagram-settings-title"></div><label class="glyph-diagram-settings-row"><span></span><select id="glyph-diagram-language-select"><option value="ja">日本語</option><option value="en">English</option></select></label></div>`;
-  header.insertBefore(wrap,document.getElementById("compile"));
-  const button=wrap.querySelector("#glyph-diagram-settings-button"),panel=wrap.querySelector(".glyph-diagram-settings-panel"),select=wrap.querySelector("select");
-  select.value=locale;
-  button.addEventListener("click",event=>{event.stopPropagation();const open=!panel.classList.contains("open");panel.classList.toggle("open",open);button.setAttribute("aria-expanded",String(open))});
-  select.addEventListener("change",()=>{locale=select.value==="en"?"en":"ja";localStorage.setItem(KEY,locale);apply();document.dispatchEvent(new CustomEvent("glyph-locale-change",{detail:{locale}}))});
-  document.addEventListener("click",event=>{if(!wrap.contains(event.target)){panel.classList.remove("open");button.setAttribute("aria-expanded","false")}});
+const STORAGE_KEY="glyph.ui.locale",SUPPORTED=new Set(["ja","en"]);
+let locale=SUPPORTED.has(localStorage.getItem(STORAGE_KEY))?localStorage.getItem(STORAGE_KEY):"ja";
+const STRINGS={
+ ja:{settings:"設定",settingsTitle:"表示設定",language:"表示言語",languageNote:"コンパイル結果の意味は変えず、UIと診断の表示だけを切り替えます。",close:"閉じる",compile:"コンパイル",save:"保存",io:"I/O",state:"状態遷移",autoLayout:"自動配置",systems:"システム",callables:"関数・作用",types:"型",machines:"状態機械",warnings:"警告",source:"Glyphコード",ioTitle:"I/O構成",ioNote:"system宣言を優先し、未宣言の場合はコンパイラが導出した呼出し関係を表示します。",stateTitle:"状態遷移",stateNote:"ワイルドカードを実状態へ展開し、到達不能分岐を除外して描画します。",transitionDetails:"遷移の詳細",transitionNote:"図中は入力→作用の要約です。完全な遷移情報は各行に表示します。",reachable:"到達可能",unreachable:"到達不能",typesSection:"型",themeWhite:"白",themeMono:"白黒",panHint:"空白部分をドラッグするとキャンバスを移動できます。",genericCompileError:"Glyphコードをコンパイルできません。",genericCompileHelp:"エラー位置の周辺で、括弧、型、名前、分岐の>>、default節を確認してください。"},
+ en:{settings:"Settings",settingsTitle:"Display settings",language:"Language",languageNote:"This changes only UI and diagnostic presentation, not compiler semantics.",close:"Close",compile:"Compile",save:"Save",io:"I/O",state:"State transitions",autoLayout:"Auto layout",systems:"Systems",callables:"Callables",types:"Types",machines:"Machines",warnings:"Warnings",source:"Glyph source",ioTitle:"I/O topology",ioNote:"Explicit system declarations are preferred; otherwise the compiler-derived call graph is shown.",stateTitle:"State transitions",stateNote:"Wildcards are expanded to concrete states and unreachable branches are removed before rendering.",transitionDetails:"Transition details",transitionNote:"The diagram shows an input-to-effect summary. Complete transition data is listed below.",reachable:"reachable state",unreachable:"unreachable state",typesSection:"Types",themeWhite:"White",themeMono:"Monochrome",panHint:"Drag an empty area to pan the canvas.",genericCompileError:"Compilation failed.",genericCompileHelp:"Check brackets, types, names, branch >> syntax, and the default branch near the reported location."}
+};
+const STANDARD_NOTES=new Set([STRINGS.ja.ioNote,STRINGS.en.ioNote,STRINGS.ja.stateNote,STRINGS.en.stateNote,"system宣言を優先し、未宣言時はコンパイラの呼出しグラフを表示する。","ワイルドカードは実状態へ展開し、到達不能分岐を除外してから描画する。"]);
+const t=key=>STRINGS[locale]?.[key]??STRINGS.ja[key]??key;
+window.GlyphI18n={get locale(){return locale},t};
+const html=value=>String(value??"").replace(/[&<>\"']/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;",'\"':"&quot;","'":"&#39;"}[ch]));
+function messageOf(item){const localized=item?.[`message_${locale}`];if(localized)return String(localized);const original=String(item?.message??"");if(locale==="ja"&&item?.severity==="error")return `${t("genericCompileError")} 詳細: ${original}`;return original}
+function helpOf(item){const localized=item?.[`help_${locale}`];if(localized)return String(localized);return item?.severity==="error"?t("genericCompileHelp"):""}
+function diagnosticMarkup(item){const code=String(item?.code??"");const help=helpOf(item);return `<div class="diagnostic" data-line="${Number(item?.line||0)}" title="${html(String(item?.message??""))}">${code?`<span class="diagnostic-code">${html(code)}</span>`:""}<span>${html(messageOf(item)||t("genericCompileError"))}</span>${help?`<span class="diagnostic-help">${html(help)}</span>`:""}</div>`}
+function selectedMachine(){const machines=snapshot?.views?.state?.machines||[];const name=document.querySelector("#machine-select")?.selectedOptions?.[0]?.textContent;return machines.find(machine=>machine.name===name)||machines[0]||null}
+function machineDiagnosticMarkup(item){const help=helpOf(item);return `<span class="analysis-code">${html(item?.code||"warning")}</span><span class="analysis-message">${html(messageOf(item))}${help?`<span class="analysis-help">${html(help)}</span>`:""}</span><span class="analysis-line">L${html(item?.line||"?")}</span>`}
+function applyMachineDiagnostics(){const machine=selectedMachine(),rows=machine?.diagnostics||[],panel=document.querySelector(".analysis-panel");if(!panel||!rows.length)return;setText(".analysis-title",`${t("warnings")} · ${rows.length}`);const items=[...panel.querySelectorAll(".analysis-item")];rows.forEach((item,index)=>{const row=items[index];if(!row)return;const markup=machineDiagnosticMarkup(item);if(row.innerHTML!==markup)row.innerHTML=markup;row.title=String(item?.message??"");row.dataset.line=String(Number(item?.line||0))})}
+function installOverrides(){
+ if(typeof renderDiagnostics==="function"&&!renderDiagnostics.__glyphLocalized){const localized=function(){const rows=snapshot?.diagnostics||[];const markup=rows.map(diagnosticMarkup).join("");if(diagnostics.innerHTML!==markup)diagnostics.innerHTML=markup};localized.__glyphLocalized=true;renderDiagnostics=localized}
+ if(typeof renderMachineDiagnostics==="function"&&!renderMachineDiagnostics.__glyphLocalized){const localized=function(machine){const rows=machine?.diagnostics||[];if(!rows.length)return "";return `<section class="analysis-panel"><div class="analysis-title">${html(t("warnings"))} · ${rows.length}</div>${rows.map(item=>`<div class="analysis-item" data-line="${Number(item?.line||0)}" title="${html(String(item?.message??""))}">${machineDiagnosticMarkup(item)}</div>`).join("")}</section>`};localized.__glyphLocalized=true;renderMachineDiagnostics=localized}
+ if(typeof renderSummary==="function"&&!renderSummary.__glyphLocalized){const localized=function(){const s=snapshot?.views?.summary||{};const markup=[["systems",s.systems,""],["callables",s.callables,""],["types",s.types,""],["machines",s.machines,""],["warnings",s.state_warnings,"warn"]].map(([key,value,cls])=>`<span class="pill ${cls}">${html(t(key))}: ${value??0}</span>`).join("");const target=document.getElementById("summary");if(target&&target.innerHTML!==markup)target.innerHTML=markup};localized.__glyphLocalized=true;renderSummary=localized}
+ if(typeof render==="function"&&!render.__glyphLocalized){const base=render;const localized=function(){base();queueMicrotask(apply)};localized.__glyphLocalized=true;render=localized}
 }
-function applyDiagnostics(){
-  const items=(typeof snapshot!=="undefined"?snapshot?.diagnostics:[])||[];
-  document.querySelectorAll("#diagnostics .diagnostic").forEach((element,index)=>set(element,diagnosticText(items[index])||element.textContent));
-  const rows=selectedMachine()?.diagnostics||[];
-  document.querySelectorAll(".analysis-item > span:nth-child(2)").forEach((element,index)=>set(element,diagnosticText(rows[index])||element.textContent));
+function setText(selector,value){const element=document.querySelector(selector);if(element&&element.textContent!==value)element.textContent=value}
+function apply(){
+ if(document.documentElement.lang!==locale)document.documentElement.lang=locale;
+ setText("#compile",t("compile"));setText("#save",t("save"));setText(".toolbar-title",t("source"));
+ document.querySelectorAll(".tab").forEach(tab=>{const value=tab.dataset.tab==="state"?t("state"):t("io");if(tab.textContent!==value)tab.textContent=value});
+ const stateView=document.querySelector('.tab.active')?.dataset.tab==="state";
+ const title=document.querySelector(".view-controls h2");if(title){const value=stateView?t("stateTitle"):t("ioTitle");if(title.textContent!==value)title.textContent=value}
+ const note=document.querySelector(".view-controls .note");if(note&&STANDARD_NOTES.has(note.textContent.trim())){const value=stateView?t("stateNote"):t("ioNote");if(note.textContent!==value)note.textContent=value}
+ setText(".transition-index-title>span:first-child",t("transitionDetails"));setText(".transition-index-note",t("transitionNote"));setText(".type-section h3",t("typesSection"));
+ const legend=document.querySelectorAll(".legend span");if(legend[0]&&legend[0].textContent!==t("reachable"))legend[0].textContent=t("reachable");if(legend[1]&&legend[1].textContent!==t("unreachable"))legend[1].textContent=t("unreachable");
+ const theme=document.getElementById("diagram-theme");if(theme){const options=theme.options;if(options[0]&&options[0].textContent!==t("themeWhite"))options[0].textContent=t("themeWhite");if(options[1]&&options[1].textContent!==t("themeMono"))options[1].textContent=t("themeMono")}
+ setText("#diagram-reset",t("autoLayout"));setText("#glyph-settings",t("settings"));setText("#glyph-settings-title",t("settingsTitle"));setText("#glyph-language-label",t("language"));setText("#glyph-language-note",t("languageNote"));setText("#glyph-settings-close",t("close"));
+ if(typeof renderDiagnostics==="function")renderDiagnostics();applyMachineDiagnostics();
+ document.querySelectorAll(".canvas-shell").forEach(shell=>{const value=t("panHint");if(shell.title!==value)shell.title=value});
+ document.dispatchEvent(new CustomEvent("glyph-locale-applied",{detail:{locale}}));
 }
-function translateSummary(){
-  const summary=(typeof snapshot!=="undefined"?snapshot?.views?.summary:null)||{};
-  const values=[
-    [pair("システム","Systems"),summary.systems],
-    [pair("呼出可能要素","Callables"),summary.callables],
-    [pair("型","Types"),summary.types],
-    [pair("状態機械","Machines"),summary.machines],
-    [pair("警告","Warnings"),summary.state_warnings],
-  ];
-  document.querySelectorAll("#summary .pill").forEach((element,index)=>{const item=values[index];if(item)set(element,`${item[0]}: ${item[1]??0}`)});
-}
-function translateAnalysisTitle(){
-  const count=selectedMachine()?.diagnostics?.length||0,element=document.querySelector(".analysis-title");
-  if(element)set(element,locale==="ja"?`静的解析 · 警告 ${count} 件`:`Static analysis · ${count} warning${count===1?"":"s"}`);
-}
-function translateMeta(){
-  if((typeof activeTab!=="undefined"?activeTab:"state")!=="state")return;
-  const machine=selectedMachine();if(!machine)return;
-  const values=[
-    [pair("状態型","State"),machine.state_type],
-    [pair("選択関数","Selector"),machine.selector],
-    [pair("次状態関数","Next"),machine.next_function],
-    [pair("初期状態","Initial"),machine.initial_state],
-    [pair("到達可能","Reachable"),`${machine.analysis?.reachable_state_count??0}/${machine.analysis?.state_count??0}`],
-  ];
-  document.querySelectorAll('.machine-meta:not([data-system-meta-owner]) .pill').forEach((element,index)=>{const item=values[index];if(item)set(element,`${item[0]}: ${item[1]??""}`)});
-}
-function applyStatic(){
-  document.documentElement.lang=locale==="ja"?"ja":"en";
-  set(document.querySelector(".brand small"),pair("コンパイラ生成のI/O図・状態遷移図","Compiler-derived I/O and state views"));
-  set(document.getElementById("compile"),pair("コンパイル","Compile"));set(document.getElementById("save"),pair("保存","Save"));
-  set(document.querySelector(".toolbar-title"),pair("Glyph ソース","Glyph source"));
-  set(document.querySelector('.tab[data-tab="io"]'),"I/O");set(document.querySelector('.tab[data-tab="state"]'),pair("状態遷移","State transitions"));
-  const source=document.getElementById("editor")?.value||"",meta=document.getElementById("editor-meta"),count=source.split("\n").length;if(meta)set(meta,locale==="ja"?`${count} 行`:`${count} lines`);
-  const tab=typeof activeTab!=="undefined"?activeTab:"state";
-  set(document.querySelector(".view-controls h2"),tab==="io"?pair("I/O 構成","I/O topology"):pair("状態遷移","State transitions"));
-  document.querySelectorAll(".ports").forEach(ports=>ports.querySelectorAll(".port-group").forEach((group,index)=>{set(group.querySelector(".port-title"),index===0?pair("入力","Inputs"):pair("出力","Output"));const unknown=group.querySelector(".unknown");if(unknown)set(unknown,index===0?pair("なし / 未宣言","none / undeclared"):pair("未宣言","undeclared"))}));
-  set(document.querySelector(".type-section h3"),pair("型","Types"));
-  const legend=document.querySelectorAll(".legend span");if(legend[0])set(legend[0],pair("到達可能状態","reachable state"));if(legend[1])set(legend[1],pair("到達不能状態","unreachable state"));
-  document.querySelectorAll(".state-terminal").forEach(element=>{if(!element.dataset.glyphTerminal)element.dataset.glyphTerminal=element.textContent.toLowerCase();const values={success:["成功","success"],failure:["失敗","failure"],unreachable:["到達不能","unreachable"]},entry=values[element.dataset.glyphTerminal];if(entry)set(element,locale==="ja"?entry[0]:entry[1])});
-  set(document.querySelector(".transition-index-title > span:first-child"),pair("遷移の詳細","Transition details"));
-  set(document.querySelector(".transition-index-note"),pair("図中ラベルは入力→アクションの要約。完全な情報は各行に表示する","Labels summarize input → action; each row shows the complete transition."));
-  translateSummary();translateAnalysisTitle();translateMeta();
-  const button=document.getElementById("glyph-diagram-settings-button");if(button){set(button.querySelector("span"),pair("設定","Settings"));button.title=pair("表示設定","Display settings")}
-  set(document.querySelector(".glyph-diagram-settings-title"),pair("表示設定","Display settings"));set(document.querySelector(".glyph-diagram-settings-row > span"),pair("言語","Language"));
-}
-function apply(){ensureSettings();applyStatic();applyDiagnostics()}
-function schedule(){if(localeTimer!==null)return;localeTimer=setTimeout(()=>{localeTimer=null;apply()},16)}
-new MutationObserver(schedule).observe(document.body,{childList:true,subtree:true});
-document.addEventListener("DOMContentLoaded",apply,{once:true});apply();
+function installSettings(){if(document.getElementById("glyph-settings"))return;const header=document.querySelector("header");if(!header)return;const button=document.createElement("button");button.id="glyph-settings";button.className="glyph-settings-button";button.type="button";button.textContent=t("settings");const compile=document.getElementById("compile");header.insertBefore(button,compile||null);const dialog=document.createElement("dialog");dialog.id="glyph-settings-dialog";dialog.className="glyph-settings-dialog";dialog.innerHTML=`<div class="glyph-settings-head"><h2 id="glyph-settings-title"></h2><button id="glyph-settings-close" class="glyph-settings-close" type="button"></button></div><div class="glyph-settings-body"><div class="glyph-settings-row"><label id="glyph-language-label" for="glyph-language"></label><select id="glyph-language"><option value="ja">日本語</option><option value="en">English</option></select></div><p id="glyph-language-note" class="glyph-settings-note"></p></div>`;document.body.appendChild(dialog);const select=dialog.querySelector("#glyph-language");select.value=locale;button.onclick=()=>typeof dialog.showModal==="function"?dialog.showModal():dialog.setAttribute("open","");dialog.querySelector("#glyph-settings-close").onclick=()=>typeof dialog.close==="function"?dialog.close():dialog.removeAttribute("open");dialog.addEventListener("click",event=>{if(event.target===dialog&&typeof dialog.close==="function")dialog.close()});select.onchange=()=>{locale=SUPPORTED.has(select.value)?select.value:"ja";localStorage.setItem(STORAGE_KEY,locale);installOverrides();apply();document.dispatchEvent(new CustomEvent("glyph-locale-changed",{detail:{locale}}))};apply()}
+let scheduled=false;function enhance(){if(scheduled)return;scheduled=true;queueMicrotask(()=>{scheduled=false;installOverrides();installSettings();apply()})}
+new MutationObserver(enhance).observe(document.body,{childList:true,subtree:true});document.addEventListener("glyph-state-transition-ir-v3-labels-ready",enhance);document.addEventListener("glyph-transition-layout-ready",enhance);enhance();
 })();
 </script>
 """
 
 
 def enhance_diagram_locale_html(html: str) -> str:
-    """Add Japanese-default labels and an English selector to the diagram app."""
+    """Install Japanese-first UI localization with an English selector."""
 
     if _MARKER in html:
         return html

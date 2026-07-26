@@ -20,6 +20,11 @@ def compile_semantic(path: Path) -> dict[str, object]:
     return views
 
 
+def compile_source(source: str, name: str = "inline.glyph") -> dict[str, object]:
+    output = CompilationPipeline().compile_text(source, source_name=name)
+    return build_io_state_views(output.model, output.diagrams.ir)
+
+
 def transitions(
     machine: dict[str, object],
     source: str,
@@ -48,18 +53,21 @@ def transition(
 
 
 class TransitionSemanticsTests(unittest.TestCase):
-    def assert_v2(self, views: dict[str, object], machine: dict[str, object]) -> None:
+    def assert_v3(self, views: dict[str, object], machine: dict[str, object]) -> None:
         self.assertEqual(
             views["state_transition_ir"],
-            {"schema": "glyph.state-transition-ir", "version": 2},
+            {"schema": "glyph.state-transition-ir", "version": 3},
         )
-        self.assertEqual(machine["transition_ir"]["version"], 2)
-        self.assertEqual(machine["analysis"]["transition_ir_version"], 2)
+        self.assertEqual(machine["transition_ir"]["version"], 3)
+        self.assertEqual(machine["analysis"]["transition_ir_version"], 3)
         for index, item in enumerate(machine["transitions"], start=1):
             self.assertEqual(item["id"], f"T{index}")
             for field in (
                 "source_state",
                 "target_state",
+                "trigger",
+                "guards",
+                "unclassified_conditions",
                 "event",
                 "guard",
                 "action",
@@ -69,14 +77,17 @@ class TransitionSemanticsTests(unittest.TestCase):
             ):
                 self.assertIn(field, item)
 
-    def test_sum_variant_input_becomes_event_and_selector_is_not_repeated(self) -> None:
+    def test_sum_variant_input_becomes_confirmed_trigger(self) -> None:
         views = compile_semantic(ROOT / "examples/state_diagrams/session_protocol.glyph")
         machine = views["state"]["machines"][0]
-        self.assert_v2(views, machine)
+        self.assert_v3(views, machine)
 
         start = transition(machine, "SessionIdle", "SessionConnecting", "SessionStart")
         self.assertEqual(start["display_label"], "SessionStart")
         self.assertIsNone(start["guard"])
+        self.assertEqual(start["guards"], [])
+        self.assertEqual(start["trigger"]["role"], "confirmed-trigger")
+        self.assertEqual(start["trigger"]["confidence"], "exact")
         self.assertIsNone(start["action"])
         self.assertEqual(start["outcome"], "normal")
 
@@ -90,20 +101,23 @@ class TransitionSemanticsTests(unittest.TestCase):
         self.assertEqual(rejected["outcome"], "failure")
         self.assertFalse(rejected["synthesized_failure"])
 
-    def test_non_event_boolean_condition_is_rendered_only_as_guard(self) -> None:
+    def test_boolean_input_is_warning_backed_provisional_trigger(self) -> None:
         views = compile_semantic(ROOT / "examples/state_diagrams/traffic_light.glyph")
         machine = views["state"]["machines"][0]
 
-        cycle = transition(machine, "Red", "Green")
-        self.assertIsNone(cycle["event"])
-        self.assertEqual(cycle["guard"], "input.tick")
-        self.assertEqual(cycle["display_label"], "[input.tick]")
+        cycle = transition(machine, "Red", "Green", "? input.tick")
+        self.assertIsNone(cycle["guard"])
+        self.assertEqual(cycle["guards"], [])
+        self.assertEqual(cycle["display_label"], "? input.tick")
+        self.assertEqual(cycle["trigger"]["role"], "provisional-trigger")
 
-        fault = transition(machine, "Red", "TrafficFault")
-        self.assertIsNone(fault["event"])
-        self.assertEqual(fault["guard"], "input.fault")
-        self.assertEqual(fault["display_label"], "[input.fault]")
+        fault = transition(machine, "Red", "TrafficFault", "? input.fault")
+        self.assertIsNone(fault["guard"])
+        self.assertEqual(fault["display_label"], "? input.fault")
         self.assertEqual(fault["outcome"], "failure")
+
+        warning_codes = {item["code"] for item in machine["diagnostics"]}
+        self.assertIn("STIR_TRIGGER_AMBIGUOUS_FALLBACK", warning_codes)
 
     def test_result_typed_effect_synthesizes_structured_failure_transition(self) -> None:
         views = compile_semantic(ROOT / "examples/state_diagrams/effect_failure.glyph")
@@ -141,6 +155,7 @@ class TransitionSemanticsTests(unittest.TestCase):
             "ConveyorStart",
         )
         self.assertEqual(start["guard"], "input.clear")
+        self.assertEqual(start["guards"], ["input.clear"])
         self.assertEqual(start["action"], "set_conveyor(input.speed)")
         self.assertEqual(
             start["display_label"],
@@ -199,7 +214,7 @@ class TransitionSemanticsTests(unittest.TestCase):
             )
         )
 
-    def test_distinct_guards_are_distinct_failure_routes(self) -> None:
+    def test_distinct_boolean_inputs_remain_distinct_provisional_routes(self) -> None:
         views = compile_semantic(ROOT / "examples/state_diagrams/cooling_fan_effect.glyph")
         machine = views["state"]["machines"][0]
         failures = [
@@ -210,9 +225,10 @@ class TransitionSemanticsTests(unittest.TestCase):
             and item.get("source_state") == "FanRunning"
         ]
         self.assertEqual(
-            {item["guard"] for item in failures},
-            {"input.overheat", "!input.enable"},
+            {item["event"] for item in failures},
+            {"? input.overheat", "? !input.enable"},
         )
+        self.assertTrue(all(item["guard"] is None for item in failures))
         self.assertTrue(all(item["failure_type"] == "FanWriteError" for item in failures))
 
     def test_effect_without_result_does_not_create_failure_edge(self) -> None:
@@ -236,8 +252,7 @@ machine Device(state:DeviceState,event:DeviceEvent)
   event==DeviceStop >> DeviceState(DeviceOff,write_device(false))
   _ >> state
 """
-        output = CompilationPipeline().compile_text(source, source_name="device.glyph")
-        views = build_io_state_views(output.model, output.diagrams.ir)
+        views = compile_source(source, "device.glyph")
         machine = views["state"]["machines"][0]
         self.assertEqual(
             machine["analysis"]["synthesized_failure_transition_count"],
@@ -246,6 +261,73 @@ machine Device(state:DeviceState,event:DeviceEvent)
         self.assertFalse(
             any(item.get("synthesized_failure") for item in machine["transitions"])
         )
+
+    def test_block_local_sum_value_is_inferred_from_input_dataflow(self) -> None:
+        views = compile_semantic(ROOT / "examples/acceptance/door_controller.glyph")
+        machine = views["state"]["machines"][0]
+        alarm = next(
+            item
+            for item in machine["transitions"]
+            if item["target_state"] == "Alarmed"
+            and (item.get("trigger") or {}).get("display") == "RaiseAlarm"
+        )
+        self.assertEqual(alarm["trigger"]["role"], "inferred-trigger")
+        self.assertEqual(alarm["trigger"]["confidence"], "dataflow-inferred")
+        self.assertEqual(alarm["event"], "RaiseAlarm")
+        self.assertNotIn("[action==RaiseAlarm]", alarm["display_label"])
+        self.assertIn("input:input", alarm["trigger"]["provenance_roots"])
+
+    def test_provisional_input_and_state_guard_are_separated(self) -> None:
+        source = """\
+machine Door(state:DoorState,input:Input)
+  select=state.mode
+  init=DoorState(Locked,0)
+  next=step(state,input)
+  success=Unlocked
+  failure=Faulted
+
+*Input(request_open:B)
++Mode=Locked|Unlocked|Faulted
+*DoorState(mode:Mode,failures:U)
+
+>step(state:DoorState,input:Input):DoorState
+  state.mode==Locked&input.request_open&state.failures<3 >> DoorState(Unlocked,state.failures)
+  _ >> state
+"""
+        views = compile_source(source, "provisional.glyph")
+        machine = views["state"]["machines"][0]
+        item = transition(machine, "Locked", "Unlocked", "? input.request_open")
+        self.assertEqual(item["guards"], ["state.failures<3"])
+        self.assertEqual(item["guard"], "state.failures<3")
+        self.assertEqual(
+            item["display_label"],
+            "? input.request_open [state.failures<3]",
+        )
+
+    def test_confirmed_event_makes_remaining_boolean_input_a_guard(self) -> None:
+        source = """\
+machine Door(state:DoorState,input:Input)
+  select=state.mode
+  init=DoorState(Locked)
+  next=step(state,input)
+  success=Unlocked
+  failure=Faulted
+
++DoorEvent=RequestOpen|ForcedOpen
+*Input(event:DoorEvent,badge_valid:B)
++Mode=Locked|Unlocked|Faulted
+*DoorState(mode:Mode)
+
+>step(state:DoorState,input:Input):DoorState
+  input.event==RequestOpen&input.badge_valid >> DoorState(Unlocked)
+  _ >> state
+"""
+        views = compile_source(source, "confirmed.glyph")
+        machine = views["state"]["machines"][0]
+        item = transition(machine, "Locked", "Unlocked", "RequestOpen")
+        self.assertEqual(item["trigger"]["role"], "confirmed-trigger")
+        self.assertEqual(item["guards"], ["input.badge_valid"])
+        self.assertEqual(item["display_label"], "RequestOpen [input.badge_valid]")
 
 
 if __name__ == "__main__":

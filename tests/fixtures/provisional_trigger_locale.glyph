@@ -1,0 +1,16 @@
++Mode=Idle|Active|Faulted
++Event=Start|Stop
+*Input(event:Event,legacy_alarm:B,allowed:B)
+*State(mode:Mode)
+
+machine Demo(state:State,input:Input)
+  select=state.mode
+  init=State(Idle)
+  next=step(state,input)
+  success=Active
+  failure=Faulted
+
+>step(state:State,input:Input):State
+  state.mode==Idle&input.event==Start&input.allowed >> State(Active)
+  state.mode==Active&input.legacy_alarm >> State(Faulted)
+  _ >> state
