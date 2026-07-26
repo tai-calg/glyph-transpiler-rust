@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="Glyph Studio">
+  <rect width="1024" height="1024" fill="#f4f7fb"/>
+  <rect x="92" y="92" width="840" height="840" rx="190" fill="#182230"/>
+  <g fill="none" stroke="#f9fafc" stroke-width="108" stroke-linecap="round">
+    <path d="M699 334a252 282 0 1 0 20 348"/>
+  </g>
+  <path d="M510 552h208v164" fill="none" stroke="#f9fafc" stroke-width="104" stroke-linecap="round" stroke-linejoin="round"/>
+  <g fill="#8ba4c1">
+    <circle cx="205" cy="286" r="22"/>
+    <circle cx="819" cy="286" r="22"/>
+    <circle cx="205" cy="738" r="22"/>
+    <circle cx="819" cy="738" r="22"/>
+  </g>
+</svg>
