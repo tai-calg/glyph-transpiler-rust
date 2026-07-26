@@ -1,13 +1,37 @@
 from __future__ import annotations
 
 
-_MARKER = "glyph-state-transition-ir-v2-renderer"
+_MARKER = "glyph-state-transition-ir-v3-renderer"
+
+
+_STYLE = r"""
+<style id="glyph-state-transition-ir-v3-renderer-style">
+.transition-label.provisional-trigger,
+.edge-label.provisional-trigger{
+  border-style:dashed!important;
+  border-color:rgba(231,191,98,.82)!important;
+  color:var(--amber)!important;
+  background:rgba(231,191,98,.10)!important;
+}
+.transition-detail-id.provisional-trigger{
+  border-style:dashed;
+  border-color:rgba(231,191,98,.82);
+  color:var(--amber);
+  background:rgba(231,191,98,.08);
+}
+.transition-label.unclassified-condition,
+.transition-detail-id.unclassified-condition{
+  border-style:dotted!important;
+  color:var(--amber)!important;
+}
+</style>
+"""
 
 
 _SCRIPT = r"""
-<script id="glyph-state-transition-ir-v2-renderer-script">
+<script id="glyph-state-transition-ir-v3-renderer-script">
 (() => {
-  const MARKER = "glyph-state-transition-ir-v2-renderer";
+  const MARKER = "glyph-state-transition-ir-v3-renderer";
   let running = false;
   let timer = null;
 
@@ -27,13 +51,52 @@ _SCRIPT = r"""
     return String(value ?? "").trim();
   }
 
-  function inputOf(transition) {
+  function triggerOf(transition) {
+    const trigger = transition?.trigger;
+    if (trigger && text(trigger.display)) {
+      return {
+        display: text(trigger.display),
+        role: text(trigger.role) || "confirmed-trigger",
+        confidence: text(trigger.confidence) || "unknown",
+        roots: trigger.provenance_roots || [],
+        path: trigger.dataflow_path || [],
+      };
+    }
     const event = text(transition?.event);
+    if (!event) return null;
+    return {
+      display: event,
+      role: event.startsWith("? ") ? "provisional-trigger" : "confirmed-trigger",
+      confidence: "legacy",
+      roots: [],
+      path: [],
+    };
+  }
+
+  function guardsOf(transition) {
+    if (Array.isArray(transition?.guards)) {
+      return transition.guards.map(text).filter(Boolean);
+    }
     const guard = text(transition?.guard);
-    if (event && guard) return `${event} [${guard}]`;
-    if (event) return event;
-    if (guard) return `[${guard}]`;
-    return text(transition?.condition_raw ?? transition?.condition) || "otherwise";
+    return guard ? [guard] : [];
+  }
+
+  function inputOf(transition) {
+    const trigger = triggerOf(transition);
+    const guards = guardsOf(transition);
+    const unknown = (transition?.unclassified_conditions || []).map(text).filter(Boolean);
+    let label = "";
+    if (trigger) {
+      label = `${trigger.role === "provisional-trigger" ? "? " : ""}${trigger.display.replace(/^\?\s*/, "")}`;
+    }
+    if (guards.length) {
+      const guard = guards.join("&");
+      label += label ? ` [${guard}]` : `[${guard}]`;
+    }
+    if (unknown.length) {
+      label += label ? ` ? ${unknown.join("&")}` : `? ${unknown.join("&")}`;
+    }
+    return label || "otherwise";
   }
 
   function actionOf(transition) {
@@ -46,14 +109,31 @@ _SCRIPT = r"""
     return `${inputOf(transition)}➡︎${actionOf(transition)}`;
   }
 
+  function evidenceOf(transition) {
+    const trigger = triggerOf(transition);
+    if (!trigger) return text(transition?.display_label);
+    const details = [];
+    if (trigger.role === "provisional-trigger") {
+      details.push("暫定入力: 出来事か継続条件かをコードだけでは確定できません");
+    } else if (trigger.role === "inferred-trigger") {
+      details.push("入力から導出された判別値");
+    } else {
+      details.push("型で確定した入力イベント");
+    }
+    if (trigger.roots.length) details.push(`origin: ${trigger.roots.join(", ")}`);
+    if (trigger.path.length) details.push(`path: ${trigger.path.join(" → ")}`);
+    return details.join("\n");
+  }
+
   function signatureOf(machine) {
     return [
       machine?.name || "",
       machine?.transition_ir?.version || "",
       ...(machine?.transitions || []).map(transition => [
         transition.id ?? "",
-        transition.event ?? "",
-        transition.guard ?? "",
+        JSON.stringify(transition.trigger ?? null),
+        JSON.stringify(transition.guards ?? []),
+        JSON.stringify(transition.unclassified_conditions ?? []),
         transition.action ?? "",
         transition.failure_type ?? "",
         transition.display_label ?? "",
@@ -68,38 +148,54 @@ _SCRIPT = r"""
     running = true;
     try {
       const machine = await readMachine();
-      if (!machine || Number(machine?.transition_ir?.version) !== 2) return;
+      if (!machine || Number(machine?.transition_ir?.version) < 2) return;
       const signature = signatureOf(machine);
-      let changed = stage.dataset.stateTransitionIRV2Labels !== signature;
+      let changed = stage.dataset.stateTransitionIRV3Labels !== signature;
 
       (machine.transitions || []).forEach((transition, index) => {
         const id = transition.id || `T${index + 1}`;
         const summary = summaryOf(transition);
+        const trigger = triggerOf(transition);
+        const provisional = trigger?.role === "provisional-trigger";
+        const unknown = (transition?.unclassified_conditions || []).length > 0;
         const compact = stage.querySelector(`.transition-label[data-transition-id="${id}"]`);
         if (compact?.classList.contains("compact") && compact.textContent !== summary) {
           compact.textContent = summary;
           compact.dataset.inputActionLabel = summary;
           changed = true;
         }
+        if (compact) {
+          compact.classList.toggle("provisional-trigger", provisional);
+          compact.classList.toggle("unclassified-condition", unknown);
+          compact.title = evidenceOf(transition);
+          compact.dataset.fullLabel = text(transition.display_label);
+          compact.dataset.triggerRole = trigger?.role || "none";
+          compact.dataset.triggerConfidence = trigger?.confidence || "unknown";
+        }
         const detailId = document.querySelector(
-          `.transition-detail[data-transition-id="${id}"] .transition-detail-id.input-action-label`,
+          `.transition-detail[data-transition-id="${id}"] .transition-detail-id`,
         );
         if (detailId && detailId.textContent !== summary) {
           detailId.textContent = summary;
           detailId.dataset.inputActionLabel = summary;
           changed = true;
         }
-        if (compact) {
-          compact.title = text(transition.display_label);
-          compact.dataset.fullLabel = text(transition.display_label);
+        if (detailId) {
+          detailId.classList.add("input-action-label");
+          detailId.classList.toggle("provisional-trigger", provisional);
+          detailId.classList.toggle("unclassified-condition", unknown);
+          detailId.title = evidenceOf(transition);
         }
       });
 
-      stage.dataset.stateTransitionIRV2Labels = signature;
+      stage.dataset.stateTransitionIRV3Labels = signature;
+      stage.dataset.stateTransitionIRV3LabelsReady = "true";
       stage.dataset.stateTransitionIRV2LabelsReady = "true";
-      // Compatibility signal for existing browser tests and third-party themes.
       stage.dataset.failureResultNotationReady = "true";
       if (changed) {
+        document.dispatchEvent(new CustomEvent("glyph-state-transition-ir-v3-labels-ready", {
+          detail: {machine: machine.name, marker: MARKER},
+        }));
         document.dispatchEvent(new CustomEvent("glyph-state-transition-ir-v2-labels-ready", {
           detail: {machine: machine.name, marker: MARKER},
         }));
@@ -112,7 +208,7 @@ _SCRIPT = r"""
   function schedule() {
     clearTimeout(timer);
     timer = setTimeout(() => render().catch(error => {
-      console.error("StateTransitionIR v2 rendering failed", error);
+      console.error("StateTransitionIR v3 rendering failed", error);
     }), 0);
   }
 
@@ -130,8 +226,10 @@ _SCRIPT = r"""
 
 
 def enhance_state_transition_ir_html(html: str) -> str:
-    """Render v2 transition summaries from structured fields only."""
+    """Render v3 trigger/guard/effect roles without reclassifying compiler semantics."""
 
     if _MARKER in html:
         return html
-    return html.replace("</body>", _SCRIPT + "\n</body>")
+    return html.replace("</head>", _STYLE + "\n</head>").replace(
+        "</body>", _SCRIPT + "\n</body>"
+    )
