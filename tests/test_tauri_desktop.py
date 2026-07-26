@@ -36,6 +36,19 @@ class TauriDesktopTests(unittest.TestCase):
         self.assertNotIn("shell:", json.dumps(capability))
         self.assertNotIn("fs:", json.dumps(capability))
 
+    def test_tauri_icons_are_generated_before_every_native_build(self) -> None:
+        package = json.loads((DESKTOP / "package.json").read_text(encoding="utf-8"))
+        scripts = package["scripts"]
+        self.assertEqual(scripts["icons"], "tauri icon src-tauri/icons/icon.svg")
+        for name in ("dev", "build", "check"):
+            self.assertTrue(
+                scripts[name].startswith("npm run icons && "),
+                f"desktop script {name!r} must generate icons before invoking Tauri",
+            )
+        icon_source = DESKTOP / "src-tauri" / "icons" / "icon.svg"
+        self.assertTrue(icon_source.is_file())
+        self.assertIn("viewBox=\"0 0 1024 1024\"", icon_source.read_text(encoding="utf-8"))
+
     def test_remote_compiler_ui_is_sandboxed(self) -> None:
         html = (DESKTOP / "ui" / "index.html").read_text(encoding="utf-8")
         self.assertIn('sandbox="allow-scripts allow-same-origin allow-downloads allow-forms"', html)
