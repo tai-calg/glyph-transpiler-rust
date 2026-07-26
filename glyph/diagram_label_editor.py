@@ -31,6 +31,7 @@ function parse(value){try{return JSON.parse(value||"{}")||{}}catch{return {}}}
 function read(stage){const current=parse(localStorage.getItem(diagramKey(stage)));if(Object.keys(current).length)return current;return parse(localStorage.getItem(legacyKey(stage)))}
 function write(stage,value){const serialized=JSON.stringify(value);localStorage.setItem(diagramKey(stage),serialized);localStorage.setItem(legacyKey(stage),serialized)}
 function labelId(label,index){const existing=label.dataset.transitionId||label.dataset.glyphLabelId;if(existing)return existing;const line=label.dataset.line||0;const text=(label.dataset.fullLabel||label.dataset.inputActionLabel||label.textContent||"").trim();const id=`L${index+1}:${line}:${text}`;label.dataset.glyphLabelId=id;return id}
+function labelIds(label,index){return[...new Set([label.dataset.transitionId,label.dataset.glyphLabelId,labelId(label,index)].filter(Boolean))]}
 function centerRect(label,x,y){return{x:x-label.offsetWidth/2,y:y-label.offsetHeight/2,width:label.offsetWidth,height:label.offsetHeight}}
 function nodeRects(stage){return[...stage.querySelectorAll(NODE_SELECTOR)].map(node=>({x:node.offsetLeft,y:node.offsetTop,width:node.offsetWidth,height:node.offsetHeight}))}
 function pathFor(label,index,stage){const id=label.dataset.transitionId;if(id){const escaped=window.CSS?.escape?CSS.escape(id):id.replace(/[^A-Za-z0-9_-]/g,"\\$&");const found=stage.querySelector(`path[data-transition-id="${escaped}"]`);if(found)return found}const paths=[...stage.querySelectorAll(":scope > svg.edge-svg > path.state-transition-path,:scope > svg.edge-svg > path")].filter((item,pos,array)=>array.indexOf(item)===pos);return paths[index]||null}
@@ -51,7 +52,7 @@ function arrange(stage){
  const labels=[...stage.querySelectorAll(LABEL_SELECTOR)];if(!labels.length)return;
  const saved=read(stage),obstacles=nodeRects(stage),placed=[];
  labels.forEach((label,index)=>{
-   const id=labelId(label,index),anchor=anchorFor(label,index,stage),manual=saved[id],restored=restoredPoint(manual,anchor);
+   const ids=labelIds(label,index),id=ids[0],anchor=anchorFor(label,index,stage),manual=ids.map(value=>saved[value]).find(Boolean),restored=restoredPoint(manual,anchor);
    label.dataset.anchorX=String(anchor.x);label.dataset.anchorY=String(anchor.y);label.dataset.maxLabelDistance=String(MAX_DISTANCE);label.classList.remove("layout-constrained");
    if(restored){const point=constrain(project(restored,anchor),label,stage);place(label,point,anchor,true,obstacles,placed);return}
    let selectedPosition=choose(label,anchor,anchor,stage,obstacles,placed);
@@ -63,12 +64,12 @@ function arrange(stage){
 }
 function schedule(stage,delay=80){clearTimeout(timer);timer=setTimeout(()=>{state().then(()=>arrange(stage||document.querySelector(".graph-stage"))).catch(()=>{})},delay)}
 function bind(label,stage,index){
- if(label.dataset.labelDragReady==="true")return;label.dataset.labelDragReady="true";const id=labelId(label,index);
- label.addEventListener("pointerdown",event=>{if(event.button!==0)return;event.preventDefault();event.stopPropagation();select(label);label.classList.add("dragging-label");label.setPointerCapture(event.pointerId);const anchor=anchorFor(label,index,stage);drag={label,stage,id,index,anchor,startX:event.clientX,startY:event.clientY,left:num(label.style.left),top:num(label.style.top)}});
+ if(label.dataset.labelDragReady==="true")return;label.dataset.labelDragReady="true";
+ label.addEventListener("pointerdown",event=>{if(event.button!==0)return;event.preventDefault();event.stopPropagation();select(label);label.classList.add("dragging-label");label.setPointerCapture(event.pointerId);const anchor=anchorFor(label,index,stage);drag={label,stage,ids:labelIds(label,index),index,anchor,startX:event.clientX,startY:event.clientY,left:num(label.style.left),top:num(label.style.top)}});
  label.addEventListener("pointermove",event=>{if(!drag||drag.label!==label)return;event.preventDefault();const desired={x:drag.left+event.clientX-drag.startX,y:drag.top+event.clientY-drag.startY},point=constrain(project(desired,drag.anchor),label,stage);label.style.left=`${point.x}px`;label.style.top=`${point.y}px`});
- label.addEventListener("pointerup",event=>{if(!drag||drag.label!==label)return;event.preventDefault();event.stopPropagation();label.classList.remove("dragging-label");const saved=read(stage),anchor=anchorFor(label,index,stage),point=constrain(project({x:num(label.style.left),y:num(label.style.top)},anchor),label,stage);saved[id]=storedPoint(point,anchor);write(stage,saved);label.dataset.manualLabel="true";drag=null;schedule(stage)});
+ label.addEventListener("pointerup",event=>{if(!drag||drag.label!==label)return;event.preventDefault();event.stopPropagation();label.classList.remove("dragging-label");const saved=read(stage),anchor=anchorFor(label,index,stage),point=constrain(project({x:num(label.style.left),y:num(label.style.top)},anchor),label,stage),stored=storedPoint(point,anchor);for(const id of new Set([...drag.ids,...labelIds(label,index)]))saved[id]=stored;write(stage,saved);label.dataset.manualLabel="true";drag=null;schedule(stage)});
  label.addEventListener("click",event=>{if(label.dataset.manualLabel==="true")event.stopPropagation()});
- label.addEventListener("dblclick",event=>{event.preventDefault();event.stopPropagation();const saved=read(stage);delete saved[id];write(stage,saved);label.dataset.manualLabel="false";schedule(stage,0)});
+ label.addEventListener("dblclick",event=>{event.preventDefault();event.stopPropagation();const saved=read(stage);for(const id of labelIds(label,index))delete saved[id];write(stage,saved);label.dataset.manualLabel="false";schedule(stage,0)});
 }
 function enhance(){const stage=document.querySelector(".graph-stage");if(!stage)return;[...stage.querySelectorAll(LABEL_SELECTOR)].forEach((label,index)=>bind(label,stage,index));schedule(stage)}
 document.addEventListener("pointerup",event=>{const node=event.target?.closest?.(NODE_SELECTOR);if(node){const stage=node.closest(".graph-stage");schedule(stage,80);setTimeout(()=>schedule(stage,0),180)}},true);
