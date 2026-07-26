@@ -53,6 +53,26 @@ function centers(box) {
   return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
 }
 
+async function waitForCollisionFreeLabels(page) {
+  await page.waitForFunction(() => {
+    const visible = element => {
+      const style = getComputedStyle(element);
+      return style.display !== "none" && style.visibility !== "hidden";
+    };
+    const labels = [...document.querySelectorAll(".transition-label")].filter(visible);
+    const nodes = [...document.querySelectorAll(".state-node")].filter(visible);
+    const overlaps = (a, b) => !(
+      a.right + 2 <= b.left || b.right + 2 <= a.left
+      || a.bottom + 2 <= b.top || b.bottom + 2 <= a.top
+    );
+    return labels.every((label, index) => {
+      const rect = label.getBoundingClientRect();
+      return labels.slice(index + 1).every(other => !overlaps(rect, other.getBoundingClientRect()))
+        && nodes.every(node => !overlaps(rect, node.getBoundingClientRect()));
+    });
+  }, null, { timeout: 3000 });
+}
+
 const logs = [];
 const port = 8894;
 const child = spawn("python3", ["glyph.py", "examples/state_diagrams/conveyor_control.glyph"], {
@@ -90,7 +110,7 @@ try {
 
   const node = page.locator(".state-node").first();
   await dragElement(page, node, 170, 160, "state node");
-  await page.waitForTimeout(120);
+  await waitForCollisionFreeLabels(page);
   const nodeStored = await page.evaluate(() => Object.keys(localStorage).some(
     key => key.startsWith("glyph.diagram.positions.v1:"),
   ));
