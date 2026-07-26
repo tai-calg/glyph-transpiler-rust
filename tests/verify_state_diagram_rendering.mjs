@@ -23,7 +23,13 @@ const cases = [
       {
         name: "Traffic",
         states: ["Red", "Green", "Yellow", "TrafficFault"],
-        warnings: [],
+        warnings: [
+          "STIR_TRIGGER_AMBIGUOUS_FALLBACK",
+          "STIR_TRIGGER_AMBIGUOUS_FALLBACK",
+          "STIR_TRIGGER_AMBIGUOUS_FALLBACK",
+          "STIR_TRIGGER_AMBIGUOUS_FALLBACK",
+        ],
+        provisionalTriggers: 4,
         compact: true,
         labels: [
           "input.fault",
@@ -42,6 +48,7 @@ const cases = [
         name: "Session",
         states: ["SessionIdle", "SessionConnecting", "SessionReady", "SessionFailed"],
         warnings: [],
+        provisionalTriggers: 0,
         compact: true,
         labels: [
           "state.phase==SessionIdle&event==SessionStart",
@@ -61,6 +68,7 @@ const cases = [
         name: "Door",
         states: ["DoorClosed", "DoorOpen", "DoorJammed"],
         warnings: ["unreachable-state"],
+        provisionalTriggers: 0,
         compact: true,
         labels: [
           "state.mode==DoorClosed&event==DoorOpenRequest",
@@ -71,6 +79,7 @@ const cases = [
         name: "Power",
         states: ["PowerOff", "PowerOn", "PowerFault"],
         warnings: [],
+        provisionalTriggers: 0,
         compact: true,
         labels: [
           "event==PowerTrip",
@@ -187,6 +196,7 @@ try {
       const apiState = await waitForServer(url, child, logs);
       assert.equal(apiState.views.schema, "glyph.io-state-views");
       assert.equal(apiState.views.version, 2);
+      assert.equal(apiState.views.state_transition_ir.version, 3);
       assert.equal(apiState.views.state.machines.length, testCase.machines.length);
 
       const page = await browser.newPage({
@@ -215,6 +225,7 @@ try {
             return selected === machineName
               && stage?.dataset.labelLayoutReady === "true"
               && stage?.dataset.initialRouteReady === "true"
+              && stage?.dataset.stateTransitionIRV3LabelsReady === "true"
               && stage.querySelector(":scope > svg.edge-svg > path.initial-transition-path")
               && stage.querySelector(".initial-dot")
               && stage.querySelectorAll(".edge-label.transition-label").length === transitionCount;
@@ -247,6 +258,13 @@ try {
           transitionCount,
           `${testCase.slug}/${expected.name}: transition paths`,
         );
+        if (expected.provisionalTriggers !== undefined) {
+          assert.equal(
+            await page.locator(".edge-label.transition-label.provisional-trigger").count(),
+            expected.provisionalTriggers,
+            `${testCase.slug}/${expected.name}: provisional trigger labels`,
+          );
+        }
 
         const labelIds = await page.locator(".edge-label.transition-label").evaluateAll(
           elements => elements.map(element => element.dataset.transitionId),
@@ -268,19 +286,21 @@ try {
         }
 
         await assertDiagramGeometry(page);
+
         await page.screenshot({
           path: path.join(outputDirectory, `${testCase.slug}-${expected.name.toLowerCase()}.png`),
           fullPage: true,
         });
       }
+
       await page.close();
     } finally {
       await stopProcess(child);
+      port += 1;
     }
-    port += 1;
   }
 } finally {
   await browser.close();
 }
 
-console.log(`verified ${cases.length} Glyph files and ${cases.reduce((sum, item) => sum + item.machines.length, 0)} collision-free state-machine renderings`);
+console.log("verified generic compiler-derived state diagrams and provisional trigger rendering");
