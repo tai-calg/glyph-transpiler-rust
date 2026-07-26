@@ -38,7 +38,7 @@ function maxScroll(element,axis){return axis==="x"?Math.max(0,element.scrollWidt
 function saved(){try{return JSON.parse(sessionStorage.getItem(key())||"null")}catch{return null}}
 function persist(shell){sessionStorage.setItem(key(),JSON.stringify({left:shell.scrollLeft,top:shell.scrollTop}))}
 function blankTarget(event,shell){const target=event.target;if(target?.closest?.(INTERACTIVE))return false;return Boolean(target===shell||target?.closest?.(".graph-stage,.edge-svg,.glyph-zoom-surface"))}
-function help(shell){let element=shell.querySelector(":scope > .canvas-pan-help");if(!element){element=document.createElement("div");element.className="canvas-pan-help";shell.appendChild(element)}element.textContent=locale()==="ja"?"空白をドラッグしてキャンバスを移動":"Drag empty canvas to pan"}
+function help(shell){let element=shell.querySelector(":scope > .canvas-pan-help");if(!element){element=document.createElement("div");element.className="canvas-pan-help";shell.appendChild(element)}const value=locale()==="ja"?"空白をドラッグしてキャンバスを移動":"Drag empty canvas to pan";if(element.textContent!==value)element.textContent=value}
 function bind(shell){
   if(shell.dataset.canvasPanReady==="true"){help(shell);return}
   shell.dataset.canvasPanReady="true";shell.classList.add("glyph-pan-ready");shell.tabIndex=0;help(shell);
