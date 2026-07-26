@@ -23,6 +23,7 @@ const num=value=>Number.parseFloat(value||"0")||0;
 const finite=value=>Number.isFinite(value);
 const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
 const intersects=(a,b,gap=GAP)=>!(a.x+a.width+gap<=b.x||b.x+b.width+gap<=a.x||a.y+a.height+gap<=b.y||b.y+b.height+gap<=a.y);
+const scaleFor=stage=>Number.parseFloat(stage?.dataset.viewportScale||"1")||1;
 async function state(){if(cache)return cache;const response=await fetch("/api/state",{cache:"no-store"});if(!response.ok)throw Error("diagram state unavailable");return cache=await response.json()}
 function keyParts(){const tab=document.querySelector(".tab.active")?.dataset.tab||"state";const index=tab==="state"?document.querySelector("#machine-select")?.value||0:document.querySelector("#system-select")?.value||0;return{digest:cache?.digest||"source",tab,index}}
 function diagramKey(stage){const{digest,tab,index}=keyParts();return `glyph.diagram.label-positions.v2:${digest}:${tab}:${index}`}
@@ -66,7 +67,7 @@ function schedule(stage,delay=80){clearTimeout(timer);timer=setTimeout(()=>{stat
 function bind(label,stage,index){
  if(label.dataset.labelDragReady==="true")return;label.dataset.labelDragReady="true";
  label.addEventListener("pointerdown",event=>{if(event.button!==0)return;event.preventDefault();event.stopPropagation();select(label);label.classList.add("dragging-label");label.setPointerCapture(event.pointerId);const anchor=anchorFor(label,index,stage);drag={label,stage,ids:labelIds(label,index),index,anchor,startX:event.clientX,startY:event.clientY,left:num(label.style.left),top:num(label.style.top)}});
- label.addEventListener("pointermove",event=>{if(!drag||drag.label!==label)return;event.preventDefault();const desired={x:drag.left+event.clientX-drag.startX,y:drag.top+event.clientY-drag.startY},point=constrain(project(desired,drag.anchor),label,stage);label.style.left=`${point.x}px`;label.style.top=`${point.y}px`});
+ label.addEventListener("pointermove",event=>{if(!drag||drag.label!==label)return;event.preventDefault();const scale=scaleFor(stage),desired={x:drag.left+(event.clientX-drag.startX)/scale,y:drag.top+(event.clientY-drag.startY)/scale},point=constrain(project(desired,drag.anchor),label,stage);label.style.left=`${point.x}px`;label.style.top=`${point.y}px`});
  label.addEventListener("pointerup",event=>{if(!drag||drag.label!==label)return;event.preventDefault();event.stopPropagation();label.classList.remove("dragging-label");const saved=read(stage),anchor=anchorFor(label,index,stage),point=constrain(project({x:num(label.style.left),y:num(label.style.top)},anchor),label,stage),stored=storedPoint(point,anchor);for(const id of new Set([...drag.ids,...labelIds(label,index)]))saved[id]=stored;write(stage,saved);label.dataset.manualLabel="true";drag=null;schedule(stage)});
  label.addEventListener("click",event=>{if(label.dataset.manualLabel==="true")event.stopPropagation()});
  label.addEventListener("dblclick",event=>{event.preventDefault();event.stopPropagation();const saved=read(stage);for(const id of labelIds(label,index))delete saved[id];write(stage,saved);label.dataset.manualLabel="false";schedule(stage,0)});
@@ -75,7 +76,7 @@ function enhance(){const stage=document.querySelector(".graph-stage");if(!stage)
 document.addEventListener("pointerup",event=>{const node=event.target?.closest?.(NODE_SELECTOR);if(node){const stage=node.closest(".graph-stage");schedule(stage,80);setTimeout(()=>schedule(stage,0),180)}},true);
 document.addEventListener("click",event=>{if(!event.target?.closest?.(LABEL_SELECTOR))select(null)});
 document.addEventListener("change",event=>{if(event.target?.matches?.("#machine-select,#system-select")){cache=null;setTimeout(enhance,0)}});
-for(const name of["glyph-transition-layout-ready","glyph-transition-input-action-labels-ready","glyph-state-transition-ir-v2-labels-ready","glyph-state-transition-ir-v3-labels-ready","glyph-uml-transition-ready"])document.addEventListener(name,enhance);
+for(const name of["glyph-transition-layout-ready","glyph-transition-input-action-labels-ready","glyph-state-transition-ir-v2-labels-ready","glyph-state-transition-ir-v3-labels-ready","glyph-uml-transition-ready","glyph-diagram-viewport-change"])document.addEventListener(name,enhance);
 new MutationObserver(enhance).observe(document.getElementById("view")||document.body,{childList:true,subtree:true});
 window.addEventListener("resize",enhance);enhance();
 })();
