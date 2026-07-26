@@ -24,14 +24,16 @@ class DiagramWorkspaceLayoutTests(unittest.TestCase):
 
     def test_labels_are_collision_aware_draggable_and_persistent(self) -> None:
         html = enhance_diagram_label_editor_html(DIAGRAM_HTML)
-        self.assertIn("glyph-diagram-label-editor-v1-script", html)
-        self.assertIn("glyph.diagram.label-positions.v1:", html)
+        self.assertIn("glyph-diagram-label-editor-v2-script", html)
+        self.assertIn("glyph.diagram.label-positions.v2:", html)
         self.assertIn("label.setPointerCapture", html)
         self.assertIn("dragging-label", html)
-        self.assertIn("occupied.some(item=>intersects", html)
-        self.assertIn("placed.some(item=>intersects", html)
+        self.assertIn("collisionCount", html)
+        self.assertIn("placed", html)
         self.assertIn("NODE_SELECTOR", html)
         self.assertIn("dblclick", html)
+        self.assertIn("MAX_DISTANCE=96", html)
+        self.assertIn("getPointAtLength(length/2)", html)
 
     def test_tauri_parent_does_not_create_a_second_page_scroll_area(self) -> None:
         css = (ROOT / "desktop" / "ui" / "styles.css").read_text(encoding="utf-8")
