@@ -28,37 +28,43 @@ function labelId(label,index){const existing=label.dataset.transitionId||label.d
 function centerRect(label,x,y){return{x:x-label.offsetWidth/2,y:y-label.offsetHeight/2,width:label.offsetWidth,height:label.offsetHeight}}
 function nodeRects(stage){return[...stage.querySelectorAll(NODE_SELECTOR)].map(node=>({x:node.offsetLeft,y:node.offsetTop,width:node.offsetWidth,height:node.offsetHeight}))}
 function candidates(x,y){const points=[[0,0]];for(const radius of[24,44,68,96,132,172])points.push([0,-radius],[0,radius],[-radius,0],[radius,0],[-radius,-radius*.6],[radius,-radius*.6],[-radius,radius*.6],[radius,radius*.6]);return points.map(([dx,dy])=>({x:x+dx,y:y+dy}))}
-function inside(rect,stage){return rect.x>=8&&rect.y>=8&&rect.x+rect.width<=stage.scrollWidth-8&&rect.y+rect.height<=stage.scrollHeight-8}
+function inside(rect,width,height){return rect.x>=8&&rect.y>=8&&rect.x+rect.width<=width-8&&rect.y+rect.height<=height-8}
 function select(label){selected?.classList.remove("selected-label");selected=label;selected?.classList.add("selected-label")}
 function arrange(stage){
   if(!stage?.isConnected)return;
   const labels=[...stage.querySelectorAll(LABEL_SELECTOR)];if(!labels.length)return;
-  const saved=read(stage),occupied=nodeRects(stage),placed=[];
+  const saved=read(stage),occupied=nodeRects(stage),placed=[],width=stage.scrollWidth,baseHeight=stage.scrollHeight;
+  let railX=12,railY=baseHeight+12,railHeight=0,requiredHeight=baseHeight;
   labels.forEach((label,index)=>{
     const id=labelId(label,index),manual=saved[id];
     if(manual&&Number.isFinite(manual.x)&&Number.isFinite(manual.y)){
-      const x=clamp(manual.x,label.offsetWidth/2+8,stage.scrollWidth-label.offsetWidth/2-8),y=clamp(manual.y,label.offsetHeight/2+8,stage.scrollHeight-label.offsetHeight/2-8);
-      label.style.left=`${x}px`;label.style.top=`${y}px`;label.dataset.manualLabel="true";placed.push(centerRect(label,x,y));return;
+      const x=clamp(manual.x,label.offsetWidth/2+8,width-label.offsetWidth/2-8),y=clamp(manual.y,label.offsetHeight/2+8,Math.max(baseHeight,manual.y+label.offsetHeight/2+8));
+      label.style.left=`${x}px`;label.style.top=`${y}px`;label.dataset.manualLabel="true";placed.push(centerRect(label,x,y));requiredHeight=Math.max(requiredHeight,y+label.offsetHeight/2+12);return;
     }
     label.dataset.manualLabel="false";
     const preferredX=num(label.style.left)||stage.clientWidth/2,preferredY=num(label.style.top)||stage.clientHeight/2;
-    let chosen={x:preferredX,y:preferredY};
+    let chosen=null;
     for(const point of candidates(preferredX,preferredY)){
       const rect=centerRect(label,point.x,point.y);
-      if(!inside(rect,stage))continue;
+      if(!inside(rect,width,baseHeight))continue;
       if(occupied.some(item=>intersects(rect,item)))continue;
       if(placed.some(item=>intersects(rect,item)))continue;
       chosen=point;break;
     }
+    if(!chosen){
+      if(railX+label.offsetWidth>width-12){railX=12;railY+=railHeight+12;railHeight=0}
+      chosen={x:railX+label.offsetWidth/2,y:railY+label.offsetHeight/2};railX+=label.offsetWidth+12;railHeight=Math.max(railHeight,label.offsetHeight);requiredHeight=Math.max(requiredHeight,railY+railHeight+12);
+    }
     label.style.left=`${chosen.x}px`;label.style.top=`${chosen.y}px`;label.dataset.autoLeft=String(chosen.x);label.dataset.autoTop=String(chosen.y);placed.push(centerRect(label,chosen.x,chosen.y));
   });
+  if(requiredHeight>stage.clientHeight){stage.style.height=`${Math.ceil(requiredHeight)}px`;const svg=stage.querySelector(":scope > svg.edge-svg");if(svg)svg.setAttribute("height",String(Math.ceil(requiredHeight)))}
   stage.dataset.labelEditorReady="true";
 }
 function schedule(stage){clearTimeout(timer);timer=setTimeout(()=>{state().then(()=>arrange(stage||document.querySelector(".graph-stage"))).catch(()=>{})},24)}
 function bind(label,stage,index){
   if(label.dataset.labelDragReady==="true")return;label.dataset.labelDragReady="true";const id=labelId(label,index);
-  label.addEventListener("pointerdown",event=>{if(event.button!==0)return;event.preventDefault();event.stopPropagation();select(label);label.classList.add("dragging-label");label.setPointerCapture(event.pointerId);drag={label,stage,id,pointerId:event.pointerId,startX:event.clientX,startY:event.clientY,left:num(label.style.left),top:num(label.style.top),moved:false}});
-  label.addEventListener("pointermove",event=>{if(!drag||drag.label!==label)return;event.preventDefault();const x=clamp(drag.left+event.clientX-drag.startX,label.offsetWidth/2+8,stage.scrollWidth-label.offsetWidth/2-8),y=clamp(drag.top+event.clientY-drag.startY,label.offsetHeight/2+8,stage.scrollHeight-label.offsetHeight/2-8);label.style.left=`${x}px`;label.style.top=`${y}px`;drag.moved=drag.moved||Math.abs(event.clientX-drag.startX)>3||Math.abs(event.clientY-drag.startY)>3});
+  label.addEventListener("pointerdown",event=>{if(event.button!==0)return;event.preventDefault();event.stopPropagation();select(label);label.classList.add("dragging-label");label.setPointerCapture(event.pointerId);drag={label,stage,id,startX:event.clientX,startY:event.clientY,left:num(label.style.left),top:num(label.style.top)}});
+  label.addEventListener("pointermove",event=>{if(!drag||drag.label!==label)return;event.preventDefault();const x=clamp(drag.left+event.clientX-drag.startX,label.offsetWidth/2+8,stage.scrollWidth-label.offsetWidth/2-8),y=clamp(drag.top+event.clientY-drag.startY,label.offsetHeight/2+8,stage.scrollHeight-label.offsetHeight/2-8);label.style.left=`${x}px`;label.style.top=`${y}px`});
   label.addEventListener("pointerup",event=>{if(!drag||drag.label!==label)return;event.preventDefault();event.stopPropagation();label.classList.remove("dragging-label");const saved=read(stage);saved[id]={x:num(label.style.left),y:num(label.style.top)};write(stage,saved);label.dataset.manualLabel="true";drag=null});
   label.addEventListener("click",event=>{if(label.dataset.manualLabel==="true")event.stopPropagation()});
   label.addEventListener("dblclick",event=>{event.preventDefault();event.stopPropagation();const saved=read(stage);delete saved[id];write(stage,saved);label.dataset.manualLabel="false";schedule(stage)});
