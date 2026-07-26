@@ -11,8 +11,6 @@ _STYLE = r"""
 .glyph-diagram-settings-title{font-weight:720;margin-bottom:10px}
 .glyph-diagram-settings-row{display:grid;grid-template-columns:72px minmax(0,1fr);align-items:center;gap:10px;color:var(--muted);font-size:12px}
 .glyph-diagram-settings-row select{width:100%;min-width:0}
-#status{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}
-#glyph-status-display{flex:0 0 auto}
 </style>
 """
 
@@ -25,12 +23,6 @@ const pair=(ja,en)=>locale==="ja"?ja:en;
 const set=(element,value)=>{if(element&&element.textContent!==value)element.textContent=value};
 function diagnosticText(item){return locale==="ja"?(item?.message_ja||item?.message):(item?.message_en||item?.message)}
 function selectedMachine(){const machines=(typeof snapshot!=="undefined"?snapshot?.views?.state?.machines:[])||[];return machines[typeof machineIndex!=="undefined"?machineIndex:0]||null}
-function ensureStatusDisplay(){
-  const canonical=document.getElementById("status");if(!canonical)return null;
-  let display=document.getElementById("glyph-status-display");
-  if(!display){display=document.createElement("div");display.id="glyph-status-display";canonical.after(display)}
-  return display;
-}
 function ensureSettings(){
   const header=document.querySelector(".app > header");if(!header||document.getElementById("glyph-diagram-settings-button"))return;
   const wrap=document.createElement("div");wrap.className="glyph-diagram-settings";
@@ -80,8 +72,6 @@ function applyStatic(){
   set(document.getElementById("compile"),pair("コンパイル","Compile"));set(document.getElementById("save"),pair("保存","Save"));
   set(document.querySelector(".toolbar-title"),pair("Glyph ソース","Glyph source"));
   set(document.querySelector('.tab[data-tab="io"]'),"I/O");set(document.querySelector('.tab[data-tab="state"]'),pair("状態遷移","State transitions"));
-  const raw=String((typeof snapshot!=="undefined"?snapshot?.status:"")||document.getElementById("status")?.textContent||"").toLowerCase(),status=ensureStatusDisplay();
-  if(status&&raw){status.className=`status ${raw}`;set(status,({starting:pair("起動中","starting"),ready:pair("準備完了","ready"),error:pair("エラー","error"),busy:pair("処理中","busy")})[raw]||raw)}
   const source=document.getElementById("editor")?.value||"",meta=document.getElementById("editor-meta"),count=source.split("\n").length;if(meta)set(meta,locale==="ja"?`${count} 行`:`${count} lines`);
   const tab=typeof activeTab!=="undefined"?activeTab:"state";
   set(document.querySelector(".view-controls h2"),tab==="io"?pair("I/O 構成","I/O topology"):pair("状態遷移","State transitions"));
