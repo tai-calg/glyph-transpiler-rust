@@ -10,6 +10,7 @@ _STYLE = r"""
 .edge-label.dragging-label,.transition-label.dragging-label{cursor:grabbing;z-index:30;box-shadow:0 0 0 2px rgba(88,166,255,.28),0 10px 24px rgba(0,0,0,.36)}
 .edge-label.selected-label,.transition-label.selected-label{outline:2px solid var(--blue);outline-offset:2px}
 .edge-label.layout-constrained,.transition-label.layout-constrained{border-color:rgba(231,191,98,.72)}
+.edge-label.compact,.transition-label.compact{max-width:116px}
 </style>
 """
 
@@ -61,8 +62,8 @@ function candidates(anchor){
 function inside(rect,width,height){return rect.x>=8&&rect.y>=8&&rect.x+rect.width<=width-8&&rect.y+rect.height<=height-8}
 function select(label){selected?.classList.remove("selected-label");selected=label;selected?.classList.add("selected-label")}
 function compact(label){
-  const id=label.dataset.transitionId;if(!id||label.textContent===id)return false;
-  label.dataset.fullLabel=label.dataset.fullLabel||label.textContent||"";label.textContent=id;label.dataset.compact="true";label.dataset.anchorCompacted="true";label.classList.add("compact");return true;
+  if(label.classList.contains("compact"))return false;
+  label.dataset.fullLabel=label.dataset.fullLabel||label.textContent||"";label.dataset.compact="true";label.dataset.anchorCompacted="true";label.classList.add("compact");return true;
 }
 function choose(label,anchor,occupied,placed,width,height){
   const points=candidates(anchor),valid=[];
