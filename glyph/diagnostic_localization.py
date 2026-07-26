@@ -9,6 +9,7 @@ _BACKTICK = re.compile(r"`([^`]+)`")
 _UNREACHABLE_STATE = re.compile(
     r"state\s+(?P<state>\S+)\s+is unreachable from initial state\s+(?P<initial>\S+)"
 )
+_LINE_PREFIX = re.compile(r"^(?:line\s+)?(?P<line>\d+)(?::(?P<column>\d+))?:\s*(?P<body>.*)$", re.IGNORECASE)
 
 
 def _quoted(message: str) -> str:
@@ -16,8 +17,58 @@ def _quoted(message: str) -> str:
     return match.group(1) if match else "この条件"
 
 
+def _compile_error_ja(message: str) -> str:
+    """Translate stable compiler-error shapes and preserve unknown technical detail."""
+
+    prefix = ""
+    body = message.strip()
+    line = _LINE_PREFIX.match(body)
+    if line:
+        location = f"{line.group('line')}行目"
+        if line.group("column"):
+            location += f"・{line.group('column')}列目"
+        prefix = location + ": "
+        body = line.group("body")
+
+    replacements: tuple[tuple[str, str], ...] = (
+        ("unexpected end of input", "入力の途中でコードが終了しています"),
+        ("unexpected token", "予期しない記号があります"),
+        ("unknown declaration", "認識できない宣言があります"),
+        ("unknown name", "未定義の名前が参照されています"),
+        ("is not defined", "が定義されていません"),
+        ("expected expression", "式が必要です"),
+        ("expected type", "型が必要です"),
+        ("expected identifier", "名前が必要です"),
+        ("missing fallback", "default節がありません"),
+        ("missing default", "default節がありません"),
+        ("unterminated", "閉じられていない構文があります"),
+        ("cannot infer", "型または意味を推論できません"),
+        ("type mismatch", "型が一致しません"),
+        ("duplicate", "重複した定義があります"),
+    )
+    lowered = body.lower()
+    for needle, translated in replacements:
+        if needle in lowered:
+            return f"{prefix}{translated}。詳細: {body}"
+    return f"{prefix}Glyphコードをコンパイルできません。詳細: {body}"
+
+
 def _messages(code: str, message: str) -> tuple[str, str, str | None, str | None]:
     expression = _quoted(message)
+    if code == "GLYPH_COMPILE_ERROR":
+        return (
+            _compile_error_ja(message),
+            message,
+            "エラー位置の周辺で、括弧、型、名前、分岐の`>>`、default節を確認してください。",
+            "Check brackets, types, names, branch `>>` syntax, and the default branch near the reported location.",
+        )
+    if code == "GLYPH_SOURCE_READ_ERROR":
+        return (
+            f"Glyphファイルを読み込めません。詳細: {message}",
+            message,
+            "ファイルの存在、アクセス権、他のアプリによるロックを確認してください。",
+            "Check that the file exists, is readable, and is not locked by another application.",
+        )
     if code == "STIR_TRIGGER_AMBIGUOUS_FALLBACK":
         return (
             f"`{expression}` が出来事なのか継続中の条件なのか、コードだけでは確定できません。図では暫定的に入力として表示します。",
