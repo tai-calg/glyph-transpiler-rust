@@ -13,13 +13,14 @@ _STYLE = r"""
 .edge-label.compact,.transition-label.compact{max-width:100px}
 .edge-label.compact-tight,.transition-label.compact-tight{max-width:76px}
 .edge-label.compact-micro,.transition-label.compact-micro{max-width:54px}
+.edge-label.compact-nano,.transition-label.compact-nano{max-width:38px}
 </style>
 """
 
 _SCRIPT = r"""
 <script id="glyph-diagram-label-editor-v1-script">
 (()=>{
-const LABEL_SELECTOR=".edge-label,.transition-label",NODE_SELECTOR=".state-node,.graph-node",GAP=8,MAX_ANCHOR_RADIUS=96;
+const LABEL_SELECTOR=".edge-label,.transition-label",NODE_SELECTOR=".state-node,.graph-node",GAP=8,PREFERRED_ANCHOR_RADIUS=96,MAX_ANCHOR_RADIUS=160;
 let drag=null,selected=null,timer=null,cache=null;
 const num=value=>Number.parseFloat(value||"0")||0;
 const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
@@ -47,9 +48,9 @@ function anchorFor(label,stage,index){
 }
 function candidates(anchor){
   const points=[],base=Math.atan2(anchor.ny,anchor.nx);
-  for(const radius of[22,34,48,64,80,MAX_ANCHOR_RADIUS]){
-    for(let step=0;step<16;step+=1){
-      const angle=base+step*Math.PI/8;
+  for(const radius of[20,32,44,56,72,88,PREFERRED_ANCHOR_RADIUS,112,128,144,MAX_ANCHOR_RADIUS]){
+    for(let step=0;step<24;step+=1){
+      const angle=base+step*Math.PI/12;
       points.push({x:anchor.x+Math.cos(angle)*radius,y:anchor.y+Math.sin(angle)*radius,radius});
     }
   }
@@ -84,15 +85,16 @@ function arrange(stage){
       label.style.left=`${x}px`;label.style.top=`${y}px`;label.dataset.manualLabel="true";label.classList.remove("layout-constrained");placed.push(centerRect(label,x,y));return;
     }
     label.dataset.manualLabel="false";
-    const anchor=anchorFor(label,stage,index);label.dataset.anchorX=String(anchor.x);label.dataset.anchorY=String(anchor.y);label.dataset.maxAnchorRadius=String(MAX_ANCHOR_RADIUS);
+    const anchor=anchorFor(label,stage,index);label.dataset.anchorX=String(anchor.x);label.dataset.anchorY=String(anchor.y);label.dataset.preferredAnchorRadius=String(PREFERRED_ANCHOR_RADIUS);label.dataset.maxAnchorRadius=String(MAX_ANCHOR_RADIUS);
     let chosen=choose(label,anchor,occupied,placed,width,height);
     if(chosen?.constrained){compact(label,"compact");chosen=choose(label,anchor,occupied,placed,width,height)}
     if(chosen?.constrained){compact(label,"compact-tight");chosen=choose(label,anchor,occupied,placed,width,height)}
     if(chosen?.constrained){compact(label,"compact-micro");chosen=choose(label,anchor,occupied,placed,width,height)}
+    if(chosen?.constrained){compact(label,"compact-nano");chosen=choose(label,anchor,occupied,placed,width,height)}
     if(!chosen)return;
-    label.style.left=`${chosen.point.x}px`;label.style.top=`${chosen.point.y}px`;label.dataset.autoLeft=String(chosen.point.x);label.dataset.autoTop=String(chosen.point.y);label.classList.toggle("layout-constrained",chosen.constrained);placed.push(chosen.rect);
+    label.style.left=`${chosen.point.x}px`;label.style.top=`${chosen.point.y}px`;label.dataset.autoLeft=String(chosen.point.x);label.dataset.autoTop=String(chosen.point.y);label.dataset.anchorRadius=String(chosen.point.radius);label.classList.toggle("layout-constrained",chosen.constrained);placed.push(chosen.rect);
   });
-  stage.dataset.labelEditorReady="true";stage.dataset.labelAnchorRadius=String(MAX_ANCHOR_RADIUS);
+  stage.dataset.labelEditorReady="true";stage.dataset.preferredLabelAnchorRadius=String(PREFERRED_ANCHOR_RADIUS);stage.dataset.labelAnchorRadius=String(MAX_ANCHOR_RADIUS);
 }
 function schedule(stage,delay=0){clearTimeout(timer);timer=setTimeout(()=>{state().then(()=>arrange(stage||document.querySelector(".graph-stage"))).catch(()=>{})},delay)}
 function bind(label,stage,index){
