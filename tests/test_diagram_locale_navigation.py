@@ -16,14 +16,16 @@ from glyph.diagram_ui import DIAGRAM_HTML
 class DiagramLocaleNavigationTests(unittest.TestCase):
     def test_locale_defaults_to_japanese_and_offers_english(self) -> None:
         html = enhance_diagram_locale_html(DIAGRAM_HTML)
+        compact = html.replace(" ", "")
 
         self.assertIn("glyph-diagram-locale-v1", html)
         self.assertIn('value="ja">日本語', html)
         self.assertIn('value="en">English', html)
         self.assertIn('localStorage.getItem(STORAGE_KEY)', html)
-        self.assertIn('locale):"ja"', html.replace(" ", ""))
+        self.assertIn('?localStorage.getItem(STORAGE_KEY):"ja"', compact)
         self.assertIn("message_ja", html)
         self.assertIn("message_en", html)
+        self.assertIn('const STORAGE_KEY="glyph.ui.locale"', html)
 
     def test_canvas_navigation_hands_residual_scroll_to_preview(self) -> None:
         html = enhance_diagram_canvas_navigation_html(DIAGRAM_HTML)
