@@ -53,6 +53,12 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e '.[desktop]'
           npm install --prefix desktop
+      - name: Generate Tauri icon assets
+        run: |
+          npm run --prefix desktop icons
+          test -s desktop/src-tauri/icons/icon.png
+          test -s desktop/src-tauri/icons/icon.ico
+          test -s desktop/src-tauri/icons/icon.icns
       - name: Run desktop Python contracts
         run: python -m unittest tests.test_desktop_server tests.test_tauri_desktop -v
       - name: Build trusted frontend
