@@ -49,8 +49,23 @@ async function dragElement(page, locator, deltaX, deltaY, name) {
   return { before, after };
 }
 
-function centers(box) {
-  return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+async function labelPlacement(locator) {
+  return locator.evaluate(element => {
+    const left = Number.parseFloat(element.style.left || "0");
+    const top = Number.parseFloat(element.style.top || "0");
+    const anchorX = Number(element.dataset.anchorX || 0);
+    const anchorY = Number(element.dataset.anchorY || 0);
+    return {
+      left,
+      top,
+      anchorX,
+      anchorY,
+      dx: left - anchorX,
+      dy: top - anchorY,
+      distance: Math.hypot(left - anchorX, top - anchorY),
+      manual: element.dataset.manualLabel,
+    };
+  });
 }
 
 const logs = [];
@@ -92,7 +107,7 @@ try {
 
   const node = page.locator(".state-node").first();
   await dragElement(page, node, 170, 160, "state node");
-  await page.waitForTimeout(120);
+  await page.waitForTimeout(220);
   const nodeStored = await page.evaluate(() => Object.keys(localStorage).some(
     key => key.startsWith("glyph.diagram.positions.v1:"),
   ));
@@ -128,11 +143,15 @@ try {
   const label = page.locator(".transition-label").first();
   const transitionId = await label.getAttribute("data-transition-id");
   assert(transitionId, "transition label has no stable id");
-  const { after: labelAfter } = await dragElement(page, label, 116, 74, "transition label");
+  await dragElement(page, label, 116, 74, "transition label");
   await page.waitForFunction(() => Object.keys(localStorage).some(
-    key => key.startsWith("glyph.diagram.label-positions.v1:"),
+    key => key.startsWith("glyph.diagram.label-positions.v2:"),
   ));
-  const draggedCenter = centers(labelAfter);
+  await page.waitForFunction(id => (
+    document.querySelector(`.transition-label[data-transition-id="${id}"]`)?.dataset.manualLabel === "true"
+  ), transitionId);
+  const draggedPlacement = await labelPlacement(label);
+  assert(draggedPlacement.distance <= 96.5, "dragged label escaped its arrow tether");
 
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => document.querySelector("#status")?.textContent === "ready");
@@ -141,14 +160,18 @@ try {
     await stateTab.click();
   }
   const restored = page.locator(`.transition-label[data-transition-id="${transitionId}"]`);
-  await page.waitForFunction(id => (
-    document.querySelector(`.transition-label[data-transition-id="${id}"]`)?.dataset.manualLabel === "true"
-  ), transitionId);
-  const restoredBox = await restored.boundingBox();
-  assert(restoredBox, "restored transition label has no bounding box");
-  const restoredCenter = centers(restoredBox);
-  assert(Math.abs(restoredCenter.x - draggedCenter.x) < 5, "label x position was not restored");
-  assert(Math.abs(restoredCenter.y - draggedCenter.y) < 5, "label y position was not restored");
+  await page.waitForFunction(id => {
+    const element = document.querySelector(`.transition-label[data-transition-id="${id}"]`);
+    return element?.dataset.manualLabel === "true"
+      && element.dataset.anchorX !== undefined
+      && element.dataset.anchorY !== undefined;
+  }, transitionId);
+  await page.waitForTimeout(220);
+  const restoredPlacement = await labelPlacement(restored);
+  assert.equal(restoredPlacement.manual, "true");
+  assert(restoredPlacement.distance <= 96.5, "restored label escaped its arrow tether");
+  assert(Math.abs(restoredPlacement.dx - draggedPlacement.dx) < 3, "label x offset from arrow was not restored");
+  assert(Math.abs(restoredPlacement.dy - draggedPlacement.dy) < 3, "label y offset from arrow was not restored");
 
   const fixedChrome = await page.evaluate(() => {
     const header = document.querySelector("header");
@@ -245,4 +268,4 @@ try {
   await stopProcess(child);
 }
 
-console.log("verified independent scrolling, draggable labels, themes, and diagram exports");
+console.log("verified independent scrolling, arrow-relative labels, themes, and diagram exports");
