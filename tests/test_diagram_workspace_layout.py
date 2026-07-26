@@ -22,14 +22,20 @@ class DiagramWorkspaceLayoutTests(unittest.TestCase):
         self.assertIn(".viewer-head{height:auto!important", html)
         self.assertIn(".diagram-tools{margin-left:auto!important", html)
 
-    def test_labels_are_collision_aware_draggable_and_persistent(self) -> None:
+    def test_labels_are_near_edges_collision_aware_draggable_and_persistent(self) -> None:
         html = enhance_diagram_label_editor_html(DIAGRAM_HTML)
         self.assertIn("glyph-diagram-label-editor-v1-script", html)
         self.assertIn("glyph.diagram.label-positions.v1:", html)
         self.assertIn("label.setPointerCapture", html)
         self.assertIn("dragging-label", html)
-        self.assertIn("occupied.some(item=>intersects", html)
-        self.assertIn("placed.some(item=>intersects", html)
+        self.assertIn("PREFERRED_ANCHOR_RADIUS=96", html)
+        self.assertIn("MAX_ANCHOR_RADIUS=160", html)
+        self.assertIn("getPointAtLength", html)
+        self.assertIn("dataset.maxAnchorRadius", html)
+        self.assertIn("collisions.length", html)
+        self.assertIn('compact(label,"compact")', html)
+        self.assertIn("compact-nano", html)
+        self.assertIn("layout-constrained", html)
         self.assertIn("NODE_SELECTOR", html)
         self.assertIn("dblclick", html)
 

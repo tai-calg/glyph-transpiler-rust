@@ -85,12 +85,18 @@ def _check_release_metadata(root: Path) -> tuple[dict[str, object], list[str]]:
         "docs/IMPLEMENTATION_STATUS.md",
     )
     document_status: dict[str, bool] = {}
+    version_markers = (
+        "Glyph 0.4",
+        "Glyph Language 0.4",
+        version,
+        f"`{version}`",
+    )
     for relative in documents:
         text = (root / relative).read_text(encoding="utf-8")
-        present = "Glyph 0.4" in text or "Glyph Language 0.4" in text
+        present = any(marker in text for marker in version_markers)
         document_status[relative] = present
         if not present:
-            errors.append(f"{relative} does not identify Glyph 0.4")
+            errors.append(f"{relative} does not identify Glyph {version}")
 
     return {
         "version": version,

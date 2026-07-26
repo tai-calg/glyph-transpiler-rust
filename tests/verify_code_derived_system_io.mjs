@@ -38,6 +38,19 @@ async function stopProcess(child) {
   if (child.exitCode === null) child.kill("SIGKILL");
 }
 
+async function waitForReadyStatus(page) {
+  try {
+    await page.waitForFunction(() => document.querySelector("#status")?.textContent === "ready");
+  } catch (error) {
+    const state = await page.evaluate(() => ({
+      status: document.querySelector("#status")?.textContent,
+      diagnostics: document.querySelector("#diagnostics")?.textContent,
+      bodyPrefix: document.body.textContent?.slice(0, 800),
+    }));
+    throw new Error(`diagram did not become ready: ${JSON.stringify(state)}\n${error.stack}`);
+  }
+}
+
 const logs = [];
 const child = spawn("python3", ["glyph.py", "examples/acceptance/door_controller.glyph"], {
   env: {
@@ -104,8 +117,14 @@ try {
   );
 
   const page = await browser.newPage({ viewport: { width: 1800, height: 1100 } });
+  page.on("pageerror", error => console.error("diagram page error", error));
+  page.on("console", message => {
+    if (["error", "warning"].includes(message.type())) {
+      console.error(`diagram console ${message.type()}: ${message.text()}`);
+    }
+  });
   await page.goto(url, { waitUntil: "domcontentloaded" });
-  await page.waitForFunction(() => document.querySelector("#status")?.textContent === "ready");
+  await waitForReadyStatus(page);
   await page.waitForFunction(() => {
     const active = document.querySelector(".tab.active")?.dataset.tab;
     const stage = document.querySelector(".state-node")?.closest(".graph-stage");

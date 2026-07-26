@@ -76,7 +76,7 @@ _SCRIPT = r"""
         const id = transition.id || `T${index + 1}`;
         const summary = summaryOf(transition);
         const compact = stage.querySelector(`.transition-label[data-transition-id="${id}"]`);
-        if (compact?.classList.contains("compact") && compact.textContent !== summary) {
+        if (compact && compact.textContent !== summary) {
           compact.textContent = summary;
           compact.dataset.inputActionLabel = summary;
           changed = true;

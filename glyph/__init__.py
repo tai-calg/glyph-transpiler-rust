@@ -32,6 +32,34 @@ from .studio import GlyphStudio, StudioSnapshot, run_studio
 from .symbols import SymbolId, SymbolRecord
 from .temporal_sigils import reject_reserved_temporal_macro_names
 
+# Studio diagnostics retain their canonical message while exposing Japanese and
+# English variants to the browser. The HTML enhancer is applied here so every
+# import path, including the desktop server, receives the same default-Japanese
+# selector without duplicating the Studio document.
+from . import studio as _studio_module
+from .diagnostic_i18n import localize_message_payload as _localize_message_payload
+from .studio_locale import enhance_studio_locale_html as _enhance_studio_locale_html
+
+_original_studio_snapshot_to_dict = StudioSnapshot.to_dict
+
+
+def _localized_studio_snapshot_to_dict(
+    self: StudioSnapshot,
+    source_path,
+    output_dir,
+    _original=_original_studio_snapshot_to_dict,
+    _localize=_localize_message_payload,
+):
+    return _localize(_original(self, source_path, output_dir))
+
+
+_localized_studio_snapshot_to_dict.__glyph_localized__ = True
+if not getattr(StudioSnapshot.to_dict, "__glyph_localized__", False):
+    StudioSnapshot.to_dict = _localized_studio_snapshot_to_dict
+
+_studio_module.STUDIO_HTML = _enhance_studio_locale_html(_studio_module.STUDIO_HTML)
+_studio_module._studio_ui.STUDIO_HTML = _studio_module.STUDIO_HTML
+
 
 def preprocess_source(source: str) -> PreprocessResult:
     """Run the public raw preprocessor with language-level name reservations."""
