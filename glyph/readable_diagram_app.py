@@ -6,6 +6,7 @@ from . import diagram_app
 from .code_derived_system_ui import enhance_code_derived_system_html
 from .diagnostic_i18n import localize_message_payload
 from .diagram_canvas_navigation import enhance_diagram_canvas_navigation_html
+from .diagram_canvas_viewport import enhance_diagram_canvas_viewport_html
 from .diagram_editor_exports import enhance_diagram_editor_exports_html
 from .diagram_editor_render_guard import enhance_diagram_editor_render_guard_html
 from .diagram_editor_route_guard import enhance_diagram_editor_route_guard_html
@@ -43,20 +44,22 @@ def prepare_diagram_app() -> None:
     install_serial_compilation()
     _install_diagram_diagnostic_localization()
     diagram_app.DIAGRAM_HTML = enhance_diagram_locale_html(
-        enhance_diagram_canvas_navigation_html(
-            enhance_workspace_layout_html(
-                enhance_diagram_label_editor_html(
-                    enhance_diagram_live_stability_html(
-                        enhance_code_derived_system_html(
-                            enhance_diagram_editor_render_guard_html(
-                                enhance_diagram_editor_route_guard_html(
-                                    enhance_diagram_editor_exports_html(
-                                        enhance_state_transition_ir_html(
-                                            enhance_initial_transition_html(
-                                                enhance_transition_route_html(
-                                                    enhance_uml_transition_html(
-                                                        enhance_diagram_html(
-                                                            diagram_app.DIAGRAM_HTML
+        enhance_diagram_canvas_viewport_html(
+            enhance_diagram_canvas_navigation_html(
+                enhance_workspace_layout_html(
+                    enhance_diagram_label_editor_html(
+                        enhance_diagram_live_stability_html(
+                            enhance_code_derived_system_html(
+                                enhance_diagram_editor_render_guard_html(
+                                    enhance_diagram_editor_route_guard_html(
+                                        enhance_diagram_editor_exports_html(
+                                            enhance_state_transition_ir_html(
+                                                enhance_initial_transition_html(
+                                                    enhance_transition_route_html(
+                                                        enhance_uml_transition_html(
+                                                            enhance_diagram_html(
+                                                                diagram_app.DIAGRAM_HTML
+                                                            )
                                                         )
                                                     )
                                                 )
