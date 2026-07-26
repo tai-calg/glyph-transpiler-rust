@@ -24,6 +24,17 @@ _STYLE = r"""
   border-style:dotted!important;
   color:var(--amber)!important;
 }
+.glyph-visually-hidden{
+  position:absolute!important;
+  width:1px!important;
+  height:1px!important;
+  padding:0!important;
+  margin:-1px!important;
+  overflow:hidden!important;
+  clip:rect(0,0,0,0)!important;
+  white-space:nowrap!important;
+  border:0!important;
+}
 </style>
 """
 
@@ -136,6 +147,23 @@ _SCRIPT = r"""
     return details.join("\n");
   }
 
+  function compactMarkup(id, summary) {
+    const hidden = document.createElement("span");
+    hidden.className = "glyph-visually-hidden";
+    hidden.textContent = summary;
+    return [document.createTextNode(id), hidden];
+  }
+
+  function setCompactContent(label, id, summary) {
+    const currentId = label.firstChild?.nodeType === Node.TEXT_NODE
+      ? label.firstChild.textContent
+      : "";
+    const hidden = label.querySelector(":scope > .glyph-visually-hidden");
+    if (currentId === id && hidden?.textContent === summary) return false;
+    label.replaceChildren(...compactMarkup(id, summary));
+    return true;
+  }
+
   function signatureOf(machine) {
     return [
       machine?.name || "",
@@ -173,9 +201,10 @@ _SCRIPT = r"""
         if (compact) {
           compact.dataset.inputActionLabel = summary;
           compact.dataset.fullLabel = summary;
-          const rendered = compact.classList.contains("compact") ? id : summary;
-          if (compact.textContent !== rendered) {
-            compact.textContent = rendered;
+          if (compact.classList.contains("compact")) {
+            changed = setCompactContent(compact, id, summary) || changed;
+          } else if (compact.textContent !== summary) {
+            compact.textContent = summary;
             changed = true;
           }
           compact.classList.toggle("provisional-trigger", provisional);
