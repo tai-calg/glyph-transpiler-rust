@@ -51,6 +51,14 @@ _SCRIPT = r"""
     return String(value ?? "").trim();
   }
 
+  function english() {
+    return (window.GlyphI18n?.locale || document.documentElement.lang || "ja").startsWith("en");
+  }
+
+  function both(ja, en) {
+    return english() ? en : ja;
+  }
+
   function triggerOf(transition) {
     const trigger = transition?.trigger;
     if (trigger && text(trigger.display)) {
@@ -114,11 +122,14 @@ _SCRIPT = r"""
     if (!trigger) return text(transition?.display_label);
     const details = [];
     if (trigger.role === "provisional-trigger") {
-      details.push("暫定入力: 出来事か継続条件かをコードだけでは確定できません");
+      details.push(both(
+        "暫定入力: 出来事か継続条件かをコードだけでは確定できません",
+        "Provisional input: the code does not prove whether this is an occurrence or a persistent condition",
+      ));
     } else if (trigger.role === "inferred-trigger") {
-      details.push("入力から導出された判別値");
+      details.push(both("入力から導出された判別値", "Discriminator derived from input data"));
     } else {
-      details.push("型で確定した入力イベント");
+      details.push(both("型で確定した入力イベント", "Input event confirmed by type"));
     }
     if (trigger.roots.length) details.push(`origin: ${trigger.roots.join(", ")}`);
     if (trigger.path.length) details.push(`path: ${trigger.path.join(" → ")}`);
@@ -159,16 +170,17 @@ _SCRIPT = r"""
         const provisional = trigger?.role === "provisional-trigger";
         const unknown = (transition?.unclassified_conditions || []).length > 0;
         const compact = stage.querySelector(`.transition-label[data-transition-id="${id}"]`);
-        if (compact?.classList.contains("compact") && compact.textContent !== summary) {
-          compact.textContent = summary;
-          compact.dataset.inputActionLabel = summary;
-          changed = true;
-        }
         if (compact) {
+          compact.dataset.inputActionLabel = summary;
+          compact.dataset.fullLabel = summary;
+          const rendered = compact.classList.contains("compact") ? id : summary;
+          if (compact.textContent !== rendered) {
+            compact.textContent = rendered;
+            changed = true;
+          }
           compact.classList.toggle("provisional-trigger", provisional);
           compact.classList.toggle("unclassified-condition", unknown);
-          compact.title = evidenceOf(transition);
-          compact.dataset.fullLabel = text(transition.display_label);
+          compact.title = `${summary}\n${evidenceOf(transition)}`.trim();
           compact.dataset.triggerRole = trigger?.role || "none";
           compact.dataset.triggerConfidence = trigger?.confidence || "unknown";
         }
@@ -214,6 +226,7 @@ _SCRIPT = r"""
 
   document.addEventListener("glyph-transition-input-action-labels-ready", schedule);
   document.addEventListener("glyph-uml-transition-ready", schedule);
+  document.addEventListener("glyph-locale-changed", schedule);
   document.addEventListener("change", event => {
     if (event.target?.id === "machine-select") schedule();
   });
