@@ -35,6 +35,20 @@ async function stopProcess(child) {
   if (child.exitCode === null) child.kill("SIGKILL");
 }
 
+function assertCommittedLabels(identity) {
+  for (const label of identity.labels) {
+    if (!/^T\d+$/.test(label.text || "")) continue;
+    assert(
+      label.full && label.full !== label.text,
+      `compact label ${label.text} does not retain its full semantic label`,
+    );
+    assert(
+      identity.detailIds.includes(label.transitionId),
+      `compact label ${label.text} has no matching Transition details row`,
+    );
+  }
+}
+
 const logs = [];
 const child = spawn("python3", ["glyph.py", "examples/state_diagrams/traffic_light.glyph"], {
   env: {
@@ -70,11 +84,16 @@ try {
     stage.dataset.stabilityProbe = "initial";
     return {
       visibility: getComputedStyle(stage).visibility,
-      labels: [...stage.querySelectorAll(".edge-label.transition-label")].map(item => item.textContent?.trim()),
+      labels: [...stage.querySelectorAll(".edge-label.transition-label")].map(item => ({
+        text: item.textContent?.trim(),
+        full: item.dataset.fullLabel || item.dataset.inputActionLabel || "",
+        transitionId: item.dataset.transitionId || "",
+      })),
+      detailIds: [...document.querySelectorAll(".transition-detail")].map(item => item.dataset.transitionId || ""),
     };
   });
   assert.equal(initialIdentity.visibility, "visible");
-  assert.equal(initialIdentity.labels.some(label => /^T\d+$/.test(label || "")), false);
+  assertCommittedLabels(initialIdentity);
 
   // The base app polls every 900 ms. More than two cycles must not replace the DOM
   // when version/digest/selection are unchanged.
@@ -117,17 +136,18 @@ try {
     const stage = document.querySelector(".state-node")?.closest(".graph-stage");
     return {
       visibility: getComputedStyle(stage).visibility,
-      labels: [...stage.querySelectorAll(".edge-label.transition-label")].map(item => item.textContent?.trim()),
+      labels: [...stage.querySelectorAll(".edge-label.transition-label")].map(item => ({
+        text: item.textContent?.trim(),
+        full: item.dataset.fullLabel || item.dataset.inputActionLabel || "",
+        transitionId: item.dataset.transitionId || "",
+      })),
+      detailIds: [...document.querySelectorAll(".transition-detail")].map(item => item.dataset.transitionId || ""),
       initialPath: Boolean(stage.querySelector(":scope > svg.edge-svg > path.initial-transition-path")),
     };
   });
   assert.equal(committed.visibility, "visible");
   assert.equal(committed.initialPath, true);
-  assert.equal(
-    committed.labels.some(label => /^T\d+$/.test(label || "")),
-    false,
-    `raw transition IDs remained visible: ${JSON.stringify(committed.labels)}`,
-  );
+  assertCommittedLabels(committed);
 
   await page.screenshot({
     path: path.join(outputDirectory, "stable-state-diagram.png"),
