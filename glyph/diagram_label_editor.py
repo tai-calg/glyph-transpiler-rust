@@ -23,9 +23,12 @@ const num=value=>Number.parseFloat(value||"0")||0;
 const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
 const intersects=(a,b,gap=GAP)=>!(a.x+a.width+gap<=b.x||b.x+b.width+gap<=a.x||a.y+a.height+gap<=b.y||b.y+b.height+gap<=a.y);
 async function state(){if(cache)return cache;const response=await fetch("/api/state",{cache:"no-store"});if(!response.ok)throw Error("diagram state unavailable");return cache=await response.json()}
-function diagramKey(stage){const tab=document.querySelector(".tab.active")?.dataset.tab||"state";const index=tab==="state"?document.querySelector("#machine-select")?.value||0:document.querySelector("#system-select")?.value||0;return `glyph.diagram.label-positions.v2:${cache?.digest||"source"}:${tab}:${index}`}
-function read(stage){try{return JSON.parse(localStorage.getItem(diagramKey(stage))||"{}")||{}}catch{return {}}}
-function write(stage,value){localStorage.setItem(diagramKey(stage),JSON.stringify(value))}
+function keyParts(){const tab=document.querySelector(".tab.active")?.dataset.tab||"state";const index=tab==="state"?document.querySelector("#machine-select")?.value||0:document.querySelector("#system-select")?.value||0;return{digest:cache?.digest||"source",tab,index}}
+function diagramKey(stage){const{digest,tab,index}=keyParts();return `glyph.diagram.label-positions.v2:${digest}:${tab}:${index}`}
+function legacyKey(stage){const{digest,tab,index}=keyParts();return `glyph.diagram.label-positions.v1:${digest}:${tab}:${index}`}
+function parse(value){try{return JSON.parse(value||"{}")||{}}catch{return {}}}
+function read(stage){const current=parse(localStorage.getItem(diagramKey(stage)));if(Object.keys(current).length)return current;return parse(localStorage.getItem(legacyKey(stage)))}
+function write(stage,value){const serialized=JSON.stringify(value);localStorage.setItem(diagramKey(stage),serialized);localStorage.setItem(legacyKey(stage),serialized)}
 function labelId(label,index){const existing=label.dataset.transitionId||label.dataset.glyphLabelId;if(existing)return existing;const line=label.dataset.line||0;const text=(label.dataset.fullLabel||label.dataset.inputActionLabel||label.textContent||"").trim();const id=`L${index+1}:${line}:${text}`;label.dataset.glyphLabelId=id;return id}
 function centerRect(label,x,y){return{x:x-label.offsetWidth/2,y:y-label.offsetHeight/2,width:label.offsetWidth,height:label.offsetHeight}}
 function nodeRects(stage){return[...stage.querySelectorAll(NODE_SELECTOR)].map(node=>({x:node.offsetLeft,y:node.offsetTop,width:node.offsetWidth,height:node.offsetHeight}))}
