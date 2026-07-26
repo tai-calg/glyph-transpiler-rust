@@ -56,6 +56,7 @@ function translateAnalysisTitle(){
   if(element)set(element,locale==="ja"?`静的解析 · 警告 ${count} 件`:`Static analysis · ${count} warning${count===1?"":"s"}`);
 }
 function translateMeta(){
+  if((typeof activeTab!=="undefined"?activeTab:"state")!=="state")return;
   const machine=selectedMachine();if(!machine)return;
   const values=[
     [pair("状態型","State"),machine.state_type],
@@ -64,7 +65,7 @@ function translateMeta(){
     [pair("初期状態","Initial"),machine.initial_state],
     [pair("到達可能","Reachable"),`${machine.analysis?.reachable_state_count??0}/${machine.analysis?.state_count??0}`],
   ];
-  document.querySelectorAll(".machine-meta .pill").forEach((element,index)=>{const item=values[index];if(item)set(element,`${item[0]}: ${item[1]??""}`)});
+  document.querySelectorAll('.machine-meta:not([data-system-meta-owner]) .pill').forEach((element,index)=>{const item=values[index];if(item)set(element,`${item[0]}: ${item[1]??""}`)});
 }
 function applyStatic(){
   document.documentElement.lang=locale==="ja"?"ja":"en";
