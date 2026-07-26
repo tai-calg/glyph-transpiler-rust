@@ -182,7 +182,10 @@ fn main() {
         .expect("failed to build Glyph Studio");
 
     application.run(|app, event| {
-        if matches!(event, tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. }) {
+        if matches!(
+            event,
+            tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. }
+        ) {
             let state = app.state::<BackendState>();
             stop_backend(&state);
         }
