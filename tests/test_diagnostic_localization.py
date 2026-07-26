@@ -24,6 +24,20 @@ class DiagnosticLocalizationTests(unittest.TestCase):
         self.assertIn("input.forced_open", item["message_en"])
         self.assertIn("直和型", item["help_ja"])
 
+    def test_compile_error_keeps_original_and_adds_japanese_guidance(self) -> None:
+        item = localize_diagnostic(
+            {
+                "severity": "error",
+                "code": "GLYPH_COMPILE_ERROR",
+                "message": "18:4: expected expression after >>",
+            }
+        )
+
+        self.assertIn("18行目", item["message_ja"])
+        self.assertIn("式が必要", item["message_ja"])
+        self.assertEqual(item["message_en"], "18:4: expected expression after >>")
+        self.assertIn("default節", item["help_ja"])
+
     def test_unreachable_state_is_localized_without_losing_original(self) -> None:
         item = localize_diagnostic(
             {
