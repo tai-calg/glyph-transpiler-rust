@@ -15,25 +15,35 @@ class DiagramLocalizationNavigationTests(unittest.TestCase):
     def test_diagram_ui_defaults_to_japanese_and_offers_english(self) -> None:
         html = enhance_diagram_locale_html(DIAGRAM_HTML)
         self.assertIn("glyph-diagram-locale-v1-script", html)
-        self.assertIn('DEFAULT_LOCALE="ja"', html)
-        self.assertIn('id="glyph-diagram-language-select"', html)
+        self.assertIn('const STORAGE_KEY="glyph.ui.locale"', html)
+        self.assertIn('?localStorage.getItem(STORAGE_KEY):"ja"', html.replace(" ", ""))
+        self.assertIn('id="glyph-language"', html)
         self.assertIn('<option value="ja">日本語</option>', html)
         self.assertIn('<option value="en">English</option>', html)
+        self.assertIn('glyph-locale-change', html)
+        self.assertIn('glyph-locale-changed', html)
 
-    def test_blank_canvas_drag_pans_with_reachable_gutter(self) -> None:
+    def test_blank_canvas_drag_pans_with_gutter_and_parent_handoff(self) -> None:
         html = enhance_diagram_canvas_navigation_html(DIAGRAM_HTML)
         self.assertIn("glyph-diagram-canvas-navigation-v1-script", html)
         self.assertIn("--glyph-pan-gutter:220px", html)
         self.assertIn("shell.setPointerCapture", html)
-        self.assertIn("shell.scrollLeft=drag.left", html)
+        self.assertIn("desiredX", html)
+        self.assertIn("residualY", html)
+        self.assertIn('shell.closest(".view-body")', html)
         self.assertIn("空白をドラッグしてキャンバスを移動", html)
         self.assertIn("overscroll-behavior:contain", html)
+        self.assertIn("sessionStorage", html)
 
-    def test_prepared_app_contains_locale_and_pan_layers(self) -> None:
+    def test_prepared_app_contains_locale_pan_and_viewport_layers(self) -> None:
         prepare_diagram_app()
         self.assertIn("glyph-diagram-locale-v1-script", diagram_app.DIAGRAM_HTML)
         self.assertIn(
             "glyph-diagram-canvas-navigation-v1-script",
+            diagram_app.DIAGRAM_HTML,
+        )
+        self.assertIn(
+            "glyph-diagram-canvas-viewport-v1-script",
             diagram_app.DIAGRAM_HTML,
         )
 

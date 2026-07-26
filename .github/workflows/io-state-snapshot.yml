@@ -7,13 +7,17 @@ on:
       - "glyph.py"
       - "glyph/architecture.py"
       - "glyph/code_derived_system_ui.py"
+      - "glyph/diagnostic_i18n.py"
+      - "glyph/diagnostic_localization.py"
       - "glyph/diagram_app.py"
       - "glyph/diagram_ui.py"
       - "glyph/diagram_canvas_navigation.py"
       - "glyph/diagram_canvas_viewport.py"
       - "glyph/diagram_editor_exports.py"
       - "glyph/diagram_label_editor.py"
+      - "glyph/diagram_locale.py"
       - "glyph/diagram_render_stability.py"
+      - "glyph/diagram_workspace_layout.py"
       - "glyph/initial_transition_layout.py"
       - "glyph/readable_diagram_app.py"
       - "glyph/state_transition_ir.py"
@@ -21,6 +25,7 @@ on:
       - "glyph/state_transition_block_lowering.py"
       - "glyph/state_transition_pipeline.py"
       - "glyph/state_transition_ir_renderer.py"
+      - "glyph/transition_condition_roles.py"
       - "glyph/transition_label_layout.py"
       - "glyph/transition_route_labels.py"
       - "glyph/transition_semantics.py"
@@ -30,9 +35,12 @@ on:
       - "glyph/state_machine_analysis.py"
       - "glyph/state_machine_source_map.py"
       - "tests/test_code_derived_system_ui.py"
+      - "tests/test_diagnostic_localization.py"
       - "tests/test_diagram_canvas_viewport.py"
       - "tests/test_diagram_editor_exports.py"
+      - "tests/test_diagram_locale_navigation.py"
       - "tests/test_diagram_render_stability.py"
+      - "tests/test_diagram_workspace_layout.py"
       - "tests/test_initial_transition_layout.py"
       - "tests/test_io_state_diagram_app.py"
       - "tests/test_state_machine_source_map.py"
@@ -48,9 +56,11 @@ on:
       - "tests/verify_additional_failure_notation.mjs"
       - "tests/verify_diagram_editor_exports.mjs"
       - "tests/verify_diagram_canvas_viewport.mjs"
+      - "tests/verify_localized_semantic_canvas.mjs"
       - "examples/acceptance/door_controller.glyph"
       - "examples/acceptance/motor_safety.glyph"
       - "examples/state_diagrams/**"
+      - "docs/PROVISIONAL_TRIGGER_CLASSIFICATION.md"
       - ".github/workflows/io-state-snapshot.yml"
   workflow_dispatch:
 
@@ -78,7 +88,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          mkdir -p build/checked-system-context-io build/state-diagram-regression build/state-diagram-stability build/uml-transition-semantics build/additional-failure-notation build/diagram-editor-exports build/diagram-canvas-viewport
+          mkdir -p build/checked-system-context-io build/state-diagram-regression build/state-diagram-stability build/uml-transition-semantics build/additional-failure-notation build/diagram-editor-exports build/diagram-canvas-viewport build/localized-semantic-canvas
           node tests/verify_code_derived_system_io.mjs \
             2>&1 | tee build/checked-system-context-io/verify.log
           node tests/verify_state_diagram_rendering.mjs \
@@ -93,6 +103,8 @@ jobs:
             2>&1 | tee build/diagram-editor-exports/verify.log
           node tests/verify_diagram_canvas_viewport.mjs \
             2>&1 | tee build/diagram-canvas-viewport/verify.log
+          node tests/verify_localized_semantic_canvas.mjs \
+            2>&1 | tee build/localized-semantic-canvas/verify.log
 
       - name: Upload rendered diagrams
         if: always()
@@ -109,6 +121,7 @@ jobs:
             build/additional-failure-notation/**
             build/diagram-editor-exports/**
             build/diagram-canvas-viewport/**
+            build/localized-semantic-canvas/**
             examples/acceptance/door_controller.glyph
             examples/acceptance/motor_safety.glyph
             examples/state_diagrams/*.glyph

@@ -12,13 +12,16 @@ from glyph.state_transition_ir_renderer import enhance_state_transition_ir_html
 
 
 class StateTransitionIRRendererTests(unittest.TestCase):
-    def test_renderer_uses_structured_failure_type(self) -> None:
+    def test_renderer_uses_structured_trigger_guard_and_failure_fields(self) -> None:
         html = enhance_state_transition_ir_html(DIAGRAM_HTML)
 
-        self.assertIn("glyph-state-transition-ir-v2-renderer", html)
+        self.assertIn("glyph-state-transition-ir-v3-renderer", html)
+        self.assertIn("transition?.trigger", html)
+        self.assertIn("transition?.guards", html)
         self.assertIn("transition?.failure_type", html)
-        self.assertIn("`${action} | ${failure}`", html)
-        self.assertNotIn("const suffix = ` ! ${failureType}`", html)
+        self.assertIn('trigger.role === "provisional-trigger" ? "? " : ""', html)
+        self.assertIn("provisional-trigger", html)
+        self.assertIn('stage.dataset.stateTransitionIRV3LabelsReady = "true"', html)
         self.assertIn('stage.dataset.stateTransitionIRV2LabelsReady = "true"', html)
 
     def test_renderer_is_idempotent(self) -> None:
