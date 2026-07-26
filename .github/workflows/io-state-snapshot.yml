@@ -18,6 +18,7 @@ on:
       - "glyph/state_transition_block_lowering.py"
       - "glyph/state_transition_pipeline.py"
       - "glyph/state_transition_ir_renderer.py"
+      - "glyph/transition_condition_roles.py"
       - "glyph/transition_label_layout.py"
       - "glyph/transition_route_labels.py"
       - "glyph/transition_semantics.py"
@@ -46,6 +47,7 @@ on:
       - "examples/acceptance/door_controller.glyph"
       - "examples/acceptance/motor_safety.glyph"
       - "examples/state_diagrams/**"
+      - "docs/PROVISIONAL_TRIGGER_CLASSIFICATION.md"
       - ".github/workflows/io-state-snapshot.yml"
   workflow_dispatch:
 
