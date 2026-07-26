@@ -100,7 +100,14 @@ function schedule(stage,delay=0){clearTimeout(timer);timer=setTimeout(()=>{state
 function bind(label,stage,index){
   if(label.dataset.labelDragReady==="true")return;label.dataset.labelDragReady="true";
   label.addEventListener("pointerdown",event=>{if(event.button!==0)return;event.preventDefault();event.stopPropagation();select(label);label.classList.add("dragging-label");label.setPointerCapture(event.pointerId);drag={label,stage,startX:event.clientX,startY:event.clientY,left:num(label.style.left),top:num(label.style.top)}});
-  label.addEventListener("pointermove",event=>{if(!drag||drag.label!==label)return;event.preventDefault();const x=clamp(drag.left+event.clientX-drag.startX,label.offsetWidth/2+8,stage.scrollWidth-label.offsetWidth/2-8),y=clamp(drag.top+event.clientY-drag.startY,label.offsetHeight/2+8,stage.scrollHeight-label.offsetHeight/2-8);label.style.left=`${x}px`;label.style.top=`${y}px`});
+  label.addEventListener("pointermove",event=>{
+    if(!drag||drag.label!==label)return;
+    event.preventDefault();
+    const scale=window.glyphDiagramViewport?.scaleFor(stage)||Number.parseFloat(stage.dataset.viewportScale||"1")||1;
+    const x=clamp(drag.left+(event.clientX-drag.startX)/scale,label.offsetWidth/2+8,stage.scrollWidth-label.offsetWidth/2-8);
+    const y=clamp(drag.top+(event.clientY-drag.startY)/scale,label.offsetHeight/2+8,stage.scrollHeight-label.offsetHeight/2-8);
+    label.style.left=`${x}px`;label.style.top=`${y}px`;
+  });
   label.addEventListener("pointerup",event=>{if(!drag||drag.label!==label)return;event.preventDefault();event.stopPropagation();label.classList.remove("dragging-label");const id=labelId(label,index),saved=read(stage);saved[id]={x:num(label.style.left),y:num(label.style.top)};write(stage,saved);label.dataset.manualLabel="true";label.classList.remove("layout-constrained");drag=null});
   label.addEventListener("click",event=>{if(label.dataset.manualLabel==="true")event.stopPropagation()});
   label.addEventListener("dblclick",event=>{event.preventDefault();event.stopPropagation();const id=labelId(label,index),saved=read(stage);delete saved[id];write(stage,saved);label.dataset.manualLabel="false";schedule(stage)});
