@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class GuardDistinctFailureIdentityTests(unittest.TestCase):
-    def test_same_effect_call_under_distinct_guards_keeps_both_failure_edges(self) -> None:
+    def test_same_effect_call_under_distinct_boolean_inputs_keeps_both_failure_edges(self) -> None:
         path = ROOT / "examples/state_diagrams/cooling_fan_effect.glyph"
         output = CompilationPipeline().compile_text(
             path.read_text(encoding="utf-8"),
@@ -32,8 +32,13 @@ class GuardDistinctFailureIdentityTests(unittest.TestCase):
             and transition.get("failure_type") == "FanWriteError"
         ]
         self.assertEqual(
-            {transition.get("guard") for transition in failures},
-            {"input.overheat", "!input.enable"},
+            {transition.get("event") for transition in failures},
+            {"? input.overheat", "? !input.enable"},
+        )
+        self.assertTrue(all(transition.get("guard") is None for transition in failures))
+        self.assertEqual(
+            {transition.get("trigger", {}).get("role") for transition in failures},
+            {"provisional-trigger"},
         )
         self.assertNotIn(
             "guard_distinct_failure_repair_count",
