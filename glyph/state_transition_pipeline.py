@@ -41,7 +41,9 @@ def enrich_state_transition_ir(
         "schema": STATE_TRANSITION_IR_SCHEMA,
         "version": STATE_TRANSITION_IR_VERSION,
     }
-    result["transition_semantics_version"] = 2
+    # This marker describes the public trigger[guard]/effect display contract.
+    # StateTransitionIR has its own independently versioned schema marker above.
+    result["transition_semantics_version"] = 1
     summary = dict(result.get("summary", {}))
     summary["state_warnings"] = sum(
         1
