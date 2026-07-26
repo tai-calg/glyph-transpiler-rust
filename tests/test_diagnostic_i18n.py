@@ -14,11 +14,11 @@ class DiagnosticI18nTests(unittest.TestCase):
     def test_common_compiler_messages_are_translated_deterministically(self) -> None:
         self.assertEqual(
             translate_diagnostic_message("line 12: unexpected identifier"),
-            "12行目: 予期しない 識別子",
+            "12行目: 予期しない識別子",
         )
         self.assertEqual(
             translate_diagnostic_message("expected return type, got value"),
-            "戻り値型 が必要だが、値 が指定されている",
+            "戻り値型が必要だが、値が指定されている",
         )
         self.assertEqual(
             translate_diagnostic_message("型 `DoorState` が必要"),
@@ -51,8 +51,8 @@ class DiagnosticI18nTests(unittest.TestCase):
         nested = payload["views"]["state"]["machines"][0]["diagnostics"][0]
         self.assertEqual(top["message"], "unexpected identifier")
         self.assertEqual(top["message_en"], "unexpected identifier")
-        self.assertEqual(top["message_ja"], "予期しない 識別子")
-        self.assertEqual(nested["message_ja"], "到達不能な 状態")
+        self.assertEqual(top["message_ja"], "予期しない識別子")
+        self.assertEqual(nested["message_ja"], "到達不能な状態")
 
     def test_studio_snapshot_api_exposes_bilingual_diagnostics(self) -> None:
         snapshot = StudioSnapshot(
@@ -72,7 +72,7 @@ class DiagnosticI18nTests(unittest.TestCase):
         payload = snapshot.to_dict(Path("example.glyph"), Path(".glyph/example"))
         diagnostic = payload["diagnostics"][0]
         self.assertEqual(diagnostic["message_en"], "unexpected identifier")
-        self.assertEqual(diagnostic["message_ja"], "予期しない 識別子")
+        self.assertEqual(diagnostic["message_ja"], "予期しない識別子")
 
     def test_studio_ui_defaults_to_japanese_and_offers_english(self) -> None:
         self.assertIn("glyph-studio-locale-v1-script", STUDIO_HTML)
