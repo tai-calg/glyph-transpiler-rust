@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 
 from .artifacts import CompilationModel
+from .diagnostic_localization import localize_state_views
 from .state_transition_block_lowering import lower_analyzed_block_transitions
 from .state_transition_compiler import enrich_state_transition_ir as compile_state_transition_ir
 from .transition_condition_roles import (
@@ -52,4 +53,4 @@ def enrich_state_transition_ir(
         if diagnostic.get("severity") == "warning"
     )
     result["summary"] = summary
-    return result
+    return localize_state_views(result)
