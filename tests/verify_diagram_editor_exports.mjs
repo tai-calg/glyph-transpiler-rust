@@ -29,9 +29,9 @@ async function stopProcess(child) {
   if (child.exitCode === null) child.kill("SIGKILL");
 }
 
-async function dragNode(page, locator, deltaX, deltaY) {
+async function dragElement(page, locator, deltaX, deltaY, name) {
   const before = await locator.boundingBox();
-  assert(before, "state node has no bounding box before drag");
+  assert(before, `${name} has no bounding box before drag`);
   const startX = before.x + before.width / 2;
   const startY = before.y + before.height / 2;
 
@@ -40,22 +40,17 @@ async function dragNode(page, locator, deltaX, deltaY) {
   await page.mouse.move(startX + deltaX, startY + deltaY, { steps: 20 });
   await page.mouse.up();
 
-  await page.waitForFunction(
-    ({ x, y }) => {
-      const node = document.querySelector(".state-node");
-      if (!node) return false;
-      const rect = node.getBoundingClientRect();
-      const persisted = Object.keys(localStorage).some(key => (
-        key.startsWith("glyph.diagram.positions.v1:")
-      ));
-      return persisted && (Math.abs(rect.x - x) > 20 || Math.abs(rect.y - y) > 20);
-    },
-    { x: before.x, y: before.y },
-  );
-
   const after = await locator.boundingBox();
-  assert(after, "state node has no bounding box after drag");
+  assert(after, `${name} has no bounding box after drag`);
+  assert(
+    Math.abs(after.x - before.x) > 20 || Math.abs(after.y - before.y) > 20,
+    `${name} did not move`,
+  );
   return { before, after };
+}
+
+function centers(box) {
+  return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
 }
 
 const logs = [];
@@ -76,13 +71,15 @@ const browser = await chromium.launch({ headless: true });
 try {
   const url = `http://127.0.0.1:${port}`;
   await waitForServer(url, child, logs);
-  const page = await browser.newPage({ viewport: { width: 1800, height: 1200 } });
+  const page = await browser.newPage({ viewport: { width: 1500, height: 900 } });
   await page.goto(url, { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => document.querySelector("#status")?.textContent === "ready");
   await page.click('button[data-tab="state"]');
   await page.waitForFunction(() => (
     document.querySelector("#diagram-tools")
     && document.querySelector(".graph-stage")?.dataset.editorReady === "true"
+    && document.querySelector(".graph-stage")?.dataset.labelEditorReady === "true"
+    && document.querySelector(".transition-label")?.dataset.labelDragReady === "true"
     && document.querySelector(".initial-transition-path")
   ));
 
@@ -92,16 +89,109 @@ try {
   assert.equal(await page.locator("#diagram-theme").inputValue(), "white");
 
   const node = page.locator(".state-node").first();
-  const { before, after } = await dragNode(page, node, 170, 160);
-  assert(
-    Math.abs(after.x - before.x) > 20 || Math.abs(after.y - before.y) > 20,
-    "node did not move",
-  );
-
-  const stored = await page.evaluate(() => Object.keys(localStorage).some(
+  await dragElement(page, node, 170, 160, "state node");
+  await page.waitForTimeout(120);
+  const nodeStored = await page.evaluate(() => Object.keys(localStorage).some(
     key => key.startsWith("glyph.diagram.positions.v1:"),
   ));
-  assert(stored, "edited node positions were not persisted");
+  assert(nodeStored, "edited node positions were not persisted");
+
+  const collisions = await page.evaluate(() => {
+    const visible = element => {
+      const style = getComputedStyle(element);
+      return style.display !== "none" && style.visibility !== "hidden";
+    };
+    const labels = [...document.querySelectorAll(".transition-label")].filter(visible);
+    const nodes = [...document.querySelectorAll(".state-node")].filter(visible);
+    const overlaps = (a, b) => !(
+      a.right + 2 <= b.left || b.right + 2 <= a.left
+      || a.bottom + 2 <= b.top || b.bottom + 2 <= a.top
+    );
+    let labelPairs = 0;
+    let labelNodes = 0;
+    labels.forEach((label, index) => {
+      const rect = label.getBoundingClientRect();
+      labels.slice(index + 1).forEach(other => {
+        if (overlaps(rect, other.getBoundingClientRect())) labelPairs += 1;
+      });
+      nodes.forEach(item => {
+        if (overlaps(rect, item.getBoundingClientRect())) labelNodes += 1;
+      });
+    });
+    return { labelPairs, labelNodes };
+  });
+  assert.equal(collisions.labelPairs, 0, "transition labels overlap after node movement");
+  assert.equal(collisions.labelNodes, 0, "transition labels overlap state nodes after node movement");
+
+  const label = page.locator(".transition-label").first();
+  const transitionId = await label.getAttribute("data-transition-id");
+  assert(transitionId, "transition label has no stable id");
+  const { after: labelAfter } = await dragElement(page, label, 116, 74, "transition label");
+  await page.waitForFunction(() => Object.keys(localStorage).some(
+    key => key.startsWith("glyph.diagram.label-positions.v1:"),
+  ));
+  const draggedCenter = centers(labelAfter);
+
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.waitForFunction(() => document.querySelector("#status")?.textContent === "ready");
+  await page.click('button[data-tab="state"]');
+  const restored = page.locator(`.transition-label[data-transition-id="${transitionId}"]`);
+  await page.waitForFunction(id => (
+    document.querySelector(`.transition-label[data-transition-id="${id}"]`)?.dataset.manualLabel === "true"
+  ), transitionId);
+  const restoredBox = await restored.boundingBox();
+  assert(restoredBox, "restored transition label has no bounding box");
+  const restoredCenter = centers(restoredBox);
+  assert(Math.abs(restoredCenter.x - draggedCenter.x) < 5, "label x position was not restored");
+  assert(Math.abs(restoredCenter.y - draggedCenter.y) < 5, "label y position was not restored");
+
+  const fixedChrome = await page.evaluate(() => {
+    const header = document.querySelector("header");
+    const viewerHead = document.querySelector(".viewer-head");
+    const editor = document.querySelector("#editor");
+    const before = {
+      headerTop: header.getBoundingClientRect().top,
+      viewerTop: viewerHead.getBoundingClientRect().top,
+    };
+    editor.value += `\n${Array.from({ length: 260 }, (_, index) => `# scroll row ${index + 1}`).join("\n")}`;
+    if (typeof syncLines === "function") syncLines();
+    editor.scrollTop = editor.scrollHeight;
+    return {
+      before,
+      editorScrollTop: editor.scrollTop,
+      headerTop: header.getBoundingClientRect().top,
+      viewerTop: viewerHead.getBoundingClientRect().top,
+      documentOverflow: document.documentElement.scrollHeight - window.innerHeight,
+      bodyOverflow: document.body.scrollHeight - window.innerHeight,
+      headerOverflow: header.scrollWidth - header.clientWidth,
+      viewerHeadOverflow: viewerHead.scrollWidth - viewerHead.clientWidth,
+      toolsOverflow: document.querySelector("#diagram-tools").scrollWidth - document.querySelector("#diagram-tools").clientWidth,
+    };
+  });
+  assert(fixedChrome.editorScrollTop > 0, "source editor is not independently scrollable");
+  assert.equal(fixedChrome.headerTop, fixedChrome.before.headerTop, "compile/save header moved with editor scroll");
+  assert.equal(fixedChrome.viewerTop, fixedChrome.before.viewerTop, "preview toolbar moved with editor scroll");
+  assert(fixedChrome.documentOverflow <= 1, "document created a global vertical scroll area");
+  assert(fixedChrome.bodyOverflow <= 1, "body created a global vertical scroll area");
+  assert(fixedChrome.headerOverflow <= 1, "compile/save controls overflow the header");
+  assert(fixedChrome.viewerHeadOverflow <= 1, "preview controls overflow their toolbar");
+  assert(fixedChrome.toolsOverflow <= 1, "export controls overflow their toolbar");
+
+  const independent = await page.evaluate(() => {
+    const editor = document.querySelector("#editor");
+    const body = document.querySelector(".view-body");
+    const spacer = document.createElement("div");
+    spacer.id = "scroll-test-spacer";
+    spacer.style.height = "900px";
+    body.appendChild(spacer);
+    const editorBefore = editor.scrollTop;
+    body.scrollTop = body.scrollHeight;
+    const result = { editorBefore, editorAfter: editor.scrollTop, previewScrollTop: body.scrollTop };
+    spacer.remove();
+    return result;
+  });
+  assert(independent.previewScrollTop > 0, "preview pane is not independently scrollable");
+  assert.equal(independent.editorAfter, independent.editorBefore, "preview scroll changed editor scroll position");
 
   await page.selectOption("#diagram-theme", "monochrome");
   assert(await page.locator("html").evaluate(
@@ -150,4 +240,4 @@ try {
   await stopProcess(child);
 }
 
-console.log("verified editable white/monochrome diagrams and SVG/PNG/PDF exports");
+console.log("verified independent scrolling, draggable labels, themes, and diagram exports");
