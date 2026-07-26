@@ -29,7 +29,7 @@ const cases = [
           "STIR_TRIGGER_AMBIGUOUS_FALLBACK",
           "STIR_TRIGGER_AMBIGUOUS_FALLBACK",
         ],
-        provisionalTriggers: 4,
+        provisionalTriggers: 7,
         compact: true,
         labels: [
           "input.fault",
