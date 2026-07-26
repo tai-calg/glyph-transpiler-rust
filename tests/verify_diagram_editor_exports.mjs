@@ -74,7 +74,9 @@ try {
   const page = await browser.newPage({ viewport: { width: 1500, height: 900 } });
   await page.goto(url, { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => document.querySelector("#status")?.textContent === "ready");
-  await page.click('button[data-tab="state"]');
+  if (!await page.locator('button[data-tab="state"]').evaluate(button => button.classList.contains("active"))) {
+    await page.click('button[data-tab="state"]');
+  }
   await page.waitForFunction(() => (
     document.querySelector("#diagram-tools")
     && document.querySelector(".graph-stage")?.dataset.editorReady === "true"
@@ -134,7 +136,10 @@ try {
 
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => document.querySelector("#status")?.textContent === "ready");
-  await page.click('button[data-tab="state"]');
+  const stateTab = page.locator('button[data-tab="state"]');
+  if (!await stateTab.evaluate(button => button.classList.contains("active"))) {
+    await stateTab.click();
+  }
   const restored = page.locator(`.transition-label[data-transition-id="${transitionId}"]`);
   await page.waitForFunction(id => (
     document.querySelector(`.transition-label[data-transition-id="${id}"]`)?.dataset.manualLabel === "true"
