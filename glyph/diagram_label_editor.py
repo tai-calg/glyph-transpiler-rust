@@ -10,7 +10,9 @@ _STYLE = r"""
 .edge-label.dragging-label,.transition-label.dragging-label{cursor:grabbing;z-index:30;box-shadow:0 0 0 2px rgba(88,166,255,.28),0 10px 24px rgba(0,0,0,.36)}
 .edge-label.selected-label,.transition-label.selected-label{outline:2px solid var(--blue);outline-offset:2px}
 .edge-label.layout-constrained,.transition-label.layout-constrained{border-color:rgba(231,191,98,.72)}
-.edge-label.compact,.transition-label.compact{max-width:116px}
+.edge-label.compact,.transition-label.compact{max-width:100px}
+.edge-label.compact-tight,.transition-label.compact-tight{max-width:76px}
+.edge-label.compact-micro,.transition-label.compact-micro{max-width:54px}
 </style>
 """
 
@@ -44,26 +46,20 @@ function anchorFor(label,stage,index){
   }catch{return fallback}
 }
 function candidates(anchor){
-  const points=[];
+  const points=[],base=Math.atan2(anchor.ny,anchor.nx);
   for(const radius of[22,34,48,64,80,MAX_ANCHOR_RADIUS]){
-    points.push(
-      {x:anchor.x+anchor.nx*radius,y:anchor.y+anchor.ny*radius,radius},
-      {x:anchor.x-anchor.nx*radius,y:anchor.y-anchor.ny*radius,radius},
-      {x:anchor.x+anchor.tx*radius,y:anchor.y+anchor.ty*radius,radius},
-      {x:anchor.x-anchor.tx*radius,y:anchor.y-anchor.ty*radius,radius},
-      {x:anchor.x+(anchor.nx+anchor.tx)*radius*.72,y:anchor.y+(anchor.ny+anchor.ty)*radius*.72,radius},
-      {x:anchor.x+(anchor.nx-anchor.tx)*radius*.72,y:anchor.y+(anchor.ny-anchor.ty)*radius*.72,radius},
-      {x:anchor.x+(-anchor.nx+anchor.tx)*radius*.72,y:anchor.y+(-anchor.ny+anchor.ty)*radius*.72,radius},
-      {x:anchor.x+(-anchor.nx-anchor.tx)*radius*.72,y:anchor.y+(-anchor.ny-anchor.ty)*radius*.72,radius},
-    );
+    for(let step=0;step<16;step+=1){
+      const angle=base+step*Math.PI/8;
+      points.push({x:anchor.x+Math.cos(angle)*radius,y:anchor.y+Math.sin(angle)*radius,radius});
+    }
   }
   return points;
 }
 function inside(rect,width,height){return rect.x>=8&&rect.y>=8&&rect.x+rect.width<=width-8&&rect.y+rect.height<=height-8}
 function select(label){selected?.classList.remove("selected-label");selected=label;selected?.classList.add("selected-label")}
-function compact(label){
-  if(label.classList.contains("compact"))return false;
-  label.dataset.fullLabel=label.dataset.fullLabel||label.textContent||"";label.dataset.compact="true";label.dataset.anchorCompacted="true";label.classList.add("compact");return true;
+function compact(label,className){
+  if(label.classList.contains(className))return false;
+  label.dataset.fullLabel=label.dataset.fullLabel||label.textContent||"";label.dataset.compact="true";label.dataset.anchorCompacted="true";label.classList.add(className);return true;
 }
 function choose(label,anchor,occupied,placed,width,height){
   const points=candidates(anchor),valid=[];
@@ -90,13 +86,15 @@ function arrange(stage){
     label.dataset.manualLabel="false";
     const anchor=anchorFor(label,stage,index);label.dataset.anchorX=String(anchor.x);label.dataset.anchorY=String(anchor.y);label.dataset.maxAnchorRadius=String(MAX_ANCHOR_RADIUS);
     let chosen=choose(label,anchor,occupied,placed,width,height);
-    if(chosen?.constrained&&compact(label))chosen=choose(label,anchor,occupied,placed,width,height);
+    if(chosen?.constrained){compact(label,"compact");chosen=choose(label,anchor,occupied,placed,width,height)}
+    if(chosen?.constrained){compact(label,"compact-tight");chosen=choose(label,anchor,occupied,placed,width,height)}
+    if(chosen?.constrained){compact(label,"compact-micro");chosen=choose(label,anchor,occupied,placed,width,height)}
     if(!chosen)return;
     label.style.left=`${chosen.point.x}px`;label.style.top=`${chosen.point.y}px`;label.dataset.autoLeft=String(chosen.point.x);label.dataset.autoTop=String(chosen.point.y);label.classList.toggle("layout-constrained",chosen.constrained);placed.push(chosen.rect);
   });
   stage.dataset.labelEditorReady="true";stage.dataset.labelAnchorRadius=String(MAX_ANCHOR_RADIUS);
 }
-function schedule(stage){clearTimeout(timer);timer=setTimeout(()=>{state().then(()=>arrange(stage||document.querySelector(".graph-stage"))).catch(()=>{})},24)}
+function schedule(stage,delay=0){clearTimeout(timer);timer=setTimeout(()=>{state().then(()=>arrange(stage||document.querySelector(".graph-stage"))).catch(()=>{})},delay)}
 function bind(label,stage,index){
   if(label.dataset.labelDragReady==="true")return;label.dataset.labelDragReady="true";const id=labelId(label,index);
   label.addEventListener("pointerdown",event=>{if(event.button!==0)return;event.preventDefault();event.stopPropagation();select(label);label.classList.add("dragging-label");label.setPointerCapture(event.pointerId);drag={label,stage,id,startX:event.clientX,startY:event.clientY,left:num(label.style.left),top:num(label.style.top)}});
@@ -106,7 +104,7 @@ function bind(label,stage,index){
   label.addEventListener("dblclick",event=>{event.preventDefault();event.stopPropagation();const saved=read(stage);delete saved[id];write(stage,saved);label.dataset.manualLabel="false";schedule(stage)});
 }
 function enhance(){const stage=document.querySelector(".graph-stage");if(!stage)return;[...stage.querySelectorAll(LABEL_SELECTOR)].forEach((label,index)=>bind(label,stage,index));schedule(stage)}
-document.addEventListener("pointerup",event=>{const node=event.target?.closest?.(NODE_SELECTOR);if(node)setTimeout(()=>schedule(node.closest(".graph-stage")),0)},true);
+document.addEventListener("pointerup",event=>{const node=event.target?.closest?.(NODE_SELECTOR);if(!node)return;const stage=node.closest(".graph-stage");for(const delay of[0,32,96])setTimeout(()=>schedule(stage),delay)},true);
 document.addEventListener("click",event=>{if(!event.target?.closest?.(LABEL_SELECTOR))select(null)});
 document.addEventListener("change",event=>{if(event.target?.matches?.("#machine-select,#system-select")){cache=null;setTimeout(enhance,0)}});
 for(const name of["glyph-transition-layout-ready","glyph-transition-input-action-labels-ready","glyph-state-transition-ir-v2-labels-ready","glyph-uml-transition-ready"])document.addEventListener(name,enhance);
