@@ -28,10 +28,11 @@ _STYLE = r"""
 _SCRIPT = r"""
 <script id="glyph-transition-semantic-role-lines-v1-script">
 (()=>{
-const MARKER="glyph-transition-semantic-role-lines-v1",MAX_LINE=28;
-let timer=null;
+const MARKER="glyph-transition-semantic-role-lines-v1",MAX_LINE=28,GAP=2;
+let timer=null,settling=false;
 const text=value=>String(value??"");
 const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
+const wait=milliseconds=>new Promise(resolve=>setTimeout(resolve,milliseconds));
 
 function preferredCut(value,limit){
   const bounded=Math.min(limit,value.length-1),characters=["(",")","[","]",",",".","_","&"," "];
@@ -82,30 +83,81 @@ function format(cluster){
   return true;
 }
 
-function apply(stage=document.querySelector(".state-node")?.closest(".graph-stage")){
+function intersects(left,right,gap=GAP){
+  return !(left.x+left.width+gap<=right.x||right.x+right.width+gap<=left.x||left.y+left.height+gap<=right.y||right.y+right.height+gap<=left.y);
+}
+
+function rectOf(element){
+  return {x:element.offsetLeft-element.offsetWidth/2,y:element.offsetTop-element.offsetHeight/2,width:element.offsetWidth,height:element.offsetHeight};
+}
+
+function nodeRect(node){
+  return {x:node.offsetLeft,y:node.offsetTop,width:node.offsetWidth,height:node.offsetHeight};
+}
+
+function collisionPairs(stage){
+  const clusters=[...stage.querySelectorAll(".transition-io-cluster")],nodes=[...stage.querySelectorAll(".state-node")],pairs=[];
+  clusters.forEach((cluster,index)=>{
+    const rect=rectOf(cluster);
+    clusters.slice(index+1).forEach(other=>{if(intersects(rect,rectOf(other)))pairs.push(`${cluster.dataset.transitionId}/${other.dataset.transitionId}`)});
+    nodes.forEach((node,nodeIndex)=>{if(intersects(rect,nodeRect(node)))pairs.push(`${cluster.dataset.transitionId}/node-${nodeIndex}`)});
+  });
+  return pairs;
+}
+
+async function settle(stage,clusters,changed){
+  if(settling)return;
+  settling=true;
+  stage.dataset.transitionSemanticRoleLinesReady="pending";
+  stage.dataset.transitionIoCollisionSolved="semantic-role-pending";
+  stage.dataset.transitionIoCollisionCount="-1";
+  try{
+    let pairs=collisionPairs(stage);
+    for(let attempt=0;attempt<6;attempt+=1){
+      window.glyphTransitionIoCollisionSolver?.run();
+      await wait(240);
+      pairs=collisionPairs(stage);
+      if(!pairs.length)break;
+      window.glyphTransitionLabelReadability?.repair(stage);
+      await wait(360);
+      pairs=collisionPairs(stage);
+      if(!pairs.length)break;
+      if(attempt===2)await window.glyphTransitionNodeLayoutGuard?.requestLayout(stage);
+    }
+    pairs=collisionPairs(stage);
+    stage.dataset.transitionIoCollisionCount=String(pairs.length);
+    stage.dataset.transitionIoCollisionSolved=pairs.length?"failed":"fallback";
+    stage.dataset.transitionSemanticRoleLinesReady=pairs.length?"failed":"true";
+    document.dispatchEvent(new CustomEvent("glyph-transition-semantic-role-lines-ready",{detail:{marker:MARKER,labels:clusters.length,changed,collisions:pairs}}));
+  }finally{
+    settling=false;
+  }
+}
+
+async function apply(stage=document.querySelector(".state-node")?.closest(".graph-stage")){
   if(!stage||stage.dataset.transitionIoClustersReady!=="true")return;
   const clusters=[...stage.querySelectorAll(".transition-io-cluster")];
   const changed=clusters.reduce((count,cluster)=>count+(format(cluster)?1:0),0);
-  stage.dataset.transitionSemanticRoleLinesReady="true";
   stage.dataset.transitionSemanticLinesReady="true";
-  if(changed){
-    stage.dataset.transitionIoCollisionSolved="semantic-role-pending";
-    stage.dataset.transitionIoCollisionCount="-1";
-    window.glyphTransitionIoCollisionSolver?.run();
+  const pairs=collisionPairs(stage);
+  if(changed||pairs.length){
+    await settle(stage,clusters,changed);
+  }else{
+    stage.dataset.transitionSemanticRoleLinesReady="true";
+    document.dispatchEvent(new CustomEvent("glyph-transition-semantic-role-lines-ready",{detail:{marker:MARKER,labels:clusters.length,changed,collisions:[]}}));
   }
-  document.dispatchEvent(new CustomEvent("glyph-transition-semantic-role-lines-ready",{detail:{marker:MARKER,labels:clusters.length,changed}}));
 }
 
 function schedule(stage=null,delay=0){
   clearTimeout(timer);
-  timer=setTimeout(()=>apply(stage||document.querySelector(".state-node")?.closest(".graph-stage")),delay);
+  timer=setTimeout(()=>apply(stage||document.querySelector(".state-node")?.closest(".graph-stage")).catch(error=>console.error("semantic role line layout failed",error)),delay);
 }
 document.addEventListener("glyph-transition-readable-layout-ready",()=>schedule(null,0));
 document.addEventListener("glyph-transition-io-clusters-ready",()=>schedule(null,0));
 document.addEventListener("glyph-locale-changed",()=>schedule(null,0));
 document.addEventListener("change",event=>{if(event.target?.id==="machine-select")schedule(null,0)});
 new MutationObserver(()=>schedule(null,30)).observe(document.getElementById("view")||document.body,{childList:true,subtree:true});
-window.glyphTransitionSemanticRoleLines={marker:MARKER,apply:()=>schedule(null,0),maxLineLength:MAX_LINE};
+window.glyphTransitionSemanticRoleLines={marker:MARKER,apply:()=>schedule(null,0),maxLineLength:MAX_LINE,collisions:()=>collisionPairs(document.querySelector(".state-node")?.closest(".graph-stage"))};
 schedule(null,0);
 })();
 </script>
