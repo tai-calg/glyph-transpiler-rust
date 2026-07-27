@@ -36,6 +36,7 @@ on:
       - "glyph/transition_layout_transaction.py"
       - "glyph/transition_layout_transaction_bootstrap.py"
       - "glyph/transition_node_layout_guard.py"
+      - "glyph/transition_node_position_adapter.py"
       - "glyph/transition_readable_exports.py"
       - "glyph/transition_readable_layout.py"
       - "glyph/transition_route_labels.py"
