@@ -16,6 +16,8 @@ class TransitionIoClusterTests(unittest.TestCase):
         self.assertIn('data-io-kind="io"', html)
         self.assertIn('guard?` [${guard}]`', html)
         self.assertIn('output?` ➞ ${output}`', html)
+        self.assertIn('return"otherwise"', html)
+        self.assertNotIn('return both("自動","automatic")', html)
         self.assertNotIn('output?` / ${output}`', html)
         self.assertNotIn('data-io-kind="input"', html)
         self.assertNotIn('data-io-kind="output"', html)
