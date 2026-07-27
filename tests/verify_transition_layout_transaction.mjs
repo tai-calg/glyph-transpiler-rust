@@ -29,15 +29,44 @@ async function stopProcess(child) {
   if (child.exitCode === null) child.kill("SIGKILL");
 }
 
+async function transactionState(page) {
+  return page.evaluate(() => {
+    const stage = document.querySelector(".graph-stage");
+    return {
+      state: stage?.dataset.transitionLayoutState || "missing",
+      error: stage?.dataset.transitionLayoutError || "",
+      generation: Number(stage?.dataset.transitionLayoutGeneration || 0),
+      collision: stage?.dataset.transitionIoCollisionSolved || "",
+      collisionCount: Number(stage?.dataset.transitionIoCollisionCount || -1),
+      semantic: stage?.dataset.transitionSemanticLinesReady || "",
+      roles: stage?.dataset.transitionSemanticRoleLinesReady || "",
+      reason: stage?.dataset.transitionLayoutReason || "",
+      audit: window.glyphTransitionLayoutTransaction?.audit?.() || null,
+    };
+  });
+}
+
 async function waitForTransaction(page) {
   await page.waitForFunction(() => {
-    const stage = document.querySelector(".graph-stage");
-    return stage?.dataset.transitionLayoutState === "ready"
-      && stage.dataset.transitionIoCollisionSolved === "true"
-      && Number(stage.dataset.transitionIoCollisionCount || 0) === 0
-      && stage.dataset.transitionSemanticLinesReady === "true"
-      && stage.dataset.transitionSemanticRoleLinesReady === "true";
+    const state = document.querySelector(".graph-stage")?.dataset.transitionLayoutState;
+    return state === "ready" || state === "failed";
   }, null, { timeout: 15000 });
+  const result = await transactionState(page);
+  assert.equal(result.state, "ready", JSON.stringify(result));
+  assert.equal(result.collision, "true", JSON.stringify(result));
+  assert.equal(result.collisionCount, 0, JSON.stringify(result));
+  assert.equal(result.semantic, "true", JSON.stringify(result));
+  assert.equal(result.roles, "true", JSON.stringify(result));
+}
+
+async function waitForNextTransaction(page, previousGeneration) {
+  await page.waitForFunction(previous => {
+    const stage = document.querySelector(".graph-stage");
+    const generation = Number(stage?.dataset.transitionLayoutGeneration || 0);
+    const state = stage?.dataset.transitionLayoutState;
+    return generation > Number(previous || 0) && (state === "ready" || state === "failed");
+  }, previousGeneration, { timeout: 10000 });
+  await waitForTransaction(page);
 }
 
 async function placement(locator) {
@@ -55,6 +84,25 @@ async function placement(locator) {
       manual: element.dataset.manualIo,
     };
   });
+}
+
+async function dragStateNode(page) {
+  const node = page.locator(".state-node").first();
+  const before = await node.boundingBox();
+  assert(before, "state node has no bounding box before drag");
+  const generation = await page.locator(".graph-stage").getAttribute("data-transition-layout-generation");
+  const startX = before.x + before.width / 2;
+  const startY = before.y + before.height / 2;
+  await page.mouse.move(startX, startY);
+  await page.mouse.down();
+  await page.mouse.move(startX + 170, startY + 160, { steps: 20 });
+  await page.mouse.up();
+  await waitForNextTransaction(page, generation);
+  const after = await node.boundingBox();
+  assert(after, "state node has no bounding box after drag");
+  assert(Math.abs(after.x - before.x) > 10 || Math.abs(after.y - before.y) > 10, "state node did not move");
+  const stored = await page.evaluate(() => Object.keys(localStorage).some(key => key.startsWith("glyph.diagram.positions.v1:")));
+  assert(stored, "state node position was not persisted");
 }
 
 async function dragFeasibleTransitionCluster(page) {
@@ -82,16 +130,10 @@ async function dragFeasibleTransitionCluster(page) {
       await page.mouse.down();
       await page.mouse.move(startX + delta.x, startY + delta.y, { steps: 20 });
       await page.mouse.up();
-      await page.waitForFunction(previous => {
-        const stage = document.querySelector(".graph-stage");
-        return stage?.dataset.transitionLayoutState === "ready"
-          && Number(stage.dataset.transitionLayoutGeneration || 0) > Number(previous || 0);
-      }, generation, { timeout: 8000 });
+      await waitForNextTransaction(page, generation);
       const after = await cluster.boundingBox();
       assert(after, `${transitionId}: missing bounding box after drag`);
-      if (Math.abs(after.x - before.x) > 10 || Math.abs(after.y - before.y) > 10) {
-        return { cluster, transitionId };
-      }
+      if (Math.abs(after.x - before.x) > 10 || Math.abs(after.y - before.y) > 10) return { cluster, transitionId };
       await cluster.dblclick();
       await page.evaluate(() => window.glyphTransitionLayoutTransaction.run());
       await waitForTransaction(page);
@@ -119,11 +161,12 @@ try {
   const url = `http://127.0.0.1:${port}`;
   await waitForServer(url, child, logs);
   const page = await browser.newPage({ viewport: { width: 1900, height: 1200 } });
+  page.on("console", message => {
+    if (message.type() === "error") logs.push(`browser error: ${message.text()}\n`);
+  });
   await page.goto(url, { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => document.querySelector("#status")?.textContent === "ready");
-  if (!await page.locator('button[data-tab="state"]').evaluate(button => button.classList.contains("active"))) {
-    await page.click('button[data-tab="state"]');
-  }
+  if (!await page.locator('button[data-tab="state"]').evaluate(button => button.classList.contains("active"))) await page.click('button[data-tab="state"]');
   await page.selectOption("#machine-select", { label: "Conveyor" });
   await waitForTransaction(page);
 
@@ -131,6 +174,7 @@ try {
   assert.equal(initialAudit.ok, true, JSON.stringify(initialAudit.violations));
   assert.equal(await page.locator('.transition-io-value:has-text("ConveyorStop")').count() > 0, true);
 
+  await dragStateNode(page);
   const dragged = await dragFeasibleTransitionCluster(page);
   const beforeReload = await placement(dragged.cluster);
   assert.equal(beforeReload.manual, "true");
@@ -146,9 +190,7 @@ try {
 
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => document.querySelector("#status")?.textContent === "ready");
-  if (!await page.locator('button[data-tab="state"]').evaluate(button => button.classList.contains("active"))) {
-    await page.click('button[data-tab="state"]');
-  }
+  if (!await page.locator('button[data-tab="state"]').evaluate(button => button.classList.contains("active"))) await page.click('button[data-tab="state"]');
   await waitForTransaction(page);
 
   const restored = page.locator(`.transition-io-cluster[data-transition-id="${dragged.transitionId}"]`);
@@ -174,14 +216,13 @@ try {
 
   const finalAudit = await page.evaluate(() => window.glyphTransitionLayoutTransaction.audit());
   assert.equal(finalAudit.ok, true, JSON.stringify(finalAudit.violations));
-  await page.screenshot({
-    path: path.join(outputDirectory, "conveyor-restored.png"),
-    fullPage: true,
-  });
+  await page.screenshot({ path: path.join(outputDirectory, "conveyor-restored.png"), fullPage: true });
   await page.close();
+} catch (error) {
+  throw new Error(`${error.stack || error}\n${logs.join("")}`);
 } finally {
   await browser.close();
   await stopProcess(child);
 }
 
-console.log("verified deterministic transition layout transaction and reload restoration");
+console.log("verified deterministic node and transition layout transaction across reload");
