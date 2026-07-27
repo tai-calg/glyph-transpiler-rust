@@ -68,11 +68,13 @@ try {
   const page = await browser.newPage({ viewport: { width: 1500, height: 900 } });
   await page.goto(url, { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => document.querySelector("#status")?.classList.contains("ready"));
-  await page.waitForFunction(() => (
-    document.querySelector(".graph-stage")?.dataset.transitionIoClustersReady === "true"
-    && document.querySelector(".graph-stage")?.dataset.stateTransitionIRV3LabelsReady === "true"
-    && document.querySelector("#glyph-settings")
-  ));
+  await page.waitForFunction(() => {
+    const stage = document.querySelector(".graph-stage");
+    return stage?.dataset.transitionIoClustersReady === "true"
+      && stage?.dataset.transitionIoCollisionSolved === "true"
+      && stage?.dataset.stateTransitionIRV3LabelsReady === "true"
+      && document.querySelector("#glyph-settings");
+  });
 
   assert.equal((await page.locator("#compile").textContent()).trim(), "コンパイル");
   assert.equal(await page.locator("html").getAttribute("lang"), "ja");
@@ -101,9 +103,12 @@ try {
       distances: clusters.map(cluster => Number(cluster.dataset.ioDistance || 0)),
       clusterOverlap: clusterRects.some((rect, index) => clusterRects.slice(index + 1).some(other => overlaps(rect, other))),
       nodeOverlap: clusterRects.some(rect => nodeRects.some(node => overlaps(rect, node))),
-      inputCount: clusters.filter(cluster => cluster.querySelector('.transition-io-node[data-io-kind="input"]')).length,
-      outputCount: clusters.filter(cluster => cluster.querySelector('.transition-io-node[data-io-kind="output"]')).length,
+      ioCount: clusters.filter(cluster => cluster.querySelector('.transition-io-node[data-io-kind="io"]')).length,
+      inputCount: document.querySelectorAll('.transition-io-node[data-io-kind="input"]').length,
+      outputCount: document.querySelectorAll('.transition-io-node[data-io-kind="output"]').length,
       guardCount: clusters.filter(cluster => cluster.querySelector('.transition-io-node[data-io-kind="guard"]')).length,
+      failureDecorationCount: document.querySelectorAll(".transition-io-error,.failure-transition").length,
+      combinedValues: clusters.map(cluster => cluster.querySelector('.transition-io-node[data-io-kind="io"] .transition-io-value')?.textContent || ""),
       visibleLegacyLabels: visibleLegacyLabels.length,
     };
   });
@@ -111,9 +116,13 @@ try {
   assert(placement.distances.every(value => value <= 96.5), placement.distances.join(", "));
   assert.equal(placement.clusterOverlap, false);
   assert.equal(placement.nodeOverlap, false);
-  assert.equal(placement.inputCount, placement.distances.length);
-  assert.equal(placement.outputCount, placement.distances.length);
+  assert.equal(placement.ioCount, placement.distances.length);
+  assert.equal(placement.inputCount, 0);
+  assert.equal(placement.outputCount, 0);
   assert(placement.guardCount > 0);
+  assert.equal(placement.failureDecorationCount, 0);
+  assert(placement.combinedValues.every(value => value.trim().length > 0));
+  assert(placement.combinedValues.some(value => value.includes(" / ")));
   assert.equal(placement.visibleLegacyLabels, 0);
 
   await page.click("#glyph-settings");
@@ -122,8 +131,8 @@ try {
   const englishWarnings = await page.locator(".analysis-panel").textContent();
   assert(englishWarnings.includes("provisionally"), englishWarnings);
   await page.waitForFunction(() => (
-    [...document.querySelectorAll(".transition-io-role")].some(item => item.textContent === "Input")
-    && [...document.querySelectorAll(".transition-io-role")].some(item => item.textContent === "Output")
+    [...document.querySelectorAll(".transition-io-role")].some(item => item.textContent === "Guard")
+    && document.querySelectorAll('.transition-io-node[data-io-kind="io"]').length > 0
   ));
   await page.click("#glyph-settings-close");
 
@@ -162,4 +171,4 @@ try {
   await stopProcess(child);
 }
 
-console.log("verified Japanese-first diagnostics, structured transition I/O, proximity and canvas panning");
+console.log("verified Japanese-first diagnostics, compact transition I/O, proximity and canvas panning");
