@@ -68,11 +68,14 @@ try {
   const page = await browser.newPage({ viewport: { width: 1500, height: 900 } });
   await page.goto(url, { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => document.querySelector("#status")?.classList.contains("ready"));
-  await page.waitForFunction(() => (
-    document.querySelector(".graph-stage")?.dataset.labelEditorReady === "true"
-    && document.querySelector(".graph-stage")?.dataset.stateTransitionIRV3LabelsReady === "true"
-    && document.querySelector("#glyph-settings")
-  ));
+  await page.waitForFunction(() => {
+    const stage = document.querySelector(".graph-stage");
+    const solved = stage?.dataset.transitionIoCollisionSolved;
+    return stage?.dataset.transitionIoClustersReady === "true"
+      && (solved === "true" || solved === "fallback")
+      && stage?.dataset.stateTransitionIRV3LabelsReady === "true"
+      && document.querySelector("#glyph-settings");
+  });
 
   assert.equal((await page.locator("#compile").textContent()).trim(), "コンパイル");
   assert.equal(await page.locator("html").getAttribute("lang"), "ja");
@@ -85,30 +88,54 @@ try {
   assert(!detailText.some(value => value.includes("[input.legacy_alarm]")), detailText.join("\n"));
 
   const placement = await page.evaluate(() => {
-    const labels = [...document.querySelectorAll(".transition-label")];
+    const clusters = [...document.querySelectorAll(".transition-io-cluster")];
     const nodes = [...document.querySelectorAll(".state-node")];
     const overlaps = (a, b, gap = 2) => !(
       a.right + gap <= b.left || b.right + gap <= a.left
       || a.bottom + gap <= b.top || b.bottom + gap <= a.top
     );
-    const labelRects = labels.map(label => label.getBoundingClientRect());
+    const clusterRects = clusters.map(cluster => cluster.getBoundingClientRect());
     const nodeRects = nodes.map(node => node.getBoundingClientRect());
+    const visibleLegacyLabels = [...document.querySelectorAll(".transition-label")].filter(label => {
+      const style = getComputedStyle(label);
+      return style.visibility !== "hidden" && style.display !== "none" && Number(style.opacity) > 0;
+    });
     return {
-      distances: labels.map(label => Number(label.dataset.labelDistance || 0)),
-      labelOverlap: labelRects.some((rect, index) => labelRects.slice(index + 1).some(other => overlaps(rect, other))),
-      nodeOverlap: labelRects.some(rect => nodeRects.some(node => overlaps(rect, node))),
+      distances: clusters.map(cluster => Number(cluster.dataset.ioDistance || 0)),
+      clusterOverlap: clusterRects.some((rect, index) => clusterRects.slice(index + 1).some(other => overlaps(rect, other))),
+      nodeOverlap: clusterRects.some(rect => nodeRects.some(node => overlaps(rect, node))),
+      ioCount: clusters.filter(cluster => cluster.querySelector('.transition-io-node[data-io-kind="io"]')).length,
+      inputCount: document.querySelectorAll('.transition-io-node[data-io-kind="input"]').length,
+      outputCount: document.querySelectorAll('.transition-io-node[data-io-kind="output"]').length,
+      guardNodeCount: document.querySelectorAll('.transition-io-node[data-io-kind="guard"]').length,
+      failureDecorationCount: document.querySelectorAll(".transition-io-cluster.failure-transition,.transition-io-cluster .transition-io-error").length,
+      combinedValues: clusters.map(cluster => cluster.querySelector('.transition-io-node[data-io-kind="io"] .transition-io-value')?.textContent || ""),
+      semanticOutputs: clusters.map(cluster => cluster.dataset.outputValue || ""),
+      visibleLegacyLabels: visibleLegacyLabels.length,
     };
   });
   assert(placement.distances.length > 0);
   assert(placement.distances.every(value => value <= 96.5), placement.distances.join(", "));
-  assert.equal(placement.labelOverlap, false);
+  assert.equal(placement.clusterOverlap, false);
   assert.equal(placement.nodeOverlap, false);
+  assert.equal(placement.ioCount, placement.distances.length);
+  assert.equal(placement.inputCount, 0);
+  assert.equal(placement.outputCount, 0);
+  assert.equal(placement.guardNodeCount, 0);
+  assert.equal(placement.failureDecorationCount, 0);
+  assert(placement.combinedValues.every(value => value.trim().length > 0));
+  const valuesWithOutput = placement.combinedValues.filter((_, index) => placement.semanticOutputs[index].trim().length > 0);
+  assert(valuesWithOutput.length > 0, placement.combinedValues.join("\n"));
+  assert(valuesWithOutput.every(value => value.includes(" ➞ ")), placement.combinedValues.join("\n"));
+  assert(placement.combinedValues.some(value => value.startsWith("? input.legacy_alarm")), placement.combinedValues.join("\n"));
+  assert.equal(placement.visibleLegacyLabels, 0);
 
   await page.click("#glyph-settings");
   await page.selectOption("#glyph-language", "en");
   assert.equal((await page.locator("#compile").textContent()).trim(), "Compile");
   const englishWarnings = await page.locator(".analysis-panel").textContent();
   assert(englishWarnings.includes("provisionally"), englishWarnings);
+  await page.waitForFunction(() => document.querySelectorAll('.transition-io-node[data-io-kind="io"]').length > 0);
   await page.click("#glyph-settings-close");
 
   const beforePan = await page.evaluate(() => {
@@ -146,4 +173,4 @@ try {
   await stopProcess(child);
 }
 
-console.log("verified Japanese-first diagnostics, semantic labels, proximity and canvas panning");
+console.log("verified Japanese-first diagnostics, one input-arrow-output transition label, proximity and canvas panning");

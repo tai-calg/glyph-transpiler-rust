@@ -33,12 +33,14 @@ _SCRIPT = r"""
 <script id="glyph-diagram-render-stability-v1-script">
 (() => {
   const MARKER = "glyph-diagram-render-stability-v1";
-  const FALLBACK_DELAY = 1600;
+  const FALLBACK_DELAY = 2200;
   const REQUIRED_FLAGS = [
     "labelLayoutReady",
     "umlTransitionReady",
     "transitionInputActionLabelsReady",
     "stateTransitionIRV2LabelsReady",
+    "transitionIoClustersReady",
+    "transitionIoCollisionSolved",
   ];
   let lastRenderKey = null;
   let revealGeneration = 0;
@@ -149,6 +151,8 @@ _SCRIPT = r"""
     "glyph-uml-transition-ready",
     "glyph-transition-input-action-labels-ready",
     "glyph-state-transition-ir-v2-labels-ready",
+    "glyph-transition-io-clusters-ready",
+    "glyph-transition-io-collision-solved",
     "glyph-initial-transition-route-ready",
   ]) {
     document.addEventListener(eventName, () => settle());
@@ -169,6 +173,8 @@ _SCRIPT = r"""
       "data-uml-transition-ready",
       "data-transition-input-action-labels-ready",
       "data-state-transition-ir-v2-labels-ready",
+      "data-transition-io-clusters-ready",
+      "data-transition-io-collision-solved",
       "data-initial-route-ready",
     ],
   });
@@ -180,15 +186,7 @@ _SCRIPT = r"""
 
 
 def enhance_diagram_render_stability_html(html: str) -> str:
-    """Commit state diagrams only after all browser-side adjustment passes finish.
-
-    The base application polls the compiler snapshot. This layer suppresses a DOM
-    rebuild when the rendered snapshot and selected view are unchanged, and hides a
-    newly built state graph until label packing, UML semantics, input/action labels,
-    StateTransitionIR v2 labels, and initial-route layout have completed. The user
-    therefore sees either the previous committed graph or the next fully adjusted
-    graph, never an intermediate T-label/raw-route frame.
-    """
+    """Reveal a state diagram only after semantic I/O placement is complete."""
 
     if _MARKER in html:
         return html
