@@ -33,6 +33,7 @@ on:
       - "glyph/transition_label_readability.py"
       - "glyph/transition_node_layout_guard.py"
       - "glyph/transition_readable_exports.py"
+      - "glyph/transition_readable_layout.py"
       - "glyph/transition_route_labels.py"
       - "glyph/transition_semantics.py"
       - "glyph/transition_semantics_runtime.py"
@@ -58,6 +59,7 @@ on:
       - "tests/test_transition_label_readability.py"
       - "tests/test_transition_node_layout_guard.py"
       - "tests/test_transition_readable_exports.py"
+      - "tests/test_transition_readable_layout.py"
       - "tests/test_transition_route_labels.py"
       - "tests/test_transition_semantics.py"
       - "tests/verify_code_derived_system_io.mjs"
@@ -69,6 +71,7 @@ on:
       - "tests/verify_diagram_canvas_viewport.mjs"
       - "tests/verify_localized_semantic_canvas.mjs"
       - "tests/verify_transition_label_readability.mjs"
+      - "tests/verify_transition_semantic_readability.mjs"
       - "examples/acceptance/door_controller.glyph"
       - "examples/acceptance/motor_safety.glyph"
       - "examples/state_diagrams/**"
@@ -100,7 +103,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          mkdir -p build/checked-system-context-io build/state-diagram-regression build/state-diagram-stability build/uml-transition-semantics build/additional-failure-notation build/diagram-editor-exports build/diagram-canvas-viewport build/localized-semantic-canvas build/transition-label-readability
+          mkdir -p build/checked-system-context-io build/state-diagram-regression build/state-diagram-stability build/uml-transition-semantics build/additional-failure-notation build/diagram-editor-exports build/diagram-canvas-viewport build/localized-semantic-canvas build/transition-label-readability build/transition-semantic-readability
           node tests/verify_code_derived_system_io.mjs \
             2>&1 | tee build/checked-system-context-io/verify.log
           node tests/verify_state_diagram_rendering.mjs \
@@ -119,6 +122,8 @@ jobs:
             2>&1 | tee build/localized-semantic-canvas/verify.log
           node tests/verify_transition_label_readability.mjs \
             2>&1 | tee build/transition-label-readability/verify.log
+          node tests/verify_transition_semantic_readability.mjs \
+            2>&1 | tee build/transition-semantic-readability/verify.log
 
       - name: Upload rendered diagrams
         if: always()
@@ -137,6 +142,7 @@ jobs:
             build/diagram-canvas-viewport/**
             build/localized-semantic-canvas/**
             build/transition-label-readability/**
+            build/transition-semantic-readability/**
             examples/acceptance/door_controller.glyph
             examples/acceptance/motor_safety.glyph
             examples/state_diagrams/*.glyph
