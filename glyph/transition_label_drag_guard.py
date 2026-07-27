@@ -10,7 +10,6 @@ const MARKER="glyph-transition-label-drag-guard-v1",MAX_DISTANCE=96,MIN_VISIBLE_
 const RINGS=[12,24,36,48,60,72,84,96],ANGLES=72;
 let active=null;
 const num=value=>Number.parseFloat(value||"0")||0;
-const finite=value=>Number.isFinite(value);
 const scaleFor=stage=>window.glyphDiagramViewport?.scaleFor(stage)||num(stage?.dataset.viewportScale)||1;
 const intersects=(left,right,gap=GAP)=>!(left.x+left.width+gap<=right.x||right.x+right.width+gap<=left.x||left.y+left.height+gap<=right.y||right.y+right.height+gap<=left.y);
 
@@ -87,7 +86,7 @@ document.addEventListener("pointerup",event=>{
   const record={...active};active=null;
   record.requested=constrain(project({x:record.original.x+(event.clientX-record.startX)/record.scale,y:record.original.y+(event.clientY-record.startY)/record.scale},record.anchor),record.cluster,record.stage);
   queueMicrotask(()=>applyFallback(record));
-});
+},true);
 
 window.glyphTransitionLabelDragGuard={marker:MARKER,minimumVisibleMove:MIN_VISIBLE_MOVE};
 })();
