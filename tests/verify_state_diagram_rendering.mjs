@@ -177,9 +177,12 @@ try {
         assert.equal(await page.locator(".transition-detail").count(), machine.transitions.length);
         assert.equal(await page.locator(".state-transition-path").count(), machine.transitions.length);
 
-        const combinedValues = await page.locator('.transition-io-node[data-io-kind="io"] .transition-io-value').allTextContents();
-        assert(combinedValues.every(value => value.trim().length > 0));
-        assert(combinedValues.some(value => value.includes(" / ")), `${testCase.slug}/${expected.name}: no combined input/effect label`);
+        const combinedValues = await page.locator('.transition-io-node[data-io-kind="io"]').evaluateAll(elements => elements.map(element => ({
+          value: element.querySelector(".transition-io-value")?.textContent || "",
+          output: element.closest(".transition-io-cluster")?.dataset.outputValue || "",
+        })));
+        assert(combinedValues.every(({value}) => value.trim().length > 0));
+        assert(combinedValues.every(({value, output}) => output ? value.includes(" / ") : !value.includes(" / —")));
 
         if (expected.provisionalTriggers !== undefined) {
           assert.equal(
