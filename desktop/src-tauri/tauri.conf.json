@@ -29,9 +29,20 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "externalBin": ["binaries/glyph-studio-server"],
-    "resources": ["../resources/default.glyph"],
+    "externalBin": [
+      "binaries/glyph-studio-server"
+    ],
+    "resources": [
+      "../resources/default.glyph"
+    ],
     "shortDescription": "Compiler-backed systems design editor",
-    "longDescription": "Glyph Studio desktop application with state-transition, I/O and architecture views."
+    "longDescription": "Glyph Studio desktop application with state-transition, I/O and architecture views.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
   }
 }
