@@ -9,14 +9,16 @@ from glyph.transition_io_clusters import enhance_transition_io_clusters_html
 
 
 class TransitionIoClusterTests(unittest.TestCase):
-    def test_enhancer_renders_combined_io_and_guard_objects(self) -> None:
+    def test_enhancer_renders_one_uml_label_per_transition(self) -> None:
         html = enhance_transition_io_clusters_html(DIAGRAM_HTML)
         self.assertIn("glyph-transition-io-clusters-v1-script", html)
         self.assertIn("transition-io-cluster", html)
-        self.assertIn('nodeMarkup("io"', html)
-        self.assertIn('nodeMarkup("guard"', html)
-        self.assertNotIn('nodeMarkup("input"', html)
-        self.assertNotIn('nodeMarkup("output"', html)
+        self.assertIn('data-io-kind=\"io\"', html)
+        self.assertIn('guard?` [${guard}]`', html)
+        self.assertIn('output?` / ${output}`', html)
+        self.assertNotIn('data-io-kind=\"input\"', html)
+        self.assertNotIn('data-io-kind=\"output\"', html)
+        self.assertNotIn('data-io-kind=\"guard\"', html)
         self.assertNotIn("failureOf(transition)", html)
         self.assertIn("MAX_DISTANCE=96", html)
         self.assertIn("glyph.diagram.transition-io.v1:", html)
