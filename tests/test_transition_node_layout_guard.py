@@ -18,7 +18,7 @@ class TransitionNodeLayoutGuardTests(unittest.TestCase):
         self.assertIn("glyphTransitionIoCollisionSolver?.run", html)
         self.assertIn("glyphTransitionLabelReadability?.repair", html)
         self.assertIn("glyph.diagram.positions.v1:", html)
-        self.assertIn('transitionIoNodeConstraint="adjusted"', html)
+        self.assertIn('ratio===0?"restored":"adjusted"', html)
         self.assertIn('transitionIoNodeConstraint="restored"', html)
 
     def test_prepared_app_installs_guard_after_readability(self) -> None:
