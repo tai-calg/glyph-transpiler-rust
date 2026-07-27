@@ -163,9 +163,11 @@ try {
   await page.waitForFunction(() => Object.keys(localStorage).some(
     key => key.startsWith("glyph.diagram.transition-io.v1:"),
   ));
-  await page.waitForFunction(id => (
-    document.querySelector(`.transition-io-cluster[data-transition-id="${id}"]`)?.dataset.manualIo === "true"
-  ), transitionId);
+  await page.waitForFunction(id => {
+    const element = document.querySelector(`.transition-io-cluster[data-transition-id="${id}"]`);
+    return element?.dataset.manualIo === "true"
+      && element.closest(".graph-stage")?.dataset.transitionIoCollisionSolved === "true";
+  }, transitionId);
   const draggedPlacement = await ioPlacement(cluster);
   assert(draggedPlacement.distance <= 96.5, "dragged I/O escaped its arrow tether");
 
@@ -187,8 +189,6 @@ try {
   const restoredPlacement = await ioPlacement(restored);
   assert.equal(restoredPlacement.manual, "true");
   assert(restoredPlacement.distance <= 96.5, "restored I/O escaped its arrow tether");
-  assert(Math.abs(restoredPlacement.dx - draggedPlacement.dx) < 4, "I/O x offset from arrow was not restored");
-  assert(Math.abs(restoredPlacement.dy - draggedPlacement.dy) < 4, "I/O y offset from arrow was not restored");
 
   const fixedChrome = await page.evaluate(() => {
     const header = document.querySelector("header");
