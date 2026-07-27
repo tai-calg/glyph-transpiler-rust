@@ -123,8 +123,9 @@ try {
   assert.equal(placement.guardNodeCount, 0);
   assert.equal(placement.failureDecorationCount, 0);
   assert(placement.combinedValues.every(value => value.trim().length > 0));
-  assert(placement.combinedValues.some(value => value.includes("Start [input.allowed]")));
-  assert(placement.combinedValues.some(value => value.startsWith("? input.legacy_alarm")));
+  assert(placement.combinedValues.some(value => value.includes("Start [input.allowed] ➞ State(Active)")));
+  assert(placement.combinedValues.some(value => value.startsWith("? input.legacy_alarm ➞ State(Faulted)")));
+  assert(placement.combinedValues.filter(value => value.includes("State(")).every(value => value.includes(" ➞ ")));
   assert.equal(placement.visibleLegacyLabels, 0);
 
   await page.click("#glyph-settings");
@@ -170,4 +171,4 @@ try {
   await stopProcess(child);
 }
 
-console.log("verified Japanese-first diagnostics, one UML transition label, proximity and canvas panning");
+console.log("verified Japanese-first diagnostics, one input-arrow-output transition label, proximity and canvas panning");
