@@ -102,7 +102,7 @@ try {
   assert(await page.locator('.transition-io-node[data-io-kind="io"]').count() > 0);
   assert.equal(await page.locator('.transition-io-node[data-io-kind="input"]').count(), 0);
   assert.equal(await page.locator('.transition-io-node[data-io-kind="output"]').count(), 0);
-  assert.equal(await page.locator(".transition-io-error,.failure-transition").count(), 0);
+  assert.equal(await page.locator(".transition-io-cluster.failure-transition,.transition-io-cluster .transition-io-error").count(), 0);
 
   const node = page.locator(".state-node").first();
   await dragElement(page, node, 170, 160, "state node");
