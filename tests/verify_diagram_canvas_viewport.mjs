@@ -53,14 +53,23 @@ async function viewportAnchor(page, fractionX, fractionY) {
     const clientX = shell.clientWidth * xFraction;
     const clientY = shell.clientHeight * yFraction;
     const scale = Number.parseFloat(stage.dataset.viewportScale || "1");
+    const shellRect = shell.getBoundingClientRect();
     return {
       clientX,
       clientY,
-      pageX: shell.getBoundingClientRect().left + clientX,
-      pageY: shell.getBoundingClientRect().top + clientY,
+      pageX: shellRect.left + clientX,
+      pageY: shellRect.top + clientY,
       diagramX: (shell.scrollLeft + clientX - surface.offsetLeft) / scale,
       diagramY: (shell.scrollTop + clientY - surface.offsetTop) / scale,
       scale,
+      scrollLeft: shell.scrollLeft,
+      scrollTop: shell.scrollTop,
+      surfaceLeft: surface.offsetLeft,
+      surfaceTop: surface.offsetTop,
+      shellWidth: shell.clientWidth,
+      shellHeight: shell.clientHeight,
+      scrollWidth: shell.scrollWidth,
+      scrollHeight: shell.scrollHeight,
     };
   }, { fractionX, fractionY });
 }
@@ -126,11 +135,12 @@ try {
     clientY: anchorBefore.pageY,
   });
   await page.waitForFunction(() => Number.parseFloat(document.querySelector(".graph-stage")?.dataset.viewportScale || "1") > 1);
-  await page.waitForTimeout(80);
+  await page.waitForTimeout(160);
   const anchorAfterZoomIn = await viewportAnchor(page, 0.68, 0.42);
-  assert(anchorAfterZoomIn.scale > anchorBefore.scale, "touchpad pinch did not zoom in");
-  assert(Math.abs(anchorAfterZoomIn.diagramX - anchorBefore.diagramX) < 3, "pinch changed the x anchor");
-  assert(Math.abs(anchorAfterZoomIn.diagramY - anchorBefore.diagramY) < 3, "pinch changed the y anchor");
+  const anchorDiagnostics = `before=${JSON.stringify(anchorBefore)} after=${JSON.stringify(anchorAfterZoomIn)}`;
+  assert(anchorAfterZoomIn.scale > anchorBefore.scale, `touchpad pinch did not zoom in; ${anchorDiagnostics}`);
+  assert(Math.abs(anchorAfterZoomIn.diagramX - anchorBefore.diagramX) < 3, `pinch changed the x anchor; ${anchorDiagnostics}`);
+  assert(Math.abs(anchorAfterZoomIn.diagramY - anchorBefore.diagramY) < 3, `pinch changed the y anchor; ${anchorDiagnostics}`);
 
   await page.locator(".canvas-shell").dispatchEvent("wheel", {
     deltaY: 160,
