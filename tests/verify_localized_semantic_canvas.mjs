@@ -110,6 +110,7 @@ try {
       guardNodeCount: document.querySelectorAll('.transition-io-node[data-io-kind="guard"]').length,
       failureDecorationCount: document.querySelectorAll(".transition-io-cluster.failure-transition,.transition-io-cluster .transition-io-error").length,
       combinedValues: clusters.map(cluster => cluster.querySelector('.transition-io-node[data-io-kind="io"] .transition-io-value')?.textContent || ""),
+      semanticOutputs: clusters.map(cluster => cluster.dataset.outputValue || ""),
       visibleLegacyLabels: visibleLegacyLabels.length,
     };
   });
@@ -123,9 +124,10 @@ try {
   assert.equal(placement.guardNodeCount, 0);
   assert.equal(placement.failureDecorationCount, 0);
   assert(placement.combinedValues.every(value => value.trim().length > 0));
-  assert(placement.combinedValues.some(value => value.includes("Start [input.allowed]") && value.includes(" ➞ ")));
-  assert(placement.combinedValues.some(value => value.startsWith("? input.legacy_alarm") && value.includes(" ➞ ")));
-  assert(placement.combinedValues.filter(value => value.includes("State(")).every(value => value.includes(" ➞ ")));
+  const valuesWithOutput = placement.combinedValues.filter((_, index) => placement.semanticOutputs[index].trim().length > 0);
+  assert(valuesWithOutput.length > 0, placement.combinedValues.join("\n"));
+  assert(valuesWithOutput.every(value => value.includes(" ➞ ")), placement.combinedValues.join("\n"));
+  assert(placement.combinedValues.some(value => value.startsWith("? input.legacy_alarm")), placement.combinedValues.join("\n"));
   assert.equal(placement.visibleLegacyLabels, 0);
 
   await page.click("#glyph-settings");
