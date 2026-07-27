@@ -37,16 +37,19 @@ function synchronize(){
 
 document.addEventListener("pointerdown",event=>{
   const tab=event.target?.closest?.(".tab[data-tab]");
-  if(tab?.dataset.tab!=="state")deactivate();
+  if(tab&&tab.dataset.tab!=="state")deactivate();
 },true);
 document.addEventListener("click",event=>{
   const tab=event.target?.closest?.(".tab[data-tab]");
   if(!tab)return;
-  queueMicrotask(()=>tab.dataset.tab==="state"?activate():deactivate());
+  if(tab.dataset.tab==="state"){
+    queueMicrotask(activate);
+    setTimeout(activate,40);
+  }else{
+    deactivate();
+  }
 },true);
-new MutationObserver(()=>synchronize()).observe(document.body,{childList:true,subtree:true,attributes:true,attributeFilter:["class"]});
 window.glyphTransitionLayoutTabGuard={marker:MARKER,synchronize};
-synchronize();
 })();
 </script>
 """
