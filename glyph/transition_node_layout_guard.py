@@ -67,6 +67,12 @@ function layoutReady(stage){
     && Number(stage.dataset.transitionIoCollisionCount||0)===0;
 }
 
+function markSettling(stage){
+  stage.dataset.transitionIoCollisionSolved="settling";
+  stage.dataset.transitionIoCollisionCount="-1";
+  stage.dataset.transitionIoNodeConstraint="settling";
+}
+
 async function waitForResolution(stage,timeout=2600){
   const started=performance.now();
   while(performance.now()-started<timeout){
@@ -78,24 +84,29 @@ async function waitForResolution(stage,timeout=2600){
 }
 
 async function requestLayout(stage){
+  markSettling(stage);
   await rerouteState(stage);
-  await wait(180);
+  await wait(120);
   window.glyphTransitionIoClusters?.render();
-  await wait(180);
+  await wait(120);
   window.glyphTransitionIoCollisionSolver?.run();
   const state=await waitForResolution(stage);
   if(state==="failed"||state==="timeout"){
     window.glyphTransitionLabelReadability?.repair(stage);
-    await wait(280);
+    await wait(220);
   }
   return layoutReady(stage);
 }
 
 async function settle(record){
   const token=++generation;
-  await wait(900);
+  await wait(120);
   if(token!==generation||!record.node.isConnected||!record.stage.isConnected)return;
-  if(layoutReady(record.stage)){await persist(record.stage);return}
+  if(layoutReady(record.stage)){
+    record.stage.dataset.transitionIoNodeConstraint="accepted";
+    await persist(record.stage);
+    return;
+  }
 
   for(const ratio of[.75,.5,.25,0]){
     if(token!==generation)return;
@@ -132,7 +143,8 @@ document.addEventListener("pointerup",event=>{
   if(!drag||drag.pointerId!==event.pointerId)return;
   const record={...drag,draggedLeft:num(drag.node.style.left),draggedTop:num(drag.node.style.top)};
   drag=null;
-  setTimeout(()=>settle(record).catch(error=>console.error("transition node layout settlement failed",error)),0);
+  markSettling(record.stage);
+  queueMicrotask(()=>settle(record).catch(error=>console.error("transition node layout settlement failed",error)));
 },true);
 
 document.addEventListener("change",event=>{
