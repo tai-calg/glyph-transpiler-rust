@@ -32,6 +32,7 @@ on:
       - "glyph/transition_label_drag_guard.py"
       - "glyph/transition_label_layout.py"
       - "glyph/transition_label_readability.py"
+      - "glyph/transition_layout_interaction_adapter.py"
       - "glyph/transition_layout_transaction.py"
       - "glyph/transition_layout_transaction_bootstrap.py"
       - "glyph/transition_node_layout_guard.py"
@@ -121,6 +122,8 @@ jobs:
             2>&1 | tee build/uml-transition-semantics/verify.log
           node tests/verify_additional_failure_notation.mjs \
             2>&1 | tee build/additional-failure-notation/verify.log
+          node tests/verify_transition_layout_transaction.mjs \
+            2>&1 | tee build/transition-layout-transaction/verify.log
           node tests/verify_diagram_editor_exports.mjs \
             2>&1 | tee build/diagram-editor-exports/verify.log
           node tests/verify_diagram_canvas_viewport.mjs \
@@ -129,8 +132,6 @@ jobs:
             2>&1 | tee build/localized-semantic-canvas/verify.log
           node tests/verify_transition_label_readability.mjs \
             2>&1 | tee build/transition-label-readability/verify.log
-          node tests/verify_transition_layout_transaction.mjs \
-            2>&1 | tee build/transition-layout-transaction/verify.log
           node tests/verify_transition_semantic_readability.mjs \
             2>&1 | tee build/transition-semantic-readability/verify.log
 
