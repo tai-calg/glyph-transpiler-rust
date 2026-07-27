@@ -7,16 +7,18 @@ _SCRIPT = r"""
 <script id="glyph-transition-layout-transaction-bootstrap-v1-script">
 (()=>{
 const MARKER="glyph-transition-layout-transaction-bootstrap-v1";
+const transitionScript=name=>`glyph-transition-${name}-v1-script`;
 const managed=new Set([
-  "glyph-transition-io-clusters-v1-script",
-  "glyph-transition-io-collision-solver-v1-script",
-  "glyph-transition-label-readability-v1-script",
-  "glyph-transition-readable-layout-v1-script",
-  "glyph-transition-semantic-role-lines-v1-script",
-  "glyph-transition-dense-canvas-dimensions-v1-script",
-  "glyph-transition-node-layout-guard-v1-script",
-  "glyph-transition-label-drag-guard-v1-script",
+  transitionScript("io-clusters"),
+  transitionScript("io-collision-solver"),
+  transitionScript("label-readability"),
+  transitionScript("readable-layout"),
+  transitionScript("semantic-role-lines"),
+  transitionScript("dense-canvas-dimensions"),
+  transitionScript("node-layout-guard"),
+  transitionScript("label-drag-guard"),
 ]);
+const ioClusterScript=transitionScript("io-clusters");
 const control={marker:MARKER,ownsScheduling:false,managedScripts:managed};
 const nativeAdd=EventTarget.prototype.addEventListener;
 const nativeSetTimeout=window.setTimeout.bind(window);
@@ -24,7 +26,7 @@ const NativeMutationObserver=window.MutationObserver;
 
 function owner(){return document.currentScript?.id||""}
 function allowInteractive(ownerId,type,event){
-  if(ownerId!=="glyph-transition-io-clusters-v1-script")return false;
+  if(ownerId!==ioClusterScript)return false;
   if(!["pointerdown","pointermove","pointerup","click","dblclick","mouseenter","mouseleave"].includes(type))return false;
   return Boolean(event?.target?.closest?.(".transition-io-cluster"));
 }
