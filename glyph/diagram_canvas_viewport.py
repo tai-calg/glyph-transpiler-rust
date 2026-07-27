@@ -8,8 +8,8 @@ _STYLE = r"""
 .diagram-viewport-tools{display:inline-flex;align-items:center;gap:4px}
 .diagram-viewport-tools button{min-width:34px;padding-left:8px;padding-right:8px}
 .diagram-viewport-tools .zoom-value{min-width:58px;color:var(--muted);font-variant-numeric:tabular-nums;cursor:default}
-.glyph-zoom-surface{position:relative;flex:none}
-.glyph-zoom-surface>.graph-stage{transform-origin:0 0;will-change:transform}
+.glyph-zoom-surface{position:relative;flex:none;overflow-anchor:none}
+.glyph-zoom-surface>.graph-stage{transform-origin:0 0;will-change:transform;overflow-anchor:none}
 @media print{
   .glyph-zoom-surface{width:auto!important;height:auto!important}
   .glyph-zoom-surface>.graph-stage{transform:none!important}
@@ -144,7 +144,7 @@ function bindPinch(shell){
 }
 function bind(shell){
   const stage=shell.querySelector(".graph-stage");if(!stage)return;
-  activeShell=shell;
+  activeShell=shell;shell.style.overflowAnchor="none";
   if(shell.dataset.viewportReady!=="true"){
     shell.dataset.viewportReady="true";
     shell.addEventListener("pointerenter",()=>{activeShell=shell});
