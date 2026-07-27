@@ -39,6 +39,7 @@ async function dragElement(page, locator, deltaX, deltaY, name) {
   await page.mouse.down();
   await page.mouse.move(startX + deltaX, startY + deltaY, { steps: 20 });
   await page.mouse.up();
+  await page.waitForTimeout(140);
 
   const after = await locator.boundingBox();
   assert(after, `${name} has no bounding box after drag`);
