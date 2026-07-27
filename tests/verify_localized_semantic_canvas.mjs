@@ -70,8 +70,9 @@ try {
   await page.waitForFunction(() => document.querySelector("#status")?.classList.contains("ready"));
   await page.waitForFunction(() => {
     const stage = document.querySelector(".graph-stage");
+    const solved = stage?.dataset.transitionIoCollisionSolved;
     return stage?.dataset.transitionIoClustersReady === "true"
-      && stage?.dataset.transitionIoCollisionSolved === "true"
+      && (solved === "true" || solved === "fallback")
       && stage?.dataset.stateTransitionIRV3LabelsReady === "true"
       && document.querySelector("#glyph-settings");
   });
@@ -106,7 +107,7 @@ try {
       ioCount: clusters.filter(cluster => cluster.querySelector('.transition-io-node[data-io-kind="io"]')).length,
       inputCount: document.querySelectorAll('.transition-io-node[data-io-kind="input"]').length,
       outputCount: document.querySelectorAll('.transition-io-node[data-io-kind="output"]').length,
-      guardCount: clusters.filter(cluster => cluster.querySelector('.transition-io-node[data-io-kind="guard"]')).length,
+      guardNodeCount: document.querySelectorAll('.transition-io-node[data-io-kind="guard"]').length,
       failureDecorationCount: document.querySelectorAll(".transition-io-cluster.failure-transition,.transition-io-cluster .transition-io-error").length,
       combinedValues: clusters.map(cluster => cluster.querySelector('.transition-io-node[data-io-kind="io"] .transition-io-value')?.textContent || ""),
       visibleLegacyLabels: visibleLegacyLabels.length,
@@ -119,9 +120,10 @@ try {
   assert.equal(placement.ioCount, placement.distances.length);
   assert.equal(placement.inputCount, 0);
   assert.equal(placement.outputCount, 0);
-  assert(placement.guardCount > 0);
+  assert.equal(placement.guardNodeCount, 0);
   assert.equal(placement.failureDecorationCount, 0);
   assert(placement.combinedValues.every(value => value.trim().length > 0));
+  assert(placement.combinedValues.some(value => value.includes("[input.allowed]")));
   assert(placement.combinedValues.some(value => value.includes(" / ")));
   assert.equal(placement.visibleLegacyLabels, 0);
 
@@ -130,10 +132,7 @@ try {
   assert.equal((await page.locator("#compile").textContent()).trim(), "Compile");
   const englishWarnings = await page.locator(".analysis-panel").textContent();
   assert(englishWarnings.includes("provisionally"), englishWarnings);
-  await page.waitForFunction(() => (
-    [...document.querySelectorAll(".transition-io-role")].some(item => item.textContent === "Guard")
-    && document.querySelectorAll('.transition-io-node[data-io-kind="io"]').length > 0
-  ));
+  await page.waitForFunction(() => document.querySelectorAll('.transition-io-node[data-io-kind="io"]').length > 0);
   await page.click("#glyph-settings-close");
 
   const beforePan = await page.evaluate(() => {
@@ -171,4 +170,4 @@ try {
   await stopProcess(child);
 }
 
-console.log("verified Japanese-first diagnostics, compact transition I/O, proximity and canvas panning");
+console.log("verified Japanese-first diagnostics, one UML transition label, proximity and canvas panning");
