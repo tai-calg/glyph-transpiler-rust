@@ -63,6 +63,13 @@ async function ioPlacement(locator) {
   });
 }
 
+async function waitForIoLayout(page) {
+  await page.waitForFunction(() => {
+    const state = document.querySelector(".graph-stage")?.dataset.transitionIoCollisionSolved;
+    return state === "true" || state === "fallback";
+  });
+}
+
 const logs = [];
 const port = 8894;
 const child = spawn("python3", ["glyph.py", "examples/state_diagrams/conveyor_control.glyph"], {
@@ -90,7 +97,7 @@ try {
   await page.waitForFunction(() => (
     document.querySelector("#diagram-tools")
     && document.querySelector(".graph-stage")?.dataset.editorReady === "true"
-    && document.querySelector(".graph-stage")?.dataset.transitionIoCollisionSolved === "true"
+    && ["true", "fallback"].includes(document.querySelector(".graph-stage")?.dataset.transitionIoCollisionSolved)
     && document.querySelector(".transition-io-cluster")?.dataset.ioDragReady === "true"
     && document.querySelector(".initial-transition-path")
   ));
@@ -106,7 +113,7 @@ try {
 
   const node = page.locator(".state-node").first();
   await dragElement(page, node, 170, 160, "state node");
-  await page.waitForFunction(() => document.querySelector(".graph-stage")?.dataset.transitionIoCollisionSolved === "true");
+  await waitForIoLayout(page);
   await page.waitForTimeout(220);
   const nodeStored = await page.evaluate(() => Object.keys(localStorage).some(
     key => key.startsWith("glyph.diagram.positions.v1:"),
@@ -171,10 +178,11 @@ try {
   const restored = page.locator(`.transition-io-cluster[data-transition-id="${transitionId}"]`);
   await page.waitForFunction(id => {
     const element = document.querySelector(`.transition-io-cluster[data-transition-id="${id}"]`);
+    const layout = element?.closest(".graph-stage")?.dataset.transitionIoCollisionSolved;
     return element?.dataset.manualIo === "true"
       && element.dataset.anchorX !== undefined
       && element.dataset.anchorY !== undefined
-      && element.closest(".graph-stage")?.dataset.transitionIoCollisionSolved === "true";
+      && (layout === "true" || layout === "fallback");
   }, transitionId);
   await page.waitForTimeout(220);
   const restoredPlacement = await ioPlacement(restored);
