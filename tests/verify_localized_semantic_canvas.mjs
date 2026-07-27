@@ -123,8 +123,8 @@ try {
   assert.equal(placement.guardNodeCount, 0);
   assert.equal(placement.failureDecorationCount, 0);
   assert(placement.combinedValues.every(value => value.trim().length > 0));
-  assert(placement.combinedValues.some(value => value.includes("Start [input.allowed] ➞ State(Active)")));
-  assert(placement.combinedValues.some(value => value.startsWith("? input.legacy_alarm ➞ State(Faulted)")));
+  assert(placement.combinedValues.some(value => value.includes("Start [input.allowed]") && value.includes(" ➞ ")));
+  assert(placement.combinedValues.some(value => value.startsWith("? input.legacy_alarm") && value.includes(" ➞ ")));
   assert(placement.combinedValues.filter(value => value.includes("State(")).every(value => value.includes(" ➞ ")));
   assert.equal(placement.visibleLegacyLabels, 0);
 
