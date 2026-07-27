@@ -30,7 +30,6 @@ const cases = [
           "STIR_TRIGGER_AMBIGUOUS_FALLBACK",
         ],
         provisionalTriggers: 7,
-        compact: true,
         labels: [
           "input.fault",
           "state.mode==Red&input.tick",
@@ -49,7 +48,6 @@ const cases = [
         states: ["SessionIdle", "SessionConnecting", "SessionReady", "SessionFailed"],
         warnings: [],
         provisionalTriggers: 0,
-        compact: true,
         labels: [
           "state.phase==SessionIdle&event==SessionStart",
           "state.phase==SessionConnecting&event==SessionAccept",
@@ -69,7 +67,6 @@ const cases = [
         states: ["DoorClosed", "DoorOpen", "DoorJammed"],
         warnings: ["unreachable-state"],
         provisionalTriggers: 0,
-        compact: true,
         labels: [
           "state.mode==DoorClosed&event==DoorOpenRequest",
           "state.mode==DoorOpen&event==DoorCloseRequest",
@@ -80,7 +77,6 @@ const cases = [
         states: ["PowerOff", "PowerOn", "PowerFault"],
         warnings: [],
         provisionalTriggers: 0,
-        compact: true,
         labels: [
           "event==PowerTrip",
           "state.mode==PowerOff&event==PowerStart",
@@ -137,41 +133,47 @@ async function assertDiagramGeometry(page) {
       name: element.textContent?.trim(),
       rect: element.getBoundingClientRect(),
     }));
-    const labels = [...document.querySelectorAll(".edge-label.transition-label")].map((element) => ({
-      kind: "label",
+    const clusters = [...document.querySelectorAll(".transition-io-cluster")].map((element) => ({
+      kind: "io",
       name: element.dataset.transitionId,
+      distance: Number(element.dataset.ioDistance || 0),
       rect: element.getBoundingClientRect(),
     }));
-    const outside = [...nodes, ...labels].filter(({rect}) => (
-      rect.left < stageRect.left - 1 ||
-      rect.top < stageRect.top - 1 ||
-      rect.right > stageRect.right + 1 ||
-      rect.bottom > stageRect.bottom + 1
+    const outside = [...nodes, ...clusters].filter(({rect}) => (
+      rect.left < stageRect.left - 1
+      || rect.top < stageRect.top - 1
+      || rect.right > stageRect.right + 1
+      || rect.bottom > stageRect.bottom + 1
     ));
     const intersects = (left, right) => !(
-      left.right <= right.left + 1 ||
-      right.right <= left.left + 1 ||
-      left.bottom <= right.top + 1 ||
-      right.bottom <= left.top + 1
+      left.right <= right.left + 1
+      || right.right <= left.left + 1
+      || left.bottom <= right.top + 1
+      || right.bottom <= left.top + 1
     );
     const overlaps = [];
-    for (let index = 0; index < labels.length; index += 1) {
-      for (let other = index + 1; other < labels.length; other += 1) {
-        if (intersects(labels[index].rect, labels[other].rect)) {
-          overlaps.push(`${labels[index].name}/${labels[other].name}`);
+    for (let index = 0; index < clusters.length; index += 1) {
+      for (let other = index + 1; other < clusters.length; other += 1) {
+        if (intersects(clusters[index].rect, clusters[other].rect)) {
+          overlaps.push(`${clusters[index].name}/${clusters[other].name}`);
         }
       }
       for (const node of nodes) {
-        if (intersects(labels[index].rect, node.rect)) {
-          overlaps.push(`${labels[index].name}/${node.name}`);
+        if (intersects(clusters[index].rect, node.rect)) {
+          overlaps.push(`${clusters[index].name}/${node.name}`);
         }
       }
     }
-    return {outside: outside.map(item => `${item.kind}:${item.name}`), overlaps};
+    return {
+      outside: outside.map(item => `${item.kind}:${item.name}`),
+      overlaps,
+      distances: clusters.map(item => item.distance),
+    };
   });
   assert.equal(result.error, undefined, result.error);
   assert.deepEqual(result.outside, [], `items outside graph stage: ${JSON.stringify(result.outside)}`);
-  assert.deepEqual(result.overlaps, [], `transition label overlap: ${JSON.stringify(result.overlaps)}`);
+  assert.deepEqual(result.overlaps, [], `transition I/O overlap: ${JSON.stringify(result.overlaps)}`);
+  assert(result.distances.every(value => value <= 96.5), `I/O escaped arrow tether: ${result.distances.join(", ")}`);
 }
 
 const browser = await chromium.launch({ headless: true });
@@ -226,9 +228,10 @@ try {
               && stage?.dataset.labelLayoutReady === "true"
               && stage?.dataset.initialRouteReady === "true"
               && stage?.dataset.stateTransitionIRV3LabelsReady === "true"
+              && stage?.dataset.transitionIoClustersReady === "true"
               && stage.querySelector(":scope > svg.edge-svg > path.initial-transition-path")
               && stage.querySelector(".initial-dot")
-              && stage.querySelectorAll(".edge-label.transition-label").length === transitionCount;
+              && stage.querySelectorAll(".transition-io-cluster").length === transitionCount;
           },
           {machineName: expected.name, transitionCount},
         );
@@ -244,9 +247,19 @@ try {
         assert.deepEqual(sorted(warningCodes), sorted(expected.warnings), `${testCase.slug}/${expected.name}: warnings`);
 
         assert.equal(
-          await page.locator(".edge-label.transition-label").count(),
+          await page.locator(".transition-io-cluster").count(),
           transitionCount,
-          `${testCase.slug}/${expected.name}: transition labels`,
+          `${testCase.slug}/${expected.name}: transition I/O clusters`,
+        );
+        assert.equal(
+          await page.locator('.transition-io-node[data-io-kind="input"]').count(),
+          transitionCount,
+          `${testCase.slug}/${expected.name}: input objects`,
+        );
+        assert.equal(
+          await page.locator('.transition-io-node[data-io-kind="output"]').count(),
+          transitionCount,
+          `${testCase.slug}/${expected.name}: output objects`,
         );
         assert.equal(
           await page.locator(".transition-detail").count(),
@@ -260,30 +273,30 @@ try {
         );
         if (expected.provisionalTriggers !== undefined) {
           assert.equal(
-            await page.locator(".edge-label.transition-label.provisional-trigger").count(),
+            await page.locator(".transition-io-cluster.provisional-trigger").count(),
             expected.provisionalTriggers,
-            `${testCase.slug}/${expected.name}: provisional trigger labels`,
+            `${testCase.slug}/${expected.name}: provisional trigger I/O`,
           );
         }
 
-        const labelIds = await page.locator(".edge-label.transition-label").evaluateAll(
+        const clusterIds = await page.locator(".transition-io-cluster").evaluateAll(
           elements => elements.map(element => element.dataset.transitionId),
         );
         const detailIds = await page.locator(".transition-detail").evaluateAll(
           elements => elements.map(element => element.dataset.transitionId),
         );
-        assert.deepEqual(sorted(labelIds), sorted(detailIds));
+        assert.deepEqual(sorted(clusterIds), sorted(detailIds));
 
         const fullLabels = await page.locator(".transition-detail-condition").allTextContents();
         for (const expectedLabel of expected.labels ?? []) {
           assert(fullLabels.includes(expectedLabel), `${testCase.slug}/${expected.name}: missing full transition label ${expectedLabel}`);
         }
-        if (expected.compact) {
-          assert(
-            await page.locator(".edge-label.transition-label.compact").count() > 0,
-            `${testCase.slug}/${expected.name}: expected compact labels`,
-          );
-        }
+
+        const visibleLegacyLabels = await page.locator(".transition-label").evaluateAll(elements => elements.filter(element => {
+          const style = getComputedStyle(element);
+          return style.visibility !== "hidden" && style.display !== "none" && Number(style.opacity) > 0;
+        }).length);
+        assert.equal(visibleLegacyLabels, 0, `${testCase.slug}/${expected.name}: legacy labels remain visible`);
 
         await assertDiagramGeometry(page);
 
@@ -303,4 +316,4 @@ try {
   await browser.close();
 }
 
-console.log("verified generic compiler-derived state diagrams and provisional trigger rendering");
+console.log("verified compiler-derived state diagrams with structured input/output objects");
