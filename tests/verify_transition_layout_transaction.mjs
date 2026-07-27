@@ -93,7 +93,6 @@ async function dragFeasibleTransitionCluster(page) {
         return { cluster, transitionId };
       }
       await cluster.dblclick();
-      window;
       await page.evaluate(() => window.glyphTransitionLayoutTransaction.run());
       await waitForTransaction(page);
     }
