@@ -6,7 +6,7 @@ _MARKER = "glyph-transition-readable-layout-v1"
 _STYLE = r"""
 <style id="glyph-transition-readable-layout-v1-style">
 .transition-io-cluster.semantic-readable-label{
-  max-width:270px!important;
+  max-width:380px!important;
 }
 .transition-io-cluster.semantic-readable-label .transition-io-node.io,
 .transition-io-cluster.semantic-readable-label.compact-io .transition-io-node.io,
@@ -49,13 +49,17 @@ function preferredCut(value,limit){
   const bounded=Math.min(limit,value.length-1),characters=["(",")","[","]",",",".","_","&"," "];
   for(let index=bounded;index>Math.max(5,bounded-12);index-=1){if(characters.includes(value[index]))return index+1}
   for(let index=bounded+1;index<Math.min(value.length,bounded+12);index+=1){if(characters.includes(value[index]))return index+1}
-  return Math.min(value.length,limit);
+  return value.length;
 }
 
 function splitExact(value,limit=MAX_LINE){
   const lines=[];
   let remaining=text(value);
-  while(remaining.length>limit){const cut=preferredCut(remaining,limit);lines.push(remaining.slice(0,cut));remaining=remaining.slice(cut)}
+  while(remaining.length>limit){
+    const cut=preferredCut(remaining,limit);
+    lines.push(remaining.slice(0,cut));
+    remaining=remaining.slice(cut);
+  }
   if(remaining.length||!lines.length)lines.push(remaining);
   return lines;
 }
@@ -63,7 +67,12 @@ function splitExact(value,limit=MAX_LINE){
 function semanticLines(cluster){
   const input=text(cluster.dataset.inputValue),guard=text(cluster.dataset.guardValue),output=text(cluster.dataset.outputValue),lines=[];
   const head=`${input}${guard?` [${guard}]`:""}`;
-  if(guard&&head.length>MAX_LINE){lines.push(...splitExact(input));lines.push(...splitExact(` [${guard}]`))}else lines.push(...splitExact(head));
+  if(guard&&head.length>MAX_LINE){
+    lines.push(...splitExact(input));
+    lines.push(...splitExact(` [${guard}]`));
+  }else{
+    lines.push(...splitExact(head));
+  }
   if(output)lines.push(...splitExact(` ➞ ${output}`));
   return lines.filter(line=>line.length>0);
 }
@@ -73,9 +82,20 @@ function formatCluster(cluster){
   const signature=JSON.stringify([cluster.dataset.inputValue||"",cluster.dataset.guardValue||"",cluster.dataset.outputValue||""]);
   if(cluster.dataset.semanticLineSignature===signature)return;
   const lines=semanticLines(cluster),expected=cluster.dataset.ioValue||value.textContent||"";
-  value.replaceChildren(...lines.map(line=>{const span=document.createElement("span");span.className="transition-semantic-line";span.textContent=line;return span}));
-  if(value.textContent!==expected){value.textContent=expected;cluster.dataset.semanticLineFallback="true"}else delete cluster.dataset.semanticLineFallback;
-  const longest=Math.max(1,...lines.map(line=>line.length)),width=clamp(Math.ceil(longest*5.65+18),104,260);
+  value.replaceChildren(...lines.map(line=>{
+    const span=document.createElement("span");
+    span.className="transition-semantic-line";
+    span.textContent=line;
+    return span;
+  }));
+  if(value.textContent!==expected){
+    value.textContent=expected;
+    cluster.dataset.semanticLineFallback="true";
+  }else{
+    delete cluster.dataset.semanticLineFallback;
+  }
+  const longest=Math.max(1,...lines.map(line=>line.length));
+  const width=clamp(Math.ceil(longest*5.65+18),104,360);
   cluster.style.setProperty("--semantic-label-width",`${width}px`);
   cluster.dataset.semanticLineCount=String(lines.length);
   cluster.dataset.semanticLongestLine=String(longest);
@@ -93,14 +113,15 @@ function expandDenseStage(stage,clusters){
   if(clusters.length<DENSE_TRANSITIONS||nodes.length<2||hasSavedNodes())return false;
   const signature=`${nodes.map(node=>node.querySelector(".state-name")?.textContent||"").join("|")}:${clusters.length}`;
   if(stage.dataset.semanticDenseLayout===signature)return false;
-  const stageWidth=Math.max(1180,stage.scrollWidth),stageHeight=Math.max(860,stage.scrollHeight),centerX=stageWidth/2,centerY=stageHeight/2;
-  const radiusX=Math.max(330,Math.min(430,stageWidth*.34)),radiusY=Math.max(245,Math.min(320,stageHeight*.32));
+  const stageWidth=Math.max(1400,stage.scrollWidth),stageHeight=Math.max(1000,stage.scrollHeight),centerX=stageWidth/2,centerY=stageHeight/2;
+  const radiusX=Math.max(420,Math.min(520,stageWidth*.36)),radiusY=Math.max(300,Math.min(380,stageHeight*.34));
   nodes.forEach((node,index)=>{
     const angle=-Math.PI/2+index*2*Math.PI/nodes.length;
     node.style.left=`${Math.round(centerX+Math.cos(angle)*radiusX-node.offsetWidth/2)}px`;
     node.style.top=`${Math.round(centerY+Math.sin(angle)*radiusY-node.offsetHeight/2)}px`;
   });
-  stage.style.width=`${stageWidth}px`;stage.style.height=`${stageHeight}px`;
+  stage.style.width=`${stageWidth}px`;
+  stage.style.height=`${stageHeight}px`;
   stage.dataset.semanticDenseLayout=signature;
   return true;
 }
@@ -119,10 +140,15 @@ async function apply(stage=document.querySelector(".state-node")?.closest(".grap
       window.glyphTransitionIoCollisionSolver?.run();
     }
     document.dispatchEvent(new CustomEvent("glyph-transition-readable-layout-ready",{detail:{marker:MARKER,labels:clusters.length,expanded}}));
-  }finally{running=false}
+  }finally{
+    running=false;
+  }
 }
 
-function schedule(stage=null,delay=0){clearTimeout(timer);timer=setTimeout(()=>apply(stage||document.querySelector(".state-node")?.closest(".graph-stage")).catch(error=>console.error("readable transition layout failed",error)),delay)}
+function schedule(stage=null,delay=0){
+  clearTimeout(timer);
+  timer=setTimeout(()=>apply(stage||document.querySelector(".state-node")?.closest(".graph-stage")).catch(error=>console.error("readable transition layout failed",error)),delay);
+}
 document.addEventListener("glyph-transition-io-clusters-ready",()=>schedule(null,0));
 document.addEventListener("glyph-locale-changed",()=>schedule(null,0));
 document.addEventListener("change",event=>{if(event.target?.id==="machine-select")schedule(null,0)});
