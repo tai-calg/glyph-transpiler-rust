@@ -264,7 +264,8 @@ try {
     if (extension === "svg") {
       const markup = bytes.toString("utf8");
       assert(markup.includes("set_conveyor"), "SVG export omitted transition effect");
-      assert(markup.includes(" / "), "SVG export omitted combined input/effect notation");
+      assert(markup.includes(" ➞ "), "SVG export omitted input-arrow-output notation");
+      assert(!markup.includes(" / "), "SVG export retained the old slash separator");
     }
     assert(bytes.length > 500, `${extension} export is unexpectedly small`);
   }
@@ -278,4 +279,4 @@ try {
   await stopProcess(child);
 }
 
-console.log("verified independent scrolling, compact arrow-tethered I/O, themes, and diagram exports");
+console.log("verified independent scrolling, input-arrow-output labels, themes, and diagram exports");
