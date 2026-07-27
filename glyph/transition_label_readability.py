@@ -9,8 +9,8 @@ _STYLE = r"""
   max-width:240px!important;
 }
 .transition-io-node.io{
-  min-width:96px!important;
-  max-width:200px!important;
+  min-width:88px!important;
+  max-width:176px!important;
   min-height:28px!important;
   padding:4px 7px!important;
   overflow:visible!important;
@@ -29,21 +29,21 @@ _STYLE = r"""
   text-align:center!important;
 }
 .transition-io-cluster.compact-io .transition-io-node.io{
-  min-width:84px!important;
-  max-width:164px!important;
+  min-width:76px!important;
+  max-width:132px!important;
   min-height:26px!important;
   padding:3px 6px!important;
 }
 .transition-io-cluster.micro-io .transition-io-node.io{
-  min-width:76px!important;
-  max-width:140px!important;
+  min-width:64px!important;
+  max-width:96px!important;
   min-height:24px!important;
   padding:3px 5px!important;
   border-radius:6px!important;
 }
 .transition-io-cluster.nano-io .transition-io-node.io{
-  min-width:72px!important;
-  max-width:116px!important;
+  min-width:56px!important;
+  max-width:72px!important;
   min-height:24px!important;
   padding:3px 4px!important;
   border-radius:5px!important;
