@@ -179,10 +179,26 @@ function svg(){
     body+=`<rect x="${x}" y="${y}" width="${width}" height="${height}" rx="10" fill="#fff" stroke="#111"/>${text(x+12,y+24,nameOf(node),15,700)}`;
     [...node.querySelectorAll(".port-text")].forEach((port,index)=>body+=text(x+12,y+52+index*16,port.textContent,10));
   });
-  stage.querySelectorAll(".edge-label").forEach(label=>{
-    const x=label.offsetLeft-label.offsetWidth/2,y=label.offsetTop-label.offsetHeight/2,width=label.offsetWidth,height=label.offsetHeight;
-    body+=`<rect x="${x}" y="${y}" width="${width}" height="${height}" rx="4" fill="#fff" stroke="#777"/>${text(x+width/2,y+height/2+4,label.textContent,10,500,"middle")}`;
-  });
+  const transitionLabels=[...stage.querySelectorAll(".transition-io-cluster")];
+  if(transitionLabels.length){
+    transitionLabels.forEach(cluster=>{
+      const label=cluster.querySelector('.transition-io-node[data-io-kind="io"]');
+      if(!label)return;
+      const x=cluster.offsetLeft-cluster.offsetWidth/2+label.offsetLeft;
+      const y=cluster.offsetTop-cluster.offsetHeight/2+label.offsetTop;
+      const width=label.offsetWidth,height=label.offsetHeight;
+      const provisional=cluster.classList.contains("provisional-trigger");
+      const stroke=root.classList.contains("theme-monochrome")?"#111":provisional?"#9a6700":"#2563eb";
+      const dash=provisional?' stroke-dasharray="5 3"':"";
+      const value=label.querySelector(".transition-io-value")?.textContent||"";
+      body+=`<rect x="${x}" y="${y}" width="${width}" height="${height}" rx="5" fill="#fff" stroke="${stroke}"${dash}/>${text(x+width/2,y+height/2+3,value,7,700,"middle")}`;
+    });
+  }else{
+    stage.querySelectorAll(".edge-label:not(.transition-label)").forEach(label=>{
+      const x=label.offsetLeft-label.offsetWidth/2,y=label.offsetTop-label.offsetHeight/2,width=label.offsetWidth,height=label.offsetHeight;
+      body+=`<rect x="${x}" y="${y}" width="${width}" height="${height}" rx="4" fill="#fff" stroke="#777"/>${text(x+width/2,y+height/2+4,label.textContent,10,500,"middle")}`;
+    });
+  }
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect width="100%" height="100%" fill="#fff"/>${body}</svg>`;
 }
 
