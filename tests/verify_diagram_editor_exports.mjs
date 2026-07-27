@@ -34,22 +34,13 @@ async function dragElement(page, locator, deltaX, deltaY, name) {
   assert(before, `${name} has no bounding box before drag`);
   const startX = before.x + before.width / 2;
   const startY = before.y + before.height / 2;
-
   await page.mouse.move(startX, startY);
   await page.mouse.down();
   await page.mouse.move(startX + deltaX, startY + deltaY, { steps: 20 });
   await page.mouse.up();
-  await page.waitForTimeout(140);
-
   const after = await locator.boundingBox();
   assert(after, `${name} has no bounding box after drag`);
-  const beforeCenter = { x: before.x + before.width / 2, y: before.y + before.height / 2 };
-  const afterCenter = { x: after.x + after.width / 2, y: after.y + after.height / 2 };
-  assert(
-    Math.abs(afterCenter.x - beforeCenter.x) > 10
-      || Math.abs(afterCenter.y - beforeCenter.y) > 10,
-    `${name} did not move`,
-  );
+  assert(Math.abs(after.x - before.x) > 10 || Math.abs(after.y - before.y) > 10, `${name} did not move`);
   return { before, after };
 }
 
@@ -108,6 +99,10 @@ try {
   assert.equal(await page.locator("#diagram-png").count(), 1);
   assert.equal(await page.locator("#diagram-pdf").count(), 1);
   assert.equal(await page.locator("#diagram-theme").inputValue(), "white");
+  assert(await page.locator('.transition-io-node[data-io-kind="io"]').count() > 0);
+  assert.equal(await page.locator('.transition-io-node[data-io-kind="input"]').count(), 0);
+  assert.equal(await page.locator('.transition-io-node[data-io-kind="output"]').count(), 0);
+  assert.equal(await page.locator(".transition-io-error,.failure-transition").count(), 0);
 
   const node = page.locator(".state-node").first();
   await dragElement(page, node, 170, 160, "state node");
@@ -163,20 +158,16 @@ try {
   await page.waitForFunction(() => Object.keys(localStorage).some(
     key => key.startsWith("glyph.diagram.transition-io.v1:"),
   ));
-  await page.waitForFunction(id => {
-    const element = document.querySelector(`.transition-io-cluster[data-transition-id="${id}"]`);
-    return element?.dataset.manualIo === "true"
-      && element.closest(".graph-stage")?.dataset.transitionIoCollisionSolved === "true";
-  }, transitionId);
+  await page.waitForFunction(id => (
+    document.querySelector(`.transition-io-cluster[data-transition-id="${id}"]`)?.dataset.manualIo === "true"
+  ), transitionId);
   const draggedPlacement = await ioPlacement(cluster);
   assert(draggedPlacement.distance <= 96.5, "dragged I/O escaped its arrow tether");
 
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => document.querySelector("#status")?.textContent === "ready");
   const stateTab = page.locator('button[data-tab="state"]');
-  if (!await stateTab.evaluate(button => button.classList.contains("active"))) {
-    await stateTab.click();
-  }
+  if (!await stateTab.evaluate(button => button.classList.contains("active"))) await stateTab.click();
   const restored = page.locator(`.transition-io-cluster[data-transition-id="${transitionId}"]`);
   await page.waitForFunction(id => {
     const element = document.querySelector(`.transition-io-cluster[data-transition-id="${id}"]`);
@@ -189,6 +180,8 @@ try {
   const restoredPlacement = await ioPlacement(restored);
   assert.equal(restoredPlacement.manual, "true");
   assert(restoredPlacement.distance <= 96.5, "restored I/O escaped its arrow tether");
+  assert(Math.abs(restoredPlacement.dx - draggedPlacement.dx) < 4, "I/O x offset from arrow was not restored");
+  assert(Math.abs(restoredPlacement.dy - draggedPlacement.dy) < 4, "I/O y offset from arrow was not restored");
 
   const fixedChrome = await page.evaluate(() => {
     const header = document.querySelector("header");
@@ -239,12 +232,8 @@ try {
   assert.equal(independent.editorAfter, independent.editorBefore, "preview scroll changed editor scroll position");
 
   await page.selectOption("#diagram-theme", "monochrome");
-  assert(await page.locator("html").evaluate(
-    element => element.classList.contains("theme-monochrome"),
-  ));
-  const shellBackground = await page.locator(".canvas-shell").evaluate(
-    element => getComputedStyle(element).backgroundColor,
-  );
+  assert(await page.locator("html").evaluate(element => element.classList.contains("theme-monochrome")));
+  const shellBackground = await page.locator(".canvas-shell").evaluate(element => getComputedStyle(element).backgroundColor);
   assert.equal(shellBackground, "rgb(255, 255, 255)");
 
   for (const [button, extension, signature] of [
@@ -262,31 +251,23 @@ try {
     if (extension === "png") {
       assert.equal(bytes.subarray(0, 8).toString("hex"), signature);
     } else {
-      assert(
-        bytes.toString("latin1", 0, 32).startsWith(signature),
-        `${extension} signature is invalid`,
-      );
+      assert(bytes.toString("latin1", 0, 32).startsWith(signature), `${extension} signature is invalid`);
     }
     if (extension === "svg") {
       const markup = bytes.toString("utf8");
-      assert(markup.includes("set_conveyor"), "SVG export omitted transition output objects");
+      assert(markup.includes("set_conveyor"), "SVG export omitted transition effect");
+      assert(markup.includes(" / "), "SVG export omitted combined input/effect notation");
     }
     assert(bytes.length > 500, `${extension} export is unexpectedly small`);
   }
 
-  await page.screenshot({
-    path: path.join(outputDirectory, "conveyor-monochrome-editor.png"),
-    fullPage: true,
-  });
+  await page.screenshot({ path: path.join(outputDirectory, "conveyor-monochrome-editor.png"), fullPage: true });
   await page.selectOption("#diagram-theme", "white");
-  await page.screenshot({
-    path: path.join(outputDirectory, "conveyor-white-editor.png"),
-    fullPage: true,
-  });
+  await page.screenshot({ path: path.join(outputDirectory, "conveyor-white-editor.png"), fullPage: true });
   await page.close();
 } finally {
   await browser.close();
   await stopProcess(child);
 }
 
-console.log("verified independent scrolling, arrow-tethered I/O objects, themes, and diagram exports");
+console.log("verified independent scrolling, compact arrow-tethered I/O, themes, and diagram exports");
