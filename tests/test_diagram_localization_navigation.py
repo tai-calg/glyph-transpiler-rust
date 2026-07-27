@@ -22,8 +22,11 @@ class DiagramLocalizationNavigationTests(unittest.TestCase):
         self.assertIn('<option value="en">English</option>', html)
         self.assertIn('glyph-locale-change', html)
         self.assertIn('glyph-locale-changed', html)
+        self.assertNotIn("空白をドラッグしてキャンバス", html)
+        self.assertNotIn("Drag an empty area to pan", html)
+        self.assertIn('shell.removeAttribute("title")', html)
 
-    def test_blank_canvas_drag_pans_with_gutter_and_parent_handoff(self) -> None:
+    def test_blank_canvas_drag_pans_without_help_overlay(self) -> None:
         html = enhance_diagram_canvas_navigation_html(DIAGRAM_HTML)
         self.assertIn("glyph-diagram-canvas-navigation-v1-script", html)
         self.assertIn("--glyph-pan-gutter:220px", html)
@@ -31,7 +34,11 @@ class DiagramLocalizationNavigationTests(unittest.TestCase):
         self.assertIn("desiredX", html)
         self.assertIn("residualY", html)
         self.assertIn('shell.closest(".view-body")', html)
-        self.assertIn("空白をドラッグしてキャンバスを移動", html)
+        self.assertNotIn("空白をドラッグしてキャンバスを移動", html)
+        self.assertNotIn("Drag empty canvas to pan", html)
+        self.assertNotIn(".canvas-pan-help{", html)
+        self.assertIn('querySelector(":scope > .canvas-pan-help")?.remove()', html)
+        self.assertIn('shell.removeAttribute("title")', html)
         self.assertIn("overscroll-behavior:contain", html)
         self.assertIn("sessionStorage", html)
 

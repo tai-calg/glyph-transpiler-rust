@@ -44,6 +44,36 @@ async function drag(page, locator, deltaX, deltaY) {
   await page.mouse.up();
 }
 
+async function viewportAnchor(page, point = null) {
+  return page.evaluate(value => {
+    const shell = document.querySelector(".canvas-shell");
+    const stage = shell?.querySelector(".graph-stage");
+    const surface = stage?.parentElement;
+    if (!shell || !stage || !surface) return null;
+    const clientX = value?.clientX ?? shell.clientWidth * 0.68;
+    const clientY = value?.clientY ?? shell.clientHeight * 0.42;
+    const scale = Number.parseFloat(stage.dataset.viewportScale || "1");
+    const shellRect = shell.getBoundingClientRect();
+    return {
+      clientX,
+      clientY,
+      pageX: shellRect.left + clientX,
+      pageY: shellRect.top + clientY,
+      diagramX: (shell.scrollLeft + clientX - surface.offsetLeft) / scale,
+      diagramY: (shell.scrollTop + clientY - surface.offsetTop) / scale,
+      scale,
+      scrollLeft: shell.scrollLeft,
+      scrollTop: shell.scrollTop,
+      surfaceLeft: surface.offsetLeft,
+      surfaceTop: surface.offsetTop,
+      shellWidth: shell.clientWidth,
+      shellHeight: shell.clientHeight,
+      scrollWidth: shell.scrollWidth,
+      scrollHeight: shell.scrollHeight,
+    };
+  }, point);
+}
+
 const logs = [];
 const port = 8896;
 const child = spawn("python3", ["glyph.py", "examples/state_diagrams/conveyor_control.glyph"], {
@@ -72,8 +102,11 @@ try {
     && document.querySelector("#diagram-fit")
     && document.querySelector("#diagram-view-reset")
     && document.querySelector(".graph-stage")?.dataset.viewportScale
+    && document.querySelector(".canvas-shell")?.dataset.touchpadZoomReady === "true"
   ));
 
+  assert.equal(await page.locator(".canvas-pan-help").count(), 0);
+  assert.equal(await page.locator(".canvas-shell").getAttribute("title"), null);
   assert.equal(await page.locator("#diagram-zoom-value").textContent(), "100%");
 
   await page.click("#diagram-zoom-out");
@@ -89,6 +122,47 @@ try {
     Math.abs((afterLeft - beforeLeft) - 100) <= 8,
     `zoom-aware node drag moved ${afterLeft - beforeLeft}px instead of about 100px`,
   );
+
+  await page.click("#diagram-view-reset");
+  await page.waitForFunction(() => document.querySelector(".graph-stage")?.dataset.viewportScale === "1");
+  const anchorBefore = await viewportAnchor(page);
+  assert(anchorBefore, "missing viewport anchor before pinch");
+  await page.locator(".canvas-shell").dispatchEvent("wheel", {
+    deltaY: -160,
+    deltaMode: 0,
+    ctrlKey: true,
+    clientX: anchorBefore.pageX,
+    clientY: anchorBefore.pageY,
+  });
+  await page.waitForFunction(() => Number.parseFloat(document.querySelector(".graph-stage")?.dataset.viewportScale || "1") > 1);
+  await page.waitForTimeout(160);
+  const anchorAfterZoomIn = await viewportAnchor(page, {
+    clientX: anchorBefore.clientX,
+    clientY: anchorBefore.clientY,
+  });
+  const anchorDiagnostics = `before=${JSON.stringify(anchorBefore)} after=${JSON.stringify(anchorAfterZoomIn)}`;
+  assert(anchorAfterZoomIn.scale > anchorBefore.scale, `touchpad pinch did not zoom in; ${anchorDiagnostics}`);
+  assert(Math.abs(anchorAfterZoomIn.shellHeight - anchorBefore.shellHeight) < 2, `pinch resized the canvas viewport; ${anchorDiagnostics}`);
+  assert(Math.abs(anchorAfterZoomIn.diagramX - anchorBefore.diagramX) < 3, `pinch changed the x anchor; ${anchorDiagnostics}`);
+  assert(Math.abs(anchorAfterZoomIn.diagramY - anchorBefore.diagramY) < 3, `pinch changed the y anchor; ${anchorDiagnostics}`);
+
+  await page.locator(".canvas-shell").dispatchEvent("wheel", {
+    deltaY: 160,
+    deltaMode: 0,
+    ctrlKey: true,
+    clientX: anchorBefore.pageX,
+    clientY: anchorBefore.pageY,
+  });
+  await page.waitForFunction(previous => (
+    Number.parseFloat(document.querySelector(".graph-stage")?.dataset.viewportScale || "1") < previous
+  ), anchorAfterZoomIn.scale);
+  await page.waitForTimeout(80);
+  const anchorAfterZoomOut = await viewportAnchor(page, {
+    clientX: anchorBefore.clientX,
+    clientY: anchorBefore.clientY,
+  });
+  assert(anchorAfterZoomOut.scale < anchorAfterZoomIn.scale, "touchpad pinch did not zoom out");
+  assert(Math.abs(anchorAfterZoomOut.shellHeight - anchorBefore.shellHeight) < 2, "pinch out resized the canvas viewport");
 
   await page.click("#diagram-fit");
   await page.waitForFunction(() => sessionStorage.getItem("glyph.diagram.viewport-mode.v1:state:0") === "fit");
@@ -125,4 +199,4 @@ try {
   await stopProcess(child);
 }
 
-console.log("verified zoom, fit-to-screen, reset-view, and zoom-aware dragging");
+console.log("verified touchpad pinch zoom, fixed canvas viewport, fit-to-screen, reset-view, and zoom-aware dragging");
