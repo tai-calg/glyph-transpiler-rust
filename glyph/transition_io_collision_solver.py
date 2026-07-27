@@ -6,19 +6,22 @@ _MARKER = "glyph-transition-io-collision-solver-v1"
 _STYLE = r"""
 <style id="glyph-transition-io-collision-solver-v1-style">
 .transition-io-cluster.nano-io{gap:1px}
-.transition-io-cluster.nano-io .transition-io-main{gap:1px}
-.transition-io-cluster.nano-io .transition-io-node{
-  min-width:32px;
-  max-width:46px;
+.transition-io-cluster.nano-io .transition-io-node.io{
+  min-width:42px;
+  max-width:78px;
   min-height:18px;
   padding:1px 2px;
   border-radius:4px;
 }
-.transition-io-cluster.nano-io .transition-io-node.guard{min-width:44px;max-width:82px}
+.transition-io-cluster.nano-io .transition-io-node.guard{
+  min-width:42px;
+  max-width:78px;
+  min-height:16px;
+  padding:1px 2px;
+  border-radius:4px;
+}
 .transition-io-cluster.nano-io .transition-io-role{display:none}
 .transition-io-cluster.nano-io .transition-io-value{font-size:6px;line-height:1.05}
-.transition-io-cluster.nano-io .transition-io-error{font-size:5px;line-height:1}
-.transition-io-cluster.nano-io .transition-io-flow{font-size:7px}
 </style>
 """
 
