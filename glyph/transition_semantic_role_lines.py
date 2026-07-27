@@ -113,16 +113,15 @@ async function settle(stage,clusters,changed){
   stage.dataset.transitionIoCollisionCount="-1";
   try{
     let pairs=collisionPairs(stage);
-    for(let attempt=0;attempt<6;attempt+=1){
+    for(let attempt=0;attempt<8;attempt+=1){
       window.glyphTransitionIoCollisionSolver?.run();
-      await wait(240);
+      await wait(260);
       pairs=collisionPairs(stage);
       if(!pairs.length)break;
       window.glyphTransitionLabelReadability?.repair(stage);
-      await wait(360);
+      await wait(420);
       pairs=collisionPairs(stage);
       if(!pairs.length)break;
-      if(attempt===2)await window.glyphTransitionNodeLayoutGuard?.requestLayout(stage);
     }
     pairs=collisionPairs(stage);
     stage.dataset.transitionIoCollisionCount=String(pairs.length);
