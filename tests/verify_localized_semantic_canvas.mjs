@@ -69,7 +69,7 @@ try {
   await page.goto(url, { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => document.querySelector("#status")?.classList.contains("ready"));
   await page.waitForFunction(() => (
-    document.querySelector(".graph-stage")?.dataset.labelEditorReady === "true"
+    document.querySelector(".graph-stage")?.dataset.transitionIoClustersReady === "true"
     && document.querySelector(".graph-stage")?.dataset.stateTransitionIRV3LabelsReady === "true"
     && document.querySelector("#glyph-settings")
   ));
@@ -85,30 +85,46 @@ try {
   assert(!detailText.some(value => value.includes("[input.legacy_alarm]")), detailText.join("\n"));
 
   const placement = await page.evaluate(() => {
-    const labels = [...document.querySelectorAll(".transition-label")];
+    const clusters = [...document.querySelectorAll(".transition-io-cluster")];
     const nodes = [...document.querySelectorAll(".state-node")];
     const overlaps = (a, b, gap = 2) => !(
       a.right + gap <= b.left || b.right + gap <= a.left
       || a.bottom + gap <= b.top || b.bottom + gap <= a.top
     );
-    const labelRects = labels.map(label => label.getBoundingClientRect());
+    const clusterRects = clusters.map(cluster => cluster.getBoundingClientRect());
     const nodeRects = nodes.map(node => node.getBoundingClientRect());
+    const visibleLegacyLabels = [...document.querySelectorAll(".transition-label")].filter(label => {
+      const style = getComputedStyle(label);
+      return style.visibility !== "hidden" && style.display !== "none" && Number(style.opacity) > 0;
+    });
     return {
-      distances: labels.map(label => Number(label.dataset.labelDistance || 0)),
-      labelOverlap: labelRects.some((rect, index) => labelRects.slice(index + 1).some(other => overlaps(rect, other))),
-      nodeOverlap: labelRects.some(rect => nodeRects.some(node => overlaps(rect, node))),
+      distances: clusters.map(cluster => Number(cluster.dataset.ioDistance || 0)),
+      clusterOverlap: clusterRects.some((rect, index) => clusterRects.slice(index + 1).some(other => overlaps(rect, other))),
+      nodeOverlap: clusterRects.some(rect => nodeRects.some(node => overlaps(rect, node))),
+      inputCount: clusters.filter(cluster => cluster.querySelector('.transition-io-node[data-io-kind="input"]')).length,
+      outputCount: clusters.filter(cluster => cluster.querySelector('.transition-io-node[data-io-kind="output"]')).length,
+      guardCount: clusters.filter(cluster => cluster.querySelector('.transition-io-node[data-io-kind="guard"]')).length,
+      visibleLegacyLabels: visibleLegacyLabels.length,
     };
   });
   assert(placement.distances.length > 0);
   assert(placement.distances.every(value => value <= 96.5), placement.distances.join(", "));
-  assert.equal(placement.labelOverlap, false);
+  assert.equal(placement.clusterOverlap, false);
   assert.equal(placement.nodeOverlap, false);
+  assert.equal(placement.inputCount, placement.distances.length);
+  assert.equal(placement.outputCount, placement.distances.length);
+  assert(placement.guardCount > 0);
+  assert.equal(placement.visibleLegacyLabels, 0);
 
   await page.click("#glyph-settings");
   await page.selectOption("#glyph-language", "en");
   assert.equal((await page.locator("#compile").textContent()).trim(), "Compile");
   const englishWarnings = await page.locator(".analysis-panel").textContent();
   assert(englishWarnings.includes("provisionally"), englishWarnings);
+  await page.waitForFunction(() => (
+    [...document.querySelectorAll(".transition-io-role")].some(item => item.textContent === "Input")
+    && [...document.querySelectorAll(".transition-io-role")].some(item => item.textContent === "Output")
+  ));
   await page.click("#glyph-settings-close");
 
   const beforePan = await page.evaluate(() => {
@@ -146,4 +162,4 @@ try {
   await stopProcess(child);
 }
 
-console.log("verified Japanese-first diagnostics, semantic labels, proximity and canvas panning");
+console.log("verified Japanese-first diagnostics, structured transition I/O, proximity and canvas panning");
