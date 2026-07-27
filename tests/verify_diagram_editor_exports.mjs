@@ -95,7 +95,7 @@ try {
   await page.waitForFunction(() => (
     document.querySelector("#diagram-tools")
     && document.querySelector(".graph-stage")?.dataset.editorReady === "true"
-    && document.querySelector(".graph-stage")?.dataset.transitionIoClustersReady === "true"
+    && document.querySelector(".graph-stage")?.dataset.transitionIoCollisionSolved === "true"
     && document.querySelector(".transition-io-cluster")?.dataset.ioDragReady === "true"
     && document.querySelector(".initial-transition-path")
   ));
@@ -107,7 +107,7 @@ try {
 
   const node = page.locator(".state-node").first();
   await dragElement(page, node, 170, 160, "state node");
-  await page.waitForFunction(() => document.querySelector(".graph-stage")?.dataset.transitionIoClustersReady === "true");
+  await page.waitForFunction(() => document.querySelector(".graph-stage")?.dataset.transitionIoCollisionSolved === "true");
   await page.waitForTimeout(220);
   const nodeStored = await page.evaluate(() => Object.keys(localStorage).some(
     key => key.startsWith("glyph.diagram.positions.v1:"),
@@ -144,7 +144,18 @@ try {
   const cluster = page.locator(".transition-io-cluster").first();
   const transitionId = await cluster.getAttribute("data-transition-id");
   assert(transitionId, "transition I/O cluster has no stable id");
-  await dragElement(page, cluster, 72, 48, "transition I/O cluster");
+  const tangent = await cluster.evaluate(element => {
+    const left = Number.parseFloat(element.style.left || "0");
+    const top = Number.parseFloat(element.style.top || "0");
+    const anchorX = Number(element.dataset.anchorX || 0);
+    const anchorY = Number(element.dataset.anchorY || 0);
+    const dx = left - anchorX;
+    const dy = top - anchorY;
+    const length = Math.hypot(dx, dy);
+    if (length < 1) return { x: 36, y: 0 };
+    return { x: -dy / length * 36, y: dx / length * 36 };
+  });
+  await dragElement(page, cluster, tangent.x, tangent.y, "transition I/O cluster");
   await page.waitForFunction(() => Object.keys(localStorage).some(
     key => key.startsWith("glyph.diagram.transition-io.v1:"),
   ));
@@ -165,7 +176,8 @@ try {
     const element = document.querySelector(`.transition-io-cluster[data-transition-id="${id}"]`);
     return element?.dataset.manualIo === "true"
       && element.dataset.anchorX !== undefined
-      && element.dataset.anchorY !== undefined;
+      && element.dataset.anchorY !== undefined
+      && element.closest(".graph-stage")?.dataset.transitionIoCollisionSolved === "true";
   }, transitionId);
   await page.waitForTimeout(220);
   const restoredPlacement = await ioPlacement(restored);
