@@ -42,8 +42,11 @@ async function dragElement(page, locator, deltaX, deltaY, name) {
 
   const after = await locator.boundingBox();
   assert(after, `${name} has no bounding box after drag`);
+  const beforeCenter = { x: before.x + before.width / 2, y: before.y + before.height / 2 };
+  const afterCenter = { x: after.x + after.width / 2, y: after.y + after.height / 2 };
   assert(
-    Math.abs(after.x - before.x) > 10 || Math.abs(after.y - before.y) > 10,
+    Math.abs(afterCenter.x - beforeCenter.x) > 10
+      || Math.abs(afterCenter.y - beforeCenter.y) > 10,
     `${name} did not move`,
   );
   return { before, after };
