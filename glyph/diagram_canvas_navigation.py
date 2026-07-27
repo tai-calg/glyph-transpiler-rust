@@ -7,11 +7,17 @@ _STYLE = r"""
 <style id="glyph-diagram-canvas-navigation-v1-style">
 .canvas-shell.glyph-pan-ready{
   --glyph-pan-gutter:220px;
+  block-size:clamp(390px,calc(100dvh - 230px),760px);
+  min-block-size:390px;
+  max-block-size:760px;
   padding:var(--glyph-pan-gutter);
+  overflow:auto;
+  overflow-anchor:none;
   overscroll-behavior:contain;
   touch-action:none;
   cursor:grab;
   scroll-behavior:auto;
+  contain:layout paint;
 }
 .canvas-shell.glyph-pan-ready.glyph-panning{cursor:grabbing;user-select:none}
 .canvas-shell.glyph-pan-ready .graph-stage{min-width:100%;min-height:100%;flex:none}
@@ -72,7 +78,7 @@ new MutationObserver(enhance).observe(document.getElementById("view")||document.
 
 
 def enhance_diagram_canvas_navigation_html(html: str) -> str:
-    """Pan empty canvas space and hand residual vertical motion to the preview pane."""
+    """Pan a fixed diagram viewport and hand residual motion to the preview pane."""
 
     if _MARKER in html:
         return html
