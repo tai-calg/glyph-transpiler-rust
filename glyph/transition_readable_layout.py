@@ -126,6 +126,13 @@ function expandDenseStage(stage,clusters){
   return true;
 }
 
+function markPending(stage){
+  if(!stage)return;
+  stage.dataset.transitionSemanticLinesReady="pending";
+  stage.dataset.transitionIoCollisionSolved="semantic-pending";
+  stage.dataset.transitionIoCollisionCount="-1";
+}
+
 async function apply(stage=document.querySelector(".state-node")?.closest(".graph-stage")){
   if(running||!stage||stage.dataset.transitionIoClustersReady!=="true")return;
   running=true;
@@ -133,12 +140,12 @@ async function apply(stage=document.querySelector(".state-node")?.closest(".grap
     const clusters=[...stage.querySelectorAll(".transition-io-cluster")];
     clusters.forEach(formatCluster);
     const expanded=expandDenseStage(stage,clusters);
-    stage.dataset.transitionSemanticLinesReady="true";
     if(expanded){
       await window.glyphTransitionNodeLayoutGuard?.requestLayout(stage);
     }else{
       window.glyphTransitionIoCollisionSolver?.run();
     }
+    stage.dataset.transitionSemanticLinesReady="true";
     document.dispatchEvent(new CustomEvent("glyph-transition-readable-layout-ready",{detail:{marker:MARKER,labels:clusters.length,expanded}}));
   }finally{
     running=false;
@@ -149,7 +156,11 @@ function schedule(stage=null,delay=0){
   clearTimeout(timer);
   timer=setTimeout(()=>apply(stage||document.querySelector(".state-node")?.closest(".graph-stage")).catch(error=>console.error("readable transition layout failed",error)),delay);
 }
-document.addEventListener("glyph-transition-io-clusters-ready",()=>schedule(null,0));
+document.addEventListener("glyph-transition-io-clusters-ready",event=>{
+  const stage=event.target?.querySelector?.(".graph-stage")||document.querySelector(".state-node")?.closest(".graph-stage");
+  markPending(stage);
+  schedule(stage,0);
+});
 document.addEventListener("glyph-locale-changed",()=>schedule(null,0));
 document.addEventListener("change",event=>{if(event.target?.id==="machine-select")schedule(null,0)});
 new MutationObserver(()=>schedule(null,30)).observe(document.getElementById("view")||document.body,{childList:true,subtree:true});
