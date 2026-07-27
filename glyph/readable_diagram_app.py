@@ -35,6 +35,9 @@ from .transition_layout_transaction_bootstrap import (
     enhance_transition_layout_transaction_bootstrap_html,
 )
 from .transition_node_layout_guard import enhance_transition_node_layout_guard_html
+from .transition_node_position_adapter import (
+    enhance_transition_node_position_adapter_html,
+)
 from .transition_readable_exports import enhance_transition_readable_exports_html
 from .transition_readable_layout import enhance_transition_readable_layout_html
 from .transition_route_labels import enhance_transition_route_html
@@ -61,34 +64,36 @@ def prepare_diagram_app() -> None:
 
     install_serial_compilation()
     _install_diagram_diagnostic_localization()
-    diagram_app.DIAGRAM_HTML = enhance_transition_layout_interaction_adapter_html(
-        enhance_transition_layout_transaction_html(
-            enhance_transition_dense_canvas_dimensions_html(
-                enhance_transition_semantic_role_lines_html(
-                    enhance_transition_readable_layout_html(
-                        enhance_transition_readable_exports_html(
-                            enhance_transition_label_drag_guard_html(
-                                enhance_transition_node_layout_guard_html(
-                                    enhance_transition_label_readability_html(
-                                        enhance_diagram_locale_html(
-                                            enhance_transition_io_collision_solver_html(
-                                                enhance_transition_io_clusters_html(
-                                                    enhance_diagram_canvas_viewport_html(
-                                                        enhance_diagram_canvas_navigation_html(
-                                                            enhance_workspace_layout_html(
-                                                                enhance_diagram_label_editor_html(
-                                                                    enhance_diagram_live_stability_html(
-                                                                        enhance_code_derived_system_html(
-                                                                            enhance_diagram_editor_render_guard_html(
-                                                                                enhance_diagram_editor_route_guard_html(
-                                                                                    enhance_diagram_editor_exports_html(
-                                                                                        enhance_state_transition_ir_html(
-                                                                                            enhance_initial_transition_html(
-                                                                                                enhance_transition_route_html(
-                                                                                                    enhance_uml_transition_html(
-                                                                                                        enhance_transition_layout_transaction_bootstrap_html(
-                                                                                                            enhance_diagram_html(
-                                                                                                                diagram_app.DIAGRAM_HTML
+    diagram_app.DIAGRAM_HTML = enhance_transition_node_position_adapter_html(
+        enhance_transition_layout_interaction_adapter_html(
+            enhance_transition_layout_transaction_html(
+                enhance_transition_dense_canvas_dimensions_html(
+                    enhance_transition_semantic_role_lines_html(
+                        enhance_transition_readable_layout_html(
+                            enhance_transition_readable_exports_html(
+                                enhance_transition_label_drag_guard_html(
+                                    enhance_transition_node_layout_guard_html(
+                                        enhance_transition_label_readability_html(
+                                            enhance_diagram_locale_html(
+                                                enhance_transition_io_collision_solver_html(
+                                                    enhance_transition_io_clusters_html(
+                                                        enhance_diagram_canvas_viewport_html(
+                                                            enhance_diagram_canvas_navigation_html(
+                                                                enhance_workspace_layout_html(
+                                                                    enhance_diagram_label_editor_html(
+                                                                        enhance_diagram_live_stability_html(
+                                                                            enhance_code_derived_system_html(
+                                                                                enhance_diagram_editor_render_guard_html(
+                                                                                    enhance_diagram_editor_route_guard_html(
+                                                                                        enhance_diagram_editor_exports_html(
+                                                                                            enhance_state_transition_ir_html(
+                                                                                                enhance_initial_transition_html(
+                                                                                                    enhance_transition_route_html(
+                                                                                                        enhance_uml_transition_html(
+                                                                                                            enhance_transition_layout_transaction_bootstrap_html(
+                                                                                                                enhance_diagram_html(
+                                                                                                                    diagram_app.DIAGRAM_HTML
+                                                                                                                )
                                                                                                             )
                                                                                                         )
                                                                                                     )
