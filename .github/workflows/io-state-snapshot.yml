@@ -27,6 +27,7 @@ on:
       - "glyph/state_transition_ir_renderer.py"
       - "glyph/transition_condition_roles.py"
       - "glyph/transition_io_clusters.py"
+      - "glyph/transition_io_collision_solver.py"
       - "glyph/transition_label_layout.py"
       - "glyph/transition_route_labels.py"
       - "glyph/transition_semantics.py"
