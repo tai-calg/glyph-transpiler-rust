@@ -75,7 +75,7 @@ function guardsOf(transition){if(Array.isArray(transition?.guards))return transi
 function unknownOf(transition){return(transition?.unclassified_conditions||[]).map(text).filter(Boolean)}
 function inputOf(transition){const trigger=triggerOf(transition),unknown=unknownOf(transition);if(trigger)return`${trigger.role==="provisional-trigger"?"? ":""}${trigger.display}`;if(unknown.length)return`? ${unknown.join(" & ")}`;return both("自動","automatic")}
 function outputOf(transition){return text(transition?.action)}
-function ioOf(transition){const input=inputOf(transition),guard=guardsOf(transition).join(" & "),output=outputOf(transition);return`${input}${guard?` [${guard}]`:""}${output?` / ${output}`:""}`}
+function ioOf(transition){const input=inputOf(transition),guard=guardsOf(transition).join(" & "),output=outputOf(transition);return`${input}${guard?` [${guard}]`:""}${output?` ➞ ${output}`:""}`}
 function evidenceOf(transition){const trigger=triggerOf(transition),parts=[];if(trigger?.role==="provisional-trigger")parts.push(both("暫定入力: 出来事か継続条件かを確定できない","Provisional input: occurrence semantics are not proven"));else if(trigger?.role==="inferred-trigger")parts.push(both("入力から導出された判別値","Discriminator derived from input"));else if(trigger)parts.push(both("型で確定した入力イベント","Input event confirmed by type"));if(trigger?.roots?.length)parts.push(`origin: ${trigger.roots.join(", ")}`);if(trigger?.path?.length)parts.push(`path: ${trigger.path.join(" → ")}`);return parts.join("\n")}
 function fullSummary(transition){return ioOf(transition)}
 function signatureOf(machine){return[window.GlyphI18n?.locale||document.documentElement.lang||"ja",machine?.name||"",...(machine?.transitions||[]).map(item=>[item.id||"",JSON.stringify(item.trigger||null),JSON.stringify(item.guards||[]),JSON.stringify(item.unclassified_conditions||[]),item.action||""].join("\u001f"))].join("\u001e")}
@@ -115,7 +115,7 @@ for(const event of["glyph-state-transition-ir-v3-labels-ready","glyph-state-tran
 
 
 def enhance_transition_io_clusters_html(html: str) -> str:
-    """Render one UML-style trigger [guard] / effect label per transition."""
+    """Render one compact input [guard] ➞ output label per transition."""
 
     if _MARKER in html:
         return html
