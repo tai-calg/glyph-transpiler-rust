@@ -182,7 +182,9 @@ try {
           output: element.closest(".transition-io-cluster")?.dataset.outputValue || "",
         })));
         assert(combinedValues.every(({value}) => value.trim().length > 0));
-        assert(combinedValues.every(({value, output}) => output ? value.includes(" / ") : !value.includes(" / —")));
+        assert(combinedValues.every(({value, output}) => (
+          output ? value.includes(" ➞ ") && !value.includes(" / ") : !value.includes(" ➞ —") && !value.includes(" / ")
+        )));
 
         if (expected.provisionalTriggers !== undefined) {
           assert.equal(
@@ -213,4 +215,4 @@ try {
   await browser.close();
 }
 
-console.log("verified compiler-derived state diagrams with compact combined I/O objects");
+console.log("verified compiler-derived state diagrams with compact input-arrow-output labels");
