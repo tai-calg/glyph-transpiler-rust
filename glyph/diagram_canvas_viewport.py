@@ -20,8 +20,8 @@ _STYLE = r"""
 _SCRIPT = r"""
 <script id="glyph-diagram-canvas-viewport-v1-script">
 (()=>{
-const MIN_SCALE=.25,MAX_SCALE=3,STEP=.1,FIT_MARGIN=32;
-let activeShell=null,resizeTimer=null;
+const MIN_SCALE=.25,MAX_SCALE=3,STEP=.1,FIT_MARGIN=32,PINCH_SPEED=.0025;
+let activeShell=null,resizeTimer=null,gesture=null;
 const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
 const roundScale=value=>Math.round(clamp(value,MIN_SCALE,MAX_SCALE)*100)/100;
 function locale(){return localStorage.getItem("glyph.ui.locale")==="en"?"en":"ja"}
@@ -54,6 +54,12 @@ function centerCoordinate(shell,surface,scale,clientX=shell.clientWidth/2,client
     x:(shell.scrollLeft+clientX-surface.offsetLeft)/scale,
     y:(shell.scrollTop+clientY-surface.offsetTop)/scale,
   };
+}
+function localPoint(shell,event){
+  const rect=shell.getBoundingClientRect();
+  const rawX=Number.isFinite(event?.clientX)?event.clientX-rect.left:shell.clientWidth/2;
+  const rawY=Number.isFinite(event?.clientY)?event.clientY-rect.top:shell.clientHeight/2;
+  return{clientX:clamp(rawX,0,shell.clientWidth),clientY:clamp(rawY,0,shell.clientHeight)};
 }
 function applyScale(shell,requested,{mode="manual",clientX=shell.clientWidth/2,clientY=shell.clientHeight/2,centerDiagram=false}={}){
   const stage=shell.querySelector(".graph-stage");if(!stage)return;
@@ -108,6 +114,34 @@ function ensureTools(){
   document.getElementById("diagram-view-reset").onclick=()=>reset(activeShell||document.querySelector(".canvas-shell"));
   localizeControls();
 }
+function wheelDelta(event,shell){
+  if(event.deltaMode===1)return event.deltaY*16;
+  if(event.deltaMode===2)return event.deltaY*Math.max(1,shell.clientHeight);
+  return event.deltaY;
+}
+function bindPinch(shell){
+  if(shell.dataset.touchpadZoomReady==="true")return;
+  shell.dataset.touchpadZoomReady="true";
+  shell.addEventListener("wheel",event=>{
+    if(!(event.ctrlKey||event.metaKey)||event.altKey)return;
+    const stage=shell.querySelector(".graph-stage");if(!stage)return;
+    const delta=wheelDelta(event,shell);if(!Number.isFinite(delta)||Math.abs(delta)<.01)return;
+    event.preventDefault();activeShell=shell;
+    const point=localPoint(shell,event),current=scaleFor(stage),next=roundScale(current*Math.exp(-delta*PINCH_SPEED));
+    if(next!==current)applyScale(shell,next,{mode:"manual",...point});
+  },{passive:false});
+  shell.addEventListener("gesturestart",event=>{
+    const stage=shell.querySelector(".graph-stage");if(!stage)return;
+    event.preventDefault();activeShell=shell;gesture={shell,startScale:scaleFor(stage),...localPoint(shell,event)};
+  },{passive:false});
+  shell.addEventListener("gesturechange",event=>{
+    if(!gesture||gesture.shell!==shell)return;
+    event.preventDefault();const factor=Number.parseFloat(event.scale||"1");if(!Number.isFinite(factor))return;
+    applyScale(shell,gesture.startScale*factor,{mode:"manual",clientX:gesture.clientX,clientY:gesture.clientY});
+  },{passive:false});
+  const finishGesture=()=>{if(gesture?.shell===shell)gesture=null};
+  shell.addEventListener("gestureend",finishGesture,{passive:true});shell.addEventListener("gesturecancel",finishGesture,{passive:true});
+}
 function bind(shell){
   const stage=shell.querySelector(".graph-stage");if(!stage)return;
   activeShell=shell;
@@ -115,6 +149,7 @@ function bind(shell){
     shell.dataset.viewportReady="true";
     shell.addEventListener("pointerenter",()=>{activeShell=shell});
   }
+  bindPinch(shell);
   const saved=Number.parseFloat(sessionStorage.getItem(scaleKey())||"1"),scale=Number.isFinite(saved)?saved:1;
   setRaw(shell,stage,scale);updateControls(scale);
   if(sessionStorage.getItem(modeKey())==="fit")setTimeout(()=>fit(shell),0);
@@ -140,7 +175,7 @@ enhance();
 
 
 def enhance_diagram_canvas_viewport_html(html: str) -> str:
-    """Add zoom, fit-to-screen, and reset-view controls to diagram canvases."""
+    """Add zoom, fit-to-screen, reset-view, and touchpad pinch controls."""
 
     if _MARKER in html:
         return html
