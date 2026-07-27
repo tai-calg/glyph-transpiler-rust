@@ -16,12 +16,6 @@ _STYLE = r"""
 .canvas-shell.glyph-pan-ready.glyph-panning{cursor:grabbing;user-select:none}
 .canvas-shell.glyph-pan-ready .graph-stage{min-width:100%;min-height:100%;flex:none}
 .canvas-shell.glyph-pan-ready:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
-.canvas-pan-help{
-  position:sticky;left:12px;bottom:12px;z-index:18;display:inline-flex;
-  width:max-content;max-width:calc(100% - 24px);padding:6px 9px;
-  border:1px solid var(--line);border-radius:999px;background:var(--panel);
-  color:var(--muted);font-size:10px;pointer-events:none;box-shadow:0 4px 12px rgba(0,0,0,.18)
-}
 </style>
 """
 
@@ -31,17 +25,17 @@ _SCRIPT = r"""
 const GUTTER=220,INTERACTIVE=".state-node,.graph-node,.edge-label,.transition-label,button,select,input,textarea,a,.transition-detail,[data-line]";
 let pan=null;
 const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
-function locale(){return localStorage.getItem("glyph.ui.locale")==="en"?"en":"ja"}
 function identity(){const tab=document.querySelector(".tab.active")?.dataset.tab||"state",index=tab==="state"?document.getElementById("machine-select")?.value||0:document.getElementById("system-select")?.value||0;return `${tab}:${index}`}
 function key(){return `glyph.diagram.canvas-pan.v1:${identity()}`}
 function maxScroll(element,axis){return axis==="x"?Math.max(0,element.scrollWidth-element.clientWidth):Math.max(0,element.scrollHeight-element.clientHeight)}
 function saved(){try{return JSON.parse(sessionStorage.getItem(key())||"null")}catch{return null}}
 function persist(shell){sessionStorage.setItem(key(),JSON.stringify({left:shell.scrollLeft,top:shell.scrollTop}))}
 function blankTarget(event,shell){const target=event.target;if(target?.closest?.(INTERACTIVE))return false;return Boolean(target===shell||target?.closest?.(".graph-stage,.edge-svg,.glyph-zoom-surface"))}
-function help(shell){let element=shell.querySelector(":scope > .canvas-pan-help");if(!element){element=document.createElement("div");element.className="canvas-pan-help";shell.appendChild(element)}const value=locale()==="ja"?"空白をドラッグしてキャンバスを移動":"Drag empty canvas to pan";if(element.textContent!==value)element.textContent=value}
+function removeHelp(shell){shell.querySelector(":scope > .canvas-pan-help")?.remove();shell.removeAttribute("title")}
 function bind(shell){
-  if(shell.dataset.canvasPanReady==="true"){help(shell);return}
-  shell.dataset.canvasPanReady="true";shell.classList.add("glyph-pan-ready");shell.tabIndex=0;help(shell);
+  removeHelp(shell);
+  if(shell.dataset.canvasPanReady==="true")return;
+  shell.dataset.canvasPanReady="true";shell.classList.add("glyph-pan-ready");shell.tabIndex=0;
   requestAnimationFrame(()=>{const position=saved();shell.scrollLeft=position?.left??GUTTER;shell.scrollTop=position?.top??GUTTER});
   shell.addEventListener("pointerdown",event=>{
     if((event.button!==0&&event.button!==1)||!blankTarget(event,shell))return;
