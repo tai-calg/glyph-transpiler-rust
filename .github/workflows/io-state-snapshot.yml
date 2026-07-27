@@ -26,11 +26,14 @@ on:
       - "glyph/state_transition_pipeline.py"
       - "glyph/state_transition_ir_renderer.py"
       - "glyph/transition_condition_roles.py"
+      - "glyph/transition_dense_canvas_dimensions.py"
       - "glyph/transition_io_clusters.py"
       - "glyph/transition_io_collision_solver.py"
       - "glyph/transition_label_drag_guard.py"
       - "glyph/transition_label_layout.py"
       - "glyph/transition_label_readability.py"
+      - "glyph/transition_layout_transaction.py"
+      - "glyph/transition_layout_transaction_bootstrap.py"
       - "glyph/transition_node_layout_guard.py"
       - "glyph/transition_readable_exports.py"
       - "glyph/transition_readable_layout.py"
@@ -58,6 +61,7 @@ on:
       - "tests/test_transition_label_drag_guard.py"
       - "tests/test_transition_label_layout.py"
       - "tests/test_transition_label_readability.py"
+      - "tests/test_transition_layout_transaction.py"
       - "tests/test_transition_node_layout_guard.py"
       - "tests/test_transition_readable_exports.py"
       - "tests/test_transition_readable_layout.py"
@@ -73,6 +77,7 @@ on:
       - "tests/verify_diagram_canvas_viewport.mjs"
       - "tests/verify_localized_semantic_canvas.mjs"
       - "tests/verify_transition_label_readability.mjs"
+      - "tests/verify_transition_layout_transaction.mjs"
       - "tests/verify_transition_semantic_readability.mjs"
       - "examples/acceptance/door_controller.glyph"
       - "examples/acceptance/motor_safety.glyph"
@@ -105,7 +110,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          mkdir -p build/checked-system-context-io build/state-diagram-regression build/state-diagram-stability build/uml-transition-semantics build/additional-failure-notation build/diagram-editor-exports build/diagram-canvas-viewport build/localized-semantic-canvas build/transition-label-readability build/transition-semantic-readability
+          mkdir -p build/checked-system-context-io build/state-diagram-regression build/state-diagram-stability build/uml-transition-semantics build/additional-failure-notation build/diagram-editor-exports build/diagram-canvas-viewport build/localized-semantic-canvas build/transition-label-readability build/transition-layout-transaction build/transition-semantic-readability
           node tests/verify_code_derived_system_io.mjs \
             2>&1 | tee build/checked-system-context-io/verify.log
           node tests/verify_state_diagram_rendering.mjs \
@@ -124,6 +129,8 @@ jobs:
             2>&1 | tee build/localized-semantic-canvas/verify.log
           node tests/verify_transition_label_readability.mjs \
             2>&1 | tee build/transition-label-readability/verify.log
+          node tests/verify_transition_layout_transaction.mjs \
+            2>&1 | tee build/transition-layout-transaction/verify.log
           node tests/verify_transition_semantic_readability.mjs \
             2>&1 | tee build/transition-semantic-readability/verify.log
 
@@ -144,6 +151,7 @@ jobs:
             build/diagram-canvas-viewport/**
             build/localized-semantic-canvas/**
             build/transition-label-readability/**
+            build/transition-layout-transaction/**
             build/transition-semantic-readability/**
             examples/acceptance/door_controller.glyph
             examples/acceptance/motor_safety.glyph
