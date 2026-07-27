@@ -22,7 +22,7 @@ const cases = [
     slug: "session-protocol",
     file: "examples/state_diagrams/session_protocol.glyph",
     machine: "Session",
-    dense: false,
+    dense: true,
   },
 ];
 
