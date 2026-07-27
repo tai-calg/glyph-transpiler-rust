@@ -65,9 +65,54 @@ async function ioPlacement(locator) {
 
 async function waitForIoLayout(page) {
   await page.waitForFunction(() => {
-    const state = document.querySelector(".graph-stage")?.dataset.transitionIoCollisionSolved;
-    return state === "true" || state === "fallback";
+    const stage = document.querySelector(".graph-stage");
+    const state = stage?.dataset.transitionIoCollisionSolved;
+    return (state === "true" || state === "fallback")
+      && stage?.dataset.transitionSemanticLinesReady === "true"
+      && stage?.dataset.transitionSemanticRoleLinesReady === "true";
   });
+}
+
+async function dragFeasibleTransitionCluster(page) {
+  const preferred = page.locator('.transition-io-cluster[data-input-value="ConveyorStop"]');
+  const all = page.locator(".transition-io-cluster");
+  const candidates = [];
+  for (let index = 0; index < await preferred.count(); index += 1) candidates.push(preferred.nth(index));
+  for (let index = 0; index < await all.count(); index += 1) candidates.push(all.nth(index));
+  const deltas = [
+    { x: 36, y: 0 },
+    { x: -36, y: 0 },
+    { x: 0, y: 36 },
+    { x: 0, y: -36 },
+    { x: 28, y: 28 },
+    { x: -28, y: 28 },
+  ];
+  const attempted = new Set();
+  for (const cluster of candidates) {
+    const transitionId = await cluster.getAttribute("data-transition-id");
+    if (!transitionId || attempted.has(transitionId)) continue;
+    attempted.add(transitionId);
+    for (const delta of deltas) {
+      const before = await cluster.boundingBox();
+      assert(before, `transition ${transitionId} has no bounding box before drag`);
+      const startX = before.x + before.width / 2;
+      const startY = before.y + before.height / 2;
+      await page.mouse.move(startX, startY);
+      await page.mouse.down();
+      await page.mouse.move(startX + delta.x, startY + delta.y, { steps: 20 });
+      await page.mouse.up();
+      await page.waitForTimeout(120);
+      const after = await cluster.boundingBox();
+      assert(after, `transition ${transitionId} has no bounding box after drag`);
+      if (Math.abs(after.x - before.x) > 10 || Math.abs(after.y - before.y) > 10) {
+        await waitForIoLayout(page);
+        return { cluster, transitionId, before, after };
+      }
+      await cluster.dblclick();
+      await waitForIoLayout(page);
+    }
+  }
+  assert.fail("no transition I/O cluster had a feasible manual drag within the 96px tether");
 }
 
 const logs = [];
@@ -94,13 +139,16 @@ try {
   if (!await page.locator('button[data-tab="state"]').evaluate(button => button.classList.contains("active"))) {
     await page.click('button[data-tab="state"]');
   }
-  await page.waitForFunction(() => (
-    document.querySelector("#diagram-tools")
-    && document.querySelector(".graph-stage")?.dataset.editorReady === "true"
-    && ["true", "fallback"].includes(document.querySelector(".graph-stage")?.dataset.transitionIoCollisionSolved)
-    && document.querySelector(".transition-io-cluster")?.dataset.ioDragReady === "true"
-    && document.querySelector(".initial-transition-path")
-  ));
+  await page.waitForFunction(() => {
+    const stage = document.querySelector(".graph-stage");
+    return document.querySelector("#diagram-tools")
+      && stage?.dataset.editorReady === "true"
+      && ["true", "fallback"].includes(stage?.dataset.transitionIoCollisionSolved)
+      && stage?.dataset.transitionSemanticLinesReady === "true"
+      && stage?.dataset.transitionSemanticRoleLinesReady === "true"
+      && document.querySelector(".transition-io-cluster")?.dataset.ioDragReady === "true"
+      && document.querySelector(".initial-transition-path");
+  });
 
   assert.equal(await page.locator("#diagram-svg").count(), 1);
   assert.equal(await page.locator("#diagram-png").count(), 1);
@@ -147,21 +195,9 @@ try {
   assert.equal(collisions.clusterPairs, 0, "transition I/O objects overlap after node movement");
   assert.equal(collisions.clusterNodes, 0, "transition I/O objects overlap state nodes after node movement");
 
-  const cluster = page.locator(".transition-io-cluster").first();
-  const transitionId = await cluster.getAttribute("data-transition-id");
-  assert(transitionId, "transition I/O cluster has no stable id");
-  const tangent = await cluster.evaluate(element => {
-    const left = Number.parseFloat(element.style.left || "0");
-    const top = Number.parseFloat(element.style.top || "0");
-    const anchorX = Number(element.dataset.anchorX || 0);
-    const anchorY = Number(element.dataset.anchorY || 0);
-    const dx = left - anchorX;
-    const dy = top - anchorY;
-    const length = Math.hypot(dx, dy);
-    if (length < 1) return { x: 36, y: 0 };
-    return { x: -dy / length * 36, y: dx / length * 36 };
-  });
-  await dragElement(page, cluster, tangent.x, tangent.y, "transition I/O cluster");
+  const dragged = await dragFeasibleTransitionCluster(page);
+  const cluster = dragged.cluster;
+  const transitionId = dragged.transitionId;
   await page.waitForFunction(() => Object.keys(localStorage).some(
     key => key.startsWith("glyph.diagram.transition-io.v1:"),
   ));
@@ -178,10 +214,12 @@ try {
   const restored = page.locator(`.transition-io-cluster[data-transition-id="${transitionId}"]`);
   await page.waitForFunction(id => {
     const element = document.querySelector(`.transition-io-cluster[data-transition-id="${id}"]`);
-    const layout = element?.closest(".graph-stage")?.dataset.transitionIoCollisionSolved;
+    const stage = element?.closest(".graph-stage");
+    const layout = stage?.dataset.transitionIoCollisionSolved;
     return element?.dataset.manualIo === "true"
       && element.dataset.anchorX !== undefined
       && element.dataset.anchorY !== undefined
+      && stage?.dataset.transitionSemanticRoleLinesReady === "true"
       && (layout === "true" || layout === "fallback");
   }, transitionId);
   await page.waitForTimeout(220);
@@ -266,6 +304,8 @@ try {
       assert(markup.includes("set_conveyor"), "SVG export omitted transition effect");
       assert(markup.includes(" ➞ "), "SVG export omitted input-arrow-output notation");
       assert(!markup.includes(" / "), "SVG export retained the old slash separator");
+      assert(markup.includes("transition-io-export-label"), "SVG export omitted readable transition labels");
+      assert(markup.includes("<tspan"), "SVG export omitted semantic label lines");
     }
     assert(bytes.length > 500, `${extension} export is unexpectedly small`);
   }
@@ -279,4 +319,4 @@ try {
   await stopProcess(child);
 }
 
-console.log("verified independent scrolling, input-arrow-output labels, themes, and diagram exports");
+console.log("verified independent scrolling, constrained label editing, themes, and readable diagram exports");
