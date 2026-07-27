@@ -107,7 +107,7 @@ try {
       inputCount: document.querySelectorAll('.transition-io-node[data-io-kind="input"]').length,
       outputCount: document.querySelectorAll('.transition-io-node[data-io-kind="output"]').length,
       guardCount: clusters.filter(cluster => cluster.querySelector('.transition-io-node[data-io-kind="guard"]')).length,
-      failureDecorationCount: document.querySelectorAll(".transition-io-error,.failure-transition").length,
+      failureDecorationCount: document.querySelectorAll(".transition-io-cluster.failure-transition,.transition-io-cluster .transition-io-error").length,
       combinedValues: clusters.map(cluster => cluster.querySelector('.transition-io-node[data-io-kind="io"] .transition-io-value')?.textContent || ""),
       visibleLegacyLabels: visibleLegacyLabels.length,
     };
