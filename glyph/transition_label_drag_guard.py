@@ -60,6 +60,7 @@ function applyFallback(record){
   if(Math.hypot(current.x-record.original.x,current.y-record.original.y)>=MIN_VISIBLE_MOVE){
     record.cluster.dataset.manualIo="true";
     record.cluster.dataset.transitionDragConstraint="accepted";
+    save(record,current);
     return;
   }
   const choice=choose(record);
@@ -74,6 +75,23 @@ function applyFallback(record){
   setTimeout(()=>window.glyphTransitionIoCollisionSolver?.run(),0);
 }
 
+function finish(event){
+  if(!active||active.pointerId!==event.pointerId||active.cluster!==event.currentTarget)return;
+  const record={...active};active=null;
+  record.requested=constrain(project({x:record.original.x+(event.clientX-record.startX)/record.scale,y:record.original.y+(event.clientY-record.startY)/record.scale},record.anchor),record.cluster,record.stage);
+  applyFallback(record);
+  queueMicrotask(()=>applyFallback(record));
+}
+
+function bindCluster(cluster){
+  if(cluster.dataset.ioDragGuardReady==="true")return;
+  cluster.dataset.ioDragGuardReady="true";
+  cluster.addEventListener("pointerup",finish);
+}
+function bindAll(stage=document.querySelector(".state-node")?.closest(".graph-stage")){
+  stage?.querySelectorAll(".transition-io-cluster").forEach(bindCluster);
+}
+
 document.addEventListener("pointerdown",event=>{
   const cluster=event.target?.closest?.(".transition-io-cluster");
   if(!cluster||event.button!==0)return;
@@ -81,14 +99,11 @@ document.addEventListener("pointerdown",event=>{
   active={cluster,stage,anchor,id:cluster.dataset.transitionId||"",pointerId:event.pointerId,startX:event.clientX,startY:event.clientY,original:{x:num(cluster.style.left),y:num(cluster.style.top)},scale:scaleFor(stage)};
 },true);
 
-document.addEventListener("pointerup",event=>{
-  if(!active||active.pointerId!==event.pointerId)return;
-  const record={...active};active=null;
-  record.requested=constrain(project({x:record.original.x+(event.clientX-record.startX)/record.scale,y:record.original.y+(event.clientY-record.startY)/record.scale},record.anchor),record.cluster,record.stage);
-  queueMicrotask(()=>applyFallback(record));
-},true);
+document.addEventListener("glyph-transition-io-clusters-ready",event=>bindAll(event.target?.closest?.(".graph-stage")||null));
+new MutationObserver(()=>bindAll()).observe(document.getElementById("view")||document.body,{childList:true,subtree:true});
+bindAll();
 
-window.glyphTransitionLabelDragGuard={marker:MARKER,minimumVisibleMove:MIN_VISIBLE_MOVE};
+window.glyphTransitionLabelDragGuard={marker:MARKER,minimumVisibleMove:MIN_VISIBLE_MOVE,bind:bindAll};
 })();
 </script>
 """
