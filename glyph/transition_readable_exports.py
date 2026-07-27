@@ -14,6 +14,8 @@ const text=(x,y,value,size=12,weight=400,anchor="start")=>`<text x="${x}" y="${y
 const nodeName=node=>node.querySelector(".state-name,.node-name")?.textContent?.trim()||"node";
 
 function renderedLines(element){
+  const semantic=[...element?.querySelectorAll(":scope > .transition-semantic-line")||[]].map(line=>line.textContent||"").filter(Boolean);
+  if(semantic.length)return semantic;
   const value=element?.textContent||"",node=element?.firstChild;
   if(!value||!node||node.nodeType!==Node.TEXT_NODE)return[value];
   const lines=[];
@@ -33,7 +35,7 @@ function renderedLines(element){
 function multilineText(x,y,width,height,lines,size=9,weight=700){
   const safe=lines.length?lines:[""];
   const lineHeight=size*1.28,startY=y+height/2-((safe.length-1)*lineHeight)/2+size*.34;
-  const tspans=safe.map((line,index)=>`<tspan x="${x+width/2}" y="${startY+index*lineHeight}">${esc(line)}</tspan>`).join("");
+  const tspans=safe.map((line,index)=>`<tspan x="${x+width/2}" y="${startY+index*lineHeight}">${esc(line.trim())}</tspan>`).join("");
   return`<text font-family="Arial,Helvetica,sans-serif" font-size="${size}" font-weight="${weight}" text-anchor="middle" fill="#111">${tspans}</text>`;
 }
 
