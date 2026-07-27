@@ -123,8 +123,8 @@ try {
   assert.equal(placement.guardNodeCount, 0);
   assert.equal(placement.failureDecorationCount, 0);
   assert(placement.combinedValues.every(value => value.trim().length > 0));
-  assert(placement.combinedValues.some(value => value.includes("[input.allowed]")));
-  assert(placement.combinedValues.some(value => value.includes(" / ")));
+  assert(placement.combinedValues.some(value => value.includes("Start [input.allowed]")));
+  assert(placement.combinedValues.some(value => value.startsWith("? input.legacy_alarm")));
   assert.equal(placement.visibleLegacyLabels, 0);
 
   await page.click("#glyph-settings");
