@@ -21,7 +21,7 @@ _SCRIPT = r"""
 <script id="glyph-diagram-canvas-viewport-v1-script">
 (()=>{
 const MIN_SCALE=.25,MAX_SCALE=3,STEP=.1,FIT_MARGIN=32,PINCH_SPEED=.0025;
-let activeShell=null,resizeTimer=null,gesture=null;
+let activeShell=null,resizeTimer=null,gesture=null,viewportGeneration=0;
 const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
 const roundScale=value=>Math.round(clamp(value,MIN_SCALE,MAX_SCALE)*100)/100;
 function locale(){return localStorage.getItem("glyph.ui.locale")==="en"?"en":"ja"}
@@ -63,9 +63,10 @@ function localPoint(shell,event){
 }
 function applyScale(shell,requested,{mode="manual",clientX=shell.clientWidth/2,clientY=shell.clientHeight/2,centerDiagram=false}={}){
   const stage=shell.querySelector(".graph-stage");if(!stage)return;
-  const oldScale=scaleFor(stage),oldSurface=surfaceFor(shell,stage),anchor=centerCoordinate(shell,oldSurface,oldScale,clientX,clientY);
+  const token=++viewportGeneration,oldScale=scaleFor(stage),oldSurface=surfaceFor(shell,stage),anchor=centerCoordinate(shell,oldSurface,oldScale,clientX,clientY);
   const {surface,size,scale}=setRaw(shell,stage,requested);saveScale(scale,mode);
-  requestAnimationFrame(()=>{
+  const position=()=>{
+    if(token!==viewportGeneration||!shell.isConnected||!stage.isConnected)return;
     if(centerDiagram){
       shell.scrollLeft=Math.max(0,surface.offsetLeft+size.width*scale/2-shell.clientWidth/2);
       shell.scrollTop=Math.max(0,surface.offsetTop+size.height*scale/2-shell.clientHeight/2);
@@ -73,8 +74,11 @@ function applyScale(shell,requested,{mode="manual",clientX=shell.clientWidth/2,c
       shell.scrollLeft=Math.max(0,surface.offsetLeft+anchor.x*scale-clientX);
       shell.scrollTop=Math.max(0,surface.offsetTop+anchor.y*scale-clientY);
     }
-    shell.dispatchEvent(new Event("scroll"));
+  };
+  requestAnimationFrame(()=>{
+    position();shell.dispatchEvent(new Event("scroll"));
     document.dispatchEvent(new CustomEvent("glyph-diagram-viewport-change",{detail:{scale,mode}}));
+    requestAnimationFrame(position);setTimeout(()=>requestAnimationFrame(position),0);
   });
 }
 function fit(shell,{persist=true}={}){
@@ -85,7 +89,7 @@ function fit(shell,{persist=true}={}){
 }
 function reset(shell){
   const stage=shell?.querySelector(".graph-stage");if(!stage)return;
-  const {surface}=setRaw(shell,stage,1);sessionStorage.removeItem(scaleKey());sessionStorage.removeItem(modeKey());sessionStorage.removeItem(panKey());
+  viewportGeneration+=1;const {surface}=setRaw(shell,stage,1);sessionStorage.removeItem(scaleKey());sessionStorage.removeItem(modeKey());sessionStorage.removeItem(panKey());
   requestAnimationFrame(()=>{
     shell.scrollLeft=Math.max(0,surface.offsetLeft-24);shell.scrollTop=Math.max(0,surface.offsetTop-24);shell.dispatchEvent(new Event("scroll"));
     document.dispatchEvent(new CustomEvent("glyph-diagram-viewport-change",{detail:{scale:1,mode:"reset"}}));
