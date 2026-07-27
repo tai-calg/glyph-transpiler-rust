@@ -33,6 +33,7 @@ on:
       - "glyph/transition_label_layout.py"
       - "glyph/transition_label_readability.py"
       - "glyph/transition_layout_interaction_adapter.py"
+      - "glyph/transition_layout_tab_guard.py"
       - "glyph/transition_layout_transaction.py"
       - "glyph/transition_layout_transaction_bootstrap.py"
       - "glyph/transition_node_layout_guard.py"
