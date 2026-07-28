@@ -124,6 +124,12 @@ async function assertDiagramGeometry(page) {
   assert(geometry.distances.every(value => value <= 96.5), `I/O escaped tether: ${geometry.distances.join(", ")}`);
 }
 
+function actionDisplay(transition) {
+  const raw = transition?.action;
+  if (typeof raw === "string") return raw.trim();
+  return String(raw?.display || raw?.expression || "").trim();
+}
+
 const browser = await chromium.launch({ headless: true });
 try {
   let port = 8765;
@@ -145,7 +151,7 @@ try {
     try {
       const apiState = await waitForServer(url, child, logs);
       assert.equal(apiState.views.schema, "glyph.io-state-views");
-      assert.equal(apiState.views.state_transition_ir.version, 3);
+      assert.equal(apiState.views.state_transition_ir.version, 4);
       assert.equal(apiState.views.state.machines.length, testCase.machines.length);
 
       const page = await browser.newPage({ viewport: { width: 1800, height: 1100 } });
@@ -177,14 +183,43 @@ try {
         assert.equal(await page.locator(".transition-detail").count(), machine.transitions.length);
         assert.equal(await page.locator(".state-transition-path").count(), machine.transitions.length);
 
-        const combinedValues = await page.locator('.transition-io-node[data-io-kind="io"]').evaluateAll(elements => elements.map(element => ({
-          value: element.querySelector(".transition-io-value")?.textContent || "",
-          output: element.closest(".transition-io-cluster")?.dataset.outputValue || "",
-        })));
+        const combinedValues = await page.locator('.transition-io-node[data-io-kind="io"]').evaluateAll(elements => elements.map(element => {
+          const cluster = element.closest(".transition-io-cluster");
+          return {
+            id: cluster?.dataset.transitionId || "",
+            value: element.querySelector(".transition-io-value")?.textContent || "",
+            action: cluster?.dataset.actionValue || "",
+          };
+        }));
         assert(combinedValues.every(({value}) => value.trim().length > 0));
-        assert(combinedValues.every(({value, output}) => (
-          output ? value.includes(" ➞ ") && !value.includes(" / ") : !value.includes(" ➞ —") && !value.includes(" / ")
-        )));
+        for (const rendered of combinedValues) {
+          const transition = machine.transitions.find(item => item.id === rendered.id);
+          assert(transition, `${testCase.slug}/${expected.name}: missing transition ${rendered.id}`);
+          const expectedAction = actionDisplay(transition);
+          assert.equal(
+            rendered.action,
+            expectedAction,
+            `${testCase.slug}/${expected.name}/${rendered.id}: DOM Action differs from StateTransitionIR`,
+          );
+          assert.notEqual(
+            rendered.action,
+            String(transition.target_state || ""),
+            `${testCase.slug}/${expected.name}/${rendered.id}: Target State leaked into Action`,
+          );
+          if (expectedAction) {
+            assert(
+              rendered.value.includes(` ➞ ${expectedAction}`),
+              `${testCase.slug}/${expected.name}/${rendered.id}: Action is not rendered`,
+            );
+            assert(!rendered.value.includes(" / "));
+          } else {
+            assert(
+              !rendered.value.includes(" ➞ "),
+              `${testCase.slug}/${expected.name}/${rendered.id}: transition without Action rendered an arrow Action`,
+            );
+            assert(!rendered.value.includes(" / "));
+          }
+        }
 
         if (expected.provisionalTriggers !== undefined) {
           assert.equal(
@@ -215,4 +250,4 @@ try {
   await browser.close();
 }
 
-console.log("verified compiler-derived state diagrams with compact input-arrow-output labels");
+console.log("verified compiler-derived state diagrams with compact input-arrow-Action labels");
