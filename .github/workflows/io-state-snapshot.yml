@@ -115,7 +115,7 @@ jobs:
           npm install playwright@1.54.2
           npx playwright install --with-deps chromium
 
-      - name: Compile and verify state diagrams
+      - name: Render and refresh README state snapshot
         shell: bash
         run: |
           set -o pipefail
@@ -128,6 +128,26 @@ jobs:
             2>&1 | tee -a build/state-diagram-regression/verify.log
           python tests/verify_readme_state_snapshot.py \
             2>&1 | tee -a build/state-diagram-regression/verify.log
+
+      - name: Commit refreshed README state snapshot
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          if git diff --quiet -- docs/images/glyph-studio-state-transition.png; then
+            echo "README state snapshot already current"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/images/glyph-studio-state-transition.png
+          git commit -m "Refresh README state snapshot with distinct Actions"
+          git push origin "HEAD:${HEAD_REF}"
+
+      - name: Run remaining diagram regressions
+        shell: bash
+        run: |
+          set -o pipefail
           node tests/verify_state_diagram_stability.mjs \
             2>&1 | tee build/state-diagram-stability/verify.log
           node tests/verify_uml_transition_semantics.mjs \
@@ -146,21 +166,6 @@ jobs:
             2>&1 | tee build/transition-label-readability/verify.log
           node tests/verify_transition_semantic_readability.mjs \
             2>&1 | tee build/transition-semantic-readability/verify.log
-
-      - name: Commit refreshed README state snapshot
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-        env:
-          HEAD_REF: ${{ github.head_ref }}
-        run: |
-          if git diff --quiet -- docs/images/glyph-studio-state-transition.png; then
-            echo "README state snapshot already current"
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add docs/images/glyph-studio-state-transition.png
-          git commit -m "Refresh README state snapshot with distinct Actions"
-          git push origin "HEAD:${HEAD_REF}"
 
       - name: Upload rendered diagrams
         if: always()
