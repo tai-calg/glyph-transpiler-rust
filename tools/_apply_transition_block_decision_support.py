@@ -43,13 +43,53 @@ replace_once(
         decision=decision,
     )
 ''',
-    '''def _resolve_block_discriminator(
+    '''def _expand_lambda_calls(
+    expression: Expr,
+    lambdas: Mapping[str, object],
+    visited: frozenset[str] = frozenset(),
+) -> Expr:
+    if isinstance(expression, FieldExpr):
+        return FieldExpr(_expand_lambda_calls(expression.base, lambdas, visited), expression.field)
+    if isinstance(expression, UnaryExpr):
+        return UnaryExpr(expression.op, _expand_lambda_calls(expression.expr, lambdas, visited))
+    if isinstance(expression, BinaryExpr):
+        return BinaryExpr(
+            expression.op,
+            _expand_lambda_calls(expression.left, lambdas, visited),
+            _expand_lambda_calls(expression.right, lambdas, visited),
+        )
+    if isinstance(expression, CallExpr):
+        arguments = tuple(
+            _expand_lambda_calls(argument, lambdas, visited)
+            for argument in expression.args
+        )
+        if isinstance(expression.callee, NameExpr):
+            lowering = lambdas.get(expression.callee.name)
+            if lowering is not None and expression.callee.name not in visited and len(arguments) == 1:
+                try:
+                    body = parse_expr(str(lowering.body))
+                except Exception:
+                    return CallExpr(expression.callee, arguments)
+                restored = _substitute(body, {str(lowering.parameter): arguments[0]})
+                return _expand_lambda_calls(
+                    restored,
+                    lambdas,
+                    visited | {expression.callee.name},
+                )
+        return CallExpr(expression.callee, arguments)
+    if isinstance(expression, TryExpr):
+        return TryExpr(_expand_lambda_calls(expression.expr, lambdas, visited))
+    return expression
+
+
+def _resolve_block_discriminator(
     candidate: _Candidate,
     definition: CallExpr,
     public: FunctionDecl,
     *,
     functions: Mapping[str, FunctionDecl],
     blocks: Mapping[str, object],
+    lambdas: Mapping[str, object],
 ) -> _Discriminator | None:
     block = blocks.get(public.name)
     if block is None:
@@ -97,7 +137,8 @@ replace_once(
             )
         if binding.kind != "expression" or helper.expression is None or helper.guards:
             return None
-        available[binding.name] = _substitute(helper.expression, substitutions)
+        restored = _substitute(helper.expression, substitutions)
+        available[binding.name] = _expand_lambda_calls(restored, lambdas)
     return None
 
 
@@ -106,6 +147,7 @@ def _resolve_discriminator(
     *,
     functions: Mapping[str, FunctionDecl],
     blocks: Mapping[str, object],
+    lambdas: Mapping[str, object],
 ) -> _Discriminator | None:
     definition = candidate.definition
     if not (
@@ -131,6 +173,7 @@ def _resolve_discriminator(
         public,
         functions=functions,
         blocks=blocks,
+        lambdas=lambdas,
     )
 ''',
 )
@@ -149,6 +192,7 @@ replace_once(
         if isinstance(item, FunctionDecl)
     }
     blocks = {item.name: item for item in model.blocks}
+    lambdas = {item.name: item for item in model.lambdas}
     definitions = _block_definitions(model, _next_name(machine))
 ''',
 )
@@ -160,6 +204,7 @@ replace_once(
             candidate,
             functions=functions,
             blocks=blocks,
+            lambdas=lambdas,
         )
 ''',
 )
