@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   implement:
-    if: github.head_ref == 'agent/transition-action-semantics-v4'
+    if: github.head_ref == 'agent/transition-action-semantics-v4' && github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -19,8 +19,10 @@ jobs:
           fetch-depth: 0
 
       - name: Run bootstrap implementation block
+        id: bootstrap
         run: |
-          python - <<'PY'
+          set +e
+          python - <<'PY' > bootstrap-debug.log 2>&1
           from pathlib import Path
           import subprocess
           import textwrap
@@ -34,12 +36,27 @@ jobs:
           script = textwrap.dedent(block)
           subprocess.run(['bash', '-lc', script], check=True)
           PY
+          status=$?
+          cat bootstrap-debug.log
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Commit bootstrap diagnostics
+        if: steps.bootstrap.outputs.status != '0'
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add bootstrap-debug.log
+          git commit -m "Capture transition bootstrap failure"
+          git push origin HEAD:${{ github.head_ref }}
 
       - name: Run focused tests
+        if: steps.bootstrap.outputs.status == '0'
         run: |
           python -m unittest tests.test_machine_action_projection tests.test_transition_action_renderer_contract
 
       - name: Commit implementation
+        if: steps.bootstrap.outputs.status == '0'
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
