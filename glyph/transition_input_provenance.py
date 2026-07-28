@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Mapping, Sequence
 
 from .artifacts import CompilationModel
@@ -252,10 +252,111 @@ def _intermediate_discriminators(
     return candidates
 
 
+def _expand_lambda_calls(
+    expression: Expr,
+    lambdas: Mapping[str, object],
+    visited: frozenset[str] = frozenset(),
+) -> Expr:
+    if isinstance(expression, FieldExpr):
+        return FieldExpr(_expand_lambda_calls(expression.base, lambdas, visited), expression.field)
+    if isinstance(expression, UnaryExpr):
+        return UnaryExpr(expression.op, _expand_lambda_calls(expression.expr, lambdas, visited))
+    if isinstance(expression, BinaryExpr):
+        return BinaryExpr(
+            expression.op,
+            _expand_lambda_calls(expression.left, lambdas, visited),
+            _expand_lambda_calls(expression.right, lambdas, visited),
+        )
+    if isinstance(expression, CallExpr):
+        arguments = tuple(
+            _expand_lambda_calls(argument, lambdas, visited)
+            for argument in expression.args
+        )
+        if isinstance(expression.callee, NameExpr):
+            lowering = lambdas.get(expression.callee.name)
+            if lowering is not None and expression.callee.name not in visited and len(arguments) == 1:
+                try:
+                    body = parse_expr(str(lowering.body))
+                except Exception:
+                    return CallExpr(expression.callee, arguments)
+                restored = _substitute(body, {str(lowering.parameter): arguments[0]})
+                return _expand_lambda_calls(
+                    restored,
+                    lambdas,
+                    visited | {expression.callee.name},
+                )
+        return CallExpr(expression.callee, arguments)
+    if isinstance(expression, TryExpr):
+        return TryExpr(_expand_lambda_calls(expression.expr, lambdas, visited))
+    return expression
+
+
+def _resolve_block_discriminator(
+    candidate: _Candidate,
+    definition: CallExpr,
+    public: FunctionDecl,
+    *,
+    functions: Mapping[str, FunctionDecl],
+    blocks: Mapping[str, object],
+    lambdas: Mapping[str, object],
+) -> _Discriminator | None:
+    block = blocks.get(public.name)
+    if block is None:
+        return None
+    try:
+        final = parse_expr(str(block.final_source))
+    except Exception:
+        return None
+    if not isinstance(final, NameExpr):
+        return None
+    bindings = list(block.bindings)
+    final_indices = [index for index, binding in enumerate(bindings) if binding.name == final.name]
+    if len(final_indices) != 1 or final_indices[0] != len(bindings) - 1:
+        return None
+    if len(public.params) != len(definition.args):
+        return None
+
+    available: dict[str, Expr] = {
+        parameter.name: argument
+        for parameter, argument in zip(public.params, definition.args)
+    }
+    for binding in bindings:
+        helper = functions.get(binding.value_helper)
+        if helper is None:
+            return None
+        try:
+            helper_arguments = tuple(available[parameter.name] for parameter in helper.params)
+        except KeyError:
+            return None
+        substitutions = {
+            parameter.name: argument
+            for parameter, argument in zip(helper.params, helper_arguments)
+        }
+        if binding.name == final.name:
+            if binding.kind != "conditional" or not helper.guards:
+                return None
+            decision = replace(helper, name=public.name)
+            return _Discriminator(
+                atom=candidate.atom,
+                local_name=candidate.local_name,
+                pattern=candidate.pattern,
+                variant=candidate.variant,
+                definition=CallExpr(NameExpr(public.name), helper_arguments),
+                decision=decision,
+            )
+        if binding.kind != "expression" or helper.expression is None or helper.guards:
+            return None
+        restored = _substitute(helper.expression, substitutions)
+        available[binding.name] = _expand_lambda_calls(restored, lambdas)
+    return None
+
+
 def _resolve_discriminator(
     candidate: _Candidate,
     *,
     functions: Mapping[str, FunctionDecl],
+    blocks: Mapping[str, object],
+    lambdas: Mapping[str, object],
 ) -> _Discriminator | None:
     definition = candidate.definition
     if not (
@@ -263,16 +364,25 @@ def _resolve_discriminator(
         and isinstance(definition.callee, NameExpr)
     ):
         return None
-    decision = functions.get(definition.callee.name)
-    if decision is None or not decision.guards:
+    public = functions.get(definition.callee.name)
+    if public is None:
         return None
-    return _Discriminator(
-        atom=candidate.atom,
-        local_name=candidate.local_name,
-        pattern=candidate.pattern,
-        variant=candidate.variant,
-        definition=definition,
-        decision=decision,
+    if public.guards:
+        return _Discriminator(
+            atom=candidate.atom,
+            local_name=candidate.local_name,
+            pattern=candidate.pattern,
+            variant=candidate.variant,
+            definition=definition,
+            decision=public,
+        )
+    return _resolve_block_discriminator(
+        candidate,
+        definition,
+        public,
+        functions=functions,
+        blocks=blocks,
+        lambdas=lambdas,
     )
 
 
@@ -492,6 +602,8 @@ def expand_machine_transition_inputs(
         for item in model.program.declarations
         if isinstance(item, FunctionDecl)
     }
+    blocks = {item.name: item for item in model.blocks}
+    lambdas = {item.name: item for item in model.lambdas}
     definitions = _block_definitions(model, _next_name(machine))
     input_names = frozenset(parameter.name for parameter in machine.input_params)
     if not definitions or not input_names:
@@ -566,7 +678,12 @@ def expand_machine_transition_inputs(
             transitions.append(transition)
             continue
 
-        discriminator = _resolve_discriminator(candidate, functions=functions)
+        discriminator = _resolve_discriminator(
+            candidate,
+            functions=functions,
+            blocks=blocks,
+            lambdas=lambdas,
+        )
         if discriminator is None:
             unresolved += 1
             _mark_unresolved(
