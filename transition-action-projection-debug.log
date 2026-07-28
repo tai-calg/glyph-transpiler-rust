@@ -1,4 +1,23 @@
 ACTION SELECTOR state.action
+BLOCKS
+{'name': 'step', 'line': 49, 'bindings': [{'name': 'action', 'type': 'Action', 'line': 50, 'kind': 'expression', 'source': 'decide(input)', 'value_helper': '__glyph_block_L48_0_value'}, {'name': 'next', 'type': 'DoorState', 'line': 51, 'kind': 'conditional', 'source': 'action==RaiseAlarm => DoorState(Alarmed,state.failures+1,RaiseAlarm)\naction==Unlock => DoorState(Unlocked,state.failures,Unlock)\naction==KeepLocked => DoorState(Locked,state.failures,KeepLocked)\n_ => DoorState(Faulted,state.failures+1,KeepLocked)', 'value_helper': '__glyph_block_L48_1_value'}], 'final': {'source': 'next', 'line': 56}, 'final_helper': '__glyph_block_L48_final', 'continuation_helpers': ['__glyph_block_L48_0_next', '__glyph_block_L48_1_next']}
+{'name': 'control', 'line': 67, 'bindings': [{'name': 'input', 'type': 'Input', 'line': 68, 'kind': 'expression', 'source': 'sensor()?', 'value_helper': '__glyph_block_L66_0_value'}, {'name': 'next', 'type': 'DoorState', 'line': 69, 'kind': 'expression', 'source': 'step(state,input)', 'value_helper': '__glyph_block_L66_1_value'}], 'final': {'source': 'apply(next)', 'line': 70}, 'final_helper': '__glyph_block_L66_final', 'continuation_helpers': ['__glyph_block_L66_0_next', '__glyph_block_L66_1_next']}
+FUNCTIONS
+authenticate 42 input.badge_valid&!input.forced_open []
+decide 44 None [(45, 'input.forced_open', 'RaiseAlarm'), (46, 'authenticate(input)&input.request_open', 'Unlock'), (47, 'otherwise', 'KeepLocked')]
+step 49 __glyph_block_L48_0_next(state,input,decide(input)) []
+apply 62 None [(63, 'state.action==RaiseAlarm', 'alarm(state)'), (64, 'otherwise', 'lock(state)')]
+control 67 __glyph_block_L66_0_next(state,sensor()?) []
+__glyph_block_L48_0_value 50 decide(input) []
+__glyph_block_L48_1_value 51 None [(74, 'action==RaiseAlarm', 'DoorState(Alarmed,state.failures+1,RaiseAlarm)'), (75, 'action==Unlock', 'DoorState(Unlocked,state.failures,Unlock)'), (76, 'action==KeepLocked', 'DoorState(Locked,state.failures,KeepLocked)'), (77, 'otherwise', 'DoorState(Faulted,state.failures+1,KeepLocked)')]
+__glyph_block_L48_final 56 next []
+__glyph_block_L48_0_next 50 __glyph_block_L48_1_next(state,input,action,__glyph_block_L48_1_value(state,input,action)) []
+__glyph_block_L48_1_next 51 next []
+__glyph_block_L66_0_value 68 sensor()? []
+__glyph_block_L66_1_value 69 step(state,input) []
+__glyph_block_L66_final 70 apply(next) []
+__glyph_block_L66_0_next 68 __glyph_block_L66_1_next(state,input,step(state,input)) []
+__glyph_block_L66_1_next 69 apply(next) []
 BRANCHES
 TRANSITIONS
 T1 52 Locked Alarmed action==RaiseAlarm None []
