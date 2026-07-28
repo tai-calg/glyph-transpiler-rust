@@ -53,9 +53,9 @@ def enrich_state_transition_ir(
         "schema": STATE_TRANSITION_IR_SCHEMA,
         "version": STATE_TRANSITION_IR_VERSION,
     }
-    # This marker describes the public Input [Guard] ➞ Action display contract.
-    # StateTransitionIR has its own independently versioned schema marker above.
-    result["transition_semantics_version"] = 3
+    # The public Input [Guard] ➞ Action shape remains contract version 2.
+    # Input-preimage expansion is independently versioned below.
+    result["transition_semantics_version"] = 2
     result["transition_input_preimage_version"] = INPUT_PREIMAGE_VERSION
     summary = dict(result.get("summary", {}))
     summary["state_warnings"] = sum(
