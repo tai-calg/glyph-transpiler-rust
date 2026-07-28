@@ -23,13 +23,13 @@ Glyphはアプリケーションの細部をすべて実装する言語ではあ
 
 Motor Safetyの状態、初期遷移、到達可能・到達不能状態、入力・ガード・遷移結果を一画面へ表示しています。
 
-![Glyph Studioの状態遷移図](docs/images/glyph-studio-state-transition.jpg)
+![Glyph Studioの状態遷移図](docs/images/glyph-studio-state-transition.png)
 
 ### I/O構成図
 
 Door Controllerの入力、代表関数、戻り値、外部作用を、コード上の型と呼出し根拠に基づいて表示しています。
 
-![Glyph StudioのI/O構成図](docs/images/glyph-studio-io.jpg)
+![Glyph StudioのI/O構成図](docs/images/glyph-studio-io.png)
 
 ---
 
