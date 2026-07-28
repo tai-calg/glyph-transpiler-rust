@@ -25,7 +25,6 @@ jobs:
           python - <<'PY' > bootstrap-debug.log 2>&1
           from pathlib import Path
           import subprocess
-          import textwrap
 
           source = Path('.github/workflows/bootstrap-transition-action-semantics.yml').read_text(encoding='utf-8')
           marker = '      - name: Implement action projection and renderer contract\n        run: |\n'
@@ -33,7 +32,8 @@ jobs:
           if marker not in source or tail not in source:
               raise SystemExit('bootstrap workflow block not found')
           block = source.split(marker, 1)[1].split(tail, 1)[0]
-          script = textwrap.dedent(block)
+          lines = block.splitlines()
+          script = '\n'.join(line[10:] if line.startswith('          ') else line for line in lines) + '\n'
           subprocess.run(['bash', '-lc', script], check=True)
           PY
           status=$?
