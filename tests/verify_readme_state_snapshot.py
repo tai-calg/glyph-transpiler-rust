@@ -6,9 +6,24 @@ from pathlib import Path
 
 from PIL import Image, ImageChops
 
+from glyph.compilation import CompilationPipeline
+from glyph.io_state_views import build_io_state_views
+
 GENERATED_PATH = Path("build/state-diagram-regression/motor-safety-motor.png")
 COMMITTED_PATH = Path("docs/images/glyph-studio-state-transition.png")
+MOTOR_SOURCE_PATH = Path("examples/acceptance/motor_safety.glyph")
 EXPECTED_SIZE = (1800, 1100)
+
+# READMEで公開するMotor Safety例は、Actionを命令、Target Stateを状態として
+# 明示的に分離する。文字列が異なるだけのStop/Stoppedは許容しない。
+REQUIRED_ACTION_TARGET_PAIRS = {
+    ("DisableMotor", "Stopped"),
+    ("SetMotorPower(normalize(input.raw))", "Running"),
+}
+FORBIDDEN_ACTION_TARGET_PAIRS = {
+    ("Stop", "Stopped"),
+    ("Drive(normalize(input.raw))", "Running"),
+}
 
 # Chromium can vary a few anti-aliased pixels between otherwise equivalent runs.
 # These limits accept the observed rasterization noise while rejecting changed text,
@@ -16,6 +31,38 @@ EXPECTED_SIZE = (1800, 1100)
 MAX_CHANGED_PIXELS = 256
 MAX_MEAN_ABSOLUTE_DELTA = 0.001
 MAX_CHANNEL_DELTA = 32
+
+
+def action_display(transition: dict[str, object]) -> str:
+    action = transition.get("action")
+    if not isinstance(action, dict):
+        return ""
+    return str(action.get("display") or action.get("expression") or "")
+
+
+def verify_readme_semantics() -> None:
+    output = CompilationPipeline().compile_text(
+        MOTOR_SOURCE_PATH.read_text(encoding="utf-8"),
+        source_name=str(MOTOR_SOURCE_PATH),
+    )
+    views = build_io_state_views(output.model, output.diagrams.ir)
+    machine = views["state"]["machines"][0]
+    pairs = {
+        (action_display(transition), str(transition.get("target_state") or ""))
+        for transition in machine["transitions"]
+        if transition.get("input_preimage")
+    }
+
+    missing = REQUIRED_ACTION_TARGET_PAIRS - pairs
+    forbidden = FORBIDDEN_ACTION_TARGET_PAIRS & pairs
+    if missing or forbidden:
+        raise AssertionError(
+            "README Motor Safety semantics do not separate command Actions from "
+            "Target States.\n"
+            f"required but missing: {sorted(missing)}\n"
+            f"forbidden but present: {sorted(forbidden)}\n"
+            f"compiled pairs: {sorted(pairs)}"
+        )
 
 
 def compare_images(
@@ -74,6 +121,8 @@ def compare_images(
 
 
 def main() -> None:
+    verify_readme_semantics()
+
     if os.environ.get("UPDATE_README_STATE_DIAGRAM") == "1":
         COMMITTED_PATH.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(GENERATED_PATH, COMMITTED_PATH)
@@ -110,7 +159,7 @@ def main() -> None:
         )
 
     print(
-        "verified README state-transition snapshot "
+        "verified README state-transition semantics and snapshot "
         f"(changed_pixels={changed_pixels}, "
         f"mean_delta={mean_absolute_delta:.8f}, "
         f"max_delta={max_channel_delta})"
