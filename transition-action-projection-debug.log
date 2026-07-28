@@ -1,0 +1,15 @@
+ACTION SELECTOR state.action
+BRANCHES
+TRANSITIONS
+T1 52 Locked Alarmed action==RaiseAlarm None []
+T2 52 Unlocked Alarmed action==RaiseAlarm None []
+T3 52 Alarmed Alarmed action==RaiseAlarm None []
+T4 52 Faulted Alarmed action==RaiseAlarm None []
+T5 53 Locked Unlocked action==Unlock None []
+T6 53 Unlocked Unlocked action==Unlock None []
+T7 53 Alarmed Unlocked action==Unlock None []
+T8 53 Faulted Unlocked action==Unlock None []
+T9 54 Locked Locked action==KeepLocked None []
+T10 54 Unlocked Locked action==KeepLocked None []
+T11 54 Alarmed Locked action==KeepLocked None []
+T12 54 Faulted Locked action==KeepLocked None []
