@@ -21,7 +21,7 @@ Glyphはアプリケーションの細部をすべて実装する言語ではあ
 
 ### 状態遷移図
 
-Motor Safetyの状態、初期遷移、到達可能・到達不能状態、入力・ガード・Actionを一画面へ表示しています。状態名とActionは別の意味として描画されます。
+Motor Safetyの状態、初期遷移、到達可能・到達不能状態、入力・ガード・遷移結果を一画面へ表示しています。
 
 ![Glyph Studioの状態遷移図](docs/images/glyph-studio-state-transition.png)
 
