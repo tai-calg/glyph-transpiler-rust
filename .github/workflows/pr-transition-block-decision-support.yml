@@ -23,12 +23,20 @@ jobs:
 
       - name: Run focused preimage suite
         run: |
+          set -o pipefail
           python3 -m unittest \
             tests.test_transition_input_provenance \
             tests.test_transition_input_provenance_audit \
             tests.test_transition_input_preimage_generalization \
             tests.test_transition_block_decision_preimage \
-            tests.test_io_state_diagram_app
+            tests.test_io_state_diagram_app 2>&1 | tee /tmp/block-decision-tests.log
+
+      - name: Upload focused test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: block-decision-test-log
+          path: /tmp/block-decision-tests.log
 
       - name: Commit block decision support
         run: |
