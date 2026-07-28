@@ -288,14 +288,18 @@ machine Device(state:DeviceState,event:DeviceEvent)
             item
             for item in machine["transitions"]
             if item["target_state"] == "Alarmed"
-            and (item.get("trigger") or {}).get("display") == "RaiseAlarm"
+            and (item.get("action") or {}).get("display") == "RaiseAlarm"
+            and item.get("input_preimage")
         )
         self.assertEqual(alarm["trigger"]["role"], "inferred-trigger")
-        self.assertEqual(alarm["trigger"]["confidence"], "dataflow-inferred")
-        self.assertEqual(alarm["event"], "RaiseAlarm")
+        self.assertEqual(alarm["trigger"]["confidence"], "dataflow-expanded")
+        self.assertEqual(alarm["trigger"]["provenance"], "decision-output-preimage")
+        self.assertIn("input.forced_open", alarm["trigger"]["display"])
+        self.assertEqual(alarm["event"], alarm["trigger"]["display"])
         self.assertEqual(alarm["target_state"], "Alarmed")
         self.assertEqual(alarm["action"]["display"], "RaiseAlarm")
         self.assertEqual(alarm["action"]["provenance"], "machine-action-projection")
+        self.assertNotEqual(alarm["trigger"]["display"], alarm["action"]["display"])
         self.assertNotEqual(alarm["action"]["display"], alarm["target_state"])
         self.assertEqual(alarm["effect_invocations"], [])
         self.assertNotIn("[action==RaiseAlarm]", alarm["display_label"])
