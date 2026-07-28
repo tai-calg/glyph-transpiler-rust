@@ -1,2 +1,3 @@
 apply immutable block decision support
 retry with captured logs
+restore lowered lambda expressions
