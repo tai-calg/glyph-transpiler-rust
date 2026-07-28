@@ -1,0 +1,51 @@
+name: Patch child PR Action export contract
+
+on:
+  pull_request:
+    branches:
+      - agent/transition-action-semantics-v4
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.head_ref == 'agent/transition-action-v4-final-trigger'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/transition-action-semantics-v4
+          fetch-depth: 0
+
+      - name: Update SVG export contract
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('tests/verify_diagram_editor_exports.mjs')
+          text = path.read_text(encoding='utf-8')
+          old = '''      assert(markup.includes("set_conveyor"), "SVG export omitted transition effect");
+      assert(markup.includes(" ➞ "), "SVG export omitted input-arrow-output notation");
+      assert(!markup.includes(" / "), "SVG export retained the old slash separator");
+'''
+          new = '''      assert(markup.includes("ConveyorStart"), "SVG export omitted transition input labels");
+      assert(!markup.includes("set_conveyor"), "SVG export leaked Effect invocation into Action labels");
+      assert(!markup.includes(" ➞ "), "SVG export synthesized an Action for a machine without action projection");
+      assert(!markup.includes(" / "), "SVG export retained the old slash separator");
+'''
+          if old not in text:
+              raise SystemExit('SVG Action export assertion anchor missing')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+
+      - name: Verify export test syntax
+        run: node --check tests/verify_diagram_editor_exports.mjs
+
+      - name: Commit export contract
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add tests/verify_diagram_editor_exports.mjs
+          git commit -m "Verify SVG exports preserve Action semantics"
+          git push origin HEAD:agent/transition-action-semantics-v4
