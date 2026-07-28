@@ -12,13 +12,17 @@ from .transition_condition_roles import (
     STATE_TRANSITION_IR_VERSION,
     classify_machine_transition_roles,
 )
+from .transition_input_provenance import (
+    INPUT_PREIMAGE_VERSION,
+    expand_machine_transition_inputs,
+)
 
 
 def enrich_state_transition_ir(
     model: CompilationModel,
     views: dict[str, object],
 ) -> dict[str, object]:
-    """Compile machines and classify StateTransitionIR v4 semantic roles."""
+    """Compile machines and classify StateTransitionIR semantic roles."""
 
     original = deepcopy(views)
     result = compile_state_transition_ir(model, views)
@@ -38,17 +42,21 @@ def enrich_state_transition_ir(
     projected = [
         project_machine_transition_actions(model, machine) for machine in lowered
     ]
-    state["machines"] = [
+    classified = [
         classify_machine_transition_roles(model, machine) for machine in projected
+    ]
+    state["machines"] = [
+        expand_machine_transition_inputs(model, machine) for machine in classified
     ]
     result["state"] = state
     result["state_transition_ir"] = {
         "schema": STATE_TRANSITION_IR_SCHEMA,
         "version": STATE_TRANSITION_IR_VERSION,
     }
-    # This marker describes the public trigger[guard]/Action display contract.
+    # This marker describes the public Input [Guard] ➞ Action display contract.
     # StateTransitionIR has its own independently versioned schema marker above.
-    result["transition_semantics_version"] = 2
+    result["transition_semantics_version"] = 3
+    result["transition_input_preimage_version"] = INPUT_PREIMAGE_VERSION
     summary = dict(result.get("summary", {}))
     summary["state_warnings"] = sum(
         1
