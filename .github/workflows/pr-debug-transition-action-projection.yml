@@ -24,7 +24,7 @@ jobs:
           from pathlib import Path
 
           from glyph.compilation import CompilationPipeline
-          from glyph.compiler import CallExpr, FieldExpr, FunctionDecl, NameExpr, ProductDecl, SumDecl
+          from glyph.compiler import CallExpr, FunctionDecl, NameExpr, ProductDecl, SumDecl
           from glyph.execution_ir import render_expr
           from glyph.io_state_views import build_io_state_views
           from glyph.state_transition_compiler import _root_branches
@@ -49,6 +49,24 @@ jobs:
               root_state_param=machine.state_param.name,
           )
           print('ACTION SELECTOR', render_expr(machine.action_selector) if machine.action_selector else None)
+          print('BLOCKS')
+          for block in model.blocks:
+              print(block.to_dict())
+          print('FUNCTIONS')
+          for name, function in functions.items():
+              print(
+                  name,
+                  function.line,
+                  render_expr(function.expression) if function.expression is not None else None,
+                  [
+                      (
+                          clause.line,
+                          render_expr(clause.condition) if clause.condition is not None else 'otherwise',
+                          render_expr(clause.value),
+                      )
+                      for clause in function.guards
+                  ],
+              )
           print('BRANCHES')
           for branch in branches:
               print(branch.line, branch.target, render_expr(branch.condition) if branch.condition else 'otherwise', render_expr(branch.value))
