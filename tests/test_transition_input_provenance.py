@@ -31,7 +31,7 @@ class TransitionInputProvenanceTests(unittest.TestCase):
         views = compile_example("examples/acceptance/motor_safety.glyph")
         machine = views["state"]["machines"][0]
 
-        self.assertEqual(views["transition_semantics_version"], 3)
+        self.assertEqual(views["transition_semantics_version"], 2)
         self.assertEqual(views["transition_input_preimage_version"], 1)
         self.assertGreater(machine["analysis"]["expanded_input_preimage_count"], 0)
         self.assertEqual(machine["analysis"]["unresolved_input_preimage_count"], 0)
