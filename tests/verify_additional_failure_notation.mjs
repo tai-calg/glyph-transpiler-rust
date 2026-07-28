@@ -10,13 +10,14 @@ const cases = [
     file: "examples/state_diagrams/door_lock_effect.glyph",
     machine: "DoorLock",
     expected: [
-      "DoorUnlockRequest [input.authorized] / write_lock(true)",
-      "DoorLockRequest / write_lock(false)",
-      "DoorReset / write_lock(false)",
-      "DoorUnlockRequest [input.authorized] / write_lock(true) | DoorWriteError",
-      "DoorLockRequest / write_lock(false) | DoorWriteError",
-      "DoorReset / write_lock(false) | DoorWriteError",
+      "DoorUnlockRequest [input.authorized]",
+      "DoorLockRequest",
+      "DoorReset",
+      "DoorUnlockRequest [input.authorized] | DoorWriteError",
+      "DoorLockRequest | DoorWriteError",
+      "DoorReset | DoorWriteError",
     ],
+    expectedEffects: ["write_lock(true)", "write_lock(false)"],
     failureType: "DoorWriteError",
   },
   {
@@ -24,13 +25,14 @@ const cases = [
     file: "examples/state_diagrams/cooling_fan_effect.glyph",
     machine: "CoolingFan",
     expected: [
-      "? input.overheat / write_fan(0.0)",
-      "? input.enable / write_fan(input.speed)",
-      "? !input.enable / write_fan(0.0)",
-      "? input.overheat / write_fan(0.0) | FanWriteError",
-      "? input.enable / write_fan(input.speed) | FanWriteError",
-      "? !input.enable / write_fan(0.0) | FanWriteError",
+      "? input.overheat",
+      "? input.enable",
+      "? !input.enable",
+      "? input.overheat | FanWriteError",
+      "? input.enable | FanWriteError",
+      "? !input.enable | FanWriteError",
     ],
+    expectedEffects: ["write_fan(0.0)", "write_fan(input.speed)"],
     failureType: "FanWriteError",
   },
 ];
@@ -47,7 +49,7 @@ async function waitForServer(url, child, logs) {
       const response = await fetch(`${url}/api/state`);
       if (response.ok) {
         const state = await response.json();
-        if (state.status === "ready" && state.views?.transition_semantics_version === 1) {
+        if (state.status === "ready" && state.views?.transition_semantics_version === 2) {
           return state;
         }
       }
@@ -67,6 +69,12 @@ async function stopProcess(child) {
     new Promise(resolve => setTimeout(resolve, 1500)),
   ]);
   if (child.exitCode === null) child.kill("SIGKILL");
+}
+
+function actionDisplay(transition) {
+  const raw = transition?.action;
+  if (typeof raw === "string") return raw.trim();
+  return String(raw?.display || raw?.expression || "").trim();
 }
 
 const browser = await chromium.launch({ headless: true });
@@ -89,12 +97,26 @@ try {
     const url = `http://127.0.0.1:${port}`;
     try {
       const state = await waitForServer(url, child, logs);
+      assert.equal(state.views.state_transition_ir.version, 4);
       const machine = state.views.state.machines.find(item => item.name === testCase.machine);
       assert.ok(machine, `${testCase.machine}: machine missing`);
       assert(
         machine.transitions.some(item => item.synthesized_failure && item.failure_type === testCase.failureType),
         `${testCase.machine}: synthesized failure transition missing`,
       );
+
+      for (const effect of testCase.expectedEffects) {
+        assert(
+          machine.transitions.some(transition => (
+            transition.effect_invocations || []
+          ).some(invocation => invocation.expression === effect)),
+          `${testCase.machine}: Effect invocation missing from IR: ${effect}`,
+        );
+        assert(
+          machine.transitions.every(transition => !actionDisplay(transition).includes(effect)),
+          `${testCase.machine}: Effect invocation leaked into Action: ${effect}`,
+        );
+      }
 
       await fs.writeFile(
         path.join(outputDirectory, `${testCase.slug}.json`),
@@ -133,6 +155,16 @@ try {
           `${testCase.machine}: missing ${expected}`,
         );
       }
+      for (const effect of testCase.expectedEffects) {
+        assert(
+          visible.every(label => !label.includes(`➡︎${effect}`) && !label.includes(` / ${effect}`)),
+          `${testCase.machine}: Effect is visible in Action position: ${effect}`,
+        );
+      }
+      assert(
+        visible.every(label => !label.includes("➡︎—")),
+        `${testCase.machine}: missing Action is rendered as a placeholder Action`,
+      );
       assert(
         visible.every(label => !label.includes(` ! ${testCase.failureType}`)),
         `${testCase.machine}: old ! failure notation remains visible`,
@@ -166,4 +198,4 @@ try {
   await browser.close();
 }
 
-console.log(`verified ${cases.length} additional diagrams with Glyph pipe failure notation`);
+console.log(`verified ${cases.length} additional diagrams with separate Action, Effect, and failure notation`);
