@@ -120,16 +120,18 @@ _SCRIPT = r"""
 
   function actionOf(transition) {
     const raw = transition?.action;
-    const action = typeof raw === "string"
+    return typeof raw === "string"
       ? text(raw)
       : text(raw?.display) || text(raw?.expression);
-    const failure = text(transition?.failure_type);
-    if (action && failure) return `${action} | ${failure}`;
-    return action || (failure ? `| ${failure}` : "—");
   }
 
   function summaryOf(transition) {
-    return `${inputOf(transition)}➡︎${actionOf(transition)}`;
+    const input = inputOf(transition);
+    const action = actionOf(transition);
+    const failure = text(transition?.failure_type);
+    let summary = action ? `${input}➡︎${action}` : input;
+    if (failure) summary += ` | ${failure}`;
+    return summary;
   }
 
   function evidenceOf(transition) {
@@ -253,7 +255,7 @@ _SCRIPT = r"""
   function schedule() {
     clearTimeout(timer);
     timer = setTimeout(() => render().catch(error => {
-      console.error("StateTransitionIR v3 rendering failed", error);
+      console.error("StateTransitionIR rendering failed", error);
     }), 0);
   }
 
