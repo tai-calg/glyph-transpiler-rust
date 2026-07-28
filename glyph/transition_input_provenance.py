@@ -1,0 +1,483 @@
+from __future__ import annotations
+
+from copy import deepcopy
+from dataclasses import dataclass
+from typing import Mapping, Sequence
+
+from .artifacts import CompilationModel
+from .compiler import (
+    BinaryExpr,
+    BoolExpr,
+    CallExpr,
+    Expr,
+    FieldExpr,
+    FunctionDecl,
+    NameExpr,
+    TryExpr,
+    UnaryExpr,
+    parse_expr,
+)
+from .execution_ir import render_expr
+from .machine import MachineDecl
+
+
+INPUT_PREIMAGE_VERSION = 1
+_INPUT_PROVENANCE = "decision-output-preimage"
+_EXPANDED_CONFIDENCE = "dataflow-expanded"
+_UNRESOLVED_CODE = "STIR_INPUT_PREIMAGE_UNRESOLVED"
+
+
+@dataclass(frozen=True)
+class _Discriminator:
+    atom: BinaryExpr
+    local_name: str
+    pattern: Expr
+    variant: str
+    definition: CallExpr
+    decision: FunctionDecl
+
+
+@dataclass(frozen=True)
+class _Preimage:
+    display: str
+    expression: str
+    exact: Expr | None
+    fallback: bool
+    roots: tuple[str, ...]
+    path: tuple[str, ...]
+    payload_bindings: Mapping[str, Expr]
+
+
+def _warning(message: str, line: int) -> dict[str, object]:
+    return {
+        "severity": "warning",
+        "code": _UNRESOLVED_CODE,
+        "message": message,
+        "line": line,
+    }
+
+
+def _next_name(machine: MachineDecl) -> str | None:
+    expression = machine.next_expr
+    if not isinstance(expression, CallExpr) or not isinstance(expression.callee, NameExpr):
+        return None
+    return expression.callee.name
+
+
+def _block_definitions(model: CompilationModel, function_name: str | None) -> dict[str, Expr]:
+    if function_name is None:
+        return {}
+    block = next((item for item in model.blocks if item.name == function_name), None)
+    if block is None:
+        return {}
+    definitions: dict[str, Expr] = {}
+    for binding in block.bindings:
+        if binding.kind != "expression":
+            continue
+        try:
+            definitions[binding.name] = parse_expr(binding.source)
+        except Exception:
+            continue
+    return definitions
+
+
+def _flatten_and(expression: Expr) -> list[Expr]:
+    if isinstance(expression, BinaryExpr) and expression.op == "&":
+        return [*_flatten_and(expression.left), *_flatten_and(expression.right)]
+    return [expression]
+
+
+def _combine(expressions: Sequence[Expr], operator: str) -> Expr | None:
+    iterator = iter(expressions)
+    try:
+        result = next(iterator)
+    except StopIteration:
+        return None
+    for expression in iterator:
+        result = BinaryExpr(operator, result, expression)
+    return result
+
+
+def _variant(expression: Expr) -> tuple[str | None, tuple[Expr, ...]]:
+    if isinstance(expression, NameExpr):
+        return expression.name, ()
+    if isinstance(expression, CallExpr) and isinstance(expression.callee, NameExpr):
+        return expression.callee.name, expression.args
+    return None, ()
+
+
+def _substitute(expression: Expr, values: Mapping[str, Expr]) -> Expr:
+    if isinstance(expression, NameExpr):
+        return values.get(expression.name, expression)
+    if isinstance(expression, FieldExpr):
+        return FieldExpr(_substitute(expression.base, values), expression.field)
+    if isinstance(expression, UnaryExpr):
+        return UnaryExpr(expression.op, _substitute(expression.expr, values))
+    if isinstance(expression, BinaryExpr):
+        return BinaryExpr(
+            expression.op,
+            _substitute(expression.left, values),
+            _substitute(expression.right, values),
+        )
+    if isinstance(expression, CallExpr):
+        return CallExpr(
+            _substitute(expression.callee, values),
+            tuple(_substitute(argument, values) for argument in expression.args),
+        )
+    if isinstance(expression, TryExpr):
+        return TryExpr(_substitute(expression.expr, values))
+    return expression
+
+
+def _input_roots(expression: Expr, input_names: frozenset[str]) -> tuple[str, ...]:
+    roots: set[str] = set()
+
+    def visit(item: Expr) -> None:
+        if isinstance(item, NameExpr):
+            if item.name in input_names:
+                roots.add(f"input:{item.name}")
+            return
+        if isinstance(item, FieldExpr):
+            visit(item.base)
+            return
+        if isinstance(item, UnaryExpr):
+            visit(item.expr)
+            return
+        if isinstance(item, BinaryExpr):
+            visit(item.left)
+            visit(item.right)
+            return
+        if isinstance(item, CallExpr):
+            visit(item.callee)
+            for argument in item.args:
+                visit(argument)
+            return
+        if isinstance(item, TryExpr):
+            visit(item.expr)
+
+    visit(expression)
+    return tuple(sorted(roots))
+
+
+def _find_discriminator(
+    condition: Expr,
+    *,
+    definitions: Mapping[str, Expr],
+    functions: Mapping[str, FunctionDecl],
+) -> _Discriminator | None:
+    for atom in _flatten_and(condition):
+        if not isinstance(atom, BinaryExpr) or atom.op != "==":
+            continue
+        for subject, pattern in ((atom.left, atom.right), (atom.right, atom.left)):
+            if not isinstance(subject, NameExpr):
+                continue
+            definition = definitions.get(subject.name)
+            if not (
+                isinstance(definition, CallExpr)
+                and isinstance(definition.callee, NameExpr)
+            ):
+                continue
+            decision = functions.get(definition.callee.name)
+            if decision is None or not decision.guards:
+                continue
+            variant, _ = _variant(pattern)
+            if variant is None:
+                continue
+            return _Discriminator(
+                atom=atom,
+                local_name=subject.name,
+                pattern=pattern,
+                variant=variant,
+                definition=definition,
+                decision=decision,
+            )
+    return None
+
+
+def _payload_mapping(pattern: Expr, value: Expr) -> dict[str, Expr] | None:
+    pattern_variant, pattern_args = _variant(pattern)
+    value_variant, value_args = _variant(value)
+    if pattern_variant is None or pattern_variant != value_variant:
+        return None
+    if len(pattern_args) != len(value_args):
+        return None
+    mapping: dict[str, Expr] = {}
+    for binder, payload in zip(pattern_args, value_args):
+        if not isinstance(binder, NameExpr) or binder.name == "_":
+            continue
+        mapping[binder.name] = payload
+    return mapping
+
+
+def _same_payload_bindings(candidates: Sequence[Mapping[str, Expr]]) -> dict[str, Expr]:
+    if not candidates:
+        return {}
+    names = set(candidates[0])
+    if any(set(candidate) != names for candidate in candidates[1:]):
+        return {}
+    result: dict[str, Expr] = {}
+    for name in names:
+        rendered = {render_expr(candidate[name]) for candidate in candidates}
+        if len(rendered) != 1:
+            return {}
+        result[name] = candidates[0][name]
+    return result
+
+
+def _resolve_preimage(
+    discriminator: _Discriminator,
+    *,
+    input_names: frozenset[str],
+) -> _Preimage | None:
+    decision = discriminator.decision
+    if len(decision.params) != len(discriminator.definition.args):
+        return None
+    substitutions = {
+        parameter.name: argument
+        for parameter, argument in zip(decision.params, discriminator.definition.args)
+    }
+
+    prior_different: list[Expr] = []
+    exact_matches: list[Expr] = []
+    fallback_match = False
+    payload_candidates: list[Mapping[str, Expr]] = []
+
+    for clause in decision.guards:
+        value = _substitute(clause.value, substitutions)
+        result_variant, _ = _variant(value)
+        condition = (
+            None
+            if clause.condition is None
+            else _substitute(clause.condition, substitutions)
+        )
+        matches = result_variant == discriminator.variant
+
+        if matches:
+            payload = _payload_mapping(discriminator.pattern, value)
+            if payload is None:
+                return None
+            payload_candidates.append(payload)
+            if condition is None:
+                fallback_match = True
+                prior = _combine(prior_different, "|")
+                exact_matches.append(
+                    BoolExpr(True) if prior is None else UnaryExpr("!", prior)
+                )
+            else:
+                prior = _combine(prior_different, "|")
+                exact_matches.append(
+                    condition
+                    if prior is None
+                    else BinaryExpr("&", condition, UnaryExpr("!", prior))
+                )
+        elif condition is not None:
+            prior_different.append(condition)
+
+    if not exact_matches:
+        return None
+
+    exact = _combine(exact_matches, "|")
+    assert exact is not None
+    roots = _input_roots(exact, input_names)
+    if not roots and not fallback_match:
+        return None
+
+    only_fallback = fallback_match and len(exact_matches) == 1
+    display = "otherwise" if only_fallback else render_expr(exact)
+    return _Preimage(
+        display=display,
+        expression=render_expr(exact),
+        exact=exact,
+        fallback=only_fallback,
+        roots=roots or tuple(f"input:{name}" for name in sorted(input_names)),
+        path=(
+            *sorted(input_names),
+            f"{discriminator.decision.name}(...)",
+            discriminator.local_name,
+            discriminator.variant,
+        ),
+        payload_bindings=_same_payload_bindings(payload_candidates),
+    )
+
+
+def _action_display(action: object) -> str:
+    if isinstance(action, Mapping):
+        return str(action.get("display") or action.get("expression") or "")
+    return "" if action is None else str(action)
+
+
+def _display_label(transition: Mapping[str, object]) -> str:
+    trigger = transition.get("trigger")
+    label = ""
+    if isinstance(trigger, Mapping):
+        prefix = "? " if trigger.get("role") == "provisional-trigger" else ""
+        label = prefix + str(trigger.get("display") or "")
+    guards = [str(item) for item in transition.get("guards", []) if str(item)]
+    if guards:
+        guard = "&".join(guards)
+        label += f" [{guard}]" if label else f"[{guard}]"
+    unknown = [
+        str(item)
+        for item in transition.get("unclassified_conditions", [])
+        if str(item)
+    ]
+    if unknown:
+        value = "&".join(unknown)
+        label += f" ? {value}" if label else f"? {value}"
+    action = _action_display(transition.get("action"))
+    if action:
+        label += f" / {action}" if label else f"/ {action}"
+    failure = str(transition.get("failure_type") or "")
+    if failure:
+        label += f" | {failure}"
+    return label
+
+
+def _refine_action(
+    transition: dict[str, object],
+    discriminator: _Discriminator,
+    preimage: _Preimage,
+) -> None:
+    action = transition.get("action")
+    if not isinstance(action, Mapping) or not preimage.payload_bindings:
+        return
+    if str(action.get("variant") or "") != discriminator.variant:
+        return
+    refined = _substitute(discriminator.pattern, preimage.payload_bindings)
+    refined_variant, refined_payload = _variant(refined)
+    if refined_variant != discriminator.variant:
+        return
+    value = dict(action)
+    rendered = render_expr(refined)
+    value["display"] = rendered
+    value["expression"] = rendered
+    value["payload"] = [render_expr(item) for item in refined_payload]
+    value["value_provenance"] = _INPUT_PROVENANCE
+    transition["action"] = value
+
+
+def expand_machine_transition_inputs(
+    model: CompilationModel,
+    machine_view: dict[str, object],
+) -> dict[str, object]:
+    """Expand local decision discriminators into machine-input preimages.
+
+    The pass is deliberately conservative. It rewrites a trigger only when a local
+    immutable binding is a direct call to a guarded pure function and the compared
+    output variant can be mapped back to input-rooted guard predicates.
+    """
+
+    result = deepcopy(machine_view)
+    machine = next(
+        (item for item in model.machines if item.name == result.get("name")),
+        None,
+    )
+    if machine is None:
+        return result
+
+    functions = {
+        item.name: item
+        for item in model.program.declarations
+        if isinstance(item, FunctionDecl)
+    }
+    definitions = _block_definitions(model, _next_name(machine))
+    input_names = frozenset(parameter.name for parameter in machine.input_params)
+    if not definitions or not input_names:
+        analysis = dict(result.get("analysis", {}))
+        analysis["input_preimage_version"] = INPUT_PREIMAGE_VERSION
+        analysis["expanded_input_preimage_count"] = 0
+        analysis["unresolved_input_preimage_count"] = 0
+        result["analysis"] = analysis
+        return result
+
+    diagnostics = [dict(item) for item in result.get("diagnostics", [])]
+    generated: list[dict[str, object]] = []
+    transitions: list[dict[str, object]] = []
+    expanded = 0
+    unresolved = 0
+
+    for original in result.get("transitions", []):
+        transition = dict(original)
+        raw = str(transition.get("condition_raw") or transition.get("condition") or "")
+        if raw in {"", "otherwise", "next"}:
+            transitions.append(transition)
+            continue
+        try:
+            condition = parse_expr(raw)
+        except Exception:
+            transitions.append(transition)
+            continue
+
+        discriminator = _find_discriminator(
+            condition,
+            definitions=definitions,
+            functions=functions,
+        )
+        if discriminator is None:
+            transitions.append(transition)
+            continue
+
+        preimage = _resolve_preimage(discriminator, input_names=input_names)
+        line = int(transition.get("source", {}).get("line", 1))
+        if preimage is None:
+            unresolved += 1
+            generated.append(
+                _warning(
+                    (
+                        f"`{render_expr(discriminator.atom)}` is an intermediate decision "
+                        "discriminator, but its machine-input preimage could not be proven. "
+                        "The existing provisional trigger is preserved."
+                    ),
+                    line,
+                )
+            )
+            transitions.append(transition)
+            continue
+
+        expanded += 1
+        transition["trigger"] = {
+            "display": preimage.display,
+            "expression": preimage.expression,
+            "role": "inferred-trigger",
+            "confidence": _EXPANDED_CONFIDENCE,
+            "value_type": discriminator.decision.return_type.name,
+            "variant": discriminator.variant,
+            "provenance": _INPUT_PROVENANCE,
+            "decision_function": discriminator.decision.name,
+            "decision_variant": discriminator.variant,
+            "provenance_roots": list(preimage.roots),
+            "dataflow_path": list(preimage.path),
+        }
+        transition["event"] = preimage.display
+        transition["input_preimage"] = {
+            "version": INPUT_PREIMAGE_VERSION,
+            "exact_expression": preimage.expression,
+            "fallback_display": preimage.fallback,
+            "decision_function": discriminator.decision.name,
+            "decision_variant": discriminator.variant,
+        }
+        _refine_action(transition, discriminator, preimage)
+        transition["display_label"] = _display_label(transition)
+        classification = dict(transition.get("classification", {}))
+        classification["confidence"] = _EXPANDED_CONFIDENCE
+        transition["classification"] = classification
+        transitions.append(transition)
+
+    seen = {
+        (item.get("code"), item.get("line"), item.get("message"))
+        for item in diagnostics
+    }
+    for item in generated:
+        key = (item.get("code"), item.get("line"), item.get("message"))
+        if key not in seen:
+            diagnostics.append(item)
+            seen.add(key)
+
+    analysis = dict(result.get("analysis", {}))
+    analysis["input_preimage_version"] = INPUT_PREIMAGE_VERSION
+    analysis["expanded_input_preimage_count"] = expanded
+    analysis["unresolved_input_preimage_count"] = unresolved
+    result["transitions"] = transitions
+    result["diagnostics"] = diagnostics
+    result["analysis"] = analysis
+    return result
