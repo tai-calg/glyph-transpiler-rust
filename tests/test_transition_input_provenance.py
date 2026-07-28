@@ -19,11 +19,54 @@ def compile_example(relative: str) -> dict[str, object]:
     return build_io_state_views(output.model, output.diagrams.ir)
 
 
+def compile_source(source: str, name: str = "input-preimage-inline.glyph") -> dict[str, object]:
+    output = CompilationPipeline().compile_text(source, source_name=name)
+    return build_io_state_views(output.model, output.diagrams.ir)
+
+
 def action_display(transition: dict[str, object]) -> str:
     action = transition.get("action")
     if not isinstance(action, dict):
         return ""
     return str(action.get("display") or action.get("expression") or "")
+
+
+def expanded_signature(views: dict[str, object], action: str) -> tuple[str, str, str]:
+    machine = views["state"]["machines"][0]
+    item = next(
+        transition
+        for transition in machine["transitions"]
+        if action_display(transition) == action and transition.get("input_preimage")
+    )
+    return item["trigger"]["display"], action_display(item), item["target_state"]
+
+
+_METAMORPHIC_SOURCE = """\
+machine Example(state:ExampleState,input:Input)
+  select=state.mode
+  action=state.action
+  init=ExampleState(Idle,Stay)
+  next=step(state,input)
+  success=Active
+  failure=Faulted
+
+*Input(start,enabled:B)
++Action=Stay|Go
++Mode=Idle|Active|Faulted
+*ExampleState(mode:Mode,action:Action)
+
+>decide(input:Input):Action
+  input.start >> Go
+  _ >> Stay
+
+>step(state:ExampleState,input:Input):ExampleState
+  action := decide(input)
+  next :=
+    action==Go >> ExampleState(Active,Go)
+    action==Stay >> ExampleState(Idle,Stay)
+    _ >> ExampleState(Faulted,Stay)
+  next
+"""
 
 
 class TransitionInputProvenanceTests(unittest.TestCase):
@@ -111,6 +154,36 @@ class TransitionInputProvenanceTests(unittest.TestCase):
             self.assertNotEqual(item["trigger"]["display"], action_display(item))
             self.assertNotEqual(action_display(item), item["target_state"])
             self.assertEqual(item.get("effect_invocations"), [])
+
+    def test_target_rename_changes_only_target_axis(self) -> None:
+        baseline = expanded_signature(compile_source(_METAMORPHIC_SOURCE), "Go")
+        renamed_source = _METAMORPHIC_SOURCE.replace("Active", "Working")
+        renamed = expanded_signature(compile_source(renamed_source), "Go")
+        self.assertEqual(renamed[0], baseline[0])
+        self.assertEqual(renamed[1], baseline[1])
+        self.assertEqual(baseline[2], "Active")
+        self.assertEqual(renamed[2], "Working")
+
+    def test_action_rename_changes_only_action_axis(self) -> None:
+        baseline = expanded_signature(compile_source(_METAMORPHIC_SOURCE), "Go")
+        renamed_source = _METAMORPHIC_SOURCE.replace("Go", "Begin")
+        renamed = expanded_signature(compile_source(renamed_source), "Begin")
+        self.assertEqual(renamed[0], baseline[0])
+        self.assertEqual(renamed[2], baseline[2])
+        self.assertEqual(baseline[1], "Go")
+        self.assertEqual(renamed[1], "Begin")
+
+    def test_predicate_change_changes_only_input_axis(self) -> None:
+        baseline = expanded_signature(compile_source(_METAMORPHIC_SOURCE), "Go")
+        changed_source = _METAMORPHIC_SOURCE.replace(
+            "input.start >> Go",
+            "input.start&input.enabled >> Go",
+        )
+        changed = expanded_signature(compile_source(changed_source), "Go")
+        self.assertNotEqual(changed[0], baseline[0])
+        self.assertIn("input.enabled", changed[0])
+        self.assertEqual(changed[1], baseline[1])
+        self.assertEqual(changed[2], baseline[2])
 
 
 if __name__ == "__main__":
