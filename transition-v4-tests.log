@@ -9,6 +9,6 @@ Traceback (most recent call last):
 TypeError: 'NoneType' object is not subscriptable
 
 ----------------------------------------------------------------------
-Ran 18 tests in 0.108s
+Ran 18 tests in 0.104s
 
 FAILED (errors=1)
