@@ -2,16 +2,21 @@ from __future__ import annotations
 
 import os
 import shutil
+import sys
 from pathlib import Path
 
 from PIL import Image, ImageChops
 
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 from glyph.compilation import CompilationPipeline
 from glyph.io_state_views import build_io_state_views
 
-GENERATED_PATH = Path("build/state-diagram-regression/motor-safety-motor.png")
-COMMITTED_PATH = Path("docs/images/glyph-studio-state-transition.png")
-MOTOR_SOURCE_PATH = Path("examples/acceptance/motor_safety.glyph")
+GENERATED_PATH = ROOT / "build/state-diagram-regression/motor-safety-motor.png"
+COMMITTED_PATH = ROOT / "docs/images/glyph-studio-state-transition.png"
+MOTOR_SOURCE_PATH = ROOT / "examples/acceptance/motor_safety.glyph"
 EXPECTED_SIZE = (1800, 1100)
 
 # READMEで公開するMotor Safety例は、Actionを命令、Target Stateを状態として
@@ -126,7 +131,7 @@ def main() -> None:
     if os.environ.get("UPDATE_README_STATE_DIAGRAM") == "1":
         COMMITTED_PATH.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(GENERATED_PATH, COMMITTED_PATH)
-        print(f"updated {COMMITTED_PATH}")
+        print(f"updated {COMMITTED_PATH.relative_to(ROOT)}")
         return
 
     changed_pixels, mean_absolute_delta, max_channel_delta, size = compare_images(
