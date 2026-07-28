@@ -118,7 +118,7 @@ machine Controller(state:ControllerState,event:Event,input:Input)
   next :=
     event==Start&decision==Run >> ControllerState(Running,StartMotor)
     _ >> state
-  ret next
+  next
 """
         machine = compile_source(source)["state"]["machines"][0]
         self.assert_unresolved_is_explicit(machine, "Running")
@@ -154,7 +154,7 @@ machine Controller(state:ControllerState,input:Input)
   next :=
     route_value==Go&permission_value==Allowed >> ControllerState(Running,StartMotor)
     _ >> state
-  ret next
+  next
 """
         machine = compile_source(source)["state"]["machines"][0]
         self.assert_unresolved_is_explicit(machine, "Running")
@@ -184,7 +184,7 @@ machine Controller(state:ControllerState,input:Input)
   next :=
     decision==Run >> ControllerState(Running,StartMotor)
     _ >> state
-  ret next
+  next
 """
         machine = compile_source(source)["state"]["machines"][0]
         self.assert_unresolved_is_explicit(machine, "Running")
@@ -218,7 +218,7 @@ machine Controller(state:ControllerState,input:Input)
   next :=
     decision==Run >> ControllerState(Running,StartMotor)
     _ >> state
-  ret next
+  next
 """
         machine = compile_source(source)["state"]["machines"][0]
         self.assert_unresolved_is_explicit(machine, "Running")
