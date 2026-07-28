@@ -139,6 +139,18 @@ try {
     Math.abs((afterLeft - beforeLeft) - 100) <= 8,
     `zoom-aware node drag moved ${afterLeft - beforeLeft}px instead of about 100px`,
   );
+  await page.waitForFunction(() => {
+    const stage = document.querySelector(".graph-stage");
+    if (!stage) return false;
+    const settled = ["accepted", "adjusted", "restored"].includes(
+      stage.dataset.transitionIoNodeConstraint || "",
+    );
+    const collisionStable = ["true", "fallback"].includes(
+      stage.dataset.transitionIoCollisionSolved || "",
+    );
+    return settled && collisionStable;
+  });
+  await page.waitForTimeout(160);
 
   await page.click("#diagram-view-reset");
   await page.waitForFunction(() => document.querySelector(".graph-stage")?.dataset.viewportScale === "1");
