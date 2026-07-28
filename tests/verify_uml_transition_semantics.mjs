@@ -11,12 +11,8 @@ const cases = [
     machine: "Session",
     labels: ["SessionStart", "SessionAccept", "SessionReject", "SessionReset"],
     failureLabels: ["SessionReject"],
-    compactLabels: [
-      "SessionStart➡︎—",
-      "SessionAccept➡︎—",
-      "SessionReject➡︎—",
-      "SessionReset➡︎—",
-    ],
+    compactLabels: ["SessionStart", "SessionAccept", "SessionReject", "SessionReset"],
+    forbiddenActions: [],
   },
   {
     slug: "traffic-uml",
@@ -24,70 +20,71 @@ const cases = [
     machine: "Traffic",
     labels: ["? input.tick", "? input.fault"],
     failureLabels: ["? input.fault"],
-    compactLabels: ["? input.tick➡︎—", "? input.fault➡︎—"],
+    compactLabels: ["? input.tick", "? input.fault"],
+    forbiddenActions: [],
   },
   {
     slug: "effect-failure-uml",
     file: "examples/state_diagrams/effect_failure.glyph",
     machine: "Pump",
     labels: [
-      "PumpStart / write_pump(true)",
-      "PumpStop / write_pump(false)",
-      "PumpStart / write_pump(true) | WriteError",
-      "PumpStop / write_pump(false) | WriteError",
+      "PumpStart",
+      "PumpStop",
+      "PumpStart | WriteError",
+      "PumpStop | WriteError",
     ],
-    failureLabels: [
-      "PumpStart / write_pump(true) | WriteError",
-      "PumpStop / write_pump(false) | WriteError",
-    ],
+    failureLabels: ["PumpStart | WriteError", "PumpStop | WriteError"],
     compactLabels: [
-      "PumpStart➡︎write_pump(true)",
-      "PumpStop➡︎write_pump(false)",
-      "PumpStart➡︎write_pump(true) | WriteError",
-      "PumpStop➡︎write_pump(false) | WriteError",
+      "PumpStart",
+      "PumpStop",
+      "PumpStart | WriteError",
+      "PumpStop | WriteError",
     ],
+    forbiddenActions: ["write_pump(true)", "write_pump(false)"],
   },
   {
     slug: "conveyor-action-uml",
     file: "examples/state_diagrams/conveyor_control.glyph",
     machine: "Conveyor",
     labels: [
-      "ConveyorStart [input.clear] / set_conveyor(input.speed)",
-      "ConveyorStop / set_conveyor(0.0)",
-      "ConveyorReset [input.clear] / set_conveyor(0.0)",
-      "ConveyorStart [input.clear] / set_conveyor(input.speed) | DriveError",
+      "ConveyorStart [input.clear]",
+      "ConveyorStop",
+      "ConveyorReset [input.clear]",
+      "ConveyorStart [input.clear] | DriveError",
     ],
     failureLabels: [
-      "ConveyorStart [input.clear] / set_conveyor(input.speed) | DriveError",
-      "ConveyorStop / set_conveyor(0.0) | DriveError",
-      "ConveyorReset [input.clear] / set_conveyor(0.0) | DriveError",
+      "ConveyorStart [input.clear] | DriveError",
+      "ConveyorStop | DriveError",
+      "ConveyorReset [input.clear] | DriveError",
     ],
     compactLabels: [
-      "ConveyorStart [input.clear]➡︎set_conveyor(input.speed)",
-      "ConveyorStop➡︎set_conveyor(0.0)",
-      "ConveyorReset [input.clear]➡︎set_conveyor(0.0)",
-      "ConveyorStart [input.clear]➡︎set_conveyor(input.speed) | DriveError",
+      "ConveyorStart [input.clear]",
+      "ConveyorStop",
+      "ConveyorReset [input.clear]",
+      "ConveyorStart [input.clear] | DriveError",
     ],
+    forbiddenActions: ["set_conveyor(input.speed)", "set_conveyor(0.0)"],
   },
   {
     slug: "valve-nested-action-uml",
     file: "examples/state_diagrams/valve_nested_effect.glyph",
     machine: "Valve",
     labels: [
-      "ValveOpenRequest / write_valve(true)",
-      "ValveCloseRequest / write_valve(false)",
-      "ValveOpenRequest / write_valve(true) | ValveError",
-      "ValveCloseRequest / write_valve(false) | ValveError",
+      "ValveOpenRequest",
+      "ValveCloseRequest",
+      "ValveOpenRequest | ValveError",
+      "ValveCloseRequest | ValveError",
     ],
     failureLabels: [
-      "ValveOpenRequest / write_valve(true) | ValveError",
-      "ValveCloseRequest / write_valve(false) | ValveError",
+      "ValveOpenRequest | ValveError",
+      "ValveCloseRequest | ValveError",
     ],
     compactLabels: [
-      "ValveOpenRequest➡︎write_valve(true)",
-      "ValveCloseRequest➡︎write_valve(false)",
-      "ValveOpenRequest➡︎write_valve(true) | ValveError",
+      "ValveOpenRequest",
+      "ValveCloseRequest",
+      "ValveOpenRequest | ValveError",
     ],
+    forbiddenActions: ["write_valve(true)", "write_valve(false)"],
   },
 ];
 
@@ -103,7 +100,7 @@ async function waitForServer(url, child, logs) {
       const response = await fetch(`${url}/api/state`);
       if (response.ok) {
         const state = await response.json();
-        if (state.status === "ready" && state.views?.transition_semantics_version === 1) {
+        if (state.status === "ready" && state.views?.transition_semantics_version === 2) {
           return state;
         }
       }
@@ -123,6 +120,12 @@ async function stopProcess(child) {
     new Promise(resolve => setTimeout(resolve, 1500)),
   ]);
   if (child.exitCode === null) child.kill("SIGKILL");
+}
+
+function actionDisplay(transition) {
+  const raw = transition?.action;
+  if (typeof raw === "string") return raw.trim();
+  return String(raw?.display || raw?.expression || "").trim();
 }
 
 async function assertInitialRouteClear(page, machineName) {
@@ -219,8 +222,24 @@ try {
     const url = `http://127.0.0.1:${port}`;
     try {
       const state = await waitForServer(url, child, logs);
+      assert.equal(state.views.state_transition_ir.version, 4);
       const machine = state.views.state.machines.find(item => item.name === testCase.machine);
       assert.ok(machine, `${testCase.machine}: machine missing`);
+
+      for (const transition of machine.transitions) {
+        const action = actionDisplay(transition);
+        assert.notEqual(
+          action,
+          String(transition.target_state || ""),
+          `${testCase.machine}/${transition.id}: Target State leaked into Action`,
+        );
+        for (const forbidden of testCase.forbiddenActions) {
+          assert(
+            !action.includes(forbidden),
+            `${testCase.machine}/${transition.id}: Effect invocation leaked into Action: ${forbidden}`,
+          );
+        }
+      }
 
       const page = await browser.newPage({
         viewport: { width: 1800, height: 1200 },
@@ -269,6 +288,16 @@ try {
         );
       }
 
+      for (const forbidden of testCase.forbiddenActions) {
+        assert(
+          visibleLabels.every(label => !label.includes(`➡︎${forbidden}`)),
+          `${testCase.machine}: Effect invocation is visible in Action position: ${forbidden}`,
+        );
+      }
+      assert(
+        visibleLabels.every(label => !label.includes("➡︎—")),
+        `${testCase.machine}: missing Action is rendered as a placeholder Action`,
+      );
       assert(
         visibleLabels.every(label => !/ ! (WriteError|DriveError|ValveError)/.test(label)),
         `${testCase.machine}: old effect-sigil failure notation remains visible`,
@@ -297,4 +326,4 @@ try {
   await browser.close();
 }
 
-console.log(`verified ${cases.length} UML diagrams with Glyph pipe failure notation`);
+console.log(`verified ${cases.length} UML diagrams with separate Action and Effect semantics`);
