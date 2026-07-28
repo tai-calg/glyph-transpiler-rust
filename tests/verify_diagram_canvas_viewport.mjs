@@ -74,6 +74,41 @@ async function viewportAnchor(page, point = null) {
   }, point);
 }
 
+async function waitForStableDiagramGeometry(page, timeoutMs = 12000) {
+  const started = Date.now();
+  let previous = null;
+  let stableSamples = 0;
+  while (Date.now() - started < timeoutMs) {
+    const current = await page.evaluate(() => {
+      const stage = document.querySelector(".graph-stage");
+      const shell = document.querySelector(".canvas-shell");
+      const node = stage?.querySelector(".state-node");
+      if (!stage || !shell || !node) return null;
+      return {
+        left: Number.parseFloat(node.style.left || "0"),
+        top: Number.parseFloat(node.style.top || "0"),
+        scrollWidth: shell.scrollWidth,
+        scrollHeight: shell.scrollHeight,
+        collision: stage.dataset.transitionIoCollisionSolved || "",
+      };
+    });
+    if (current && previous) {
+      const unchanged = (
+        Math.abs(current.left - previous.left) <= 1
+        && Math.abs(current.top - previous.top) <= 1
+        && Math.abs(current.scrollWidth - previous.scrollWidth) <= 1
+        && Math.abs(current.scrollHeight - previous.scrollHeight) <= 1
+      );
+      const collisionStable = ["true", "fallback"].includes(current.collision);
+      stableSamples = unchanged && collisionStable ? stableSamples + 1 : 0;
+      if (stableSamples >= 2) return current;
+    }
+    previous = current;
+    await page.waitForTimeout(160);
+  }
+  throw new Error(`diagram geometry did not settle: ${JSON.stringify(previous)}`);
+}
+
 const logs = [];
 const port = 8896;
 const child = spawn("python3", ["glyph.py", "examples/state_diagrams/conveyor_control.glyph"], {
@@ -111,16 +146,7 @@ try {
     const semantic = stage.dataset.transitionSemanticRoleLinesReady;
     return semantic === undefined || semantic === "true";
   });
-  // Position assertions must begin after the asynchronous semantic-label transaction is stable.
-  await page.waitForTimeout(220);
-  const stableNode = page.locator(".state-node").first();
-  const stableLeft = await stableNode.evaluate(element => Number.parseFloat(element.style.left));
-  await page.waitForTimeout(180);
-  const stableLeftAgain = await stableNode.evaluate(element => Number.parseFloat(element.style.left));
-  assert(
-    Math.abs(stableLeftAgain - stableLeft) <= 1,
-    `state diagram moved during viewport-test setup: ${stableLeft} -> ${stableLeftAgain}`,
-  );
+  await waitForStableDiagramGeometry(page);
 
   assert.equal(await page.locator(".canvas-pan-help").count(), 0);
   assert.equal(await page.locator(".canvas-shell").getAttribute("title"), null);
@@ -139,21 +165,11 @@ try {
     Math.abs((afterLeft - beforeLeft) - 100) <= 8,
     `zoom-aware node drag moved ${afterLeft - beforeLeft}px instead of about 100px`,
   );
-  await page.waitForFunction(() => {
-    const stage = document.querySelector(".graph-stage");
-    if (!stage) return false;
-    const settled = ["accepted", "adjusted", "restored"].includes(
-      stage.dataset.transitionIoNodeConstraint || "",
-    );
-    const collisionStable = ["true", "fallback"].includes(
-      stage.dataset.transitionIoCollisionSolved || "",
-    );
-    return settled && collisionStable;
-  });
-  await page.waitForTimeout(160);
+  await waitForStableDiagramGeometry(page);
 
   await page.click("#diagram-view-reset");
   await page.waitForFunction(() => document.querySelector(".graph-stage")?.dataset.viewportScale === "1");
+  await waitForStableDiagramGeometry(page);
   const anchorBefore = await viewportAnchor(page);
   assert(anchorBefore, "missing viewport anchor before pinch");
   await page.locator(".canvas-shell").dispatchEvent("wheel", {
