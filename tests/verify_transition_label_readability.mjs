@@ -8,7 +8,7 @@ const cases = [
   {
     slug: "conveyor",
     file: "examples/state_diagrams/conveyor_control.glyph",
-    requiredLabel: "ConveyorStop ➞ set_conveyor(0.0)",
+    requiredLabel: "ConveyorStop",
   },
   {
     slug: "traffic-light",
@@ -38,10 +38,10 @@ function expectedLabel(transition) {
   const guards = Array.isArray(transition?.guards)
     ? transition.guards.map(clean).filter(Boolean)
     : clean(transition?.guard) ? [clean(transition.guard)] : [];
-  const output = clean(transition?.action)
-    || clean(transition?.target_state)
-    || clean(transition?.target?.state)
-    || clean(transition?.target?.name);
+  const action = transition?.action;
+  const output = typeof action === "string"
+    ? clean(action)
+    : clean(action?.display) || clean(action?.expression);
   return `${input}${guards.length ? ` [${guards.join(" & ")}]` : ""}${output ? ` ➞ ${output}` : ""}`;
 }
 

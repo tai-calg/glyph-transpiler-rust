@@ -27,6 +27,8 @@ from .compiler import (
 _MACHINE_RE = re.compile(r"machine\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(")
 _SINGLE_EQUAL_RE = re.compile(r"(?<![<>=!])=(?!=)")
 _REQUIRED_PROPERTIES = ("select", "init", "next", "success", "failure")
+_OPTIONAL_PROPERTIES = ("action",)
+_ALLOWED_PROPERTIES = (*_REQUIRED_PROPERTIES, *_OPTIONAL_PROPERTIES)
 
 
 @dataclass(frozen=True)
@@ -44,6 +46,8 @@ class MachineDecl:
     next_line: int
     success_line: int
     failure_line: int
+    action_selector: Expr | None = None
+    action_line: int | None = None
 
     @property
     def state_param(self) -> Param:
@@ -129,10 +133,10 @@ def extract_machines(source: str) -> tuple[str, tuple[MachineDecl, ...]]:
                 )
             key = stripped[:separator].strip()
             value = stripped[separator + 1 :].strip()
-            if key not in _REQUIRED_PROPERTIES:
+            if key not in _ALLOWED_PROPERTIES:
                 raise GlyphError(
                     f"{body_line}行目: 不明なmachineプロパティ '{key}'。"
-                    f"使用可能: {', '.join(_REQUIRED_PROPERTIES)}"
+                    f"使用可能: {', '.join(_ALLOWED_PROPERTIES)}"
                 )
             if key in properties:
                 raise GlyphError(
@@ -151,8 +155,9 @@ def extract_machines(source: str) -> tuple[str, tuple[MachineDecl, ...]]:
                 + ", ".join(missing)
             )
 
-        for key in ("select", "init", "next"):
-            _reject_single_equal(properties[key][0], properties[key][1])
+        for key in ("select", "action", "init", "next"):
+            if key in properties:
+                _reject_single_equal(properties[key][0], properties[key][1])
         for key in ("success", "failure"):
             value, value_line = properties[key]
             if not value.isidentifier():
@@ -174,6 +179,12 @@ def extract_machines(source: str) -> tuple[str, tuple[MachineDecl, ...]]:
             next_line=properties["next"][1],
             success_line=properties["success"][1],
             failure_line=properties["failure"][1],
+            action_selector=(
+                parse_expr(properties["action"][0], macros)
+                if "action" in properties
+                else None
+            ),
+            action_line=(properties["action"][1] if "action" in properties else None),
         )
         machines.append(machine)
         seen[name] = line_no
@@ -204,6 +215,22 @@ def _selector_field(machine: MachineDecl) -> str:
             f" '{machine.state_param.name}.field' の形式で記述する"
         )
     return selector.field
+
+
+def _action_field(machine: MachineDecl) -> str | None:
+    action = machine.action_selector
+    if action is None:
+        return None
+    if not (
+        isinstance(action, FieldExpr)
+        and isinstance(action.base, NameExpr)
+        and action.base.name == machine.state_param.name
+    ):
+        line = machine.action_line or machine.line
+        raise GlyphError(
+            f"{line}行目: actionは '{machine.state_param.name}.field' の形式で記述する"
+        )
+    return action.field
 
 
 def _direct_call(expr: Expr, line: int, label: str) -> CallExpr:
@@ -254,6 +281,28 @@ def validate_machines(program: Program, machines: Sequence[MachineDecl]) -> None
                 f" '{selector_type.name}' は直和型でなければならない"
             )
         variants = {variant.name for variant in selector_sum.variants}
+
+        action_name = _action_field(machine)
+        if action_name is not None:
+            action_index = next(
+                (index for index, field in enumerate(state_decl.fields) if field.name == action_name),
+                None,
+            )
+            line = machine.action_line or machine.line
+            if action_index is None:
+                raise GlyphError(
+                    f"{line}行目: 状態型 '{state_decl.name}' にAction field '{action_name}' がない"
+                )
+            if action_index == selector_index:
+                raise GlyphError(
+                    f"{line}行目: actionとselectは同じfield '{action_name}' を参照できない"
+                )
+            action_type = state_decl.fields[action_index].ty
+            action_sum = sums.get(action_type.name)
+            if action_sum is None or action_type.args:
+                raise GlyphError(
+                    f"{line}行目: action対象 '{action_name}' の型 '{action_type.name}' は直和型でなければならない"
+                )
 
         initial_call = _direct_call(machine.initial, machine.initial_line, "init")
         if initial_call.callee.name != state_decl.name:

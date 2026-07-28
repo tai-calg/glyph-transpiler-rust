@@ -28,7 +28,10 @@ class GuardDistinctFailureIdentityTests(unittest.TestCase):
             if transition["source_state"] == "FanRunning"
             and transition["target_state"] == "FanFault"
             and transition.get("synthesized_failure")
-            and transition.get("action") == "write_fan(0.0)"
+            and any(
+                effect.get("expression") == "write_fan(0.0)"
+                for effect in transition.get("effect_invocations", [])
+            )
             and transition.get("failure_type") == "FanWriteError"
         ]
         self.assertEqual(

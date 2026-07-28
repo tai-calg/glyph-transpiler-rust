@@ -301,8 +301,9 @@ try {
     }
     if (extension === "svg") {
       const markup = bytes.toString("utf8");
-      assert(markup.includes("set_conveyor"), "SVG export omitted transition effect");
-      assert(markup.includes(" ➞ "), "SVG export omitted input-arrow-output notation");
+      assert(markup.includes("ConveyorStart"), "SVG export omitted transition input labels");
+      assert(!markup.includes("set_conveyor"), "SVG export leaked Effect invocation into Action labels");
+      assert(!markup.includes(" ➞ "), "SVG export synthesized an Action for a machine without action projection");
       assert(!markup.includes(" / "), "SVG export retained the old slash separator");
       assert(markup.includes("transition-io-export-label"), "SVG export omitted readable transition labels");
       assert(markup.includes("<tspan"), "SVG export omitted semantic label lines");

@@ -29,7 +29,10 @@ class NestedTransitionRepairTests(unittest.TestCase):
                 transition["source_state"] == "ValveClosed"
                 and transition["target_state"] == "ValveOpen"
                 and transition.get("event") == "ValveOpenRequest"
-                and transition.get("action") == "write_valve(true)"
+                and any(
+                    effect.get("expression") == "write_valve(true)"
+                    for effect in transition.get("effect_invocations", [])
+                )
                 for transition in machine["transitions"]
             )
         )

@@ -119,13 +119,19 @@ _SCRIPT = r"""
   }
 
   function actionOf(transition) {
-    const action = text(transition?.action) || "—";
-    const failure = text(transition?.failure_type);
-    return failure ? `${action} | ${failure}` : action;
+    const raw = transition?.action;
+    return typeof raw === "string"
+      ? text(raw)
+      : text(raw?.display) || text(raw?.expression);
   }
 
   function summaryOf(transition) {
-    return `${inputOf(transition)}➡︎${actionOf(transition)}`;
+    const input = inputOf(transition);
+    const action = actionOf(transition);
+    const failure = text(transition?.failure_type);
+    let summary = action ? `${input}➡︎${action}` : input;
+    if (failure) summary += ` | ${failure}`;
+    return summary;
   }
 
   function evidenceOf(transition) {
@@ -173,7 +179,7 @@ _SCRIPT = r"""
         JSON.stringify(transition.trigger ?? null),
         JSON.stringify(transition.guards ?? []),
         JSON.stringify(transition.unclassified_conditions ?? []),
-        transition.action ?? "",
+        JSON.stringify(transition.action ?? null),
         transition.failure_type ?? "",
         transition.display_label ?? "",
       ].join("\u001f")),
@@ -249,7 +255,7 @@ _SCRIPT = r"""
   function schedule() {
     clearTimeout(timer);
     timer = setTimeout(() => render().catch(error => {
-      console.error("StateTransitionIR v3 rendering failed", error);
+      console.error("StateTransitionIR rendering failed", error);
     }), 0);
   }
 
@@ -268,7 +274,7 @@ _SCRIPT = r"""
 
 
 def enhance_state_transition_ir_html(html: str) -> str:
-    """Render v3 trigger/guard/effect roles without reclassifying compiler semantics."""
+    """Render trigger/guard/Action roles without reclassifying compiler semantics."""
 
     if _MARKER in html:
         return html

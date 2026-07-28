@@ -110,7 +110,7 @@ try {
       guardNodeCount: document.querySelectorAll('.transition-io-node[data-io-kind="guard"]').length,
       failureDecorationCount: document.querySelectorAll(".transition-io-cluster.failure-transition,.transition-io-cluster .transition-io-error").length,
       combinedValues: clusters.map(cluster => cluster.querySelector('.transition-io-node[data-io-kind="io"] .transition-io-value')?.textContent || ""),
-      semanticOutputs: clusters.map(cluster => cluster.dataset.outputValue || ""),
+      semanticActions: clusters.map(cluster => cluster.dataset.actionValue || ""),
       visibleLegacyLabels: visibleLegacyLabels.length,
     };
   });
@@ -124,9 +124,9 @@ try {
   assert.equal(placement.guardNodeCount, 0);
   assert.equal(placement.failureDecorationCount, 0);
   assert(placement.combinedValues.every(value => value.trim().length > 0));
-  const valuesWithOutput = placement.combinedValues.filter((_, index) => placement.semanticOutputs[index].trim().length > 0);
-  assert(valuesWithOutput.length > 0, placement.combinedValues.join("\n"));
-  assert(valuesWithOutput.every(value => value.includes(" ➞ ")), placement.combinedValues.join("\n"));
+  assert(placement.semanticActions.every(value => value.trim().length === 0), placement.semanticActions.join("\n"));
+  assert(placement.combinedValues.every(value => !value.includes(" ➞ ")), placement.combinedValues.join("\n"));
+  assert(!placement.combinedValues.some(value => /\b(Idle|Active|Faulted)\b/.test(value)), placement.combinedValues.join("\n"));
   assert(placement.combinedValues.some(value => value.startsWith("? input.legacy_alarm")), placement.combinedValues.join("\n"));
   assert.equal(placement.visibleLegacyLabels, 0);
 
@@ -173,4 +173,4 @@ try {
   await stopProcess(child);
 }
 
-console.log("verified Japanese-first diagnostics, one input-arrow-output transition label, proximity and canvas panning");
+console.log("verified Japanese-first diagnostics, input/guard transition labels, proximity and canvas panning");

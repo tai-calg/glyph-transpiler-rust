@@ -53,13 +53,13 @@ def transition(
 
 
 class TransitionSemanticsTests(unittest.TestCase):
-    def assert_v3(self, views: dict[str, object], machine: dict[str, object]) -> None:
+    def assert_v4(self, views: dict[str, object], machine: dict[str, object]) -> None:
         self.assertEqual(
             views["state_transition_ir"],
-            {"schema": "glyph.state-transition-ir", "version": 3},
+            {"schema": "glyph.state-transition-ir", "version": 4},
         )
-        self.assertEqual(machine["transition_ir"]["version"], 3)
-        self.assertEqual(machine["analysis"]["transition_ir_version"], 3)
+        self.assertEqual(machine["transition_ir"]["version"], 4)
+        self.assertEqual(machine["analysis"]["transition_ir_version"], 4)
         for index, item in enumerate(machine["transitions"], start=1):
             self.assertEqual(item["id"], f"T{index}")
             for field in (
@@ -71,6 +71,7 @@ class TransitionSemanticsTests(unittest.TestCase):
                 "event",
                 "guard",
                 "action",
+                "effect_invocations",
                 "failure_type",
                 "outcome",
                 "source",
@@ -80,7 +81,7 @@ class TransitionSemanticsTests(unittest.TestCase):
     def test_sum_variant_input_becomes_confirmed_trigger(self) -> None:
         views = compile_semantic(ROOT / "examples/state_diagrams/session_protocol.glyph")
         machine = views["state"]["machines"][0]
-        self.assert_v3(views, machine)
+        self.assert_v4(views, machine)
 
         start = transition(machine, "SessionIdle", "SessionConnecting", "SessionStart")
         self.assertEqual(start["display_label"], "SessionStart")
@@ -124,9 +125,13 @@ class TransitionSemanticsTests(unittest.TestCase):
         machine = views["state"]["machines"][0]
 
         normal = transition(machine, "PumpOff", "PumpOn", "PumpStart")
-        self.assertEqual(normal["action"], "write_pump(true)")
+        self.assertIsNone(normal["action"])
+        self.assertEqual(
+            [item["expression"] for item in normal["effect_invocations"]],
+            ["write_pump(true)"],
+        )
         self.assertIsNone(normal["failure_type"])
-        self.assertEqual(normal["display_label"], "PumpStart / write_pump(true)")
+        self.assertEqual(normal["display_label"], "PumpStart")
 
         failures = [
             item
@@ -135,13 +140,14 @@ class TransitionSemanticsTests(unittest.TestCase):
         ]
         self.assertEqual(len(failures), 1)
         failure = failures[0]
-        self.assertEqual(failure["action"], "write_pump(true)")
+        self.assertIsNone(failure["action"])
+        self.assertEqual(
+            [item["expression"] for item in failure["effect_invocations"]],
+            ["write_pump(true)"],
+        )
         self.assertEqual(failure["failure_type"], "WriteError")
         self.assertEqual(failure["outcome"], "failure")
-        self.assertEqual(
-            failure["display_label"],
-            "PumpStart / write_pump(true) | WriteError",
-        )
+        self.assertEqual(failure["display_label"], "PumpStart | WriteError")
         self.assertNotIn("PumpFault", machine["unreachable_states"])
 
     def test_event_guard_and_action_are_all_preserved(self) -> None:
@@ -156,11 +162,12 @@ class TransitionSemanticsTests(unittest.TestCase):
         )
         self.assertEqual(start["guard"], "input.clear")
         self.assertEqual(start["guards"], ["input.clear"])
-        self.assertEqual(start["action"], "set_conveyor(input.speed)")
+        self.assertIsNone(start["action"])
         self.assertEqual(
-            start["display_label"],
-            "ConveyorStart [input.clear] / set_conveyor(input.speed)",
+            [item["expression"] for item in start["effect_invocations"]],
+            ["set_conveyor(input.speed)"],
         )
+        self.assertEqual(start["display_label"], "ConveyorStart [input.clear]")
 
         failure = next(
             item
@@ -173,7 +180,11 @@ class TransitionSemanticsTests(unittest.TestCase):
             if item.get("synthesized_failure")
         )
         self.assertEqual(failure["guard"], "input.clear")
-        self.assertEqual(failure["action"], "set_conveyor(input.speed)")
+        self.assertIsNone(failure["action"])
+        self.assertEqual(
+            [item["expression"] for item in failure["effect_invocations"]],
+            ["set_conveyor(input.speed)"],
+        )
         self.assertEqual(failure["failure_type"], "DriveError")
 
     def test_nested_pure_helper_keeps_outer_event_and_has_no_helper_wildcards(self) -> None:
@@ -186,11 +197,12 @@ class TransitionSemanticsTests(unittest.TestCase):
             "ValveOpen",
             "ValveOpenRequest",
         )
-        self.assertEqual(opened["action"], "write_valve(true)")
+        self.assertIsNone(opened["action"])
         self.assertEqual(
-            opened["display_label"],
-            "ValveOpenRequest / write_valve(true)",
+            [item["expression"] for item in opened["effect_invocations"]],
+            ["write_valve(true)"],
         )
+        self.assertEqual(opened["display_label"], "ValveOpenRequest")
         failure = next(
             item
             for item in transitions(
@@ -201,7 +213,11 @@ class TransitionSemanticsTests(unittest.TestCase):
             )
             if item.get("synthesized_failure")
         )
-        self.assertEqual(failure["action"], "write_valve(true)")
+        self.assertIsNone(failure["action"])
+        self.assertEqual(
+            [item["expression"] for item in failure["effect_invocations"]],
+            ["write_valve(true)"],
+        )
         self.assertEqual(failure["failure_type"], "ValveError")
 
         self.assertFalse(
@@ -221,7 +237,10 @@ class TransitionSemanticsTests(unittest.TestCase):
             item
             for item in machine["transitions"]
             if item.get("synthesized_failure")
-            and item.get("action") == "write_fan(0.0)"
+            and any(
+                effect.get("expression") == "write_fan(0.0)"
+                for effect in item.get("effect_invocations", [])
+            )
             and item.get("source_state") == "FanRunning"
         ]
         self.assertEqual(
@@ -274,6 +293,11 @@ machine Device(state:DeviceState,event:DeviceEvent)
         self.assertEqual(alarm["trigger"]["role"], "inferred-trigger")
         self.assertEqual(alarm["trigger"]["confidence"], "dataflow-inferred")
         self.assertEqual(alarm["event"], "RaiseAlarm")
+        self.assertEqual(alarm["target_state"], "Alarmed")
+        self.assertEqual(alarm["action"]["display"], "RaiseAlarm")
+        self.assertEqual(alarm["action"]["provenance"], "machine-action-projection")
+        self.assertNotEqual(alarm["action"]["display"], alarm["target_state"])
+        self.assertEqual(alarm["effect_invocations"], [])
         self.assertNotIn("[action==RaiseAlarm]", alarm["display_label"])
         self.assertIn("input:input", alarm["trigger"]["provenance_roots"])
 
