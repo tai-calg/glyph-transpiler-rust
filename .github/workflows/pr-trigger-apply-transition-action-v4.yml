@@ -19,8 +19,10 @@ jobs:
           fetch-depth: 0
 
       - name: Apply v4 consumer and test updates
+        id: apply
         run: |
-          python - <<'PY'
+          set +e
+          python - <<'PY' > transition-v4-apply.log 2>&1
           from pathlib import Path
           import subprocess
 
@@ -36,8 +38,22 @@ jobs:
           ) + '\n'
           subprocess.run(['bash', '-lc', script], check=True)
           PY
+          status=$?
+          cat transition-v4-apply.log
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Commit application failure log
+        if: steps.apply.outputs.status != '0'
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add transition-v4-apply.log
+          git commit -m "Capture StateTransitionIR v4 application failure"
+          git push origin HEAD:agent/transition-action-semantics-v4
 
       - name: Run focused semantic tests
+        if: steps.apply.outputs.status == '0'
         run: |
           python -m unittest \
             tests.test_machine_action_projection \
@@ -48,6 +64,7 @@ jobs:
             tests.test_guard_distinct_failure_repair
 
       - name: Commit v4 consumer changes
+        if: steps.apply.outputs.status == '0'
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
