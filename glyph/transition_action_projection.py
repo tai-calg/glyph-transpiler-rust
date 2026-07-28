@@ -16,6 +16,7 @@ from .compiler import (
     SumDecl,
     TryExpr,
     TypeRef,
+    parse_expr,
 )
 from .execution_ir import render_expr
 from .state_transition_compiler import _root_branches
@@ -178,6 +179,64 @@ def _branch_for_transition(
     return candidates[0] if len(candidates) == 1 else None
 
 
+def _conditional_block_values(
+    model: CompilationModel,
+    function_name: str | None,
+) -> tuple[tuple[int, str, Expr], ...]:
+    if function_name is None:
+        return ()
+    block = next((item for item in model.blocks if item.name == function_name), None)
+    if block is None:
+        return ()
+    values: list[tuple[int, str, Expr]] = []
+    for binding in block.bindings:
+        if binding.kind != "conditional":
+            continue
+        for offset, original in enumerate(binding.source.splitlines(), start=1):
+            stripped = original.strip()
+            arrow = stripped.find("=>")
+            if arrow < 0:
+                continue
+            condition_text = stripped[:arrow].strip()
+            value_text = stripped[arrow + 2 :].strip()
+            if not value_text:
+                continue
+            try:
+                value = parse_expr(value_text)
+                condition = (
+                    "otherwise"
+                    if condition_text == "_"
+                    else render_expr(parse_expr(condition_text))
+                )
+            except Exception:
+                continue
+            values.append((binding.line + offset, condition, value))
+    return tuple(values)
+
+
+def _block_value_for_transition(
+    values: Sequence[tuple[int, str, Expr]],
+    transition: Mapping[str, object],
+) -> Expr | None:
+    source = transition.get("source", {})
+    line = int(source.get("line", 0)) if isinstance(source, Mapping) else 0
+    raw = str(transition.get("condition_raw") or transition.get("condition") or "")
+    condition = "otherwise" if raw in {"", "otherwise", "next"} else raw
+    exact = [
+        value
+        for candidate_line, candidate_condition, value in values
+        if candidate_line == line and candidate_condition == condition
+    ]
+    if exact:
+        return exact[0]
+    matching = [
+        value
+        for _, candidate_condition, value in values
+        if candidate_condition == condition
+    ]
+    return matching[0] if len(matching) == 1 else None
+
+
 def _warning(message: str, line: int) -> dict[str, object]:
     return {
         "severity": "warning",
@@ -268,6 +327,7 @@ def project_machine_transition_actions(
         if next_name is not None
         else ()
     )
+    block_values = _conditional_block_values(model, next_name)
 
     diagnostics = [dict(item) for item in result.get("diagnostics", [])]
     generated: list[dict[str, object]] = []
@@ -276,6 +336,8 @@ def project_machine_transition_actions(
         transition = dict(original)
         branch = _branch_for_transition(branches, transition)
         branch_value = getattr(branch, "value", None) if branch is not None else None
+        if branch_value is None:
+            branch_value = _block_value_for_transition(block_values, transition)
         source = transition.get("source", {})
         source_map = dict(source) if isinstance(source, Mapping) else {"line": 1, "column": 1}
         legacy_action = transition.get("action")

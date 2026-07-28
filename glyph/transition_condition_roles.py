@@ -27,7 +27,7 @@ from .machine import MachineDecl
 
 
 STATE_TRANSITION_IR_SCHEMA = "glyph.state-transition-ir"
-STATE_TRANSITION_IR_VERSION = 3
+STATE_TRANSITION_IR_VERSION = 4
 
 _ROLE_CONFIRMED = "confirmed-trigger"
 _ROLE_INFERRED = "inferred-trigger"
@@ -436,14 +436,21 @@ def _classification(
     }
 
 
+def _action_display(action: object) -> str:
+    if isinstance(action, Mapping):
+        return str(action.get("display") or action.get("expression") or "")
+    return "" if action is None else str(action)
+
+
 def _display_label(
     trigger: Mapping[str, object] | None,
     guards: Sequence[str],
-    action: str | None,
+    action: object,
     failure_type: str | None,
     unclassified: Sequence[str],
 ) -> str:
     label = ""
+    action_text = _action_display(action)
     if trigger is not None:
         prefix = "? " if trigger.get("role") == _ROLE_PROVISIONAL else ""
         label = prefix + str(trigger.get("display", ""))
@@ -453,8 +460,8 @@ def _display_label(
     if unclassified:
         unknown = "&".join(unclassified)
         label += f" ? {unknown}" if label else f"? {unknown}"
-    if action:
-        label += f" / {action}" if label else f"/ {action}"
+    if action_text:
+        label += f" / {action_text}" if label else f"/ {action_text}"
     if failure_type:
         label += f" | {failure_type}"
     return label
