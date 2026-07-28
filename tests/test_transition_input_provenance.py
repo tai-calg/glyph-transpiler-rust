@@ -83,7 +83,7 @@ class TransitionInputProvenanceTests(unittest.TestCase):
             item
             for item in machine["transitions"]
             if item["target_state"] == "Stopped"
-            and action_display(item) == "Stop"
+            and action_display(item) == "DisableMotor"
             and item.get("input_preimage")
         ]
         self.assertTrue(stopped)
@@ -96,7 +96,7 @@ class TransitionInputProvenanceTests(unittest.TestCase):
             self.assertIn("input.emergency", display)
             self.assertIn("input.fault", display)
             self.assertIn("input.enabled", display)
-            self.assertNotEqual(display, "Stop")
+            self.assertNotEqual(display, "DisableMotor")
             self.assertNotEqual(display, action_display(item))
             self.assertNotEqual(action_display(item), item["target_state"])
 
@@ -112,10 +112,20 @@ class TransitionInputProvenanceTests(unittest.TestCase):
             self.assertEqual(item["trigger"]["confidence"], "dataflow-expanded")
             self.assertEqual(
                 action_display(item),
-                "Drive(normalize(input.raw))",
+                "SetMotorPower(normalize(input.raw))",
             )
             self.assertNotEqual(item["trigger"]["display"], action_display(item))
             self.assertNotEqual(action_display(item), item["target_state"])
+
+        readme_pairs = {
+            (action_display(item), str(item["target_state"]))
+            for item in machine["transitions"]
+            if item.get("input_preimage")
+        }
+        self.assertIn(("DisableMotor", "Stopped"), readme_pairs)
+        self.assertIn(("SetMotorPower(normalize(input.raw))", "Running"), readme_pairs)
+        self.assertNotIn(("Stop", "Stopped"), readme_pairs)
+        self.assertNotIn(("Drive(normalize(input.raw))", "Running"), readme_pairs)
 
     def test_door_decision_preimage_keeps_input_action_and_target_independent(self) -> None:
         views = compile_example("examples/acceptance/door_controller.glyph")
