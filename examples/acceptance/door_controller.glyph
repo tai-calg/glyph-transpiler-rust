@@ -13,6 +13,7 @@ system DoorController
 
 machine Door(state:DoorState,input:Input)
   select=state.mode
+  action=state.action
   init=DoorState(Locked,0,KeepLocked)
   next=step(state,input)
   success=Locked
