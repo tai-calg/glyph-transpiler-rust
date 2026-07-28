@@ -104,6 +104,23 @@ try {
     && document.querySelector(".graph-stage")?.dataset.viewportScale
     && document.querySelector(".canvas-shell")?.dataset.touchpadZoomReady === "true"
   ));
+  await page.waitForFunction(() => {
+    const stage = document.querySelector(".graph-stage");
+    if (!stage || stage.dataset.transitionIoClustersReady !== "true") return false;
+    if (!["true", "fallback"].includes(stage.dataset.transitionIoCollisionSolved || "")) return false;
+    const semantic = stage.dataset.transitionSemanticRoleLinesReady;
+    return semantic === undefined || semantic === "true";
+  });
+  // Position assertions must begin after the asynchronous semantic-label transaction is stable.
+  await page.waitForTimeout(220);
+  const stableNode = page.locator(".state-node").first();
+  const stableLeft = await stableNode.evaluate(element => Number.parseFloat(element.style.left));
+  await page.waitForTimeout(180);
+  const stableLeftAgain = await stableNode.evaluate(element => Number.parseFloat(element.style.left));
+  assert(
+    Math.abs(stableLeftAgain - stableLeft) <= 1,
+    `state diagram moved during viewport-test setup: ${stableLeft} -> ${stableLeftAgain}`,
+  );
 
   assert.equal(await page.locator(".canvas-pan-help").count(), 0);
   assert.equal(await page.locator(".canvas-shell").getAttribute("title"), null);
