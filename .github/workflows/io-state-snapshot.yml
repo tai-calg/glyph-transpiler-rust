@@ -92,16 +92,13 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   render:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -123,8 +120,6 @@ jobs:
             2>&1 | tee build/checked-system-context-io/verify.log
           node tests/verify_state_diagram_rendering.mjs \
             2>&1 | tee build/state-diagram-regression/verify.log
-          UPDATE_README_STATE_DIAGRAM=1 node tests/verify_readme_state_snapshot.mjs \
-            2>&1 | tee -a build/state-diagram-regression/verify.log
           node tests/verify_readme_state_snapshot.mjs \
             2>&1 | tee -a build/state-diagram-regression/verify.log
           node tests/verify_state_diagram_stability.mjs \
@@ -145,21 +140,6 @@ jobs:
             2>&1 | tee build/transition-label-readability/verify.log
           node tests/verify_transition_semantic_readability.mjs \
             2>&1 | tee build/transition-semantic-readability/verify.log
-
-      - name: Commit refreshed README state snapshot
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-        env:
-          HEAD_REF: ${{ github.head_ref }}
-        run: |
-          if git diff --quiet -- docs/images/glyph-studio-state-transition.png; then
-            echo "README state snapshot already current"
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add docs/images/glyph-studio-state-transition.png
-          git commit -m "Refresh README state snapshot"
-          git push origin "HEAD:${HEAD_REF}"
 
       - name: Upload rendered diagrams
         if: always()
