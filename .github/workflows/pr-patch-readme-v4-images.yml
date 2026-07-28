@@ -39,20 +39,21 @@ jobs:
 
           python - <<'PY'
           from pathlib import Path
-          from PIL import Image
+          import struct
 
           expected = {
               Path('docs/images/glyph-studio-state-transition.png'): (1800, 1100),
               Path('docs/images/glyph-studio-io.png'): (1800, 1100),
           }
           for path, size in expected.items():
-              with Image.open(path) as image:
-                  if image.format != 'PNG':
-                      raise SystemExit(f'{path}: expected PNG, got {image.format}')
-                  if image.size != size:
-                      raise SystemExit(f'{path}: expected {size}, got {image.size}')
-              if path.stat().st_size < 100_000:
-                  raise SystemExit(f'{path}: unexpectedly small ({path.stat().st_size} bytes)')
+              data = path.read_bytes()
+              if data[:8] != b'\x89PNG\r\n\x1a\n':
+                  raise SystemExit(f'{path}: invalid PNG signature')
+              width, height = struct.unpack('>II', data[16:24])
+              if (width, height) != size:
+                  raise SystemExit(f'{path}: expected {size}, got {(width, height)}')
+              if len(data) < 100_000:
+                  raise SystemExit(f'{path}: unexpectedly small ({len(data)} bytes)')
 
           readme = Path('README.md')
           text = readme.read_text(encoding='utf-8')
