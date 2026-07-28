@@ -12,6 +12,7 @@ system MotorSafety
 
 machine Motor(state:MotorState,input:Input)
   select=state.mode
+  action=state.command
   init=MotorState(Stopped,Stop)
   next=step(state,input)
   success=Stopped

@@ -12,6 +12,7 @@ const cases = [
       name: "Motor",
       states: ["Stopped", "Running", "Faulted"],
       warnings: ["state-independent-transition", "unreachable-branch", "unreachable-state"],
+      requireInputAction: true,
     }],
   },
   {
@@ -188,6 +189,7 @@ try {
           return {
             id: cluster?.dataset.transitionId || "",
             value: element.querySelector(".transition-io-value")?.textContent || "",
+            input: cluster?.dataset.inputValue || "",
             action: cluster?.dataset.actionValue || "",
           };
         }));
@@ -218,6 +220,41 @@ try {
               `${testCase.slug}/${expected.name}/${rendered.id}: transition without Action rendered an arrow Action`,
             );
             assert(!rendered.value.includes(" / "));
+          }
+        }
+
+        if (expected.requireInputAction) {
+          const semanticPairs = combinedValues.filter(({input, action, value}) => (
+            input.trim().length > 0
+            && action.trim().length > 0
+            && value.includes(" ➞ ")
+          ));
+          assert(
+            semanticPairs.length > 0,
+            `${testCase.slug}/${expected.name}: README candidate has no Input ➞ Action transition`,
+          );
+          for (const rendered of semanticPairs) {
+            const transition = machine.transitions.find(item => item.id === rendered.id);
+            assert(transition, `${testCase.slug}/${expected.name}: missing transition ${rendered.id}`);
+            assert.notEqual(
+              rendered.input,
+              rendered.action,
+              `${testCase.slug}/${expected.name}/${rendered.id}: intermediate Action repeated as Input`,
+            );
+            assert.notEqual(
+              rendered.action,
+              String(transition.target_state || ""),
+              `${testCase.slug}/${expected.name}/${rendered.id}: Target State repeated as Action`,
+            );
+            assert.equal(
+              transition.trigger?.provenance,
+              "decision-output-preimage",
+              `${testCase.slug}/${expected.name}/${rendered.id}: Input lacks proven decision preimage`,
+            );
+            assert(
+              rendered.value.includes(` ➞ ${rendered.action}`),
+              `${testCase.slug}/${expected.name}/${rendered.id}: rendered join is not Input ➞ Action`,
+            );
           }
         }
 
