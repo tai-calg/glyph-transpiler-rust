@@ -1,0 +1,14 @@
+......E...........
+======================================================================
+ERROR: test_block_local_sum_value_is_inferred_from_input_dataflow (tests.test_transition_semantics.TransitionSemanticsTests.test_block_local_sum_value_is_inferred_from_input_dataflow)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/runner/work/glyph-transpiler-rust/glyph-transpiler-rust/tests/test_transition_semantics.py", line 297, in test_block_local_sum_value_is_inferred_from_input_dataflow
+    self.assertEqual(alarm["action"]["display"], "RaiseAlarm")
+                     ~~~~~~~~~~~~~~~^^^^^^^^^^^
+TypeError: 'NoneType' object is not subscriptable
+
+----------------------------------------------------------------------
+Ran 18 tests in 0.127s
+
+FAILED (errors=1)
