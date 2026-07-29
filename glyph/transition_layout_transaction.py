@@ -129,32 +129,44 @@ function arrangeInitialDenseNodes(stage,data,machine,dense){
   return true;
 }
 
-function stateCurve(source,target,same,index){
+function stateCurve(source,target,same,lane,laneCount){
   const x1=source.offsetLeft+source.offsetWidth/2,y1=source.offsetTop+source.offsetHeight/2;
   const x2=target.offsetLeft+target.offsetWidth/2,y2=target.offsetTop+target.offsetHeight/2;
+  const centered=lane-(laneCount-1)/2;
   if(same){
-    const spread=58+index%3*14;
-    return`M ${x1-27} ${y1-34} C ${x1-spread} ${y1-98}, ${x1+spread} ${y1-98}, ${x1+27} ${y1-34}`;
+    const magnitude=Math.abs(centered),spread=64+magnitude*30,lift=108+magnitude*38,shift=centered*42;
+    return`M ${x1-27} ${y1-34} C ${x1-spread+shift} ${y1-lift}, ${x1+spread+shift} ${y1-lift}, ${x1+27} ${y1-34}`;
   }
   const dx=x2-x1,dy=y2-y1,length=Math.max(1,Math.hypot(dx,dy));
   const startX=x1+dx/length*source.offsetWidth/2,startY=y1+dy/length*source.offsetHeight/2;
   const endX=x2-dx/length*target.offsetWidth/2,endY=y2-dy/length*target.offsetHeight/2;
-  const offset=(index%3-1)*22;
-  return`M ${startX} ${startY} Q ${(startX+endX)/2-dy*.1+offset} ${(startY+endY)/2+dx*.1+offset} ${endX} ${endY}`;
+  const laneOffset=centered*62,normalX=-dy/length,normalY=dx/length;
+  return`M ${startX} ${startY} Q ${(startX+endX)/2+normalX*laneOffset} ${(startY+endY)/2+normalY*laneOffset} ${endX} ${endY}`;
 }
 function reroute(stage,machine){
   const nodes=new Map([...stage.querySelectorAll(".state-node")].map(node=>[nodeName(node),node]));
   const paths=[...stage.querySelectorAll(":scope > svg.edge-svg > path.state-transition-path")];
   const labels=[...stage.querySelectorAll(".transition-label")];
-  (machine?.transitions||[]).forEach((transition,index)=>{
+  const transitions=machine?.transitions||[],totals=new Map(),seen=new Map();
+  transitions.forEach(transition=>{const key=`${transition.source_state}${transition.target_state}`;totals.set(key,(totals.get(key)||0)+1)});
+  transitions.forEach((transition,index)=>{
     const source=nodes.get(transition.source_state),target=nodes.get(transition.target_state);
     if(!source||!target)return;
+    const key=`${transition.source_state}${transition.target_state}`,lane=seen.get(key)||0,laneCount=totals.get(key)||1;
+    seen.set(key,lane+1);
     const path=paths[index];
-    path?.setAttribute("d",stateCurve(source,target,source===target,index));
-    if(path&&!path.dataset.transitionId&&transition.id)path.dataset.transitionId=transition.id;
+    path?.setAttribute("d",stateCurve(source,target,source===target,lane,laneCount));
+    if(path){
+      if(!path.dataset.transitionId&&transition.id)path.dataset.transitionId=transition.id;
+      path.dataset.sourceState=transition.source_state;
+      path.dataset.targetState=transition.target_state;
+      path.dataset.parallelLane=String(lane);
+      path.dataset.parallelLaneCount=String(laneCount);
+    }
     if(labels[index]){
-      labels[index].style.left=`${(source.offsetLeft+target.offsetLeft+source.offsetWidth)/2+(index%3-1)*18}px`;
-      labels[index].style.top=`${(source.offsetTop+target.offsetTop+source.offsetHeight)/2-(source===target?80:0)+(index%2)*12}px`;
+      const centered=lane-(laneCount-1)/2;
+      labels[index].style.left=`${(source.offsetLeft+target.offsetLeft+source.offsetWidth)/2+centered*46}px`;
+      labels[index].style.top=`${(source.offsetTop+target.offsetTop+source.offsetHeight)/2-(source===target?108+Math.abs(centered)*38:0)}px`;
     }
   });
   delete stage.dataset.initialTransitionRouting;
@@ -180,7 +192,7 @@ function safeCuts(value){
   }
   return result;
 }
-function splitComponent(value,limit=42){
+function splitComponent(value,limit=28){
   const lines=[];
   let remaining=text(value);
   while(remaining.length>limit){
