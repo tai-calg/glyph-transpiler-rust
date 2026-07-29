@@ -50,21 +50,26 @@ def _target_state_projection_type(
     return field.ty.name if field is not None else None
 
 
+def _operation_action_type(machine: dict[str, object]) -> str | None:
+    for transition in machine.get("transitions", []):
+        action = transition.get("action") if isinstance(transition, dict) else None
+        if not isinstance(action, dict):
+            continue
+        if action.get("provenance") == "transition-operation-invocation":
+            return "OperationInvocation"
+    return None
+
+
 def _attach_action_target_independence(
     model: CompilationModel,
     machine: dict[str, object],
 ) -> dict[str, object]:
     result = dict(machine)
-    action_projection = result.get("action_projection")
-    action_type = (
-        str(action_projection.get("type") or "")
-        if isinstance(action_projection, dict)
-        else ""
-    )
+    action_type = _operation_action_type(result)
     state_type = _target_state_projection_type(model, str(result.get("name") or ""))
     independence, generated = analyze_action_target_independence(
         result.get("transitions", []),
-        action_type=action_type or None,
+        action_type=action_type,
         state_type=state_type,
     )
 
@@ -137,6 +142,7 @@ def enrich_state_transition_ir(
     result["transition_semantics_version"] = 2
     result["transition_input_preimage_version"] = INPUT_PREIMAGE_VERSION
     result["transition_enabling_cases_version"] = ENABLING_CASES_VERSION
+    result["transition_operation_action_version"] = 2
     result["transition_action_target_independence_version"] = 1
     summary = dict(result.get("summary", {}))
     summary["state_warnings"] = sum(
