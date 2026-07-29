@@ -134,13 +134,12 @@ def project_transition_action_scopes(
 
     for original in result.get("transitions", []):
         transition = dict(original)
-        machine_action = deepcopy(transition.get("machine_action") or transition.get("action"))
-        machine_invocations = _invocations(
-            transition.get("machine_action_invocations", transition.get("action_invocations", []))
-        )
-        machine_effects = _invocations(
-            transition.get("machine_effect_invocations", transition.get("effect_invocations", []))
-        )
+        # The finalization pass immediately before this stage may specialize aliases,
+        # decision preimages, or branch-local values. Its compatibility fields are the
+        # authoritative finalized Machine Action at this point in the pipeline.
+        machine_action = deepcopy(transition.get("action"))
+        machine_invocations = _invocations(transition.get("action_invocations", []))
+        machine_effects = _invocations(transition.get("effect_invocations", []))
         transition["machine_action"] = machine_action
         transition["machine_action_invocations"] = [dict(item) for item in machine_invocations]
         transition["machine_effect_invocations"] = [dict(item) for item in machine_effects]
