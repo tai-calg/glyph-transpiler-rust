@@ -55,17 +55,40 @@ function splitExact(value,limit=MAX_LINE){
 
 function linesFor(cluster){
   const input=text(cluster.dataset.inputValue),guard=text(cluster.dataset.guardValue),output=text(cluster.dataset.outputValue),lines=[];
-  lines.push(...splitExact(input));
-  if(guard)lines.push(...splitExact(` [${guard}]`));
-  if(output)lines.push(...splitExact(` ➞ ${output}`));
+  if(input)lines.push(...splitExact(input));
+  if(guard)lines.push(...splitExact(`${input?" ":""}[${guard}]`));
+  if(output)lines.push(...splitExact(`${input||guard?" ":""}➞ ${output}`));
   return lines.filter(line=>line.length>0);
+}
+
+function preserveMultipleCaseLines(cluster,value,signature){
+  const lines=[...value.querySelectorAll(".enabling-case-line")].map(element=>text(element.textContent)).filter(Boolean);
+  if(!lines.length)return false;
+  const expected=cluster.dataset.ioValue||lines.join(" || ");
+  if(lines.join(" || ")!==expected)throw Error(`multiple enabling-case lines changed semantics: ${expected}`);
+  const longest=Math.max(1,...lines.map(line=>line.length));
+  cluster.style.setProperty("--semantic-role-width",`${clamp(Math.ceil(longest*5.65+18),104,360)}px`);
+  cluster.dataset.semanticLineCount=String(lines.length);
+  cluster.dataset.semanticLongestLine=String(longest);
+  cluster.dataset.semanticRoleSignature=signature;
+  cluster.classList.add("semantic-role-lines");
+  return true;
 }
 
 function format(cluster){
   const value=cluster.querySelector(".transition-io-value");
   if(!value)return false;
-  const signature=JSON.stringify([cluster.dataset.inputValue||"",cluster.dataset.guardValue||"",cluster.dataset.outputValue||""]);
+  const signature=JSON.stringify([
+    cluster.dataset.inputValue||"",
+    cluster.dataset.guardValue||"",
+    cluster.dataset.outputValue||"",
+    cluster.dataset.ioValue||"",
+    cluster.dataset.enablingCaseCount||"1",
+  ]);
   if(cluster.dataset.semanticRoleSignature===signature)return false;
+  if(Number(cluster.dataset.enablingCaseCount||"1")>1){
+    return preserveMultipleCaseLines(cluster,value,signature);
+  }
   const lines=linesFor(cluster),expected=cluster.dataset.ioValue||value.textContent||"";
   value.replaceChildren(...lines.map(line=>{
     const span=document.createElement("span");
@@ -164,7 +187,7 @@ schedule(null,0);
 
 
 def enhance_transition_semantic_role_lines_html(html: str) -> str:
-    """Split a single transition label into readable input, guard, and output lines."""
+    """Split a transition label into readable Input, Guard, and Action lines."""
 
     if _MARKER in html:
         return html
