@@ -40,7 +40,8 @@ class TransitionEnablingCasesTests(unittest.TestCase):
         views = compile_example("examples/acceptance/motor_safety.glyph")
         machine = views["state"]["machines"][0]
 
-        self.assertEqual(views["state_transition_ir"]["version"], 4)
+        self.assertEqual(views["state_transition_ir"]["version"], 5)
+        self.assertEqual(views["state_transition_ir"]["stage"], "public")
         self.assertEqual(views["transition_enabling_cases_version"], 1)
         self.assertEqual(views["transition_semantics_version"], 2)
 
