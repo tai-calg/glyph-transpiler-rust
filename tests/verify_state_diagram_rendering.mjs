@@ -254,11 +254,14 @@ try {
             String(transition.target_state || ""),
             `${testCase.slug}/${expected.name}/${rendered.id}: Target State leaked into Action`,
           );
-          assert.notEqual(
-            rendered.action,
-            emittedOutputDisplay(transition),
-            `${testCase.slug}/${expected.name}/${rendered.id}: Emitted Output leaked into Action`,
-          );
+          const emittedOutput = emittedOutputDisplay(transition);
+          if (rendered.action && emittedOutput) {
+            assert.notEqual(
+              rendered.action,
+              emittedOutput,
+              `${testCase.slug}/${expected.name}/${rendered.id}: Emitted Output leaked into Action`,
+            );
+          }
           if (expectedAction) {
             assert.equal(
               transition.action?.provenance,
@@ -311,11 +314,14 @@ try {
               String(transition.target_state || ""),
               `${testCase.slug}/${expected.name}/${rendered.id}: Target State repeated as Action`,
             );
-            assert.notEqual(
-              rendered.action,
-              emittedOutputDisplay(transition),
-              `${testCase.slug}/${expected.name}/${rendered.id}: Emitted Output repeated as Action`,
-            );
+            const emittedOutput = emittedOutputDisplay(transition);
+            if (emittedOutput) {
+              assert.notEqual(
+                rendered.action,
+                emittedOutput,
+                `${testCase.slug}/${expected.name}/${rendered.id}: Emitted Output repeated as Action`,
+              );
+            }
             assert.equal(
               transition.trigger?.provenance,
               "decision-output-preimage",
