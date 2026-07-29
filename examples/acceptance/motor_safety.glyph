@@ -13,7 +13,7 @@ system MotorSafety
 machine Motor(state:MotorState,input:Input)
   select=state.mode
   action=state.command
-  init=MotorState(Stopped,Stop)
+  init=MotorState(Stopped,DisableMotor)
   next=step(state,input)
   success=Stopped
   failure=Faulted
@@ -21,30 +21,33 @@ machine Motor(state:MotorState,input:Input)
 @STOP_LIMIT=100ms
 
 *Input(raw:F,enabled,emergency,fault,stopped:B)
-+Command=Stop|Drive(F)
++MotorCommand=EmergencyBrake|DisableMotor|SetMotorPower(F)|LatchFault
 +Mode=Stopped|Running|Faulted
-*MotorState(mode:Mode,command:Command)
-*Receipt(command:Command)
+*MotorState(mode:Mode,command:MotorCommand)
+*Receipt(command:MotorCommand)
 
 ?emergency_stop(*Input)=@A(emergency>>@E STOP_LIMIT stopped)
 ?fault_stop(*Input)=@A(fault>>@E STOP_LIMIT stopped)
 
 >normalize(raw:F):F=min(raw,1.0)
 
->decide(input:Input):Command
-  input.emergency|input.fault >> Stop
-  !input.enabled >> Stop
-  _ >> Drive(normalize(input.raw))
+>decide(input:Input):MotorCommand
+  input.fault >> LatchFault
+  input.emergency >> EmergencyBrake
+  !input.enabled >> DisableMotor
+  _ >> SetMotorPower(normalize(input.raw))
 
 >step(state:MotorState,input:Input):MotorState
   command := decide(input)
   next :=
-    command==Stop >> MotorState(Stopped,Stop)
-    command==Drive(speed) >> MotorState(Running,Drive(speed))
-    _ >> MotorState(Faulted,Stop)
+    command==LatchFault >> MotorState(Faulted,LatchFault)
+    command==EmergencyBrake >> MotorState(Stopped,EmergencyBrake)
+    command==DisableMotor >> MotorState(Stopped,DisableMotor)
+    command==SetMotorPower(power) >> MotorState(Running,SetMotorPower(power))
+    _ >> MotorState(Faulted,LatchFault)
   next
 
-!write_motor(command:Command):Receipt
+!write_motor(command:MotorCommand):Receipt
 
 # 一周期のentryは状態計算と外部作用の接続だけを担当する。
 >cycle(state:MotorState,input:Input):Receipt=write_motor(step(state,input).command)

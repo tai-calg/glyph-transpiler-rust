@@ -25,6 +25,8 @@ on:
       - "glyph/state_transition_block_lowering.py"
       - "glyph/state_transition_pipeline.py"
       - "glyph/state_transition_ir_renderer.py"
+      - "glyph/transition_action_projection.py"
+      - "glyph/transition_action_target_independence.py"
       - "glyph/transition_condition_roles.py"
       - "glyph/transition_dense_canvas_dimensions.py"
       - "glyph/transition_io_clusters.py"
@@ -60,6 +62,8 @@ on:
       - "tests/test_state_machine_source_map.py"
       - "tests/test_state_diagram_examples.py"
       - "tests/test_state_transition_ir_renderer.py"
+      - "tests/test_transition_action_target_independence.py"
+      - "tests/test_transition_input_provenance.py"
       - "tests/test_transition_io_clusters.py"
       - "tests/test_transition_label_drag_guard.py"
       - "tests/test_transition_label_layout.py"
@@ -87,6 +91,7 @@ on:
       - "examples/acceptance/motor_safety.glyph"
       - "examples/state_diagrams/**"
       - "docs/PROVISIONAL_TRIGGER_CLASSIFICATION.md"
+      - "docs/design/transition-input-action-provenance-v1.md"
       - "docs/images/glyph-studio-state-transition.png"
       - ".github/workflows/io-state-snapshot.yml"
   workflow_dispatch:
@@ -117,6 +122,8 @@ jobs:
         run: |
           set -o pipefail
           mkdir -p build/checked-system-context-io build/state-diagram-regression build/state-diagram-stability build/uml-transition-semantics build/additional-failure-notation build/diagram-editor-exports build/diagram-canvas-viewport build/localized-semantic-canvas build/transition-label-readability build/transition-layout-transaction build/transition-semantic-readability
+          python -m unittest discover -s tests -p 'test_transition_action_target_independence.py'
+          python -m unittest discover -s tests -p 'test_transition_input_provenance.py'
           node tests/verify_code_derived_system_io.mjs \
             2>&1 | tee build/checked-system-context-io/verify.log
           node tests/verify_state_diagram_rendering.mjs \

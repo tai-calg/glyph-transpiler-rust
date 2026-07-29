@@ -1,37 +1,38 @@
 # Transition Input → Action Provenance v1
 
-Status: Proposed for implementation in PR #47
+Status: Implemented
 
 ## Problem
 
-A transition label must not use an intermediate discriminator such as `Stop` or `Drive` as its Input merely because a downstream state function branches on `command == Stop`.
+A transition label must not use an intermediate discriminator as its Input merely because a downstream state function branches on that value. It must also not present Action as a renamed copy of Target State.
 
 For:
 
 ```glyph
 command := decide(input)
-command == Stop >> MotorState(Stopped,Stop)
+command == EmergencyBrake >> MotorState(Stopped,EmergencyBrake)
 ```
 
 and:
 
 ```glyph
->decide(input:Input):Command
-  input.emergency|input.fault >> Stop
-  !input.enabled >> Stop
-  _ >> Drive(normalize(input.raw))
+>decide(input:Input):MotorCommand
+  input.fault >> LatchFault
+  input.emergency >> EmergencyBrake
+  !input.enabled >> DisableMotor
+  _ >> SetMotorPower(normalize(input.raw))
 ```
 
 the semantic roles are:
 
 ```text
 Input   = preimage conditions in decide(input)
-Action  = projection declared by machine action=
-Target  = projection declared by machine select=
+Action  = operation value projected by machine action=
+Target  = state value projected by machine select=
 Effect  = effect_invocations
 ```
 
-`Stop` is an Action value, not an Input event.
+`EmergencyBrake` and `DisableMotor` are different Actions that can both lead to `Stopped`. This is a behavioral witness that Action and Target State are independent axes, rather than two labels for the same transition result.
 
 ## Invariants
 
@@ -40,99 +41,124 @@ Effect  = effect_invocations
 - Target State is derived only from `machine select=state.field`.
 - Effect invocations never populate Action.
 - Target State never populates Action.
-- An intermediate sum variant may appear as Action, but may not be published as Input when its defining call can be expanded.
-- Failed expansion preserves the existing provisional trigger and emits `STIR_INPUT_PREIMAGE_UNRESOLVED`.
+- Action projection type and Target State projection type are analyzed independently.
+- A shared projection type emits `STIR_ACTION_TARGET_TYPE_ALIAS`.
+- Lexical near-aliases such as `Stop` / `Stopped`, `RunAction` / `RunningState`, and `OpenValveCommand` / `ValveOpenedMode` emit `STIR_ACTION_TARGET_NEAR_ALIAS`.
+- A purely one-to-one Action↔Target mapping emits `STIR_ACTION_TARGET_REDUNDANT_AXIS` because the compiled machine contains no behavioral independence witness.
+- A behavioral witness exists when one Action reaches multiple Target States or multiple Actions reach one Target State.
+- Failed Input-preimage expansion preserves the existing provisional trigger and emits `STIR_INPUT_PREIMAGE_UNRESOLVED`.
 - Renderers consume structured Input and Action; they do not infer either role.
 
-## Compiler pass
+The compiler diagnostics remain warnings for compatibility. Publication gates may require stronger conditions.
 
-A new pass runs after Action projection and initial trigger/guard classification.
+## Compiler passes
 
 ```text
 compile transitions
   → project Action
   → classify local conditions
   → expand discriminator preimages
+  → analyze Action/Target independence
   → render
 ```
 
-For a transition discriminator:
+The independence pass is generic. It does not contain Motor, Door, Stop, Stopped, or other example-specific allowlists.
 
-```text
-local == Variant(pattern_bindings)
-```
+## Input-preimage IR
 
-the pass resolves:
-
-```text
-local := decision(machine_inputs)
-```
-
-then inspects the guarded clauses of `decision`. Clauses whose result has the same sum variant form the Input preimage.
-
-Ordered guards are preserved. A matching clause is excluded by earlier clauses only when those earlier clauses produce a different result variant. A fallback clause is rendered as `otherwise` while its exact predicate is retained in IR metadata.
-
-Parameter substitution maps decision-function parameters to call arguments. Pattern payloads may refine a symbolic Action such as `Drive(speed)` to `Drive(normalize(input.raw))` when the mapping is unique.
-
-## IR extension
-
-The existing trigger object gains provenance fields without changing Action or Effect fields:
+The trigger object records dataflow provenance without changing Action or Effect fields:
 
 ```json
 {
-  "display": "input.emergency|input.fault|!input.enabled",
-  "expression": "input.emergency|input.fault|!input.enabled",
+  "display": "input.emergency&!input.fault",
+  "expression": "input.emergency&!input.fault",
   "role": "inferred-trigger",
   "confidence": "dataflow-expanded",
   "provenance": "decision-output-preimage",
   "decision_function": "decide",
-  "decision_variant": "Stop",
-  "provenance_roots": ["input:input"],
-  "dataflow_path": ["input", "decide(input)", "command", "Stop"]
+  "decision_variant": "EmergencyBrake",
+  "provenance_roots": ["input:input"]
 }
 ```
 
 `analysis.input_preimage_version` is `1`.
 
+## Action/Target independence IR
+
+Every compiled machine exposes:
+
+```json
+{
+  "analysis": {
+    "action_target_independence": {
+      "version": 1,
+      "action_type": "MotorCommand",
+      "state_type": "Mode",
+      "typed_independent": true,
+      "mapping_shape": "many-actions-to-one-state",
+      "behaviorally_independent": true,
+      "behavioral_witness_count": 1,
+      "multiple_actions_to_state": {
+        "Stopped": ["DisableMotor", "EmergencyBrake"]
+      },
+      "action_to_multiple_states": {},
+      "near_alias_count": 0,
+      "near_aliases": []
+    }
+  }
+}
+```
+
+The mapping analysis uses structured Action variants and Target State values. Payload expressions such as `SetMotorPower(normalize(input.raw))` are grouped by the Action variant `SetMotorPower`.
+
+## Lexical near-alias analysis
+
+Identifiers are split across CamelCase, snake_case, and punctuation. Generic role words such as `Action`, `Command`, `State`, `Mode`, and `Status` are removed. Conservative inflection normalization then compares the remaining semantic tokens.
+
+Examples detected without a domain-specific dictionary:
+
+```text
+Stop                  ≈ Stopped
+RunAction             ≈ RunningState
+OpenValveCommand      ≈ ValveOpenedMode
+```
+
+This diagnostic is evidence of naming ambiguity, not a claim that arbitrary natural-language semantics can be fully inferred by the compiler.
+
 ## Conservative boundaries
 
-The first implementation expands only when all of the following are proven:
+Input-preimage expansion performs no arbitrary symbolic execution, recursion expansion, Effect execution, or target-based inference.
 
-- the discriminator subject is a local immutable binding;
-- the binding value is a direct named function call;
-- the function has typed guarded clauses;
-- the compared pattern is a variant of that function's sum return type;
-- substituted guard predicates are rooted in machine inputs;
-- Action payload refinement is unique when applied.
+Action/Target independence analysis deliberately does not:
 
-No arbitrary symbolic execution, recursion expansion, Effect execution, or target-based inference is performed.
+- infer business meaning from unrelated words;
+- reject a machine solely because it has one transition;
+- treat synthesized failure transitions as independence witnesses;
+- require all valid machines to have a many-to-many mapping.
+
+It reports structural evidence. The README publication gate requires stronger evidence because the image is intended to teach the distinction.
 
 ## Verification
 
-### Semantic tests
+### Generic semantic tests
 
-- Motor Safety Stop routes use input predicates and Action `Stop`.
-- Motor Safety Drive routes use `otherwise` and Action `Drive(normalize(input.raw))`.
-- Door Controller routes use `input.forced_open`, authenticated open request, and `otherwise` with Actions `RaiseAlarm`, `Unlock`, and `KeepLocked`.
-- No expanded Input equals its Action variant name.
-- Target, Action, Input, and Effect remain pairwise independent.
-- Ambiguous or unsupported definitions produce a warning instead of invented provenance.
-
-### Metamorphic tests
-
-- Renaming a state changes Target only.
-- Renaming an Action variant changes Action only.
-- Rewriting a decision predicate changes Input only.
-- Adding an Effect changes `effect_invocations` only.
+- distinct Action and Target State types are recognized;
+- same-type projections emit `STIR_ACTION_TARGET_TYPE_ALIAS`;
+- lexical near-aliases emit `STIR_ACTION_TARGET_NEAR_ALIAS` across arbitrary domain names;
+- a one-to-one mapping emits `STIR_ACTION_TARGET_REDUNDANT_AXIS`;
+- many Actions reaching one state prove behavioral independence;
+- synthesized failure transitions do not fabricate independence;
+- renaming Input, Action, or Target changes only its own axis.
 
 ### README publishing gate
 
-Before a state screenshot can replace the README image, browser verification must prove:
+Before a state screenshot can replace the README image, compiler and snapshot verification must prove:
 
-- at least one visible transition has non-empty `data-input-value`;
-- the same transition has non-empty `data-action-value`;
-- the rendered value contains exactly the semantic join `Input [Guard] ➞ Action`;
-- Action differs from Target State;
-- the Input is not merely the Action variant repeated on the left.
+- the Action and Target State projection types are distinct;
+- the compiled mapping contains at least one behavioral independence witness;
+- the mapping is not purely one-to-one;
+- no Action is a lexical near-alias of its Target State;
+- the visible label contains `Input [Guard] ➞ Action`;
+- the generated PNG matches the committed README PNG within bounded rasterization tolerance.
 
-The screenshot remains secondary evidence. The compiler IR and DOM contract tests are the primary evidence.
+No Action or state name is hardcoded in this gate. The screenshot remains secondary evidence; compiler IR and DOM contract tests are primary evidence.

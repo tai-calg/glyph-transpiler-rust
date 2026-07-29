@@ -3,10 +3,12 @@ from __future__ import annotations
 from copy import deepcopy
 
 from .artifacts import CompilationModel
+from .compiler import FieldExpr, ProductDecl
 from .diagnostic_localization import localize_state_views
 from .state_transition_block_lowering import lower_analyzed_block_transitions
 from .state_transition_compiler import enrich_state_transition_ir as compile_state_transition_ir
 from .transition_action_projection import project_machine_transition_actions
+from .transition_action_target_independence import analyze_action_target_independence
 from .transition_condition_roles import (
     STATE_TRANSITION_IR_SCHEMA,
     STATE_TRANSITION_IR_VERSION,
@@ -16,6 +18,66 @@ from .transition_input_provenance import (
     INPUT_PREIMAGE_VERSION,
     expand_machine_transition_inputs,
 )
+
+
+def _target_state_projection_type(
+    model: CompilationModel,
+    machine_name: str,
+) -> str | None:
+    machine = next((item for item in model.machines if item.name == machine_name), None)
+    if machine is None or not isinstance(machine.selector, FieldExpr):
+        return None
+    state_decl = next(
+        (
+            item
+            for item in model.program.declarations
+            if isinstance(item, ProductDecl) and item.name == machine.state_param.ty.name
+        ),
+        None,
+    )
+    if state_decl is None:
+        return None
+    field = next(
+        (item for item in state_decl.fields if item.name == machine.selector.field),
+        None,
+    )
+    return field.ty.name if field is not None else None
+
+
+def _attach_action_target_independence(
+    model: CompilationModel,
+    machine: dict[str, object],
+) -> dict[str, object]:
+    result = dict(machine)
+    action_projection = result.get("action_projection")
+    action_type = (
+        str(action_projection.get("type") or "")
+        if isinstance(action_projection, dict)
+        else ""
+    )
+    state_type = _target_state_projection_type(model, str(result.get("name") or ""))
+    independence, generated = analyze_action_target_independence(
+        result.get("transitions", []),
+        action_type=action_type or None,
+        state_type=state_type,
+    )
+
+    diagnostics = [dict(item) for item in result.get("diagnostics", [])]
+    seen = {
+        (item.get("code"), item.get("line"), item.get("message"))
+        for item in diagnostics
+    }
+    for item in generated:
+        key = (item.get("code"), item.get("line"), item.get("message"))
+        if key not in seen:
+            diagnostics.append(item)
+            seen.add(key)
+
+    analysis = dict(result.get("analysis", {}))
+    analysis["action_target_independence"] = independence
+    result["analysis"] = analysis
+    result["diagnostics"] = diagnostics
+    return result
 
 
 def enrich_state_transition_ir(
@@ -45,8 +107,11 @@ def enrich_state_transition_ir(
     classified = [
         classify_machine_transition_roles(model, machine) for machine in projected
     ]
-    state["machines"] = [
+    expanded = [
         expand_machine_transition_inputs(model, machine) for machine in classified
+    ]
+    state["machines"] = [
+        _attach_action_target_independence(model, machine) for machine in expanded
     ]
     result["state"] = state
     result["state_transition_ir"] = {
@@ -54,9 +119,10 @@ def enrich_state_transition_ir(
         "version": STATE_TRANSITION_IR_VERSION,
     }
     # The public Input [Guard] ➞ Action shape remains contract version 2.
-    # Input-preimage expansion is independently versioned below.
+    # Input-preimage expansion and Action/Target independence are independently versioned.
     result["transition_semantics_version"] = 2
     result["transition_input_preimage_version"] = INPUT_PREIMAGE_VERSION
+    result["transition_action_target_independence_version"] = 1
     summary = dict(result.get("summary", {}))
     summary["state_warnings"] = sum(
         1

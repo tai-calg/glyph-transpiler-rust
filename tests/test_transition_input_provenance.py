@@ -76,29 +76,41 @@ class TransitionInputProvenanceTests(unittest.TestCase):
 
         self.assertEqual(views["transition_semantics_version"], 2)
         self.assertEqual(views["transition_input_preimage_version"], 1)
+        self.assertEqual(views["transition_action_target_independence_version"], 1)
         self.assertGreater(machine["analysis"]["expanded_input_preimage_count"], 0)
         self.assertEqual(machine["analysis"]["unresolved_input_preimage_count"], 0)
 
-        stopped = [
+        emergency = next(
             item
             for item in machine["transitions"]
             if item["target_state"] == "Stopped"
-            and action_display(item) == "Stop"
+            and action_display(item) == "EmergencyBrake"
             and item.get("input_preimage")
-        ]
-        self.assertTrue(stopped)
-        for item in stopped:
-            trigger = item["trigger"]
-            display = trigger["display"]
-            self.assertEqual(trigger["confidence"], "dataflow-expanded")
-            self.assertEqual(trigger["provenance"], "decision-output-preimage")
-            self.assertEqual(trigger["decision_function"], "decide")
-            self.assertIn("input.emergency", display)
-            self.assertIn("input.fault", display)
-            self.assertIn("input.enabled", display)
-            self.assertNotEqual(display, "Stop")
-            self.assertNotEqual(display, action_display(item))
-            self.assertNotEqual(action_display(item), item["target_state"])
+        )
+        self.assertIn("input.emergency", emergency["trigger"]["display"])
+        self.assertEqual(
+            emergency["trigger"]["provenance"],
+            "decision-output-preimage",
+        )
+
+        disabled = next(
+            item
+            for item in machine["transitions"]
+            if item["target_state"] == "Stopped"
+            and action_display(item) == "DisableMotor"
+            and item.get("input_preimage")
+        )
+        self.assertIn("input.enabled", disabled["trigger"]["display"])
+        self.assertNotEqual(disabled["trigger"]["display"], "DisableMotor")
+
+        faulted = next(
+            item
+            for item in machine["transitions"]
+            if item["target_state"] == "Faulted"
+            and action_display(item) == "LatchFault"
+            and item.get("input_preimage")
+        )
+        self.assertIn("input.fault", faulted["trigger"]["display"])
 
         running = [
             item
@@ -112,10 +124,22 @@ class TransitionInputProvenanceTests(unittest.TestCase):
             self.assertEqual(item["trigger"]["confidence"], "dataflow-expanded")
             self.assertEqual(
                 action_display(item),
-                "Drive(normalize(input.raw))",
+                "SetMotorPower(normalize(input.raw))",
             )
             self.assertNotEqual(item["trigger"]["display"], action_display(item))
             self.assertNotEqual(action_display(item), item["target_state"])
+
+        independence = machine["analysis"]["action_target_independence"]
+        self.assertTrue(independence["typed_independent"])
+        self.assertEqual(independence["action_type"], "MotorCommand")
+        self.assertEqual(independence["state_type"], "Mode")
+        self.assertTrue(independence["behaviorally_independent"])
+        self.assertGreater(independence["behavioral_witness_count"], 0)
+        self.assertEqual(independence["near_alias_count"], 0)
+        self.assertEqual(
+            set(independence["multiple_actions_to_state"]["Stopped"]),
+            {"DisableMotor", "EmergencyBrake"},
+        )
 
     def test_door_decision_preimage_keeps_input_action_and_target_independent(self) -> None:
         views = compile_example("examples/acceptance/door_controller.glyph")
