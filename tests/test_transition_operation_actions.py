@@ -11,6 +11,11 @@ from glyph.io_state_views import build_io_state_views
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def compile_source(source: str) -> dict[str, object]:
+    output = CompilationPipeline().compile_text(source, source_name="test.glyph")
+    return build_io_state_views(output.model, output.diagrams.ir)
+
+
 def compile_example(relative: str) -> dict[str, object]:
     path = ROOT / relative
     output = CompilationPipeline().compile_text(
@@ -28,6 +33,44 @@ def output_variant(transition: Mapping[str, object]) -> str:
 def action_display(transition: Mapping[str, object]) -> str:
     value = transition.get("action")
     return str(value.get("display") or "") if isinstance(value, Mapping) else ""
+
+
+DIRECT_ACTUATOR_SOURCE = """system DoorControl
+  entry control
+
+  in state:DoorState
+  in input:Input
+  out receipt:Receipt
+
+  state -> control
+  input -> control
+  control -> receipt
+  control -> actuator
+
+machine Door(state:DoorState,input:Input)
+  select=state.mode
+  init=DoorState(Closed)
+  next=step(state,input)
+  success=Open
+  failure=Alarm
+
+*Input(open_request,authorized,obstruction:B)
++DoorMode=Closed|Opening|Open|Alarm
+*DoorState(mode:DoorMode)
+*Receipt(state:DoorState)
+
+!actuator(state:DoorState):Receipt
+
+>step(state:DoorState,input:Input):DoorState
+  state.mode==Closed&input.open_request&input.authorized >> DoorState(Opening)
+  state.mode==Opening&input.obstruction >> DoorState(Alarm)
+  state.mode==Opening >> DoorState(Open)
+  _ >> state
+
+>control(state:DoorState,input:Input):Receipt
+  next := step(state,input)
+  actuator(next)
+"""
 
 
 class TransitionOperationActionTests(unittest.TestCase):
@@ -66,19 +109,113 @@ class TransitionOperationActionTests(unittest.TestCase):
                 action,
             )
 
-    def test_state_carried_door_command_is_not_rendered_as_action(self) -> None:
+    def test_door_result_flows_through_apply_into_real_operation(self) -> None:
         views = compile_example("examples/acceptance/door_controller.glyph")
+        self.assertEqual(views["transition_result_consumer_action_version"], 1)
         machine = views["state"]["machines"][0]
+        expected_operations = {
+            "RaiseAlarm": "alarm",
+            "Unlock": "lock",
+            "KeepLocked": "lock",
+        }
         transitions = [
             item
             for item in machine["transitions"]
-            if output_variant(item) in {"RaiseAlarm", "Unlock", "KeepLocked"}
+            if output_variant(item) in expected_operations and item.get("input_preimage")
         ]
         self.assertTrue(transitions)
         for transition in transitions:
+            variant = output_variant(transition)
+            operation = expected_operations[variant]
+            action = action_display(transition)
+            self.assertTrue(action.startswith(f"{operation}(DoorState("), action)
+            self.assertEqual(
+                transition["action"]["provenance"],
+                "transition-operation-invocation",
+            )
+            self.assertEqual(
+                transition["action_invocations"][0]["provenance"],
+                "transition-result-consumer",
+            )
+            self.assertEqual(
+                transition["action_result_dataflow"]["path"][:2],
+                ["step", "control.next"],
+            )
+            self.assertNotEqual(action, variant)
+            self.assertNotEqual(action, transition["target_state"])
+
+    def test_direct_caller_binding_is_specialized_per_transition(self) -> None:
+        views = compile_source(DIRECT_ACTUATOR_SOURCE)
+        machine = views["state"]["machines"][0]
+        opening = next(
+            item
+            for item in machine["transitions"]
+            if item["target_state"] == "Opening"
+        )
+        alarm = next(
+            item
+            for item in machine["transitions"]
+            if item["target_state"] == "Alarm"
+        )
+        self.assertEqual(
+            action_display(opening),
+            "actuator(DoorState(Opening))",
+        )
+        self.assertEqual(
+            action_display(alarm),
+            "actuator(DoorState(Alarm))",
+        )
+
+    def test_alias_chain_preserves_transition_result_provenance(self) -> None:
+        source = DIRECT_ACTUATOR_SOURCE.replace(
+            "  actuator(next)\n",
+            "  forwarded := next\n  actuator(forwarded)\n",
+        )
+        views = compile_source(source)
+        machine = views["state"]["machines"][0]
+        opening = next(
+            item
+            for item in machine["transitions"]
+            if item["target_state"] == "Opening"
+        )
+        self.assertEqual(
+            action_display(opening),
+            "actuator(DoorState(Opening))",
+        )
+
+    def test_unrelated_post_step_effect_is_not_invented_as_action(self) -> None:
+        source = DIRECT_ACTUATOR_SOURCE.replace(
+            "!actuator(state:DoorState):Receipt\n",
+            "!actuator(state:DoorState):Receipt\n!tick():Receipt\n",
+        ).replace("  actuator(next)\n", "  tick()\n")
+        views = compile_source(source)
+        machine = views["state"]["machines"][0]
+        for transition in machine["transitions"]:
             self.assertIsNone(transition["action"])
             self.assertEqual(transition["action_invocations"], [])
-            self.assertIsNotNone(transition["emitted_output"])
+
+    def test_divergent_caller_contexts_are_rejected_not_guessed(self) -> None:
+        source = DIRECT_ACTUATOR_SOURCE.replace(
+            "system DoorControl\n  entry control\n\n  in state:DoorState\n  in input:Input\n  out receipt:Receipt\n\n  state -> control\n  input -> control\n  control -> receipt\n  control -> actuator\n\n",
+            "",
+        ).replace(
+            "!actuator(state:DoorState):Receipt\n",
+            "!actuator(state:DoorState):Receipt\n!audit(state:DoorState):Receipt\n",
+        ) + """
+>audit_control(state:DoorState,input:Input):Receipt
+  next := step(state,input)
+  audit(next)
+"""
+        views = compile_source(source)
+        machine = views["state"]["machines"][0]
+        self.assertTrue(
+            any(
+                item.get("code") == "STIR_ACTION_RESULT_CONSUMER_AMBIGUOUS"
+                for item in machine["diagnostics"]
+            )
+        )
+        for transition in machine["transitions"]:
+            self.assertIsNone(transition["action"])
 
     def test_target_state_is_never_action_fallback(self) -> None:
         views = compile_example("examples/state_diagrams/session_protocol.glyph")
