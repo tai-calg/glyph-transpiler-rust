@@ -11,11 +11,12 @@ from .transition_action_projection import project_machine_transition_actions
 from .transition_action_target_independence import analyze_action_target_independence
 from .transition_condition_roles import (
     STATE_TRANSITION_IR_SCHEMA,
+    STATE_TRANSITION_IR_VERSION,
     classify_machine_transition_roles,
 )
+from .transition_enabling_case_compatibility import preserve_legacy_transition_metadata
 from .transition_enabling_cases import (
     ENABLING_CASES_VERSION,
-    STATE_TRANSITION_IR_VERSION,
     attach_machine_enabling_cases,
 )
 from .transition_input_provenance import (
@@ -115,7 +116,10 @@ def enrich_state_transition_ir(
         expand_machine_transition_inputs(model, machine) for machine in classified
     ]
     enabled = [
-        attach_machine_enabling_cases(model, machine) for machine in expanded
+        preserve_legacy_transition_metadata(
+            attach_machine_enabling_cases(model, machine)
+        )
+        for machine in expanded
     ]
     state["machines"] = [
         _attach_action_target_independence(model, machine) for machine in enabled
@@ -126,7 +130,7 @@ def enrich_state_transition_ir(
         "version": STATE_TRANSITION_IR_VERSION,
     }
     # Input [Guard] ➞ Action remains the public label contract version 2.
-    # Enabling-case IR is independently versioned.
+    # Enabling-case IR is an additive, independently versioned v1 contract.
     result["transition_semantics_version"] = 2
     result["transition_input_preimage_version"] = INPUT_PREIMAGE_VERSION
     result["transition_enabling_cases_version"] = ENABLING_CASES_VERSION
