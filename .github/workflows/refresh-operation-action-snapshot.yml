@@ -29,17 +29,21 @@ jobs:
           python -m pip install pillow==12.0.0
           npm install playwright@1.54.2
           npx playwright install --with-deps chromium
-      - name: Verify semantics and refresh PNG
+      - name: Verify semantics and render PNG
         run: |
           python -m unittest discover -s tests -p 'test_transition_operation_actions.py'
           node tests/verify_enabling_case_rendering.mjs
           node tests/verify_state_diagram_rendering.mjs
           UPDATE_README_STATE_DIAGRAM=1 python tests/verify_readme_state_snapshot.py
           python tests/verify_readme_state_snapshot.py
-      - name: Commit generated image
+          cp docs/images/glyph-studio-state-transition.png /tmp/glyph-studio-state-transition.png
+      - name: Commit generated image onto latest head
         env:
           HEAD_REF: ${{ github.head_ref }}
         run: |
+          git fetch origin "${HEAD_REF}"
+          git checkout -B "${HEAD_REF}" "origin/${HEAD_REF}"
+          cp /tmp/glyph-studio-state-transition.png docs/images/glyph-studio-state-transition.png
           if git diff --quiet -- docs/images/glyph-studio-state-transition.png; then
             echo "README state snapshot already current"
             exit 0
