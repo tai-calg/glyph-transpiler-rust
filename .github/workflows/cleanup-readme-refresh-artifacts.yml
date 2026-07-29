@@ -1,0 +1,35 @@
+name: Cleanup README Refresh Artifacts
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/cleanup-readme-refresh-artifacts.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - name: Remove generated dependencies and build output
+        run: |
+          git rm -r --ignore-unmatch node_modules
+          git rm -r --ignore-unmatch build/state-diagram-regression
+          git rm --ignore-unmatch package-lock.json package.json
+          rm .github/workflows/cleanup-readme-refresh-artifacts.yml
+      - name: Commit clean artifact set
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Remove temporary README refresh artifacts"
+          git push origin "HEAD:${HEAD_REF}"
