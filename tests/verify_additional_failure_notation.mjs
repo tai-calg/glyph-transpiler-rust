@@ -106,17 +106,17 @@ try {
       );
 
       for (const effect of testCase.expectedEffects) {
-        assert(
-          machine.transitions.some(transition => (
-            transition.effect_invocations || []
-          ).some(invocation => invocation.expression === effect)),
-          `${testCase.machine}: Effect invocation missing from IR: ${effect}`,
-        );
-        assert(
-          machine.transitions.every(transition => !actionDisplay(transition).includes(effect)),
-          `${testCase.machine}: Effect invocation leaked into Action: ${effect}`,
-        );
-      }
+      const witnesses = machine.transitions.filter(transition => (
+        actionDisplay(transition) === effect
+        && (transition.action_invocations || []).some(invocation => invocation.expression === effect)
+        && (transition.effect_invocations || []).some(invocation => invocation.expression === effect)
+        && transition.action?.effectful === true
+      ));
+      assert(
+        witnesses.length > 0,
+        `${testCase.machine}: missing Action/Effect dual-role witness: ${effect}`,
+      );
+    }
 
       await fs.writeFile(
         path.join(outputDirectory, `${testCase.slug}.json`),
@@ -156,11 +156,11 @@ try {
         );
       }
       for (const effect of testCase.expectedEffects) {
-        assert(
-          visible.every(label => !label.includes(`➡︎${effect}`) && !label.includes(` / ${effect}`)),
-          `${testCase.machine}: Effect is visible in Action position: ${effect}`,
-        );
-      }
+      assert(
+        visible.some(label => label.includes(`➡︎${effect}`)),
+        `${testCase.machine}: operation-derived Action is not visible: ${effect}`,
+      );
+    }
       assert(
         visible.every(label => !label.includes("➡︎—")),
         `${testCase.machine}: missing Action is rendered as a placeholder Action`,
@@ -198,4 +198,4 @@ try {
   await browser.close();
 }
 
-console.log(`verified ${cases.length} additional diagrams with separate Action, Effect, and failure notation`);
+console.log(`verified ${cases.length} additional diagrams with operation Actions, Effect metadata, and failure notation`);

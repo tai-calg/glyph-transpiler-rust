@@ -8,7 +8,7 @@ const cases = [
   {
     slug: "conveyor",
     file: "examples/state_diagrams/conveyor_control.glyph",
-    requiredLabel: "ConveyorStop",
+    requiredLabel: "ConveyorStop ➞ set_conveyor(0.0)",
   },
   {
     slug: "traffic-light",

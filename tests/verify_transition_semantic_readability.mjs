@@ -10,7 +10,7 @@ const cases = [
     file: "examples/state_diagrams/conveyor_control.glyph",
     machine: "Conveyor",
     dense: true,
-    required: "ConveyorStop",
+    required: "ConveyorStop ➞ set_conveyor(0.0)",
   },
   {
     slug: "traffic-light",
