@@ -7,9 +7,10 @@ STATE_TRANSITION_IR_SCHEMA = "glyph.state-transition-ir"
 # input-preimage, enabling-case, and execution-context enrichment.
 RAW_STATE_TRANSITION_IR_VERSION = 2
 
-# Public StateTransitionIR v5 separates intrinsic machine operations from
-# system-entry operations and publishes an explicit display projection.
-STATE_TRANSITION_IR_VERSION = 5
+# Action-scope fields are additive to the public v4 shape. Existing `action`
+# remains the selected display projection, while the new explicit fields expose
+# machine and system ownership without invalidating v4 consumers.
+STATE_TRANSITION_IR_VERSION = 4
 
 # Input [Guard] ➞ Action remains label contract v2. Scope separation has its own
 # additive version and does not redefine the label grammar.
@@ -34,5 +35,4 @@ def public_transition_ir_marker() -> dict[str, object]:
     return {
         "schema": STATE_TRANSITION_IR_SCHEMA,
         "version": STATE_TRANSITION_IR_VERSION,
-        "stage": "public",
     }
