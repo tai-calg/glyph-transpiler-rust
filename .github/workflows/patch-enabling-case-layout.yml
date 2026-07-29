@@ -1,0 +1,93 @@
+name: Patch Enabling Case Layout
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/patch-enabling-case-layout.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - name: Patch structured semantic label audits
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          role = Path('glyph/transition_semantic_role_lines.py')
+          text = role.read_text(encoding='utf-8')
+          old = '''function linesFor(cluster){
+            const input=text(cluster.dataset.inputValue),guard=text(cluster.dataset.guardValue),output=text(cluster.dataset.outputValue),lines=[];
+            if(input)lines.push(...splitExact(input));
+            if(guard)lines.push(...splitExact(`${input?" ":""}[${guard}]`));
+            if(output)lines.push(...splitExact(`${input||guard?" ":""}➞ ${output}`));
+            return lines.filter(line=>line.length>0);
+          }
+          '''
+          new = old + '''
+          function canonicalLabel(cluster){
+            const input=text(cluster.dataset.inputValue),guard=text(cluster.dataset.guardValue),output=text(cluster.dataset.outputValue);
+            const left=`${input}${guard?`${input?" ":""}[${guard}]`:""}`.trim();
+            return`${left}${output?`${left?" ":""}➞ ${output}`:""}`.trim();
+          }
+          '''
+          if old not in text:
+              raise SystemExit('semantic role lines insertion point changed')
+          text = text.replace(old, new, 1)
+          old_check = 'if(value.textContent!==expected)throw Error(`transition label role split changed semantics: ${expected}`);'
+          new_check = 'if(canonicalLabel(cluster)!==expected)throw Error(`transition label role split changed structured semantics: ${expected}`);'
+          if old_check not in text:
+              raise SystemExit('semantic role lines check changed')
+          text = text.replace(old_check, new_check, 1)
+          role.write_text(text, encoding='utf-8')
+
+          transaction = Path('glyph/transition_layout_transaction.py')
+          text = transaction.read_text(encoding='utf-8')
+          old = '''function semanticLines(cluster){
+            const input=text(cluster.dataset.inputValue),guard=text(cluster.dataset.guardValue),output=text(cluster.dataset.outputValue),lines=[];
+            lines.push(...splitComponent(input));
+            if(guard)lines.push(...splitComponent(` [${guard}]`));
+            if(output)lines.push(...splitComponent(` ➞ ${output}`));
+            return lines.filter(line=>line.length>0);
+          }
+          '''
+          new = old + '''
+          function canonicalLabel(cluster){
+            const input=text(cluster.dataset.inputValue),guard=text(cluster.dataset.guardValue),output=text(cluster.dataset.outputValue);
+            const left=`${input}${guard?`${input?" ":""}[${guard}]`:""}`.trim();
+            return`${left}${output?`${left?" ":""}➞ ${output}`:""}`.trim();
+          }
+          '''
+          if old not in text:
+              raise SystemExit('transaction insertion point changed')
+          text = text.replace(old, new, 1)
+          old_check = 'if(value.textContent!==expected)throw Error(`transition label formatting changed semantics: ${expected}`);'
+          new_check = 'if(canonicalLabel(cluster)!==expected)throw Error(`transition label formatting changed structured semantics: ${expected}`);'
+          if old_check not in text:
+              raise SystemExit('transaction format check changed')
+          text = text.replace(old_check, new_check, 1)
+          old_audit = 'const expected=cluster.dataset.ioValue||"",actual=value?.textContent||"",rect=rects[index];'
+          new_audit = 'const expected=cluster.dataset.ioValue||"",actual=canonicalLabel(cluster),rect=rects[index];'
+          if old_audit not in text:
+              raise SystemExit('transaction audit check changed')
+          text = text.replace(old_audit, new_audit, 1)
+          transaction.write_text(text, encoding='utf-8')
+          PY
+      - name: Commit patches
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add glyph/transition_semantic_role_lines.py glyph/transition_layout_transaction.py
+          git commit -m "Audit enabling-case labels from structured roles"
+          git push origin "HEAD:${HEAD_REF}"
