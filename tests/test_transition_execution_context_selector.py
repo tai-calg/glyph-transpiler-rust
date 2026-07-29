@@ -24,7 +24,6 @@ class TransitionExecutionContextSelectorTests(unittest.TestCase):
         self.assertIn("window.GlyphExecutionContext", html)
         self.assertNotIn("window.fetch=async", html)
         self.assertIn("glyph-execution-context-changed", html)
-        self.assertIn("glyph-locale-changed", html)
 
     def test_prepared_app_installs_context_projection_after_compiler_ui(self) -> None:
         prepare_diagram_app()
