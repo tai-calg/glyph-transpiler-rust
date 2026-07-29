@@ -5,6 +5,8 @@ from typing import Mapping, Sequence
 
 _OPERATION_ACTION_PROVENANCE = "transition-operation-invocation"
 _RESULT_CONSUMER_PROVENANCE = "transition-result-consumer"
+_SEQUENCED_SYSTEM_PROVENANCE = "transition-sequenced-operation"
+_SYSTEM_EXECUTION_PROVENANCE = "system-transition-execution"
 _DECLARED_EFFECT_PROVENANCE = "declared-effect-invocation"
 _OUTPUT_PROJECTION_PROVENANCE = "machine-output-projection"
 
