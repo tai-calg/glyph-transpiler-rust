@@ -42,7 +42,7 @@ class TransitionEnablingCasesTests(unittest.TestCase):
 
         self.assertEqual(views["state_transition_ir"]["version"], 5)
         self.assertEqual(views["transition_enabling_cases_version"], 1)
-        self.assertEqual(views["transition_semantics_version"], 3)
+        self.assertEqual(views["transition_semantics_version"], 2)
 
         fault = case_for(machine, "LatchFault")
         self.assertEqual(fault["input_pattern"]["expression"], "input.fault")
