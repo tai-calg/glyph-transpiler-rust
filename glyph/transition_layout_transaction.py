@@ -194,10 +194,16 @@ function splitComponent(value,limit=42){
   return lines;
 }
 function semanticLines(cluster){
+  const value=cluster.querySelector(".transition-io-value"),count=Number(cluster.dataset.enablingCaseCount||"1");
+  if(count>1){
+    const cases=[...(value?.querySelectorAll(".enabling-case-line")||[])].map(element=>text(element.textContent)).filter(Boolean);
+    if(cases.length)return cases;
+    return text(cluster.dataset.ioValue).split(" || ").map(item=>item.trim()).filter(Boolean);
+  }
   const input=text(cluster.dataset.inputValue),guard=text(cluster.dataset.guardValue),output=text(cluster.dataset.outputValue),lines=[];
-  lines.push(...splitComponent(input));
-  if(guard)lines.push(...splitComponent(` [${guard}]`));
-  if(output)lines.push(...splitComponent(` ➞ ${output}`));
+  if(input)lines.push(...splitComponent(input));
+  if(guard)lines.push(...splitComponent(`${input?" ":""}[${guard}]`));
+  if(output)lines.push(...splitComponent(`${input||guard?" ":""}➞ ${output}`));
   return lines.filter(line=>line.length>0);
 }
 
@@ -212,14 +218,15 @@ function formatLabels(stage){
     const value=cluster.querySelector(".transition-io-value");
     if(!value)continue;
     const expected=cluster.dataset.ioValue||value.textContent||"";
-    const lines=semanticLines(cluster);
+    const lines=semanticLines(cluster),multiple=Number(cluster.dataset.enablingCaseCount||"1")>1;
     value.replaceChildren(...lines.map(line=>{
       const span=document.createElement("span");
-      span.className="transition-semantic-line transition-role-line transition-transaction-line";
+      span.className=`transition-semantic-line transition-role-line transition-transaction-line${multiple?" enabling-case-line":""}`;
       span.textContent=line;
       return span;
     }));
-    if(canonicalLabel(cluster)!==expected)throw Error(`transition label formatting changed structured semantics: ${expected}`);
+    const actual=multiple?lines.join(" || "):canonicalLabel(cluster);
+    if(actual!==expected)throw Error(`transition label formatting changed structured semantics: ${expected}`);
     const longest=Math.max(1,...lines.map(line=>line.length));
     const width=clamp(Math.ceil(longest*5.8+22),108,640);
     cluster.style.setProperty("--transaction-label-width",`${width}px`);
@@ -367,7 +374,8 @@ function audit(stage){
   const rects=clusters.map(cluster=>rectAt(cluster,{x:num(cluster.style.left),y:num(cluster.style.top)}));
   clusters.forEach((cluster,index)=>{
     const value=cluster.querySelector(".transition-io-value"),node=cluster.querySelector(".transition-io-node.io"),style=value?getComputedStyle(value):null;
-    const expected=cluster.dataset.ioValue||"",actual=canonicalLabel(cluster),rect=rects[index];
+    const expected=cluster.dataset.ioValue||"",multiple=Number(cluster.dataset.enablingCaseCount||"1")>1;
+    const actual=multiple?[...value.querySelectorAll(".enabling-case-line")].map(element=>text(element.textContent)).filter(Boolean).join(" || "):canonicalLabel(cluster),rect=rects[index];
     const reasons=[];
     if(actual!==expected)reasons.push("text-mismatch");
     if((Number.parseFloat(style?.fontSize||"0")||0)<9)reasons.push("font-too-small");
