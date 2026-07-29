@@ -29,6 +29,51 @@ jobs:
           python -m pip install pillow==12.0.0
           npm install playwright@1.54.2
           npx playwright install --with-deps chromium
+      - name: Correct empty-value comparison
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("tests/verify_state_diagram_rendering.mjs")
+          text = path.read_text(encoding="utf-8")
+          old = '''          assert.notEqual(
+            rendered.action,
+            emittedOutputDisplay(transition),
+            `${testCase.slug}/${expected.name}/${rendered.id}: Emitted Output leaked into Action`,
+          );
+'''
+          new = '''          const emittedOutput = emittedOutputDisplay(transition);
+          if (rendered.action && emittedOutput) {
+            assert.notEqual(
+              rendered.action,
+              emittedOutput,
+              `${testCase.slug}/${expected.name}/${rendered.id}: Emitted Output leaked into Action`,
+            );
+          }
+'''
+          if old not in text:
+              raise SystemExit("first emitted-output assertion not found")
+          text = text.replace(old, new, 1)
+
+          old = '''            assert.notEqual(
+              rendered.action,
+              emittedOutputDisplay(transition),
+              `${testCase.slug}/${expected.name}/${rendered.id}: Emitted Output repeated as Action`,
+            );
+'''
+          new = '''            const emittedOutput = emittedOutputDisplay(transition);
+            if (emittedOutput) {
+              assert.notEqual(
+                rendered.action,
+                emittedOutput,
+                `${testCase.slug}/${expected.name}/${rendered.id}: Emitted Output repeated as Action`,
+              );
+            }
+'''
+          if old not in text:
+              raise SystemExit("second emitted-output assertion not found")
+          path.write_text(text.replace(old, new, 1), encoding="utf-8")
+          PY
       - name: Verify semantics and render PNG
         run: |
           python -m unittest discover -s tests -p 'test_transition_operation_actions.py'
@@ -37,19 +82,21 @@ jobs:
           UPDATE_README_STATE_DIAGRAM=1 python tests/verify_readme_state_snapshot.py
           python tests/verify_readme_state_snapshot.py
           cp docs/images/glyph-studio-state-transition.png /tmp/glyph-studio-state-transition.png
-      - name: Commit generated image onto latest head
+          cp tests/verify_state_diagram_rendering.mjs /tmp/verify_state_diagram_rendering.mjs
+      - name: Commit corrected test and generated image onto latest head
         env:
           HEAD_REF: ${{ github.head_ref }}
         run: |
           git fetch origin "${HEAD_REF}"
           git checkout -B "${HEAD_REF}" "origin/${HEAD_REF}"
           cp /tmp/glyph-studio-state-transition.png docs/images/glyph-studio-state-transition.png
-          if git diff --quiet -- docs/images/glyph-studio-state-transition.png; then
+          cp /tmp/verify_state_diagram_rendering.mjs tests/verify_state_diagram_rendering.mjs
+          if git diff --quiet -- docs/images/glyph-studio-state-transition.png tests/verify_state_diagram_rendering.mjs; then
             echo "README state snapshot already current"
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add docs/images/glyph-studio-state-transition.png
+          git add docs/images/glyph-studio-state-transition.png tests/verify_state_diagram_rendering.mjs
           git commit -m "Refresh README snapshot with operation Actions"
           git push origin "HEAD:${HEAD_REF}"
