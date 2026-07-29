@@ -6,32 +6,10 @@ from ._boolean_reasoning import propositional_truth
 from ._transition_branch_semantics import (
     MachineBranchContext,
     PlannedTransitionBranch,
-    _source_state_value,
     simplify_expr,
-    substitute_expr,
+    specialize_for_source,
 )
 from .compiler import BoolExpr, Expr
-
-
-def specialize_for_source(
-    context: MachineBranchContext,
-    expression: Expr,
-    source_state: str,
-) -> Expr:
-    substituted = substitute_expr(
-        expression,
-        {
-            context.machine.state_param.name: _source_state_value(
-                context,
-                source_state,
-            )
-        },
-    )
-    return simplify_expr(
-        substituted,
-        products=context.products,
-        constants=context.constants,
-    )
 
 
 def semantic_truth_value(
