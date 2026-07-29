@@ -132,7 +132,7 @@ def prepare_diagram_app() -> None:
 
 
 def run_diagram_app(input_path: str | Path) -> int:
-    """Run the editable diagram app from compiler-produced StateTransitionIR v5."""
+    """Run the editable app from StateTransitionIR v4 plus enabling-cases v1."""
 
     prepare_diagram_app()
     return diagram_app.run_diagram_app(input_path)
