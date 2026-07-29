@@ -23,6 +23,18 @@ def _replace_output(
     return expression.replace(original_output, refined_output)
 
 
+def _remove_legacy_action_segment(
+    transition: dict[str, object],
+    candidates: list[str],
+) -> None:
+    label = _text(transition.get("display_label"))
+    if not label:
+        return
+    for candidate in sorted({item for item in candidates if item}, key=len, reverse=True):
+        label = label.replace(f" / {candidate}", "")
+    transition["display_label"] = label
+
+
 def _refine_emitted_output(
     transition: dict[str, object],
     action: object,
@@ -65,6 +77,16 @@ def finalize_machine_operation_actions(
     for original in result.get("transitions", []):
         transition = dict(original)
         action = transition.get("action")
+        prefinal_action = (
+            _text(action.get("display") or action.get("expression"))
+            if isinstance(action, Mapping)
+            else ""
+        )
+        operation_template = (
+            _text(action.get("operation_template"))
+            if isinstance(action, Mapping)
+            else ""
+        )
         original_output, refined_output = _refine_emitted_output(transition, action)
         invocations = [
             dict(item)
@@ -73,6 +95,10 @@ def finalize_machine_operation_actions(
         ]
 
         if not invocations:
+            _remove_legacy_action_segment(
+                transition,
+                [prefinal_action, original_output, refined_output],
+            )
             if isinstance(action, Mapping):
                 compatibility_removed += int(
                     action.get("provenance") == _OUTPUT_COMPATIBILITY_PROVENANCE
@@ -107,6 +133,10 @@ def finalize_machine_operation_actions(
             refined_output=refined_output,
         )
 
+        _remove_legacy_action_segment(
+            transition,
+            [prefinal_action, operation_template, template, rendered],
+        )
         value["display"] = rendered
         value["expression"] = rendered
         value["decision_variant"] = decision_variant or None
