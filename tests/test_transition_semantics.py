@@ -52,6 +52,16 @@ def transition(
     return matches[0]
 
 
+def action_display(item: dict[str, object]) -> str:
+    value = item.get("action")
+    return str(value.get("display") or "") if isinstance(value, dict) else ""
+
+
+def output_display(item: dict[str, object]) -> str:
+    value = item.get("emitted_output")
+    return str(value.get("display") or "") if isinstance(value, dict) else ""
+
+
 class TransitionSemanticsTests(unittest.TestCase):
     def assert_v4(self, views: dict[str, object], machine: dict[str, object]) -> None:
         self.assertEqual(
@@ -71,6 +81,8 @@ class TransitionSemanticsTests(unittest.TestCase):
                 "event",
                 "guard",
                 "action",
+                "action_invocations",
+                "emitted_output",
                 "effect_invocations",
                 "failure_type",
                 "outcome",
@@ -125,7 +137,11 @@ class TransitionSemanticsTests(unittest.TestCase):
         machine = views["state"]["machines"][0]
 
         normal = transition(machine, "PumpOff", "PumpOn", "PumpStart")
-        self.assertIsNone(normal["action"])
+        self.assertEqual(action_display(normal), "write_pump(true)")
+        self.assertEqual(
+            normal["action"]["provenance"],
+            "transition-operation-invocation",
+        )
         self.assertEqual(
             [item["expression"] for item in normal["effect_invocations"]],
             ["write_pump(true)"],
@@ -140,7 +156,7 @@ class TransitionSemanticsTests(unittest.TestCase):
         ]
         self.assertEqual(len(failures), 1)
         failure = failures[0]
-        self.assertIsNone(failure["action"])
+        self.assertEqual(action_display(failure), "write_pump(true)")
         self.assertEqual(
             [item["expression"] for item in failure["effect_invocations"]],
             ["write_pump(true)"],
@@ -150,7 +166,7 @@ class TransitionSemanticsTests(unittest.TestCase):
         self.assertEqual(failure["display_label"], "PumpStart | WriteError")
         self.assertNotIn("PumpFault", machine["unreachable_states"])
 
-    def test_event_guard_and_action_are_all_preserved(self) -> None:
+    def test_event_guard_action_and_effect_are_all_preserved(self) -> None:
         views = compile_semantic(ROOT / "examples/state_diagrams/conveyor_control.glyph")
         machine = views["state"]["machines"][0]
 
@@ -162,7 +178,7 @@ class TransitionSemanticsTests(unittest.TestCase):
         )
         self.assertEqual(start["guard"], "input.clear")
         self.assertEqual(start["guards"], ["input.clear"])
-        self.assertIsNone(start["action"])
+        self.assertEqual(action_display(start), "set_conveyor(input.speed)")
         self.assertEqual(
             [item["expression"] for item in start["effect_invocations"]],
             ["set_conveyor(input.speed)"],
@@ -180,7 +196,7 @@ class TransitionSemanticsTests(unittest.TestCase):
             if item.get("synthesized_failure")
         )
         self.assertEqual(failure["guard"], "input.clear")
-        self.assertIsNone(failure["action"])
+        self.assertEqual(action_display(failure), "set_conveyor(input.speed)")
         self.assertEqual(
             [item["expression"] for item in failure["effect_invocations"]],
             ["set_conveyor(input.speed)"],
@@ -197,7 +213,7 @@ class TransitionSemanticsTests(unittest.TestCase):
             "ValveOpen",
             "ValveOpenRequest",
         )
-        self.assertIsNone(opened["action"])
+        self.assertEqual(action_display(opened), "write_valve(true)")
         self.assertEqual(
             [item["expression"] for item in opened["effect_invocations"]],
             ["write_valve(true)"],
@@ -213,7 +229,7 @@ class TransitionSemanticsTests(unittest.TestCase):
             )
             if item.get("synthesized_failure")
         )
-        self.assertIsNone(failure["action"])
+        self.assertEqual(action_display(failure), "write_valve(true)")
         self.assertEqual(
             [item["expression"] for item in failure["effect_invocations"]],
             ["write_valve(true)"],
@@ -249,6 +265,7 @@ class TransitionSemanticsTests(unittest.TestCase):
         )
         self.assertTrue(all(item["guard"] is None for item in failures))
         self.assertTrue(all(item["failure_type"] == "FanWriteError" for item in failures))
+        self.assertTrue(all(action_display(item) == "write_fan(0.0)" for item in failures))
 
     def test_effect_without_result_does_not_create_failure_edge(self) -> None:
         source = """\
@@ -280,6 +297,12 @@ machine Device(state:DeviceState,event:DeviceEvent)
         self.assertFalse(
             any(item.get("synthesized_failure") for item in machine["transitions"])
         )
+        actions = {
+            action_display(item)
+            for item in machine["transitions"]
+            if action_display(item)
+        }
+        self.assertEqual(actions, {"write_device(true)", "write_device(false)"})
 
     def test_block_local_sum_value_is_inferred_from_input_dataflow(self) -> None:
         views = compile_semantic(ROOT / "examples/acceptance/door_controller.glyph")
@@ -288,7 +311,7 @@ machine Device(state:DeviceState,event:DeviceEvent)
             item
             for item in machine["transitions"]
             if item["target_state"] == "Alarmed"
-            and (item.get("action") or {}).get("display") == "RaiseAlarm"
+            and output_display(item) == "RaiseAlarm"
             and item.get("input_preimage")
         )
         self.assertEqual(alarm["trigger"]["role"], "inferred-trigger")
@@ -297,10 +320,12 @@ machine Device(state:DeviceState,event:DeviceEvent)
         self.assertIn("input.forced_open", alarm["trigger"]["display"])
         self.assertEqual(alarm["event"], alarm["trigger"]["display"])
         self.assertEqual(alarm["target_state"], "Alarmed")
-        self.assertEqual(alarm["action"]["display"], "RaiseAlarm")
-        self.assertEqual(alarm["action"]["provenance"], "machine-action-projection")
-        self.assertNotEqual(alarm["trigger"]["display"], alarm["action"]["display"])
-        self.assertNotEqual(alarm["action"]["display"], alarm["target_state"])
+        self.assertEqual(output_display(alarm), "RaiseAlarm")
+        self.assertEqual(
+            alarm["emitted_output"]["provenance"],
+            "machine-output-projection",
+        )
+        self.assertIsNone(alarm["action"])
         self.assertEqual(alarm["effect_invocations"], [])
         self.assertNotIn("[action==RaiseAlarm]", alarm["display_label"])
         self.assertIn("input:input", alarm["trigger"]["provenance_roots"])

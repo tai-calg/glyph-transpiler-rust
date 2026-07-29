@@ -68,29 +68,46 @@ class TransitionInputProvenanceAuditTests(unittest.TestCase):
                         action = action_display(item)
                         if action:
                             self.assertNotEqual(action, item.get("target_state"))
+                            self.assertNotEqual(
+                                action,
+                                str((item.get("emitted_output") or {}).get("display") or ""),
+                            )
                         self.assertFalse(
                             item.get("input_preimage")
                             and (item.get("trigger") or {}).get("provenance")
                             != "decision-output-preimage"
                         )
 
-    def test_effect_examples_keep_effects_outside_action(self) -> None:
+    def test_effectful_invocations_are_both_actions_and_effects(self) -> None:
         expectations = {
             "examples/state_diagrams/conveyor_control.glyph": "set_conveyor(input.speed)",
             "examples/state_diagrams/effect_failure.glyph": "write_pump(true)",
             "examples/state_diagrams/valve_nested_effect.glyph": "write_valve(true)",
         }
-        for relative, expected_effect in expectations.items():
+        for relative, expected_operation in expectations.items():
             with self.subTest(example=relative):
                 machine = compile_example(relative)["state"]["machines"][0]
                 matching = [
                     item
                     for item in machine["transitions"]
-                    if expected_effect
+                    if expected_operation
                     in {effect["expression"] for effect in item.get("effect_invocations", [])}
                 ]
                 self.assertTrue(matching)
-                self.assertTrue(all(action_display(item) != expected_effect for item in matching))
+                for item in matching:
+                    self.assertEqual(action_display(item), expected_operation)
+                    self.assertEqual(
+                        item["action"]["provenance"],
+                        "transition-operation-invocation",
+                    )
+                    self.assertIn(
+                        expected_operation,
+                        {
+                            invocation["expression"]
+                            for invocation in item.get("action_invocations", [])
+                        },
+                    )
+                    self.assertTrue(item["action"]["effectful"])
 
     def test_direct_event_and_intermediate_decision_are_not_partially_expanded(self) -> None:
         source = """\

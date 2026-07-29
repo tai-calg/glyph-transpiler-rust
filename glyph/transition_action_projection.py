@@ -23,7 +23,9 @@ from .state_transition_compiler import _root_branches
 from .state_transition_ir import _actions_in_expr, _render_type
 
 
-ACTION_PROVENANCE = "machine-action-projection"
+ACTION_PROVENANCE = "transition-operation-invocation"
+OUTPUT_PROVENANCE = "machine-output-projection"
+EFFECT_PROVENANCE = "declared-effect-invocation"
 
 
 def _unwrap(expr: Expr) -> Expr:
@@ -89,26 +91,26 @@ def _variant_parts(
     return None, ()
 
 
-def _action_value(
+def _output_value(
     expr: Expr | None,
     *,
-    action_type: TypeRef,
-    action_sum: SumDecl,
+    output_type: TypeRef,
+    output_sum: SumDecl,
     source: Mapping[str, object],
 ) -> dict[str, object] | None:
     if expr is None:
         return None
-    variant, payload = _variant_parts(expr, action_sum)
+    variant, payload = _variant_parts(expr, output_sum)
     if variant is None:
         return None
     rendered = render_expr(expr)
     return {
         "display": rendered,
         "expression": rendered,
-        "type": _render_type(action_type),
+        "type": _render_type(output_type),
         "variant": variant,
         "payload": [render_expr(item) for item in payload],
-        "provenance": ACTION_PROVENANCE,
+        "provenance": OUTPUT_PROVENANCE,
         "source": dict(source),
     }
 
@@ -153,10 +155,47 @@ def _effect_values(
             "expression": item.call,
             "failure_type": item.failure_type,
             "sequence": index,
+            "effectful": True,
+            "kind": "effect-invocation",
+            "provenance": EFFECT_PROVENANCE,
             "source": dict(source),
         }
         for index, item in enumerate(effects, start=1)
     ]
+
+
+def _operation_action(
+    invocations: Sequence[Mapping[str, object]],
+    *,
+    source: Mapping[str, object],
+) -> dict[str, object] | None:
+    expressions = [
+        str(item.get("expression") or "").strip()
+        for item in invocations
+        if str(item.get("expression") or "").strip()
+    ]
+    if not expressions:
+        return None
+    operations = [
+        str(item.get("operation") or "").strip()
+        for item in invocations
+        if str(item.get("operation") or "").strip()
+    ]
+    display = "; ".join(expressions)
+    return {
+        "display": display,
+        "expression": display,
+        "operation": operations[0] if len(operations) == 1 else None,
+        "operations": operations,
+        "kind": (
+            "operation-invocation"
+            if len(expressions) == 1
+            else "operation-sequence"
+        ),
+        "effectful": True,
+        "provenance": ACTION_PROVENANCE,
+        "source": dict(source),
+    }
 
 
 def _branch_for_transition(
@@ -237,10 +276,10 @@ def _block_value_for_transition(
     return matching[0] if len(matching) == 1 else None
 
 
-def _warning(message: str, line: int) -> dict[str, object]:
+def _diagnostic(code: str, message: str, line: int) -> dict[str, object]:
     return {
         "severity": "warning",
-        "code": "STIR_ACTION_UNRESOLVED",
+        "code": code,
         "message": message,
         "line": line,
     }
@@ -250,11 +289,11 @@ def project_machine_transition_actions(
     model: CompilationModel,
     machine_view: dict[str, object],
 ) -> dict[str, object]:
-    """Separate projected transition Actions from Effect invocations.
+    """Derive edge Actions from executed operations, never from state values.
 
-    Action is derived only from the optional ``machine action=state.field`` projection.
-    Existing compiler ``action`` strings are external Effect calls and are moved to
-    ``effect_invocations``. Target state is never used as an Action fallback.
+    The legacy ``machine action=state.field`` selector is retained as an
+    Emitted Output projection for decision provenance and compatibility.
+    Target State and Emitted Output are never Action fallbacks.
     """
 
     result = deepcopy(machine_view)
@@ -300,14 +339,14 @@ def project_machine_transition_actions(
     if selector_sum is None:
         return result
 
-    action_selector = (
+    output_selector = (
         machine.action_selector
         if isinstance(machine.action_selector, FieldExpr)
         else None
     )
-    action_index = _field_index(state_decl, action_selector)
-    action_type = state_decl.fields[action_index].ty if action_index is not None else None
-    action_sum = sums.get(action_type.name) if action_type is not None else None
+    output_index = _field_index(state_decl, output_selector)
+    output_type = state_decl.fields[output_index].ty if output_index is not None else None
+    output_sum = sums.get(output_type.name) if output_type is not None else None
 
     next_call = machine.next_expr if isinstance(machine.next_expr, CallExpr) else None
     next_name = (
@@ -339,9 +378,13 @@ def project_machine_transition_actions(
         if branch_value is None:
             branch_value = _block_value_for_transition(block_values, transition)
         source = transition.get("source", {})
-        source_map = dict(source) if isinstance(source, Mapping) else {"line": 1, "column": 1}
+        source_map = (
+            dict(source)
+            if isinstance(source, Mapping)
+            else {"line": 1, "column": 1}
+        )
         legacy_action = transition.get("action")
-        transition["effect_invocations"] = _effect_values(
+        effect_invocations = _effect_values(
             branch_value,
             legacy_action=legacy_action,
             synthesized_failure=bool(transition.get("synthesized_failure")),
@@ -350,41 +393,48 @@ def project_machine_transition_actions(
             aliases=aliases,
             source=source_map,
         )
+        transition["effect_invocations"] = effect_invocations
+        transition["action_invocations"] = [dict(item) for item in effect_invocations]
+        transition["action"] = _operation_action(
+            effect_invocations,
+            source=source_map,
+        )
 
         projected_expr = (
             _project_constructor_field(
                 branch_value,
                 state_decl=state_decl,
-                field_index=action_index,
+                field_index=output_index,
                 state_param=machine.state_param.name,
             )
-            if branch_value is not None and action_index is not None
+            if branch_value is not None and output_index is not None
             else None
         )
-        action = (
-            _action_value(
+        emitted_output = (
+            _output_value(
                 projected_expr,
-                action_type=action_type,
-                action_sum=action_sum,
+                output_type=output_type,
+                output_sum=output_sum,
                 source=source_map,
             )
-            if action_type is not None and action_sum is not None
+            if output_type is not None and output_sum is not None
             else None
         )
-        transition["action"] = action
+        transition["emitted_output"] = emitted_output
 
         if (
-            action_selector is not None
+            output_selector is not None
             and branch_value is not None
             and projected_expr is not None
-            and action is None
+            and emitted_output is None
         ):
             line = int(source_map.get("line", 1))
             generated.append(
-                _warning(
+                _diagnostic(
+                    "STIR_OUTPUT_UNRESOLVED",
                     (
-                        f"transition Action `{render_expr(projected_expr)}` could not be "
-                        f"resolved as a variant of `{_render_type(action_type)}`"
+                        f"transition output `{render_expr(projected_expr)}` could not be "
+                        f"resolved as a variant of `{_render_type(output_type)}`"
                     ),
                     line,
                 )
@@ -401,16 +451,35 @@ def project_machine_transition_actions(
             diagnostics.append(item)
             seen.add(key)
 
+    projection_metadata = (
+        None
+        if output_selector is None
+        else {
+            "expression": render_expr(output_selector),
+            "field": output_selector.field,
+            "type": _render_type(output_type),
+            "semantic_role": "emitted-output",
+            "legacy_source_spelling": "action=",
+        }
+    )
     analysis = dict(result.get("analysis", {}))
     analysis.update(
         {
             "projected_action_count": sum(
                 1 for item in transitions if item.get("action") is not None
             ),
+            "operation_action_count": sum(
+                len(item.get("action_invocations", [])) for item in transitions
+            ),
             "effect_invocation_count": sum(
                 len(item.get("effect_invocations", [])) for item in transitions
             ),
-            "action_projection_declared": action_selector is not None,
+            "emitted_output_count": sum(
+                1 for item in transitions if item.get("emitted_output") is not None
+            ),
+            "state_field_action_count": 0,
+            "action_projection_declared": output_selector is not None,
+            "output_projection_declared": output_selector is not None,
         }
     )
     result.update(
@@ -418,18 +487,16 @@ def project_machine_transition_actions(
             "transitions": transitions,
             "diagnostics": diagnostics,
             "analysis": analysis,
-            "action_projection": (
-                None
-                if action_selector is None
-                else {
-                    "expression": render_expr(action_selector),
-                    "field": action_selector.field,
-                    "type": _render_type(action_type),
-                }
-            ),
+            "action_projection": projection_metadata,
+            "output_projection": projection_metadata,
         }
     )
     return result
 
 
-__all__ = ["ACTION_PROVENANCE", "project_machine_transition_actions"]
+__all__ = [
+    "ACTION_PROVENANCE",
+    "EFFECT_PROVENANCE",
+    "OUTPUT_PROVENANCE",
+    "project_machine_transition_actions",
+]

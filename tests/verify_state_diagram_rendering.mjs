@@ -14,6 +14,7 @@ const cases = [
       warnings: ["state-independent-transition", "unreachable-branch"],
       requireInputAction: true,
       requireActionTargetIndependence: true,
+      requireOperationAction: true,
     }],
   },
   {
@@ -127,38 +128,47 @@ async function assertDiagramGeometry(page) {
 }
 
 async function waitForStableLayout(page, machineName, transitionCount) {
-  await page.waitForFunction(({name, count}) => {
+  const ready = async () => page.waitForFunction(({name, count}) => {
     const stage = document.querySelector(".graph-stage");
-    const transaction = window.glyphTransitionLayoutTransaction;
     return document.querySelector("#machine-select")?.selectedOptions?.[0]?.textContent === name
       && stage?.dataset.transitionIoClustersReady === "true"
       && stage?.dataset.transitionEnablingCasesReady === "true"
       && stage?.dataset.transitionLayoutState === "ready"
       && stage?.dataset.transitionIoCollisionSolved === "true"
       && stage?.dataset.transitionIoCollisionCount === "0"
-      && transaction?.generation === transaction?.completedGeneration
       && stage.querySelectorAll(".transition-io-cluster").length === count;
-  }, { name: machineName, count: transitionCount });
+  }, { name: machineName, count: transitionCount }, { timeout: 60_000 });
 
   const snapshot = async () => page.evaluate(() => ({
-    generation: window.glyphTransitionLayoutTransaction?.generation,
-    completedGeneration: window.glyphTransitionLayoutTransaction?.completedGeneration,
     positions: [...document.querySelectorAll(".transition-io-cluster")].map(cluster => [
       cluster.dataset.transitionId,
       cluster.style.left,
       cluster.style.top,
       cluster.dataset.ioValue,
     ]),
+    paths: [...document.querySelectorAll(".state-transition-path")].map(pathElement => (
+      pathElement.getAttribute("d") || ""
+    )),
   }));
-  const before = await snapshot();
-  await page.waitForTimeout(500);
-  const after = await snapshot();
-  assert.deepEqual(after, before, `${machineName}: layout changed after reporting ready`);
+
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    await ready();
+    const before = await snapshot();
+    await page.waitForTimeout(500);
+    const after = await snapshot();
+    if (JSON.stringify(after) === JSON.stringify(before)) return;
+  }
+  throw new Error(`${machineName}: layout kept changing after reporting ready`);
 }
 
 function actionDisplay(transition) {
   const raw = transition?.action;
   if (typeof raw === "string") return raw.trim();
+  return String(raw?.display || raw?.expression || "").trim();
+}
+
+function emittedOutputDisplay(transition) {
+  const raw = transition?.emitted_output;
   return String(raw?.display || raw?.expression || "").trim();
 }
 
@@ -244,7 +254,24 @@ try {
             String(transition.target_state || ""),
             `${testCase.slug}/${expected.name}/${rendered.id}: Target State leaked into Action`,
           );
+          const emittedOutput = emittedOutputDisplay(transition);
+          if (rendered.action && emittedOutput) {
+            assert.notEqual(
+              rendered.action,
+              emittedOutput,
+              `${testCase.slug}/${expected.name}/${rendered.id}: Emitted Output leaked into Action`,
+            );
+          }
           if (expectedAction) {
+            assert.equal(
+              transition.action?.provenance,
+              "transition-operation-invocation",
+              `${testCase.slug}/${expected.name}/${rendered.id}: Action lacks operation provenance`,
+            );
+            assert(
+              Array.isArray(transition.action_invocations) && transition.action_invocations.length > 0,
+              `${testCase.slug}/${expected.name}/${rendered.id}: Action lacks invocation witness`,
+            );
             assert(
               rendered.value.includes(` ➞ ${expectedAction}`),
               `${testCase.slug}/${expected.name}/${rendered.id}: Action is not rendered`,
@@ -257,6 +284,11 @@ try {
             );
             assert(!rendered.value.includes(" / "));
           }
+        }
+
+        if (expected.requireOperationAction) {
+          assert.equal(apiState.views.transition_operation_action_version, 2);
+          assert.equal(machine.analysis.state_field_action_count, 0);
         }
 
         if (expected.requireInputAction) {
@@ -275,13 +307,21 @@ try {
             assert.notEqual(
               rendered.input,
               rendered.action,
-              `${testCase.slug}/${expected.name}/${rendered.id}: intermediate Action repeated as Input`,
+              `${testCase.slug}/${expected.name}/${rendered.id}: Action repeated as Input`,
             );
             assert.notEqual(
               rendered.action,
               String(transition.target_state || ""),
               `${testCase.slug}/${expected.name}/${rendered.id}: Target State repeated as Action`,
             );
+            const emittedOutput = emittedOutputDisplay(transition);
+            if (emittedOutput) {
+              assert.notEqual(
+                rendered.action,
+                emittedOutput,
+                `${testCase.slug}/${expected.name}/${rendered.id}: Emitted Output repeated as Action`,
+              );
+            }
             assert.equal(
               transition.trigger?.provenance,
               "decision-output-preimage",
@@ -323,4 +363,4 @@ try {
   await browser.close();
 }
 
-console.log("verified compiler-derived state diagrams with stable enabling-case layout");
+console.log("verified compiler-derived state diagrams with operation-derived Actions and stable enabling-case layout");

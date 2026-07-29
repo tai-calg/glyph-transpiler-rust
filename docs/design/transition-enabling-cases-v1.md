@@ -6,7 +6,7 @@ Status: Implemented
 
 This specification defines the semantic boundary between Input Pattern and Guard in a state transition. It prevents a compiler-derived exact enabling condition from being rendered as though the entire expression were an Input.
 
-No new Glyph syntax is introduced. The feature is a compiler-IR and renderer contract over existing syntax.
+Action-source semantics are defined by `transition-operation-action-semantics-v2.md`. No new Glyph syntax is introduced.
 
 ## 2. Terms
 
@@ -22,23 +22,31 @@ The state from which a transition originates. A selector equality that merely re
 
 The state reached by a transition. It is obtained only from the `machine select=` projection of the transition result.
 
-### 2.4 Action
+### 2.4 Emitted Output
 
-The operation value obtained only from the optional `machine action=` projection. Action is independent of Target State and Effect.
+A data value projected from the transition result by the legacy `machine action=state.field` selector. It may identify a decision result or command transported by the state value. It is not an Action.
 
-### 2.5 Effect
+### 2.5 Operation Invocation
 
-An externally or internally executed effect invocation. Effects remain in `effect_invocations` and never populate Action.
+A compiler-recognized executable call occurring in the transition branch.
 
-### 2.6 Authored Clause
+### 2.6 Action
+
+One or more Operation Invocations executed by the transition branch. Action is not derived from Source State, Target State, Emitted Output, or naming similarity.
+
+### 2.7 Effect
+
+The side-effect and failure properties of an Operation Invocation. An effectful invocation can simultaneously be an Action occurrence and an Effect occurrence because the terms describe different axes.
+
+### 2.8 Authored Clause
 
 One ordered branch written by the user in a guarded function or conditional block. Its predicate is the Authored Predicate. `_` is the Fallback Clause.
 
-### 2.7 Input Root
+### 2.9 Input Root
 
 A machine input parameter or declared external input source from which an expression derives data.
 
-### 2.8 Direct Input Atom
+### 2.10 Direct Input Atom
 
 An authored atomic predicate that directly observes an Input Root without calling a decision predicate. Supported forms include:
 
@@ -51,13 +59,13 @@ An authored atomic predicate that directly observes an Input Root without callin
 
 A function call such as `authenticate(input)` is not a Direct Input Atom even though it is input-derived.
 
-### 2.9 Input Pattern
+### 2.11 Input Pattern
 
 The authored direct observation that identifies the accepted region of the input space for one Enabling Case. Input Pattern is derived only from Direct Input Atoms in the Authored Predicate.
 
 Input Pattern is not the complete condition under which a branch wins.
 
-### 2.10 Guard
+### 2.12 Guard
 
 An additional proposition that must hold after the Input Pattern matches. Guard Terms have an explicit origin:
 
@@ -70,11 +78,11 @@ An additional proposition that must hold after the Input Pattern matches. Guard 
 
 A Guard may be input-derived. Data provenance alone does not determine semantic role.
 
-### 2.11 Priority Exclusion
+### 2.13 Priority Exclusion
 
 For ordered clauses `P1 >> V1`, `P2 >> V2`, ..., clause `k` is eligible only when no earlier clause with a different result wins. The compiler-generated proposition excluding such earlier clauses is the Priority Exclusion. It is always a Guard, never an Input Pattern.
 
-### 2.12 Enabling Condition
+### 2.14 Enabling Condition
 
 The exact Boolean condition under which one Enabling Case wins after ordered-branch semantics are applied.
 
@@ -84,9 +92,9 @@ For a non-fallback case:
 EnablingCondition = InputPattern ∧ Guard
 ```
 
-Terms that are absent denote `true`.
+Absent terms denote `true`.
 
-### 2.13 Enabling Case
+### 2.15 Enabling Case
 
 One alternative semantic case under which a Transition is enabled. IR name: `enabling_case`; collection name: `enabling_cases`.
 
@@ -97,23 +105,23 @@ An Enabling Case contains:
 - one exact Enabling Condition
 - provenance and confidence
 
-Multiple authored clauses that produce the same Action/Target transition remain separate Enabling Cases. They are not collapsed into an opaque disjunction.
+Multiple authored clauses that produce the same transition result remain separate Enabling Cases. They are not collapsed into an opaque disjunction.
 
-### 2.14 Fallback Enabling Case
+### 2.16 Fallback Enabling Case
 
 An Enabling Case produced by `_`. It has no Input Pattern. Its Guard contains a `fallback` term rendered as `otherwise`; its exact Enabling Condition stores the complement of preceding clauses.
 
 `otherwise` is never an Input.
 
-### 2.15 Provisional Input Pattern
+### 2.17 Provisional Input Pattern
 
-An authored input-derived expression whose occurrence-versus-condition role cannot be proven. It is retained on the Input side with `confidence=fallback`, prefixed by `?`, and accompanied by a diagnostic. This preserves the established compatibility rule without claiming certainty.
+An authored input-derived expression whose occurrence-versus-condition role cannot be proven. It is retained on the Input side with `confidence=fallback`, prefixed by `?`, and accompanied by a diagnostic.
 
-### 2.16 Unclassified Condition
+### 2.18 Unclassified Condition
 
 A condition whose type or provenance cannot be resolved and whose placement in Input Pattern or Guard cannot be proven. It remains explicit in IR and produces a warning. It must not be silently dropped.
 
-### 2.17 Legacy Projection
+### 2.19 Legacy Projection
 
 The compatibility fields `trigger`, `guards`, `event`, and `guard` synthesized from `enabling_cases`. New renderers consume `enabling_cases` as the source of truth. If multiple cases cannot be represented losslessly by the legacy fields, `legacy_projection_lossy=true`.
 
@@ -126,9 +134,10 @@ The compatibility fields `trigger`, `guards`, `event`, and `guard` synthesized f
 5. Every exact Enabling Case preserves `EnablingCondition ≡ InputPattern ∧ Guard`.
 6. Multiple alternative cases remain distinct.
 7. Renderer code does not infer Input or Guard from strings.
-8. Action, Target State, Effect, Input Pattern, and Guard remain separate IR roles.
-9. Unknown information is retained provisionally or unclassified; it is never invented or discarded.
-10. Existing Glyph source syntax remains valid.
+8. Input Pattern, Guard, Action, Emitted Output, Effect, and Target State remain separate IR roles.
+9. Action is operation-derived only.
+10. Unknown information is retained provisionally or unclassified; it is never invented or discarded.
+11. Existing Glyph source syntax remains valid.
 
 ## 4. IR contract
 
@@ -167,6 +176,14 @@ StateTransitionIR remains version 4 for reader compatibility. The additive `tran
       "confidence": "exact"
     }
   ],
+  "emitted_output": {
+    "display": "EmergencyBrake"
+  },
+  "action": {
+    "display": "write_motor(EmergencyBrake)",
+    "provenance": "transition-operation-invocation"
+  },
+  "target_state": "Stopped",
   "legacy_projection_lossy": false
 }
 ```
@@ -176,8 +193,6 @@ StateTransitionIR remains version 4 for reader compatibility. The additive `tran
 ### 5.1 Conjunction
 
 An authored conjunction is flattened into atoms. Direct Input Atoms form Input Pattern. All other atoms become Guard Terms according to origin.
-
-Example:
 
 ```text
 input.request & authenticate(input) & state.ready
@@ -234,13 +249,13 @@ Formatting:
 - Guard only: `[G] ➞ A`
 - Fallback: `[otherwise] ➞ A`
 - Provisional Input: `? I [G] ➞ A`
-- No Action: omit `➞ A`
+- No operation Action: omit `➞ A`
 
-Boolean input fields may initially retain source expressions such as `input.emergency`; display normalization such as `emergency=true` is a presentation refinement and must not alter IR semantics.
+Emitted Output is not rendered in the Action position.
 
 ## 7. Motor Safety expected semantics
 
-For ordered clauses:
+For decision clauses:
 
 ```glyph
 input.fault >> LatchFault
@@ -249,16 +264,25 @@ input.emergency >> EmergencyBrake
 _ >> SetMotorPower(normalize(input.raw))
 ```
 
-expected cases are:
+and branch operations:
 
-```text
-input.fault ➞ LatchFault
-input.emergency [!input.fault] ➞ EmergencyBrake
-!input.enabled [!(input.fault|input.emergency)] ➞ DisableMotor
-[otherwise] ➞ SetMotorPower(normalize(input.raw))
+```glyph
+write_motor(LatchFault)
+write_motor(EmergencyBrake)
+write_motor(DisableMotor)
+write_motor(SetMotorPower(power))
 ```
 
-The exact fallback condition remains available in `enabling_condition` but is rendered as `otherwise`.
+expected labels are:
+
+```text
+input.fault ➞ write_motor(LatchFault)
+input.emergency [!input.fault] ➞ write_motor(EmergencyBrake)
+!input.enabled [!(input.fault|input.emergency)] ➞ write_motor(DisableMotor)
+[otherwise] ➞ write_motor(SetMotorPower(normalize(input.raw)))
+```
+
+The command values remain in `emitted_output`; the operation calls occupy Action.
 
 ## 8. Diagnostics
 
@@ -278,13 +302,16 @@ Required tests:
 5. Multiple same-result clauses remain separate Enabling Cases.
 6. Mixed OR is decomposed or reported without semantic loss.
 7. Exact condition equals Input Pattern conjoined with Guard for supported Boolean cases.
-8. Input, Guard, Action, and Target renames affect only their respective axes.
-9. DOM exposes separate `data-input-value`, `data-guard-value`, and `data-action-value` from Enabling Case IR.
-10. README PNG is regenerated only after IR and DOM contracts pass.
+8. Input, Guard, Emitted Output, Action, and Target changes affect only their respective axes.
+9. DOM exposes separate `data-input-value`, `data-guard-value`, and `data-action-value` from structured IR.
+10. DOM Action equals a proven operation invocation and differs from Target State and Emitted Output.
+11. README PNG is regenerated only after IR and DOM contracts pass.
 
 ## 10. Migration
 
 - StateTransitionIR v4 readers continue through Legacy Projection.
-- Enabling-case-aware renderers must consume `enabling_cases` when `transition_enabling_cases_version >= 1`.
+- Enabling-case-aware renderers consume `enabling_cases` when `transition_enabling_cases_version >= 1`.
+- Operation-aware renderers consume only operation-derived `action` when `transition_operation_action_version >= 2`.
 - `trigger` and `guards` are compatibility outputs, not semantic inputs.
+- `machine action=` remains source-compatible but represents an Emitted Output projection.
 - No parser or source-language grammar change is included.

@@ -32,14 +32,14 @@ async function stop(child) {
   if (child.exitCode === null) child.kill("SIGKILL");
 }
 
-function actionVariant(transition) {
-  return String(transition?.action?.variant || "");
+function outputVariant(transition) {
+  return String(transition?.emitted_output?.variant || "");
 }
 
-function onlyCase(machine, action) {
-  const transition = machine.transitions.find(item => actionVariant(item) === action);
-  assert(transition, `missing transition action ${action}`);
-  assert.equal(transition.enabling_cases.length, 1, `${action} must have one enabling case`);
+function onlyCase(machine, output) {
+  const transition = machine.transitions.find(item => outputVariant(item) === output);
+  assert(transition, `missing transition emitted output ${output}`);
+  assert.equal(transition.enabling_cases.length, 1, `${output} must have one enabling case`);
   return { transition, item: transition.enabling_cases[0] };
 }
 
@@ -60,13 +60,16 @@ try {
   const apiState = await waitForServer(child);
   assert.equal(apiState.views.state_transition_ir.version, 4);
   assert.equal(apiState.views.transition_enabling_cases_version, 1);
+  assert.equal(apiState.views.transition_operation_action_version, 2);
   const machine = apiState.views.state.machines.find(item => item.name === "Motor");
   assert(machine, "Motor machine missing");
   assert.equal(machine.analysis.all_transitions_have_enabling_cases, true);
+  assert.equal(machine.analysis.state_field_action_count, 0);
 
   const fault = onlyCase(machine, "LatchFault");
   assert.equal(fault.item.input_pattern.expression, "input.fault");
   assert.equal(fault.item.guard, null);
+  assert.equal(fault.transition.action.display, "write_motor(LatchFault)");
 
   const emergency = onlyCase(machine, "EmergencyBrake");
   assert.equal(emergency.item.input_pattern.expression, "input.emergency");
@@ -74,15 +77,24 @@ try {
   assert.equal(emergency.item.guard.terms[0].origin, "priority-exclusion");
   assert.equal(emergency.item.enabling_condition.expression, "input.emergency&!input.fault");
   assert(!emergency.item.input_pattern.expression.includes("!input.fault"));
+  assert.equal(emergency.transition.action.display, "write_motor(EmergencyBrake)");
+  assert.equal(emergency.transition.action.provenance, "transition-operation-invocation");
+  assert.notEqual(emergency.transition.action.display, emergency.transition.target_state);
+  assert.notEqual(emergency.transition.action.display, emergency.transition.emitted_output.display);
 
   const disabled = onlyCase(machine, "DisableMotor");
   assert.equal(disabled.item.input_pattern.expression, "!input.enabled");
   assert.equal(disabled.item.guard.expression, "!(input.fault|input.emergency)");
+  assert.equal(disabled.transition.action.display, "write_motor(DisableMotor)");
 
   const running = onlyCase(machine, "SetMotorPower");
   assert.equal(running.item.input_pattern, null);
   assert.equal(running.item.guard.display, "otherwise");
   assert.equal(running.item.guard.terms[0].origin, "fallback");
+  assert.equal(
+    running.transition.action.display,
+    "write_motor(SetMotorPower(normalize(input.raw)))",
+  );
 
   const page = await browser.newPage({ viewport: { width: 1800, height: 1100 } });
   const consoleErrors = [];
@@ -120,24 +132,29 @@ try {
     {
       input: "input.emergency",
       guard: "!input.fault",
-      action: "EmergencyBrake",
+      action: "write_motor(EmergencyBrake)",
       count: "1",
     },
   );
   assert.equal(
     emergencyDom.value,
-    "input.emergency [!input.fault] ➞ EmergencyBrake",
+    "input.emergency [!input.fault] ➞ write_motor(EmergencyBrake)",
   );
   assert(!emergencyDom.input.includes("!input.fault"));
+  assert.notEqual(emergencyDom.action, emergency.transition.target_state);
+  assert.notEqual(emergencyDom.action, emergency.transition.emitted_output.display);
 
   const runningDom = byId(running.transition.id);
   assert(runningDom, "SetMotorPower DOM cluster missing");
   assert.equal(runningDom.input, "");
   assert.equal(runningDom.guard, "otherwise");
-  assert.equal(runningDom.action, "SetMotorPower(normalize(input.raw))");
+  assert.equal(
+    runningDom.action,
+    "write_motor(SetMotorPower(normalize(input.raw)))",
+  );
   assert.equal(
     runningDom.value,
-    "[otherwise] ➞ SetMotorPower(normalize(input.raw))",
+    "[otherwise] ➞ write_motor(SetMotorPower(normalize(input.raw)))",
   );
 
   try {
@@ -183,4 +200,4 @@ try {
   await stop(child);
 }
 
-console.log("verified enabling-case Input Pattern, Guard, Action, fallback, and collision-free layout roles");
+console.log("verified Input Pattern, Guard, operation Action, emitted output separation, fallback, and collision-free layout");

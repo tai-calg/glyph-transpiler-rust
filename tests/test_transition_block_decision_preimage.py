@@ -6,11 +6,11 @@ from glyph.compilation import CompilationPipeline
 from glyph.io_state_views import build_io_state_views
 
 
-def action_display(item: dict[str, object]) -> str:
-    action = item.get("action")
-    if not isinstance(action, dict):
+def output_display(item: dict[str, object]) -> str:
+    emitted = item.get("emitted_output")
+    if not isinstance(emitted, dict):
         return ""
-    return str(action.get("display") or action.get("expression") or "")
+    return str(emitted.get("display") or emitted.get("expression") or "")
 
 
 class TransitionBlockDecisionPreimageTests(unittest.TestCase):
@@ -60,10 +60,11 @@ machine Motor(state:MotorState,input:Input)
         stop = next(
             item
             for item in machine["transitions"]
-            if action_display(item) == "Stop" and not item.get("synthesized_failure")
+            if output_display(item) == "Stop" and not item.get("synthesized_failure")
         )
         self.assertEqual(stop["trigger"]["display"], "!input.enabled")
         self.assertEqual(stop["trigger"]["decision_function"], "decide")
+        self.assertIsNone(stop["action"])
 
         drive = next(
             item
@@ -73,8 +74,9 @@ machine Motor(state:MotorState,input:Input)
         self.assertEqual(drive["trigger"]["display"], "otherwise")
         self.assertEqual(drive["trigger"]["decision_function"], "decide")
         self.assertNotIn("__glyph_block_", drive["trigger"]["dataflow_path"])
-        self.assertEqual(action_display(drive), "Drive(min(input.raw,1.0))")
-        self.assertNotEqual(action_display(drive), drive["target_state"])
+        self.assertEqual(output_display(drive), "Drive(min(input.raw,1.0))")
+        self.assertIsNone(drive["action"])
+        self.assertNotEqual(output_display(drive), drive["target_state"])
 
 
 if __name__ == "__main__":
