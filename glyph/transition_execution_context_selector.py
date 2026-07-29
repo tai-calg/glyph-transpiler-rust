@@ -35,8 +35,6 @@ _SCRIPT = r"""
 const MARKER="glyph-transition-execution-context-selector-v1",AUTO="auto",MACHINE="machine";
 let cache=null,currentMachine=null,currentKey=AUTO,timer=null,running=false;
 const text=value=>String(value??"").trim();
-const english=()=>String(window.GlyphI18n?.locale||document.documentElement.lang||"ja").startsWith("en");
-const both=(ja,en)=>english()?en:ja;
 const actionText=value=>typeof value==="string"?text(value):text(value?.display)||text(value?.expression);
 const selectedMachine=data=>{const machines=data?.views?.state?.machines||[],name=document.getElementById("machine-select")?.selectedOptions?.[0]?.textContent;return machines.find(machine=>machine.name===name)||machines[0]||null};
 const contextKey=binding=>`context:${text(binding?.scope)||"system"}:${text(binding?.system)}:${text(binding?.entry)}`;
@@ -74,7 +72,7 @@ function projectionFor(transition,key=currentKey){
   return{action:transition?.display_action||transition?.action||null,invocations:transition?.display_action_invocations||transition?.action_invocations||[],effects:transition?.display_effect_invocations||transition?.effect_invocations||[]};
 }
 function actionFor(transition){return projectionFor(transition).action}
-function optionLabel(context){if(context.system&&context.entry)return`${context.system} / ${context.entry}`;return context.entry||context.system||both("暗黙の呼出し元","Implicit caller")}
+function optionLabel(context){if(context.system&&context.entry)return`${context.system} / ${context.entry}`;return context.entry||context.system||"implicit caller"}
 function publish(){document.dispatchEvent(new CustomEvent("glyph-execution-context-changed",{detail:{marker:MARKER,machine:currentMachine?.name||null,key:currentKey}}))}
 async function state(){if(cache)return cache;const response=await fetch("/api/state",{cache:"no-store"});if(!response.ok)throw Error("diagram state unavailable");return cache=await response.json()}
 function ensureControl(machine){
@@ -85,14 +83,13 @@ function ensureControl(machine){
   if(!contexts.length){control?.remove();currentMachine=machine;currentKey=AUTO;return false}
   if(!control){
     control=document.createElement("div");control.id="execution-context-control";control.className="execution-context-control";
-    const label=document.createElement("label");label.htmlFor="execution-context-select";
+    const label=document.createElement("label");label.htmlFor="execution-context-select";label.textContent="実行コンテキスト";
     const select=document.createElement("select");select.id="execution-context-select";control.append(label,select);host.appendChild(control);
   }
-  const label=control.querySelector("label"),select=control.querySelector("select"),signature=JSON.stringify([contexts,english()]);
-  label.textContent=both("実行コンテキスト","Execution context");
+  const select=control.querySelector("select"),signature=JSON.stringify(contexts);
   if(control.dataset.contextSignature!==signature){
     select.replaceChildren();
-    const options=[{key:AUTO,label:both("自動（単一コンテキスト）","Automatic (single context)")},{key:MACHINE,label:both("Machineのみ","Machine only")},...contexts.map(item=>({key:item.key,label:optionLabel(item)}))];
+    const options=[{key:AUTO,label:"自動（単一コンテキスト）"},{key:MACHINE,label:"Machineのみ"},...contexts.map(item=>({key:item.key,label:optionLabel(item)}))];
     for(const item of options){const option=document.createElement("option");option.value=item.key;option.textContent=item.label;select.appendChild(option)}
     control.dataset.contextSignature=signature;
   }
