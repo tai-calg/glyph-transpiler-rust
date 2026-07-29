@@ -31,6 +31,13 @@ def action_display(transition: dict[str, object]) -> str:
     return str(action.get("display") or action.get("expression") or "")
 
 
+def first_case(transition: dict[str, object]) -> dict[str, object]:
+    cases = transition.get("enabling_cases", [])
+    if not cases:
+        raise AssertionError(f"transition lacks enabling_cases: {transition}")
+    return cases[0]
+
+
 def expanded_signature(views: dict[str, object], action: str) -> tuple[str, str, str]:
     machine = views["state"]["machines"][0]
     item = next(
@@ -38,7 +45,9 @@ def expanded_signature(views: dict[str, object], action: str) -> tuple[str, str,
         for transition in machine["transitions"]
         if action_display(transition) == action and transition.get("input_preimage")
     )
-    return item["trigger"]["display"], action_display(item), item["target_state"]
+    case = first_case(item)
+    input_pattern = case.get("input_pattern") or {}
+    return str(input_pattern.get("display") or ""), action_display(item), item["target_state"]
 
 
 _METAMORPHIC_SOURCE = """\
@@ -76,6 +85,7 @@ class TransitionInputProvenanceTests(unittest.TestCase):
 
         self.assertEqual(views["transition_semantics_version"], 2)
         self.assertEqual(views["transition_input_preimage_version"], 1)
+        self.assertEqual(views["transition_enabling_cases_version"], 1)
         self.assertEqual(views["transition_action_target_independence_version"], 1)
         self.assertGreater(machine["analysis"]["expanded_input_preimage_count"], 0)
         self.assertEqual(machine["analysis"]["unresolved_input_preimage_count"], 0)
@@ -87,10 +97,15 @@ class TransitionInputProvenanceTests(unittest.TestCase):
             and action_display(item) == "EmergencyBrake"
             and item.get("input_preimage")
         )
-        self.assertIn("input.emergency", emergency["trigger"]["display"])
+        emergency_case = first_case(emergency)
+        self.assertEqual(
+            emergency_case["input_pattern"]["display"],
+            "input.emergency",
+        )
+        self.assertEqual(emergency_case["guard"]["display"], "!input.fault")
         self.assertEqual(
             emergency["trigger"]["provenance"],
-            "decision-output-preimage",
+            "enabling-case-input-pattern",
         )
 
         disabled = next(
@@ -100,8 +115,9 @@ class TransitionInputProvenanceTests(unittest.TestCase):
             and action_display(item) == "DisableMotor"
             and item.get("input_preimage")
         )
-        self.assertIn("input.enabled", disabled["trigger"]["display"])
-        self.assertNotEqual(disabled["trigger"]["display"], "DisableMotor")
+        disabled_case = first_case(disabled)
+        self.assertEqual(disabled_case["input_pattern"]["display"], "!input.enabled")
+        self.assertNotEqual(disabled_case["input_pattern"]["display"], "DisableMotor")
 
         faulted = next(
             item
@@ -110,7 +126,7 @@ class TransitionInputProvenanceTests(unittest.TestCase):
             and action_display(item) == "LatchFault"
             and item.get("input_preimage")
         )
-        self.assertIn("input.fault", faulted["trigger"]["display"])
+        self.assertEqual(first_case(faulted)["input_pattern"]["display"], "input.fault")
 
         running = [
             item
@@ -120,13 +136,14 @@ class TransitionInputProvenanceTests(unittest.TestCase):
         ]
         self.assertTrue(running)
         for item in running:
-            self.assertEqual(item["trigger"]["display"], "otherwise")
-            self.assertEqual(item["trigger"]["confidence"], "dataflow-expanded")
+            case = first_case(item)
+            self.assertIsNone(case["input_pattern"])
+            self.assertEqual(case["guard"]["display"], "otherwise")
+            self.assertIsNone(item["trigger"])
             self.assertEqual(
                 action_display(item),
                 "SetMotorPower(normalize(input.raw))",
             )
-            self.assertNotEqual(item["trigger"]["display"], action_display(item))
             self.assertNotEqual(action_display(item), item["target_state"])
 
         independence = machine["analysis"]["action_target_independence"]
@@ -141,7 +158,7 @@ class TransitionInputProvenanceTests(unittest.TestCase):
             {"DisableMotor", "EmergencyBrake"},
         )
 
-    def test_door_decision_preimage_keeps_input_action_and_target_independent(self) -> None:
+    def test_door_decision_preimage_keeps_input_guard_action_and_target_independent(self) -> None:
         views = compile_example("examples/acceptance/door_controller.glyph")
         machine = views["state"]["machines"][0]
         expanded = [item for item in machine["transitions"] if item.get("input_preimage")]
@@ -153,8 +170,9 @@ class TransitionInputProvenanceTests(unittest.TestCase):
             if item["target_state"] == "Alarmed"
             and action_display(item) == "RaiseAlarm"
         )
-        self.assertIn("input.forced_open", alarm["trigger"]["display"])
-        self.assertNotEqual(alarm["trigger"]["display"], "RaiseAlarm")
+        alarm_case = first_case(alarm)
+        self.assertIn("input.forced_open", alarm_case["input_pattern"]["display"])
+        self.assertNotEqual(alarm_case["input_pattern"]["display"], "RaiseAlarm")
 
         unlock = next(
             item
@@ -162,9 +180,10 @@ class TransitionInputProvenanceTests(unittest.TestCase):
             if item["target_state"] == "Unlocked"
             and action_display(item) == "Unlock"
         )
-        self.assertIn("authenticate(input)", unlock["trigger"]["display"])
-        self.assertIn("input.request_open", unlock["trigger"]["display"])
-        self.assertNotEqual(unlock["trigger"]["display"], "Unlock")
+        unlock_case = first_case(unlock)
+        self.assertEqual(unlock_case["input_pattern"]["display"], "input.request_open")
+        self.assertIn("authenticate(input)", unlock_case["guard"]["display"])
+        self.assertNotIn("authenticate(input)", unlock_case["input_pattern"]["display"])
 
         locked = next(
             item
@@ -172,10 +191,11 @@ class TransitionInputProvenanceTests(unittest.TestCase):
             if item["target_state"] == "Locked"
             and action_display(item) == "KeepLocked"
         )
-        self.assertEqual(locked["trigger"]["display"], "otherwise")
+        locked_case = first_case(locked)
+        self.assertIsNone(locked_case["input_pattern"])
+        self.assertEqual(locked_case["guard"]["display"], "otherwise")
 
         for item in (alarm, unlock, locked):
-            self.assertNotEqual(item["trigger"]["display"], action_display(item))
             self.assertNotEqual(action_display(item), item["target_state"])
             self.assertEqual(item.get("effect_invocations"), [])
 
