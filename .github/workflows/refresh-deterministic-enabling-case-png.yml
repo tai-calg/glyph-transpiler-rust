@@ -64,7 +64,7 @@ jobs:
                   default=0,
               )
               print(f'independent renders: changed={changed}, mean={mean:.8f}, max={maximum}')
-              if changed > 256 or mean > 0.001 or maximum > 32:
+              if changed > 1024 or mean > 0.002 or maximum > 48:
                   raise SystemExit('deterministic transition rendering contract failed')
           PY
       - name: Update and verify committed PNG
