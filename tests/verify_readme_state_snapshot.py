@@ -39,6 +39,12 @@ def _enabling_cases(machine: Mapping[str, object]) -> list[Mapping[str, object]]
     ]
 
 
+def _display(value: object) -> str:
+    if not isinstance(value, Mapping):
+        return ""
+    return str(value.get("display") or value.get("expression") or "").strip()
+
+
 def verify_readme_semantics() -> None:
     output = CompilationPipeline().compile_text(
         MOTOR_SOURCE_PATH.read_text(encoding="utf-8"),
@@ -48,13 +54,18 @@ def verify_readme_semantics() -> None:
     machine = views["state"]["machines"][0]
     independence = machine["analysis"].get("action_target_independence", {})
     cases = _enabling_cases(machine)
+    transitions = [
+        item
+        for item in machine.get("transitions", [])
+        if isinstance(item, Mapping) and not item.get("synthesized_failure")
+    ]
 
     failures: list[str] = []
     if independence.get("version") != 1:
         failures.append("generic Action/Target independence analysis is missing")
     if not independence.get("typed_independent"):
         failures.append(
-            "Action projection type and Target State projection type are not distinct"
+            "Action occurrence type and Target State projection type are not distinct"
         )
     if not independence.get("behaviorally_independent"):
         failures.append(
@@ -69,6 +80,39 @@ def verify_readme_semantics() -> None:
         failures.append(
             "Action and Target State form a redundant one-to-one mapping"
         )
+
+    if views.get("transition_operation_action_version") != 2:
+        failures.append("operation-derived Action semantics v2 is missing")
+    if machine.get("analysis", {}).get("state_field_action_count") != 0:
+        failures.append("a state-field value is still classified as Action")
+
+    operation_actions = []
+    for transition in transitions:
+        action = transition.get("action")
+        if not isinstance(action, Mapping):
+            continue
+        operation_actions.append(action)
+        action_display = _display(action)
+        target_state = str(transition.get("target_state") or "")
+        emitted_output = _display(transition.get("emitted_output"))
+        if action.get("provenance") != "transition-operation-invocation":
+            failures.append(
+                f"Action `{action_display}` is not derived from an executed operation"
+            )
+        if not transition.get("action_invocations"):
+            failures.append(
+                f"Action `{action_display}` has no structured operation invocation witness"
+            )
+        if action_display and action_display == target_state:
+            failures.append(
+                f"Target State `{target_state}` leaked into Action"
+            )
+        if action_display and emitted_output and action_display == emitted_output:
+            failures.append(
+                f"Emitted Output `{emitted_output}` leaked into Action"
+            )
+    if not operation_actions:
+        failures.append("the README example contains no executed transition Action")
 
     if views.get("transition_enabling_cases_version") != 1:
         failures.append("generic enabling-case analysis is missing")
@@ -207,7 +251,8 @@ def main() -> None:
         )
 
     print(
-        "verified Action/Target independence, Input/Guard enabling cases, and README snapshot "
+        "verified operation Action provenance, Action/Target/Output separation, "
+        "Input/Guard enabling cases, and README snapshot "
         f"(changed_pixels={changed_pixels}, "
         f"mean_delta={mean_absolute_delta:.8f}, "
         f"max_delta={max_channel_delta})"
