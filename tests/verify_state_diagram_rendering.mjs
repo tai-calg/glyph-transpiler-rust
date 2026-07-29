@@ -11,8 +11,9 @@ const cases = [
     machines: [{
       name: "Motor",
       states: ["Stopped", "Running", "Faulted"],
-      warnings: ["state-independent-transition", "unreachable-branch", "unreachable-state"],
+      warnings: ["state-independent-transition", "unreachable-branch"],
       requireInputAction: true,
+      requireActionTargetIndependence: true,
     }],
   },
   {
@@ -184,6 +185,17 @@ try {
         assert.equal(await page.locator(".transition-detail").count(), machine.transitions.length);
         assert.equal(await page.locator(".state-transition-path").count(), machine.transitions.length);
 
+        if (expected.requireActionTargetIndependence) {
+          const independence = machine.analysis?.action_target_independence;
+          assert(independence, `${testCase.slug}/${expected.name}: independence analysis missing`);
+          assert.equal(independence.version, 1);
+          assert.equal(independence.typed_independent, true);
+          assert.equal(independence.behaviorally_independent, true);
+          assert.notEqual(independence.mapping_shape, "one-to-one");
+          assert.equal(independence.near_alias_count, 0);
+          assert(independence.behavioral_witness_count > 0);
+        }
+
         const combinedValues = await page.locator('.transition-io-node[data-io-kind="io"]').evaluateAll(elements => elements.map(element => {
           const cluster = element.closest(".transition-io-cluster");
           return {
@@ -287,4 +299,4 @@ try {
   await browser.close();
 }
 
-console.log("verified compiler-derived state diagrams with compact input-arrow-Action labels");
+console.log("verified compiler-derived state diagrams with generic Action/Target independence");
