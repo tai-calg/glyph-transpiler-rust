@@ -64,7 +64,7 @@ def _install_diagram_diagnostic_localization() -> None:
 
 
 def prepare_diagram_app() -> None:
-    """Install the shared compiler and browser presentation layers once per process."""
+    """Install the shared compiler and additive presentation contracts once."""
 
     install_serial_compilation()
     _install_diagram_diagnostic_localization()
