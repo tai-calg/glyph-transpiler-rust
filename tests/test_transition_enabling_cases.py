@@ -20,18 +20,18 @@ def compile_example(relative: str) -> dict[str, object]:
     return compile_source(path.read_text(encoding="utf-8"), str(path))
 
 
-def action_variant(transition: dict[str, object]) -> str:
-    action = transition.get("action")
-    return str(action.get("variant") or "") if isinstance(action, dict) else ""
+def output_variant(transition: dict[str, object]) -> str:
+    emitted = transition.get("emitted_output")
+    return str(emitted.get("variant") or "") if isinstance(emitted, dict) else ""
 
 
-def case_for(machine: dict[str, object], action: str) -> dict[str, object]:
+def case_for(machine: dict[str, object], output: str) -> dict[str, object]:
     transition = next(
-        item for item in machine["transitions"] if action_variant(item) == action
+        item for item in machine["transitions"] if output_variant(item) == output
     )
     cases = transition.get("enabling_cases", [])
     if len(cases) != 1:
-        raise AssertionError(f"expected one case for {action}, got {cases}")
+        raise AssertionError(f"expected one case for {output}, got {cases}")
     return cases[0]
 
 
@@ -194,7 +194,7 @@ machine M(state:S,input:I)
 """
         machine = compile_source(source)["state"]["machines"][0]
         transition = next(
-            item for item in machine["transitions"] if action_variant(item) == "Stop"
+            item for item in machine["transitions"] if output_variant(item) == "Stop"
         )
         cases = transition["enabling_cases"]
         self.assertEqual(len(cases), 2)
@@ -203,6 +203,7 @@ machine M(state:S,input:I)
             ["input.a", "input.b"],
         )
         self.assertTrue(transition["legacy_projection_lossy"])
+        self.assertIsNone(transition["action"])
 
 
 if __name__ == "__main__":
