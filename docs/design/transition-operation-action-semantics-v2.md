@@ -1,6 +1,6 @@
 # Transition Operation Action Semantics v2
 
-Status: Implementing
+Status: Implemented
 
 ## Purpose
 
