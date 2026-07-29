@@ -106,9 +106,15 @@ on:
       - "docs/images/glyph-studio-state-transition.png"
       - ".github/workflows/io-state-snapshot.yml"
   workflow_dispatch:
+    inputs:
+      update_readme_image:
+        description: Publish the CI-rendered README state diagram
+        required: true
+        default: false
+        type: boolean
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   render:
@@ -130,6 +136,8 @@ jobs:
 
       - name: Compile and verify state diagrams
         shell: bash
+        env:
+          UPDATE_README_STATE_DIAGRAM: ${{ github.event_name == 'workflow_dispatch' && inputs.update_readme_image && '1' || '0' }}
         run: |
           set -o pipefail
           mkdir -p build/checked-system-context-io build/state-diagram-regression build/state-diagram-stability build/uml-transition-semantics build/additional-failure-notation build/diagram-editor-exports build/diagram-canvas-viewport build/localized-semantic-canvas build/transition-label-readability build/transition-layout-transaction build/transition-semantic-readability
@@ -163,6 +171,20 @@ jobs:
             2>&1 | tee build/transition-label-readability/verify.log
           node tests/verify_transition_semantic_readability.mjs \
             2>&1 | tee build/transition-semantic-readability/verify.log
+
+      - name: Publish verified README image and remove updater
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.update_readme_image }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main --depth=1
+          git checkout origin/main -- .github/workflows/io-state-snapshot.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/images/glyph-studio-state-transition.png .github/workflows/io-state-snapshot.yml
+          git diff --cached --exit-code && { echo "No snapshot update was produced"; exit 1; } || true
+          git commit -m "Publish operation-derived Action state diagram"
+          git push origin HEAD:${{ github.ref_name }}
 
       - name: Upload rendered diagrams
         if: always()
