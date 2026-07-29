@@ -12,7 +12,7 @@ const cases = [
     labels: ["SessionStart", "SessionAccept", "SessionReject", "SessionReset"],
     failureLabels: ["SessionReject"],
     compactLabels: ["SessionStart", "SessionAccept", "SessionReject", "SessionReset"],
-    forbiddenActions: [],
+    effectfulActions: [],
   },
   {
     slug: "traffic-uml",
@@ -21,7 +21,7 @@ const cases = [
     labels: ["? input.tick", "? input.fault"],
     failureLabels: ["? input.fault"],
     compactLabels: ["? input.tick", "? input.fault"],
-    forbiddenActions: [],
+    effectfulActions: [],
   },
   {
     slug: "effect-failure-uml",
@@ -40,7 +40,7 @@ const cases = [
       "PumpStart | WriteError",
       "PumpStop | WriteError",
     ],
-    forbiddenActions: ["write_pump(true)", "write_pump(false)"],
+    effectfulActions: ["write_pump(true)", "write_pump(false)"],
   },
   {
     slug: "conveyor-action-uml",
@@ -63,7 +63,7 @@ const cases = [
       "ConveyorReset [input.clear]",
       "ConveyorStart [input.clear] | DriveError",
     ],
-    forbiddenActions: ["set_conveyor(input.speed)", "set_conveyor(0.0)"],
+    effectfulActions: ["set_conveyor(input.speed)", "set_conveyor(0.0)"],
   },
   {
     slug: "valve-nested-action-uml",
@@ -84,7 +84,7 @@ const cases = [
       "ValveCloseRequest",
       "ValveOpenRequest | ValveError",
     ],
-    forbiddenActions: ["write_valve(true)", "write_valve(false)"],
+    effectfulActions: ["write_valve(true)", "write_valve(false)"],
   },
 ];
 
@@ -137,13 +137,13 @@ async function assertInitialRouteClear(page, machineName) {
 
     const point = value => ({x: value.x, y: value.y});
     const distance = (left, right) => Math.hypot(left.x - right.x, left.y - right.y);
-    const sample = (path, step = 3) => {
-      const length = path.getTotalLength();
+    const sample = (pathElement, step = 3) => {
+      const length = pathElement.getTotalLength();
       const values = [];
       for (let offset = 0; offset < length; offset += step) {
-        values.push(point(path.getPointAtLength(offset)));
+        values.push(point(pathElement.getPointAtLength(offset)));
       }
-      values.push(point(path.getPointAtLength(length)));
+      values.push(point(pathElement.getPointAtLength(length)));
       return values;
     };
     const orientation = (a, b, c) => (
@@ -233,12 +233,41 @@ try {
           String(transition.target_state || ""),
           `${testCase.machine}/${transition.id}: Target State leaked into Action`,
         );
-        for (const forbidden of testCase.forbiddenActions) {
-          assert(
-            !action.includes(forbidden),
-            `${testCase.machine}/${transition.id}: Effect invocation leaked into Action: ${forbidden}`,
+        if (!action) {
+          assert.equal(transition.action, null);
+          continue;
+        }
+        assert.equal(
+          transition.action?.provenance,
+          "transition-operation-invocation",
+          `${testCase.machine}/${transition.id}: Action lacks operation provenance`,
+        );
+        assert(
+          transition.action_invocations?.some(item => item.expression === action),
+          `${testCase.machine}/${transition.id}: Action lacks invocation witness: ${action}`,
+        );
+        const matchingEffect = transition.effect_invocations?.some(
+          item => item.expression === action,
+        );
+        if (matchingEffect) {
+          assert.equal(
+            transition.action?.effectful,
+            true,
+            `${testCase.machine}/${transition.id}: effectful Action is not marked effectful`,
           );
         }
+      }
+
+      for (const expectedAction of testCase.effectfulActions) {
+        const witnesses = machine.transitions.filter(transition => (
+          actionDisplay(transition) === expectedAction
+          && transition.action_invocations?.some(item => item.expression === expectedAction)
+          && transition.effect_invocations?.some(item => item.expression === expectedAction)
+        ));
+        assert(
+          witnesses.length > 0,
+          `${testCase.machine}: missing Action/Effect dual-role witness ${expectedAction}`,
+        );
       }
 
       const page = await browser.newPage({
@@ -288,10 +317,10 @@ try {
         );
       }
 
-      for (const forbidden of testCase.forbiddenActions) {
+      for (const expectedAction of testCase.effectfulActions) {
         assert(
-          visibleLabels.every(label => !label.includes(`➡︎${forbidden}`)),
-          `${testCase.machine}: Effect invocation is visible in Action position: ${forbidden}`,
+          visibleLabels.some(label => label.includes(`➡︎${expectedAction}`)),
+          `${testCase.machine}: operation Action is not visible: ${expectedAction}`,
         );
       }
       assert(
@@ -326,4 +355,4 @@ try {
   await browser.close();
 }
 
-console.log(`verified ${cases.length} UML diagrams with separate Action and Effect semantics`);
+console.log(`verified ${cases.length} UML diagrams with operation Actions and separate Effect metadata`);
