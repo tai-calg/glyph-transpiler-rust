@@ -3,13 +3,10 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Mapping
 
+from ._transition_action_ir import _OPERATION_ACTION_PROVENANCE, text
 
-ACTION_PROVENANCE = "transition-operation-invocation"
+
 _OUTPUT_COMPATIBILITY_PROVENANCE = "machine-output-projection-compatibility"
-
-
-def _text(value: object) -> str:
-    return str(value or "").strip()
 
 
 def _replace_output(
@@ -27,7 +24,7 @@ def _remove_legacy_action_segment(
     transition: dict[str, object],
     candidates: list[str],
 ) -> None:
-    label = _text(transition.get("display_label"))
+    label = text(transition.get("display_label"))
     if not label:
         return
     for candidate in sorted({item for item in candidates if item}, key=len, reverse=True):
@@ -44,13 +41,13 @@ def _refine_emitted_output(
         return "", ""
 
     output = dict(emitted)
-    original_output = _text(output.get("display") or output.get("expression"))
+    original_output = text(output.get("display") or output.get("expression"))
     refined_output = original_output
     if isinstance(action, Mapping) and action.get("value_provenance"):
-        action_variant = _text(action.get("variant"))
-        output_variant = _text(output.get("variant"))
+        action_variant = text(action.get("variant"))
+        output_variant = text(output.get("variant"))
         if action_variant and action_variant == output_variant:
-            refined_output = _text(action.get("display") or action.get("expression"))
+            refined_output = text(action.get("display") or action.get("expression"))
             output["display"] = refined_output
             output["expression"] = refined_output
             output["payload"] = list(action.get("payload", []))
@@ -62,12 +59,7 @@ def _refine_emitted_output(
 def finalize_machine_operation_actions(
     machine_view: dict[str, object],
 ) -> dict[str, object]:
-    """Remove state-output compatibility Actions and restore operation expressions.
-
-    Earlier decision-preimage passes still consume the legacy ``action.variant``
-    compatibility field. This final pass runs after enabling-case association and
-    guarantees that renderer-visible Action is operation-derived only.
-    """
+    """Remove compatibility-only Actions before renderer-visible publication."""
 
     result = deepcopy(machine_view)
     transitions: list[dict[str, object]] = []
@@ -78,12 +70,12 @@ def finalize_machine_operation_actions(
         transition = dict(original)
         action = transition.get("action")
         prefinal_action = (
-            _text(action.get("display") or action.get("expression"))
+            text(action.get("display") or action.get("expression"))
             if isinstance(action, Mapping)
             else ""
         )
         operation_template = (
-            _text(action.get("operation_template"))
+            text(action.get("operation_template"))
             if isinstance(action, Mapping)
             else ""
         )
@@ -114,19 +106,19 @@ def finalize_machine_operation_actions(
             continue
 
         value = dict(action)
-        decision_variant = _text(value.get("variant"))
-        compatibility_output = _text(value.get("output_expression"))
+        decision_variant = text(value.get("variant"))
+        compatibility_output = text(value.get("output_expression"))
         if compatibility_output:
             original_output = compatibility_output
         emitted = transition.get("emitted_output")
         emitted_display = (
-            _text(emitted.get("display") or emitted.get("expression"))
+            text(emitted.get("display") or emitted.get("expression"))
             if isinstance(emitted, Mapping)
             else ""
         )
         if not refined_output:
             refined_output = emitted_display
-        template = _text(value.get("operation_template") or value.get("expression"))
+        template = text(value.get("operation_template") or value.get("expression"))
         rendered = _replace_output(
             template,
             original_output=original_output,
@@ -140,7 +132,7 @@ def finalize_machine_operation_actions(
         value["display"] = rendered
         value["expression"] = rendered
         value["decision_variant"] = decision_variant or None
-        value["provenance"] = ACTION_PROVENANCE
+        value["provenance"] = _OPERATION_ACTION_PROVENANCE
         value["compatibility_only"] = False
         value.pop("variant", None)
         value.pop("payload", None)
@@ -148,12 +140,11 @@ def finalize_machine_operation_actions(
 
         finalized_invocations = []
         for invocation in invocations:
-            expression = _replace_output(
-                _text(invocation.get("expression")),
+            invocation["expression"] = _replace_output(
+                text(invocation.get("expression")),
                 original_output=original_output,
                 refined_output=refined_output,
             )
-            invocation["expression"] = expression
             finalized_invocations.append(invocation)
         transition["action_invocations"] = finalized_invocations
 
@@ -163,7 +154,7 @@ def finalize_machine_operation_actions(
                 continue
             item = dict(effect)
             item["expression"] = _replace_output(
-                _text(item.get("expression")),
+                text(item.get("expression")),
                 original_output=original_output,
                 refined_output=refined_output,
             )
