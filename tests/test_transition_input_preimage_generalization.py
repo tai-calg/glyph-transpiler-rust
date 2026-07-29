@@ -11,21 +11,21 @@ def compile_source(source: str, name: str) -> dict[str, object]:
     return build_io_state_views(output.model, output.diagrams.ir)
 
 
-def action_display(item: dict[str, object]) -> str:
-    action = item.get("action")
-    if not isinstance(action, dict):
+def output_display(item: dict[str, object]) -> str:
+    emitted = item.get("emitted_output")
+    if not isinstance(emitted, dict):
         return ""
-    return str(action.get("display") or action.get("expression") or "")
+    return str(emitted.get("display") or emitted.get("expression") or "")
 
 
-def by_action(machine: dict[str, object], action: str) -> dict[str, object]:
+def by_output(machine: dict[str, object], output: str) -> dict[str, object]:
     matches = [
         item
         for item in machine["transitions"]
-        if action_display(item) == action and not item.get("synthesized_failure")
+        if output_display(item) == output and not item.get("synthesized_failure")
     ]
     if not matches:
-        raise AssertionError(f"missing transition with Action {action}")
+        raise AssertionError(f"missing transition with emitted output {output}")
     return matches[0]
 
 
@@ -62,20 +62,23 @@ machine Controller(state:ControllerState,input:Input)
 """
         machine = compile_source(source, "ordered.glyph")["state"]["machines"][0]
 
-        stopped = by_action(machine, "StopAction")
+        stopped = by_output(machine, "StopAction")
         self.assertEqual(stopped["trigger"]["display"], "input.emergency")
+        self.assertIsNone(stopped["action"])
 
-        running = by_action(machine, "RunAction")
+        running = by_output(machine, "RunAction")
         run_input = running["trigger"]["display"]
         self.assertIn("input.request", run_input)
         self.assertIn("!input.emergency", run_input)
         self.assertNotEqual(run_input, "input.request")
+        self.assertIsNone(running["action"])
 
-        held = by_action(machine, "HoldAction")
+        held = by_output(machine, "HoldAction")
         self.assertEqual(held["trigger"]["display"], "otherwise")
         exact = held["input_preimage"]["exact_expression"]
         self.assertIn("input.emergency", exact)
         self.assertIn("input.request", exact)
+        self.assertIsNone(held["action"])
 
     def test_local_input_chain_is_expanded_before_decision_preimage(self) -> None:
         source = """\
@@ -108,14 +111,19 @@ machine Controller(state:ControllerState,input:Input)
   next
 """
         machine = compile_source(source, "local-chain.glyph")["state"]["machines"][0]
-        drive = by_action(machine, "Drive(normalize(input.raw))")
+        drive = by_output(machine, "Drive(normalize(input.raw))")
         self.assertEqual(drive["trigger"]["display"], "otherwise")
         self.assertEqual(drive["trigger"]["provenance"], "decision-output-preimage")
-        self.assertEqual(drive["action"]["value_provenance"], "decision-output-preimage")
-        self.assertIn("normalize(input.raw)", drive["action"]["display"])
+        self.assertEqual(
+            drive["emitted_output"]["value_provenance"],
+            "decision-output-preimage",
+        )
+        self.assertIn("normalize(input.raw)", drive["emitted_output"]["display"])
+        self.assertIsNone(drive["action"])
 
-        stop = by_action(machine, "Stop")
+        stop = by_output(machine, "Stop")
         self.assertEqual(stop["trigger"]["display"], "!input.enabled")
+        self.assertIsNone(stop["action"])
 
     def test_ambiguous_payload_remains_symbolic_instead_of_being_invented(self) -> None:
         source = """\
@@ -144,11 +152,12 @@ machine Controller(state:ControllerState,input:Input)
   next
 """
         machine = compile_source(source, "ambiguous-payload.glyph")["state"]["machines"][0]
-        drive = by_action(machine, "Drive(speed)")
+        drive = by_output(machine, "Drive(speed)")
         self.assertIn("input_preimage", drive)
-        self.assertNotIn("value_provenance", drive["action"])
-        self.assertNotIn("Drive(1.0)", action_display(drive))
-        self.assertNotIn("Drive(2.0)", action_display(drive))
+        self.assertNotIn("value_provenance", drive["emitted_output"])
+        self.assertNotIn("Drive(1.0)", output_display(drive))
+        self.assertNotIn("Drive(2.0)", output_display(drive))
+        self.assertIsNone(drive["action"])
 
 
 if __name__ == "__main__":
