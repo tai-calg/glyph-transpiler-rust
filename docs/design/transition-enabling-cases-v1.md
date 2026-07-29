@@ -1,6 +1,6 @@
 # Transition Enabling Cases v1
 
-Status: Implementing
+Status: Implemented
 
 ## 1. Purpose
 
