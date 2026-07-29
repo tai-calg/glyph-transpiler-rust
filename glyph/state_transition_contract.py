@@ -18,7 +18,11 @@ TRANSITION_SEMANTICS_VERSION = 2
 TRANSITION_INPUT_PREIMAGE_VERSION = 1
 TRANSITION_ENABLING_CASES_VERSION = 1
 TRANSITION_OPERATION_ACTION_VERSION = 2
+# Result-dependency remains an explicitly identified subset for compatibility.
 TRANSITION_RESULT_CONSUMER_ACTION_VERSION = 2
+# Complete System Action includes every proven operation sequenced after the
+# machine transition, not only operations that consume the returned state.
+TRANSITION_SYSTEM_EXECUTION_ACTION_VERSION = 1
 TRANSITION_ACTION_SCOPE_VERSION = 1
 TRANSITION_ACTION_TARGET_INDEPENDENCE_VERSION = 1
 
