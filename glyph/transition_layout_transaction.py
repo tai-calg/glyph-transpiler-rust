@@ -428,7 +428,7 @@ async function transaction(token,reason){
   reroute(stage,machine);
   await nextFrame();
   if(cancelled(token))return false;
-  if(!await ensureClusters(stage,machine,token))throw Error("transition clusters were not created");
+  if(!await ensureClusters(stage,machine,token))return false;
   ensureCanvas(stage,machine.transitions?.length||0);
   reroute(stage,machine);
   formatLabels(stage);
