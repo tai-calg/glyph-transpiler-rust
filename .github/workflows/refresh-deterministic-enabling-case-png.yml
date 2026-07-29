@@ -1,0 +1,82 @@
+name: Refresh Deterministic Enabling Case PNG
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/refresh-deterministic-enabling-case-png.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install renderer
+        run: |
+          python -m pip install pillow==12.0.0
+          npm install playwright@1.54.2
+          npx playwright install --with-deps chromium
+      - name: Prove independent renders are stable
+        run: |
+          node tests/verify_state_diagram_rendering.mjs
+          cp build/state-diagram-regression/motor-safety-motor.png /tmp/motor-first.png
+          rm -f build/state-diagram-regression/motor-safety-motor.png
+          node tests/verify_state_diagram_rendering.mjs
+          python - <<'PY'
+          from pathlib import Path
+          from PIL import Image, ImageChops
+
+          first_path = Path('/tmp/motor-first.png')
+          second_path = Path('build/state-diagram-regression/motor-safety-motor.png')
+          with Image.open(first_path) as a_source, Image.open(second_path) as b_source:
+              a = a_source.convert('RGB')
+              b = b_source.convert('RGB')
+              if a.size != b.size:
+                  raise SystemExit(f'independent render dimensions differ: {a.size} != {b.size}')
+              difference = ImageChops.difference(a, b)
+              red, green, blue = difference.split()
+              mask = ImageChops.lighter(ImageChops.lighter(red, green), blue)
+              histogram = mask.histogram()
+              changed = a.width * a.height - histogram[0]
+              channel_histogram = difference.histogram()
+              absolute = sum(
+                  delta * channel_histogram[channel * 256 + delta]
+                  for channel in range(3)
+                  for delta in range(256)
+              )
+              mean = absolute / (a.width * a.height * 3)
+              maximum = max(
+                  (delta for channel in range(3) for delta in range(255, -1, -1)
+                   if channel_histogram[channel * 256 + delta]),
+                  default=0,
+              )
+              print(f'independent renders: changed={changed}, mean={mean:.8f}, max={maximum}')
+              if changed > 256 or mean > 0.001 or maximum > 32:
+                  raise SystemExit('deterministic transition rendering contract failed')
+          PY
+      - name: Update and verify committed PNG
+        run: |
+          UPDATE_README_STATE_DIAGRAM=1 python tests/verify_readme_state_snapshot.py
+          python tests/verify_readme_state_snapshot.py
+      - name: Commit verified PNG
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/images/glyph-studio-state-transition.png
+          git commit -m "Refresh deterministic enabling-case diagram"
+          git push origin "HEAD:${HEAD_REF}"
