@@ -14,6 +14,12 @@ from .transition_condition_roles import (
     STATE_TRANSITION_IR_VERSION,
     classify_machine_transition_roles,
 )
+from .transition_enabling_case_compatibility import preserve_legacy_transition_metadata
+from .transition_enabling_case_defaults import ensure_machine_enabling_cases
+from .transition_enabling_cases import (
+    ENABLING_CASES_VERSION,
+    attach_machine_enabling_cases,
+)
 from .transition_input_provenance import (
     INPUT_PREIMAGE_VERSION,
     expand_machine_transition_inputs,
@@ -110,18 +116,27 @@ def enrich_state_transition_ir(
     expanded = [
         expand_machine_transition_inputs(model, machine) for machine in classified
     ]
+    enabled = [
+        ensure_machine_enabling_cases(
+            preserve_legacy_transition_metadata(
+                attach_machine_enabling_cases(model, machine)
+            )
+        )
+        for machine in expanded
+    ]
     state["machines"] = [
-        _attach_action_target_independence(model, machine) for machine in expanded
+        _attach_action_target_independence(model, machine) for machine in enabled
     ]
     result["state"] = state
     result["state_transition_ir"] = {
         "schema": STATE_TRANSITION_IR_SCHEMA,
         "version": STATE_TRANSITION_IR_VERSION,
     }
-    # The public Input [Guard] ➞ Action shape remains contract version 2.
-    # Input-preimage expansion and Action/Target independence are independently versioned.
+    # Input [Guard] ➞ Action remains the public label contract version 2.
+    # Enabling-case IR is an additive, independently versioned v1 contract.
     result["transition_semantics_version"] = 2
     result["transition_input_preimage_version"] = INPUT_PREIMAGE_VERSION
+    result["transition_enabling_cases_version"] = ENABLING_CASES_VERSION
     result["transition_action_target_independence_version"] = 1
     summary = dict(result.get("summary", {}))
     summary["state_warnings"] = sum(

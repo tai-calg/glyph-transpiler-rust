@@ -25,7 +25,36 @@ await fs.mkdir(outputDirectory, { recursive: true });
 
 const clean = value => String(value ?? "").trim();
 
+function actionLabel(transition) {
+  const action = transition?.action;
+  return typeof action === "string"
+    ? clean(action)
+    : clean(action?.display) || clean(action?.expression);
+}
+
+function enablingCaseLabel(item, action) {
+  const input = item?.input_pattern;
+  const inputLabel = input
+    ? `${input.confidence === "fallback" ? "? " : ""}${clean(input.display) || clean(input.expression)}`
+    : "";
+  const guardLabel = clean(item?.guard?.display)
+    || clean(item?.guard?.expression).replace(/^true$/i, "");
+  const left = `${inputLabel}${guardLabel ? `${inputLabel ? " " : ""}[${guardLabel}]` : ""}`.trim();
+  return `${left}${action ? `${left ? " " : ""}➞ ${action}` : ""}`.trim();
+}
+
 function expectedLabel(transition) {
+  const action = actionLabel(transition);
+  const enablingCases = Array.isArray(transition?.enabling_cases)
+    ? transition.enabling_cases
+    : [];
+  if (enablingCases.length) {
+    return enablingCases
+      .map(item => enablingCaseLabel(item, action))
+      .filter(Boolean)
+      .join(" || ");
+  }
+
   const trigger = transition?.trigger;
   let input = "otherwise";
   if (trigger && clean(trigger.display)) {
@@ -38,11 +67,7 @@ function expectedLabel(transition) {
   const guards = Array.isArray(transition?.guards)
     ? transition.guards.map(clean).filter(Boolean)
     : clean(transition?.guard) ? [clean(transition.guard)] : [];
-  const action = transition?.action;
-  const output = typeof action === "string"
-    ? clean(action)
-    : clean(action?.display) || clean(action?.expression);
-  return `${input}${guards.length ? ` [${guards.join(" & ")}]` : ""}${output ? ` ➞ ${output}` : ""}`;
+  return `${input}${guards.length ? ` [${guards.join(" & ")}]` : ""}${action ? ` ➞ ${action}` : ""}`;
 }
 
 async function waitForServer(url, child, logs) {

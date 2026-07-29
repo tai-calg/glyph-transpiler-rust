@@ -126,6 +126,36 @@ async function assertDiagramGeometry(page) {
   assert(geometry.distances.every(value => value <= 96.5), `I/O escaped tether: ${geometry.distances.join(", ")}`);
 }
 
+async function waitForStableLayout(page, machineName, transitionCount) {
+  await page.waitForFunction(({name, count}) => {
+    const stage = document.querySelector(".graph-stage");
+    const transaction = window.glyphTransitionLayoutTransaction;
+    return document.querySelector("#machine-select")?.selectedOptions?.[0]?.textContent === name
+      && stage?.dataset.transitionIoClustersReady === "true"
+      && stage?.dataset.transitionEnablingCasesReady === "true"
+      && stage?.dataset.transitionLayoutState === "ready"
+      && stage?.dataset.transitionIoCollisionSolved === "true"
+      && stage?.dataset.transitionIoCollisionCount === "0"
+      && transaction?.generation === transaction?.completedGeneration
+      && stage.querySelectorAll(".transition-io-cluster").length === count;
+  }, { name: machineName, count: transitionCount });
+
+  const snapshot = async () => page.evaluate(() => ({
+    generation: window.glyphTransitionLayoutTransaction?.generation,
+    completedGeneration: window.glyphTransitionLayoutTransaction?.completedGeneration,
+    positions: [...document.querySelectorAll(".transition-io-cluster")].map(cluster => [
+      cluster.dataset.transitionId,
+      cluster.style.left,
+      cluster.style.top,
+      cluster.dataset.ioValue,
+    ]),
+  }));
+  const before = await snapshot();
+  await page.waitForTimeout(500);
+  const after = await snapshot();
+  assert.deepEqual(after, before, `${machineName}: layout changed after reporting ready`);
+}
+
 function actionDisplay(transition) {
   const raw = transition?.action;
   if (typeof raw === "string") return raw.trim();
@@ -168,13 +198,7 @@ try {
         const machine = apiState.views.state.machines.find(item => item.name === expected.name);
         assert(machine, `${testCase.slug}/${expected.name}: API machine missing`);
         if (testCase.machines.length > 1) await page.selectOption("#machine-select", { label: expected.name });
-        await page.waitForFunction(({machineName, transitionCount}) => {
-          const stage = document.querySelector(".graph-stage");
-          return document.querySelector("#machine-select")?.selectedOptions?.[0]?.textContent === machineName
-            && stage?.dataset.transitionIoClustersReady === "true"
-            && stage?.dataset.transitionIoCollisionSolved === "true"
-            && stage.querySelectorAll(".transition-io-cluster").length === transitionCount;
-        }, { machineName: expected.name, transitionCount: machine.transitions.length });
+        await waitForStableLayout(page, expected.name, machine.transitions.length);
 
         assert.deepEqual(sorted(await page.locator(".state-name").allTextContents()), sorted(expected.states));
         assert.deepEqual(sorted(await page.locator(".analysis-code").allTextContents()), sorted(expected.warnings));
@@ -299,4 +323,4 @@ try {
   await browser.close();
 }
 
-console.log("verified compiler-derived state diagrams with generic Action/Target independence");
+console.log("verified compiler-derived state diagrams with stable enabling-case layout");

@@ -12,7 +12,7 @@ def enrich_runtime_io_state_views(
     model: CompilationModel,
     views: dict[str, object],
 ) -> dict[str, object]:
-    """Compatibility entry point; canonical v3 views require no runtime repair."""
+    """Compatibility entry point; canonical compiler views require no runtime repair."""
 
     marker = views.get("state_transition_ir", {})
     if (

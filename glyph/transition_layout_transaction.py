@@ -51,7 +51,7 @@ _SCRIPT = r"""
 (()=>{
 const MARKER="glyph-transition-layout-transaction-v1";
 const MAX_DISTANCE=96,GAP=4,DENSE_TRANSITIONS=7,MIN_WIDTH=1400,MIN_HEIGHT=1000;
-const RINGS=[0,12,24,36,48,60,72,84,96],ANGLES=72,OPTION_LIMIT=144,SEARCH_MS=1800;
+const RINGS=[0,12,24,36,48,60,72,84,96],ANGLES=72,OPTION_LIMIT=144,SEARCH_STEPS=1000000;
 const control=window.glyphTransitionLegacyControl;
 if(control)control.ownsScheduling=true;
 
@@ -129,32 +129,44 @@ function arrangeInitialDenseNodes(stage,data,machine,dense){
   return true;
 }
 
-function stateCurve(source,target,same,index){
+function stateCurve(source,target,same,lane,laneCount){
   const x1=source.offsetLeft+source.offsetWidth/2,y1=source.offsetTop+source.offsetHeight/2;
   const x2=target.offsetLeft+target.offsetWidth/2,y2=target.offsetTop+target.offsetHeight/2;
+  const centered=lane-(laneCount-1)/2;
   if(same){
-    const spread=58+index%3*14;
-    return`M ${x1-27} ${y1-34} C ${x1-spread} ${y1-98}, ${x1+spread} ${y1-98}, ${x1+27} ${y1-34}`;
+    const magnitude=Math.abs(centered),spread=64+magnitude*30,lift=108+magnitude*38,shift=centered*42;
+    return`M ${x1-27} ${y1-34} C ${x1-spread+shift} ${y1-lift}, ${x1+spread+shift} ${y1-lift}, ${x1+27} ${y1-34}`;
   }
   const dx=x2-x1,dy=y2-y1,length=Math.max(1,Math.hypot(dx,dy));
   const startX=x1+dx/length*source.offsetWidth/2,startY=y1+dy/length*source.offsetHeight/2;
   const endX=x2-dx/length*target.offsetWidth/2,endY=y2-dy/length*target.offsetHeight/2;
-  const offset=(index%3-1)*22;
-  return`M ${startX} ${startY} Q ${(startX+endX)/2-dy*.1+offset} ${(startY+endY)/2+dx*.1+offset} ${endX} ${endY}`;
+  const laneOffset=centered*62,normalX=-dy/length,normalY=dx/length;
+  return`M ${startX} ${startY} Q ${(startX+endX)/2+normalX*laneOffset} ${(startY+endY)/2+normalY*laneOffset} ${endX} ${endY}`;
 }
 function reroute(stage,machine){
   const nodes=new Map([...stage.querySelectorAll(".state-node")].map(node=>[nodeName(node),node]));
   const paths=[...stage.querySelectorAll(":scope > svg.edge-svg > path.state-transition-path")];
   const labels=[...stage.querySelectorAll(".transition-label")];
-  (machine?.transitions||[]).forEach((transition,index)=>{
+  const transitions=machine?.transitions||[],totals=new Map(),seen=new Map();
+  transitions.forEach(transition=>{const key=`${transition.source_state}${transition.target_state}`;totals.set(key,(totals.get(key)||0)+1)});
+  transitions.forEach((transition,index)=>{
     const source=nodes.get(transition.source_state),target=nodes.get(transition.target_state);
     if(!source||!target)return;
+    const key=`${transition.source_state}${transition.target_state}`,lane=seen.get(key)||0,laneCount=totals.get(key)||1;
+    seen.set(key,lane+1);
     const path=paths[index];
-    path?.setAttribute("d",stateCurve(source,target,source===target,index));
-    if(path&&!path.dataset.transitionId&&transition.id)path.dataset.transitionId=transition.id;
+    path?.setAttribute("d",stateCurve(source,target,source===target,lane,laneCount));
+    if(path){
+      if(!path.dataset.transitionId&&transition.id)path.dataset.transitionId=transition.id;
+      path.dataset.sourceState=transition.source_state;
+      path.dataset.targetState=transition.target_state;
+      path.dataset.parallelLane=String(lane);
+      path.dataset.parallelLaneCount=String(laneCount);
+    }
     if(labels[index]){
-      labels[index].style.left=`${(source.offsetLeft+target.offsetLeft+source.offsetWidth)/2+(index%3-1)*18}px`;
-      labels[index].style.top=`${(source.offsetTop+target.offsetTop+source.offsetHeight)/2-(source===target?80:0)+(index%2)*12}px`;
+      const centered=lane-(laneCount-1)/2;
+      labels[index].style.left=`${(source.offsetLeft+target.offsetLeft+source.offsetWidth)/2+centered*46}px`;
+      labels[index].style.top=`${(source.offsetTop+target.offsetTop+source.offsetHeight)/2-(source===target?108+Math.abs(centered)*38:0)}px`;
     }
   });
   delete stage.dataset.initialTransitionRouting;
@@ -180,7 +192,7 @@ function safeCuts(value){
   }
   return result;
 }
-function splitComponent(value,limit=42){
+function splitComponent(value,limit=28){
   const lines=[];
   let remaining=text(value);
   while(remaining.length>limit){
@@ -194,11 +206,23 @@ function splitComponent(value,limit=42){
   return lines;
 }
 function semanticLines(cluster){
+  const value=cluster.querySelector(".transition-io-value"),count=Number(cluster.dataset.enablingCaseCount||"1");
+  if(count>1){
+    const cases=[...(value?.querySelectorAll(".enabling-case-line")||[])].map(element=>text(element.textContent)).filter(Boolean);
+    if(cases.length)return cases;
+    return text(cluster.dataset.ioValue).split(" || ").map(item=>item.trim()).filter(Boolean);
+  }
   const input=text(cluster.dataset.inputValue),guard=text(cluster.dataset.guardValue),output=text(cluster.dataset.outputValue),lines=[];
-  lines.push(...splitComponent(input));
-  if(guard)lines.push(...splitComponent(` [${guard}]`));
-  if(output)lines.push(...splitComponent(` ➞ ${output}`));
+  if(input)lines.push(...splitComponent(input));
+  if(guard)lines.push(...splitComponent(`${input?" ":""}[${guard}]`));
+  if(output)lines.push(...splitComponent(`${input||guard?" ":""}➞ ${output}`));
   return lines.filter(line=>line.length>0);
+}
+
+function canonicalLabel(cluster){
+  const input=text(cluster.dataset.inputValue),guard=text(cluster.dataset.guardValue),output=text(cluster.dataset.outputValue);
+  const left=`${input}${guard?`${input?" ":""}[${guard}]`:""}`.trim();
+  return`${left}${output?`${left?" ":""}➞ ${output}`:""}`.trim();
 }
 function formatLabels(stage){
   const clusters=[...stage.querySelectorAll(".transition-io-cluster")];
@@ -206,14 +230,15 @@ function formatLabels(stage){
     const value=cluster.querySelector(".transition-io-value");
     if(!value)continue;
     const expected=cluster.dataset.ioValue||value.textContent||"";
-    const lines=semanticLines(cluster);
+    const lines=semanticLines(cluster),multiple=Number(cluster.dataset.enablingCaseCount||"1")>1;
     value.replaceChildren(...lines.map(line=>{
       const span=document.createElement("span");
-      span.className="transition-semantic-line transition-role-line transition-transaction-line";
+      span.className=`transition-semantic-line transition-role-line transition-transaction-line${multiple?" enabling-case-line":""}`;
       span.textContent=line;
       return span;
     }));
-    if(value.textContent!==expected)throw Error(`transition label formatting changed semantics: ${expected}`);
+    const actual=multiple?lines.join(" || "):canonicalLabel(cluster);
+    if(actual!==expected)throw Error(`transition label formatting changed structured semantics: ${expected}`);
     const longest=Math.max(1,...lines.map(line=>line.length));
     const width=clamp(Math.ceil(longest*5.8+22),108,640);
     cluster.style.setProperty("--transaction-label-width",`${width}px`);
@@ -235,16 +260,16 @@ function pathFor(stage,id,index){
     ||[...stage.querySelectorAll(":scope > svg.edge-svg > path.state-transition-path")][index]
     ||null;
 }
-function anchorFor(stage,id,index){
+function anchorFor(stage,id,index,fraction=.5){
   const path=pathFor(stage,id,index);
   if(path&&typeof path.getTotalLength==="function"){
     try{
-      const length=path.getTotalLength(),mid=path.getPointAtLength(length/2);
-      const before=path.getPointAtLength(Math.max(0,length/2-2)),after=path.getPointAtLength(Math.min(length,length/2+2));
-      return{x:mid.x,y:mid.y,normal:Math.atan2(after.x-before.x,-(after.y-before.y))};
+      const length=path.getTotalLength(),offset=clamp(fraction,.18,.82)*length,mid=path.getPointAtLength(offset);
+      const before=path.getPointAtLength(Math.max(0,offset-2)),after=path.getPointAtLength(Math.min(length,offset+2));
+      return{x:mid.x,y:mid.y,normal:Math.atan2(after.x-before.x,-(after.y-before.y)),fraction};
     }catch{}
   }
-  return{x:stage.clientWidth/2,y:stage.clientHeight/2,normal:-Math.PI/2};
+  return{x:stage.clientWidth/2,y:stage.clientHeight/2,normal:-Math.PI/2,fraction:.5};
 }
 function project(point,anchor){
   const dx=point.x-anchor.x,dy=point.y-anchor.y,distance=Math.hypot(dx,dy);
@@ -292,12 +317,14 @@ function optionsFor(entry,stage,nodes){
   values.sort((left,right)=>left.score-right.score);
   return values.slice(0,OPTION_LIMIT);
 }
-function solveEntries(entries,deadline){
+function solveEntries(entries,stepLimit=SEARCH_STEPS){
   const ordered=[...entries].sort((left,right)=>Number(right.manual)-Number(left.manual)||left.options.length-right.options.length||left.index-right.index);
   const assignment=new Map(),placed=[];
+  let steps=0;
   function visit(index){
     if(index>=ordered.length)return true;
-    if(performance.now()>deadline)return false;
+    steps+=1;
+    if(steps>stepLimit)return false;
     const entry=ordered[index];
     for(const option of entry.options){
       if(placed.some(rect=>intersects(option.rect,rect)))continue;
@@ -321,9 +348,18 @@ function greedyEntries(entries){
 }
 function layoutEntries(stage,data){
   const clusters=[...stage.querySelectorAll(".transition-io-cluster")],nodes=[...stage.querySelectorAll(".state-node")].map(nodeRect);
-  const saved=parseStored(labelStorageKey(data));
+  const saved=parseStored(labelStorageKey(data)),machine=selectedMachine(data),transitions=machine?.transitions||[];
+  const groups=new Map(),fractions=new Map();
+  transitions.forEach((transition,index)=>{
+    const key=`${transition.source_state||"?"}→${transition.target_state||"?"}`;
+    if(!groups.has(key))groups.set(key,[]);
+    groups.get(key).push(index);
+  });
+  groups.forEach(indices=>indices.forEach((transitionIndex,rank)=>{
+    fractions.set(transitionIndex,indices.length===1?.5:(rank+1)/(indices.length+1));
+  }));
   return clusters.map((cluster,index)=>{
-    const id=cluster.dataset.transitionId||`T${index+1}`,anchor=anchorFor(stage,id,index),record=saved[id];
+    const id=cluster.dataset.transitionId||`T${index+1}`,fraction=fractions.get(index)??.5,anchor=anchorFor(stage,id,index,fraction),record=saved[id];
     const manual=Boolean(record);
     const restored=finite(record?.dx)&&finite(record?.dy)
       ?{x:anchor.x+record.dx,y:anchor.y+record.dy}
@@ -361,7 +397,8 @@ function audit(stage){
   const rects=clusters.map(cluster=>rectAt(cluster,{x:num(cluster.style.left),y:num(cluster.style.top)}));
   clusters.forEach((cluster,index)=>{
     const value=cluster.querySelector(".transition-io-value"),node=cluster.querySelector(".transition-io-node.io"),style=value?getComputedStyle(value):null;
-    const expected=cluster.dataset.ioValue||"",actual=value?.textContent||"",rect=rects[index];
+    const expected=cluster.dataset.ioValue||"",multiple=Number(cluster.dataset.enablingCaseCount||"1")>1;
+    const actual=multiple?[...value.querySelectorAll(".enabling-case-line")].map(element=>text(element.textContent)).filter(Boolean).join(" || "):canonicalLabel(cluster),rect=rects[index];
     const reasons=[];
     if(actual!==expected)reasons.push("text-mismatch");
     if((Number.parseFloat(style?.fontSize||"0")||0)<9)reasons.push("font-too-small");
@@ -393,7 +430,7 @@ async function transaction(token,reason){
   reroute(stage,machine);
   await nextFrame();
   if(cancelled(token))return false;
-  if(!await ensureClusters(stage,machine,token))throw Error("transition clusters were not created");
+  if(!await ensureClusters(stage,machine,token))return false;
   ensureCanvas(stage,machine.transitions?.length||0);
   reroute(stage,machine);
   formatLabels(stage);
@@ -403,7 +440,7 @@ async function transaction(token,reason){
   await nextFrame();
   const entries=layoutEntries(stage,data);
   if(entries.some(entry=>!entry.options.length))throw Error("no valid position exists inside the transition tether");
-  const assignment=solveEntries(entries,performance.now()+SEARCH_MS)||greedyEntries(entries);
+  const assignment=solveEntries(entries)||greedyEntries(entries);
   if(!assignment)throw Error("no collision-free transition label assignment exists");
   applyAssignment(stage,data,entries,assignment);
   await nextFrame();
@@ -453,7 +490,7 @@ function schedule(reason="scheduled",delay=0){
   return requestedGeneration;
 }
 
-for(const eventName of["glyph-state-transition-ir-v3-labels-ready","glyph-uml-transition-ready","glyph-locale-changed"]){
+for(const eventName of["glyph-state-transition-ir-v3-labels-ready","glyph-transition-enabling-cases-ready","glyph-uml-transition-ready","glyph-locale-changed"]){
   document.addEventListener(eventName,()=>{stateCache=null;schedule(eventName,0)});
 }
 document.addEventListener("change",event=>{
