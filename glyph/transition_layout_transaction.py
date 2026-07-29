@@ -260,16 +260,16 @@ function pathFor(stage,id,index){
     ||[...stage.querySelectorAll(":scope > svg.edge-svg > path.state-transition-path")][index]
     ||null;
 }
-function anchorFor(stage,id,index){
+function anchorFor(stage,id,index,fraction=.5){
   const path=pathFor(stage,id,index);
   if(path&&typeof path.getTotalLength==="function"){
     try{
-      const length=path.getTotalLength(),mid=path.getPointAtLength(length/2);
-      const before=path.getPointAtLength(Math.max(0,length/2-2)),after=path.getPointAtLength(Math.min(length,length/2+2));
-      return{x:mid.x,y:mid.y,normal:Math.atan2(after.x-before.x,-(after.y-before.y))};
+      const length=path.getTotalLength(),offset=clamp(fraction,.18,.82)*length,mid=path.getPointAtLength(offset);
+      const before=path.getPointAtLength(Math.max(0,offset-2)),after=path.getPointAtLength(Math.min(length,offset+2));
+      return{x:mid.x,y:mid.y,normal:Math.atan2(after.x-before.x,-(after.y-before.y)),fraction};
     }catch{}
   }
-  return{x:stage.clientWidth/2,y:stage.clientHeight/2,normal:-Math.PI/2};
+  return{x:stage.clientWidth/2,y:stage.clientHeight/2,normal:-Math.PI/2,fraction:.5};
 }
 function project(point,anchor){
   const dx=point.x-anchor.x,dy=point.y-anchor.y,distance=Math.hypot(dx,dy);
@@ -346,9 +346,18 @@ function greedyEntries(entries){
 }
 function layoutEntries(stage,data){
   const clusters=[...stage.querySelectorAll(".transition-io-cluster")],nodes=[...stage.querySelectorAll(".state-node")].map(nodeRect);
-  const saved=parseStored(labelStorageKey(data));
+  const saved=parseStored(labelStorageKey(data)),machine=selectedMachine(data),transitions=machine?.transitions||[];
+  const groups=new Map(),fractions=new Map();
+  transitions.forEach((transition,index)=>{
+    const key=`${transition.source_state||"?"}→${transition.target_state||"?"}`;
+    if(!groups.has(key))groups.set(key,[]);
+    groups.get(key).push(index);
+  });
+  groups.forEach(indices=>indices.forEach((transitionIndex,rank)=>{
+    fractions.set(transitionIndex,indices.length===1?.5:(rank+1)/(indices.length+1));
+  }));
   return clusters.map((cluster,index)=>{
-    const id=cluster.dataset.transitionId||`T${index+1}`,anchor=anchorFor(stage,id,index),record=saved[id];
+    const id=cluster.dataset.transitionId||`T${index+1}`,fraction=fractions.get(index)??.5,anchor=anchorFor(stage,id,index,fraction),record=saved[id];
     const manual=Boolean(record);
     const restored=finite(record?.dx)&&finite(record?.dy)
       ?{x:anchor.x+record.dx,y:anchor.y+record.dy}
