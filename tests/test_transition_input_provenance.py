@@ -218,10 +218,28 @@ class TransitionInputProvenanceTests(unittest.TestCase):
         self.assertIsNone(locked_case["input_pattern"])
         self.assertEqual(locked_case["guard"]["display"], "otherwise")
 
+        expected_operations = {
+            "RaiseAlarm": "alarm",
+            "Unlock": "lock",
+            "KeepLocked": "lock",
+        }
         for item in (alarm, unlock, locked):
-            self.assertIsNone(item["action"])
-            self.assertEqual(item.get("action_invocations"), [])
-            self.assertEqual(item.get("effect_invocations"), [])
+            operation = expected_operations[output_variant(item)]
+            self.assertTrue(
+                action_display(item).startswith(f"{operation}(DoorState("),
+                action_display(item),
+            )
+            self.assertEqual(len(item.get("action_invocations", [])), 1)
+            self.assertEqual(
+                item["action_invocations"][0]["provenance"],
+                "transition-result-consumer",
+            )
+            self.assertEqual(
+                [effect["expression"] for effect in item.get("effect_invocations", [])],
+                [action_display(item)],
+            )
+            self.assertNotEqual(action_display(item), output_display(item))
+            self.assertNotEqual(action_display(item), item["target_state"])
             self.assertNotEqual(output_display(item), item["target_state"])
 
     def test_target_rename_changes_only_target_axis(self) -> None:

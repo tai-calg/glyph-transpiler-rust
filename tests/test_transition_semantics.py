@@ -325,8 +325,20 @@ machine Device(state:DeviceState,event:DeviceEvent)
             alarm["emitted_output"]["provenance"],
             "machine-output-projection",
         )
-        self.assertIsNone(alarm["action"])
-        self.assertEqual(alarm["effect_invocations"], [])
+        self.assertEqual(
+            action_display(alarm),
+            "alarm(DoorState(Alarmed,state.failures+1,RaiseAlarm))",
+        )
+        self.assertEqual(
+            [item["expression"] for item in alarm["effect_invocations"]],
+            ["alarm(DoorState(Alarmed,state.failures+1,RaiseAlarm))"],
+        )
+        self.assertEqual(
+            alarm["action_invocations"][0]["provenance"],
+            "transition-result-consumer",
+        )
+        self.assertNotEqual(action_display(alarm), output_display(alarm))
+        self.assertNotEqual(action_display(alarm), alarm["target_state"])
         self.assertNotIn("[action==RaiseAlarm]", alarm["display_label"])
         self.assertIn("input:input", alarm["trigger"]["provenance_roots"])
 
