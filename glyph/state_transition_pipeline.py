@@ -12,6 +12,8 @@ from .state_transition_contract import (
     TRANSITION_ACTION_SCOPE_VERSION,
     TRANSITION_ACTION_TARGET_INDEPENDENCE_VERSION,
     TRANSITION_ENABLING_CASES_VERSION,
+    TRANSITION_EXECUTION_CONTEXT_CONTROL_FLOW_VERSION,
+    TRANSITION_EXECUTION_CONTEXT_PROJECTION_VERSION,
     TRANSITION_INPUT_PREIMAGE_VERSION,
     TRANSITION_OPERATION_ACTION_VERSION,
     TRANSITION_RESULT_CONSUMER_ACTION_VERSION,
@@ -178,6 +180,12 @@ def enrich_state_transition_ir(
         TRANSITION_SYSTEM_EXECUTION_ACTION_VERSION
     )
     result["transition_action_scope_version"] = TRANSITION_ACTION_SCOPE_VERSION
+    result["transition_execution_context_control_flow_version"] = (
+        TRANSITION_EXECUTION_CONTEXT_CONTROL_FLOW_VERSION
+    )
+    result["transition_execution_context_projection_version"] = (
+        TRANSITION_EXECUTION_CONTEXT_PROJECTION_VERSION
+    )
     result["transition_action_target_independence_version"] = (
         TRANSITION_ACTION_TARGET_INDEPENDENCE_VERSION
     )
