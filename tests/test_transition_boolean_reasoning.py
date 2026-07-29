@@ -63,13 +63,12 @@ class TransitionBooleanReasoningTests(unittest.TestCase):
         views = compile_source(SOURCE)
         machine = views["state"]["machines"][0]
         self.assertEqual(FACADE_VERSION, STATE_TRANSITION_IR_VERSION)
-        self.assertEqual(STATE_TRANSITION_IR_VERSION, 5)
+        self.assertEqual(STATE_TRANSITION_IR_VERSION, 4)
         self.assertEqual(
             views["state_transition_ir"],
             {
                 "schema": "glyph.state-transition-ir",
                 "version": STATE_TRANSITION_IR_VERSION,
-                "stage": "public",
             },
         )
         self.assertEqual(machine["transition_ir"], views["state_transition_ir"])
