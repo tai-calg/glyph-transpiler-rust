@@ -24,6 +24,9 @@ from .transition_input_provenance import (
     INPUT_PREIMAGE_VERSION,
     expand_machine_transition_inputs,
 )
+from .transition_operation_action_finalization import (
+    finalize_machine_operation_actions,
+)
 
 
 def _target_state_projection_type(
@@ -129,8 +132,11 @@ def enrich_state_transition_ir(
         )
         for machine in expanded
     ]
+    finalized = [
+        finalize_machine_operation_actions(machine) for machine in enabled
+    ]
     state["machines"] = [
-        _attach_action_target_independence(model, machine) for machine in enabled
+        _attach_action_target_independence(model, machine) for machine in finalized
     ]
     result["state"] = state
     result["state_transition_ir"] = {
