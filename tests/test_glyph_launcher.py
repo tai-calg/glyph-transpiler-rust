@@ -98,6 +98,15 @@ class GlyphLauncherTests(unittest.TestCase):
                 "transition-result-consumer",
             )
             self.assertEqual(transition["action_scope"]["display_scope"], "system")
+            self.assertEqual(transition["action"], transition["display_action"])
+            self.assertEqual(
+                transition["display_action"]["provenance"],
+                "transition-operation-invocation",
+            )
+            self.assertEqual(
+                transition["display_action"]["projection_provenance"],
+                "transition-display-action-projection",
+            )
             self.assertNotEqual(
                 action_display(transition),
                 transition["target_state"],
