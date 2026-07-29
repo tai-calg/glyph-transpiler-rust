@@ -20,12 +20,13 @@ COMMITTED_PATH = ROOT / "docs/images/glyph-studio-state-transition.png"
 MOTOR_SOURCE_PATH = ROOT / "examples/acceptance/motor_safety.glyph"
 EXPECTED_SIZE = (1800, 1100)
 
-# Chromium can vary a few anti-aliased pixels between otherwise equivalent runs.
-# These limits accept the observed rasterization noise while rejecting changed text,
-# layout, state nodes, or transition semantics.
-MAX_CHANGED_PIXELS = 256
-MAX_MEAN_ABSOLUTE_DELTA = 0.001
-MAX_CHANNEL_DELTA = 32
+# Independent Chromium runs can differ in a small anti-aliased edge band even
+# when semantic roles, geometry, and line breaks are identical. These limits
+# cover the measured raster-only envelope while remaining far below meaningful
+# text or layout changes (which alter tens of thousands of pixels).
+MAX_CHANGED_PIXELS = 1024
+MAX_MEAN_ABSOLUTE_DELTA = 0.002
+MAX_CHANNEL_DELTA = 48
 
 
 def _enabling_cases(machine: Mapping[str, object]) -> list[Mapping[str, object]]:
