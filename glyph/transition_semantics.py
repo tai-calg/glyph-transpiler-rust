@@ -2,18 +2,18 @@ from __future__ import annotations
 
 from .artifacts import CompilationModel
 from .state_transition_compiler import build_machine_state_transition_ir
-from .state_transition_pipeline import enrich_state_transition_ir
-from .transition_condition_roles import (
+from .state_transition_contract import (
     STATE_TRANSITION_IR_SCHEMA,
     STATE_TRANSITION_IR_VERSION,
 )
+from .state_transition_pipeline import enrich_state_transition_ir
 
 
 def enrich_io_state_views(
     model: CompilationModel,
     views: dict[str, object],
 ) -> dict[str, object]:
-    """Compatibility facade for callers of the state-transition enrichment pass."""
+    """Compatibility facade for callers of the public enrichment pass."""
 
     marker = views.get("state_transition_ir", {})
     if (

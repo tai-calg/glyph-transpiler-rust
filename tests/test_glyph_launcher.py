@@ -18,7 +18,7 @@ SPEC.loader.exec_module(launcher)
 
 
 def action_display(transition: dict[str, object]) -> str:
-    action = transition.get("action")
+    action = transition.get("display_action") or transition.get("action")
     return str(action.get("display") or "") if isinstance(action, dict) else ""
 
 
@@ -47,7 +47,8 @@ class GlyphLauncherTests(unittest.TestCase):
             source_name="default-workspace.glyph",
         )
         views = build_io_state_views(output.model, output.diagrams.ir)
-        self.assertEqual(views["transition_result_consumer_action_version"], 1)
+        self.assertEqual(views["transition_result_consumer_action_version"], 2)
+        self.assertEqual(views["transition_action_scope_version"], 1)
         machine = views["state"]["machines"][0]
         transitions = [
             item
@@ -87,9 +88,24 @@ class GlyphLauncherTests(unittest.TestCase):
         self.assertEqual(actual, expected)
 
         for transition in transitions:
+            self.assertIsNone(transition["machine_action"])
+            self.assertEqual(len(transition["execution_action_bindings"]), 1)
+            binding = transition["execution_action_bindings"][0]
+            self.assertEqual(binding["system"], "DoorControl")
+            self.assertEqual(binding["entry"], "control")
             self.assertEqual(
-                transition["action_invocations"][0]["provenance"],
+                binding["action_invocations"][0]["provenance"],
                 "transition-result-consumer",
+            )
+            self.assertEqual(transition["action_scope"]["display_scope"], "system")
+            self.assertEqual(transition["action"], transition["display_action"])
+            self.assertEqual(
+                transition["display_action"]["provenance"],
+                "transition-operation-invocation",
+            )
+            self.assertEqual(
+                transition["display_action"]["projection_provenance"],
+                "transition-display-action-projection",
             )
             self.assertNotEqual(
                 action_display(transition),

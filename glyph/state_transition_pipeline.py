@@ -7,32 +7,28 @@ from .compiler import FieldExpr, ProductDecl
 from .diagnostic_localization import localize_state_views
 from .state_transition_block_lowering import lower_analyzed_block_transitions
 from .state_transition_compiler import enrich_state_transition_ir as compile_state_transition_ir
-from .transition_action_projection import project_machine_transition_actions
-from .transition_action_target_independence import analyze_action_target_independence
-from .transition_condition_roles import (
-    STATE_TRANSITION_IR_SCHEMA,
+from .state_transition_contract import (
     STATE_TRANSITION_IR_VERSION,
-    classify_machine_transition_roles,
+    TRANSITION_ACTION_SCOPE_VERSION,
+    TRANSITION_ACTION_TARGET_INDEPENDENCE_VERSION,
+    TRANSITION_ENABLING_CASES_VERSION,
+    TRANSITION_INPUT_PREIMAGE_VERSION,
+    TRANSITION_OPERATION_ACTION_VERSION,
+    TRANSITION_RESULT_CONSUMER_ACTION_VERSION,
+    TRANSITION_SEMANTICS_VERSION,
+    public_transition_ir_marker,
 )
+from .transition_action_projection import project_machine_transition_actions
+from .transition_action_scopes import project_transition_action_scopes
+from .transition_action_target_independence import analyze_action_target_independence
+from .transition_condition_roles import classify_machine_transition_roles
 from .transition_enabling_case_compatibility import preserve_legacy_transition_metadata
 from .transition_enabling_case_defaults import ensure_machine_enabling_cases
-from .transition_enabling_cases import (
-    ENABLING_CASES_VERSION,
-    attach_machine_enabling_cases,
-)
-from .transition_input_provenance import (
-    INPUT_PREIMAGE_VERSION,
-    expand_machine_transition_inputs,
-)
-from .transition_operation_action_finalization import (
-    finalize_machine_operation_actions,
-)
-from .transition_output_action_compatibility import (
-    attach_output_action_compatibility,
-)
-from .transition_result_action_dataflow import (
-    attach_transition_result_consumer_actions,
-)
+from .transition_enabling_cases import attach_machine_enabling_cases
+from .transition_input_provenance import expand_machine_transition_inputs
+from .transition_operation_action_finalization import finalize_machine_operation_actions
+from .transition_output_action_compatibility import attach_output_action_compatibility
+from .transition_result_action_dataflow import attach_transition_result_consumer_actions
 
 
 def _target_state_projection_type(
@@ -61,7 +57,7 @@ def _target_state_projection_type(
 
 def _operation_action_type(machine: dict[str, object]) -> str | None:
     for transition in machine.get("transitions", []):
-        action = transition.get("action") if isinstance(transition, dict) else None
+        action = transition.get("display_action") if isinstance(transition, dict) else None
         if not isinstance(action, dict):
             continue
         if action.get("provenance") == "transition-operation-invocation":
@@ -100,11 +96,22 @@ def _attach_action_target_independence(
     return result
 
 
+def _publish_machine_contract(machine: dict[str, object]) -> dict[str, object]:
+    result = dict(machine)
+    marker = public_transition_ir_marker()
+    result["transition_ir"] = marker
+    analysis = dict(result.get("analysis", {}))
+    analysis["transition_ir_schema"] = marker["schema"]
+    analysis["transition_ir_version"] = marker["version"]
+    result["analysis"] = analysis
+    return result
+
+
 def enrich_state_transition_ir(
     model: CompilationModel,
     views: dict[str, object],
 ) -> dict[str, object]:
-    """Compile machines and classify StateTransitionIR semantic roles."""
+    """Compile and publish the complete StateTransitionIR contract."""
 
     original = deepcopy(views)
     result = compile_state_transition_ir(model, views)
@@ -148,22 +155,26 @@ def enrich_state_transition_ir(
     finalized = [
         finalize_machine_operation_actions(machine) for machine in enabled
     ]
+    scoped = [project_transition_action_scopes(machine) for machine in finalized]
     state["machines"] = [
-        _attach_action_target_independence(model, machine) for machine in finalized
+        _publish_machine_contract(
+            _attach_action_target_independence(model, machine)
+        )
+        for machine in scoped
     ]
     result["state"] = state
-    result["state_transition_ir"] = {
-        "schema": STATE_TRANSITION_IR_SCHEMA,
-        "version": STATE_TRANSITION_IR_VERSION,
-    }
-    # Input [Guard] ➞ Action remains the public label contract version 2.
-    # Enabling-case IR is an additive, independently versioned v1 contract.
-    result["transition_semantics_version"] = 2
-    result["transition_input_preimage_version"] = INPUT_PREIMAGE_VERSION
-    result["transition_enabling_cases_version"] = ENABLING_CASES_VERSION
-    result["transition_operation_action_version"] = 2
-    result["transition_result_consumer_action_version"] = 1
-    result["transition_action_target_independence_version"] = 1
+    result["state_transition_ir"] = public_transition_ir_marker()
+    result["transition_semantics_version"] = TRANSITION_SEMANTICS_VERSION
+    result["transition_input_preimage_version"] = TRANSITION_INPUT_PREIMAGE_VERSION
+    result["transition_enabling_cases_version"] = TRANSITION_ENABLING_CASES_VERSION
+    result["transition_operation_action_version"] = TRANSITION_OPERATION_ACTION_VERSION
+    result["transition_result_consumer_action_version"] = (
+        TRANSITION_RESULT_CONSUMER_ACTION_VERSION
+    )
+    result["transition_action_scope_version"] = TRANSITION_ACTION_SCOPE_VERSION
+    result["transition_action_target_independence_version"] = (
+        TRANSITION_ACTION_TARGET_INDEPENDENCE_VERSION
+    )
     summary = dict(result.get("summary", {}))
     summary["state_warnings"] = sum(
         1

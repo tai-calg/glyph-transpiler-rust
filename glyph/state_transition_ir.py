@@ -18,10 +18,10 @@ from .compiler import (
     UnaryExpr,
 )
 from .execution_ir import render_expr
-
-
-STATE_TRANSITION_IR_SCHEMA = "glyph.state-transition-ir"
-STATE_TRANSITION_IR_VERSION = 2
+from .state_transition_contract import (
+    RAW_STATE_TRANSITION_IR_VERSION as STATE_TRANSITION_IR_VERSION,
+    STATE_TRANSITION_IR_SCHEMA,
+)
 
 
 @dataclass(frozen=True)
