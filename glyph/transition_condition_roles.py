@@ -24,10 +24,11 @@ from .compiler import (
 )
 from .execution_ir import render_expr
 from .machine import MachineDecl
+from .state_transition_contract import (
+    STATE_TRANSITION_IR_SCHEMA,
+    STATE_TRANSITION_IR_VERSION,
+)
 
-
-STATE_TRANSITION_IR_SCHEMA = "glyph.state-transition-ir"
-STATE_TRANSITION_IR_VERSION = 4
 
 _ROLE_CONFIRMED = "confirmed-trigger"
 _ROLE_INFERRED = "inferred-trigger"
@@ -60,7 +61,10 @@ class _Facts:
 
     @property
     def input_derived(self) -> bool:
-        return any(root.startswith("input:") or root.startswith("external:") for root in self.roots)
+        return any(
+            root.startswith("input:") or root.startswith("external:")
+            for root in self.roots
+        )
 
     @property
     def state_derived(self) -> bool:
@@ -71,16 +75,28 @@ class _Facts:
         return any(root.startswith("unknown:") for root in self.roots)
 
 
-def _resolve_alias(ty: TypeRef | None, aliases: Mapping[str, TypeRef]) -> TypeRef | None:
+def _resolve_alias(
+    ty: TypeRef | None,
+    aliases: Mapping[str, TypeRef],
+) -> TypeRef | None:
     current = ty
     seen: set[str] = set()
-    while current is not None and not current.args and current.name in aliases and current.name not in seen:
+    while (
+        current is not None
+        and not current.args
+        and current.name in aliases
+        and current.name not in seen
+    ):
         seen.add(current.name)
         current = aliases[current.name]
     return current
 
 
-def _expr_type(expr: Expr, context: _Context, visited: frozenset[str] = frozenset()) -> TypeRef | None:
+def _expr_type(
+    expr: Expr,
+    context: _Context,
+    visited: frozenset[str] = frozenset(),
+) -> TypeRef | None:
     if isinstance(expr, BoolExpr):
         return TypeRef("bool")
     if isinstance(expr, NumberExpr):
@@ -102,7 +118,10 @@ def _expr_type(expr: Expr, context: _Context, visited: frozenset[str] = frozense
         product = context.products.get(base_type.name)
         if product is None:
             return None
-        field = next((item for item in product.fields if item.name == expr.field), None)
+        field = next(
+            (item for item in product.fields if item.name == expr.field),
+            None,
+        )
         return None if field is None else _resolve_alias(field.ty, context.aliases)
     if isinstance(expr, UnaryExpr):
         if expr.op == "!":
@@ -111,7 +130,11 @@ def _expr_type(expr: Expr, context: _Context, visited: frozenset[str] = frozense
     if isinstance(expr, BinaryExpr):
         if expr.op in {"&", "|", "==", "!=", "<", ">", "<=", ">="}:
             return TypeRef("bool")
-        return _expr_type(expr.left, context, visited) or _expr_type(expr.right, context, visited)
+        return _expr_type(expr.left, context, visited) or _expr_type(
+            expr.right,
+            context,
+            visited,
+        )
     if isinstance(expr, CallExpr) and isinstance(expr.callee, NameExpr):
         declaration = context.functions.get(expr.callee.name)
         if declaration is not None:
@@ -122,15 +145,25 @@ def _expr_type(expr: Expr, context: _Context, visited: frozenset[str] = frozense
         if expr.callee.name in context.products:
             return TypeRef(expr.callee.name)
         for sum_name, declaration in context.sums.items():
-            if expr.callee.name in {variant.name for variant in declaration.variants}:
+            if expr.callee.name in {
+                variant.name for variant in declaration.variants
+            }:
                 return TypeRef(sum_name)
     return None
 
 
-def _facts(expr: Expr, context: _Context, visited: frozenset[str] = frozenset()) -> _Facts:
+def _facts(
+    expr: Expr,
+    context: _Context,
+    visited: frozenset[str] = frozenset(),
+) -> _Facts:
     if isinstance(expr, NameExpr):
         if expr.name == context.state_param:
-            return _Facts(frozenset({"state"}), _expr_type(expr, context), (expr.name,))
+            return _Facts(
+                frozenset({"state"}),
+                _expr_type(expr, context),
+                (expr.name,),
+            )
         if expr.name in context.input_names:
             return _Facts(
                 frozenset({f"input:{expr.name}"}),
@@ -159,7 +192,11 @@ def _facts(expr: Expr, context: _Context, visited: frozenset[str] = frozenset())
             for declaration in context.sums.values()
         ):
             return _Facts(frozenset(), _expr_type(expr, context), (expr.name,))
-        return _Facts(frozenset({f"unknown:{expr.name}"}), None, (expr.name,))
+        return _Facts(
+            frozenset({f"unknown:{expr.name}"}),
+            None,
+            (expr.name,),
+        )
     if isinstance(expr, FieldExpr):
         nested = _facts(expr.base, context, visited)
         return _Facts(
@@ -169,7 +206,11 @@ def _facts(expr: Expr, context: _Context, visited: frozenset[str] = frozenset())
         )
     if isinstance(expr, UnaryExpr):
         nested = _facts(expr.expr, context, visited)
-        return _Facts(nested.roots, _expr_type(expr, context, visited), nested.path)
+        return _Facts(
+            nested.roots,
+            _expr_type(expr, context, visited),
+            nested.path,
+        )
     if isinstance(expr, BinaryExpr):
         left = _facts(expr.left, context, visited)
         right = _facts(expr.right, context, visited)
@@ -191,7 +232,11 @@ def _facts(expr: Expr, context: _Context, visited: frozenset[str] = frozenset())
                 roots |= {f"external:{name}"}
             path = (*path, f"{name}(...)")
         return _Facts(roots, _expr_type(expr, context, visited), path)
-    return _Facts(frozenset(), _expr_type(expr, context, visited), (render_expr(expr),))
+    return _Facts(
+        frozenset(),
+        _expr_type(expr, context, visited),
+        (render_expr(expr),),
+    )
 
 
 def _flatten_and(expr: Expr) -> list[Expr]:
@@ -253,7 +298,9 @@ def _trigger_atom(expr: Expr, context: _Context) -> dict[str, object] | None:
         if value_type is None or variant is None:
             continue
         declaration = context.sums.get(value_type.name)
-        if declaration is None or variant not in {item.name for item in declaration.variants}:
+        if declaration is None or variant not in {
+            item.name for item in declaration.variants
+        }:
             continue
         facts = _facts(subject, context)
         if not facts.input_derived:
@@ -306,7 +353,11 @@ def _classification(
             "diagnostics": [],
         }
 
-    atoms = [part for part in _flatten_and(condition) if not _is_source_state(part, context)]
+    atoms = [
+        part
+        for part in _flatten_and(condition)
+        if not _is_source_state(part, context)
+    ]
     trigger_atoms: list[tuple[Expr, dict[str, object]]] = []
     remaining: list[Expr] = []
     for atom in atoms:
@@ -336,7 +387,9 @@ def _classification(
             )
         for atom in remaining:
             facts = _facts(atom, context)
-            if facts.unknown and not (facts.input_derived or facts.state_derived):
+            if facts.unknown and not (
+                facts.input_derived or facts.state_derived
+            ):
                 unclassified.append(render_expr(atom))
                 diagnostics.append(
                     _warning(
@@ -475,7 +528,11 @@ def _matching_clause(
     matches: list[FunctionDecl] = []
     for declaration in functions.values():
         for clause in declaration.guards:
-            rendered = "otherwise" if clause.condition is None else render_expr(clause.condition)
+            rendered = (
+                "otherwise"
+                if clause.condition is None
+                else render_expr(clause.condition)
+            )
             if clause.line == line and rendered == raw:
                 matches.append(declaration)
     return matches[0] if len(matches) == 1 else None
@@ -519,14 +576,26 @@ def _context(
     aliases: Mapping[str, TypeRef],
 ) -> _Context:
     line = int(transition.get("source", {}).get("line", 1))
-    raw = str(transition.get("condition_raw") or transition.get("condition") or "")
+    raw = str(
+        transition.get("condition_raw")
+        or transition.get("condition")
+        or ""
+    )
     declaration = _matching_clause(functions, line, raw)
-    locals_: dict[str, TypeRef] = {parameter.name: parameter.ty for parameter in machine.params}
+    locals_: dict[str, TypeRef] = {
+        parameter.name: parameter.ty for parameter in machine.params
+    }
     if declaration is not None:
-        locals_.update({parameter.name: parameter.ty for parameter in declaration.params})
+        locals_.update(
+            {parameter.name: parameter.ty for parameter in declaration.params}
+        )
     return _Context(
         state_param=machine.state_param.name,
-        selector_field=machine.selector.field if isinstance(machine.selector, FieldExpr) else "",
+        selector_field=(
+            machine.selector.field
+            if isinstance(machine.selector, FieldExpr)
+            else ""
+        ),
         source_state=str(transition.get("source_state", "")),
         input_names=frozenset(
             parameter.name
@@ -534,7 +603,10 @@ def _context(
             if parameter.name != machine.state_param.name
         ),
         locals=locals_,
-        definitions=_block_definitions(model, None if declaration is None else declaration.name),
+        definitions=_block_definitions(
+            model,
+            None if declaration is None else declaration.name,
+        ),
         products=products,
         sums=sums,
         functions=functions,
@@ -585,7 +657,11 @@ def classify_machine_transition_roles(
     generated_diagnostics: list[dict[str, object]] = []
     for original in result.get("transitions", []):
         transition = dict(original)
-        raw = str(transition.get("condition_raw") or transition.get("condition") or "")
+        raw = str(
+            transition.get("condition_raw")
+            or transition.get("condition")
+            or ""
+        )
         condition: Expr | None
         if raw in {"", "otherwise", "next"}:
             condition = None
@@ -639,7 +715,9 @@ def classify_machine_transition_roles(
         )
         transition["classification"] = {
             "confidence": (
-                "unknown" if trigger is None else trigger.get("confidence", "unknown")
+                "unknown"
+                if trigger is None
+                else trigger.get("confidence", "unknown")
             ),
             "warning_count": len(classified["diagnostics"]),
         }
