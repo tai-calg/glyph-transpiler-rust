@@ -60,7 +60,7 @@ def _operation_action_type(machine: dict[str, object]) -> str | None:
         action = transition.get("display_action") if isinstance(transition, dict) else None
         if not isinstance(action, dict):
             continue
-        if action.get("provenance") == "transition-display-action-projection":
+        if action.get("provenance") == "transition-operation-invocation":
             return "OperationInvocation"
     return None
 
