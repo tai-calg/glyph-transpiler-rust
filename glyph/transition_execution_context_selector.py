@@ -105,7 +105,7 @@ function ensureControl(machine){
 async function render(){if(running)return;running=true;try{const data=await state(),machine=selectedMachine(data);if(machine&&ensureControl(machine))publish()}finally{running=false}}
 function schedule(delay=0){clearTimeout(timer);timer=setTimeout(()=>render().catch(error=>console.error("execution-context selector failed",error)),delay)}
 document.addEventListener("change",event=>{if(event.target?.id==="machine-select"){cache=null;currentMachine=null;currentKey=AUTO;schedule(0)}});
-for(const event of["glyph-state-transition-ir-v3-labels-ready","glyph-transition-io-clusters-ready","glyph-locale-changed"]){document.addEventListener(event,()=>schedule(0))}
+for(const event of["glyph-state-transition-ir-v3-labels-ready","glyph-transition-io-clusters-ready"]){document.addEventListener(event,()=>schedule(0))}
 new MutationObserver(()=>schedule(20)).observe(document.getElementById("view")||document.body,{childList:true,subtree:true});
 window.GlyphExecutionContext={marker:MARKER,actionFor,projectionFor,contextsFor,selectedKey:()=>currentKey,signature:()=>`${currentMachine?.name||""}:${currentKey}`,refresh:()=>{cache=null;schedule(0)}};
 schedule(0);
