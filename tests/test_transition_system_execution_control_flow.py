@@ -75,15 +75,23 @@ system DoorObserve
   next := step(state,input)
   next
 """
-        transition = opening_transition(compile_source(source))
-        bindings = {
+        views = compile_source(source)
+        self.assertEqual(views["transition_system_execution_action_version"], 1)
+        self.assertEqual(views["transition_execution_context_control_flow_version"], 1)
+        self.assertEqual(views["transition_execution_context_projection_version"], 1)
+        transition = opening_transition(views)
+        contexts = {
             item["system"]: item
-            for item in transition["execution_action_bindings"]
+            for item in transition["execution_contexts"]
         }
-        self.assertEqual(set(bindings), {"DoorControl", "DoorObserve"})
-        self.assertEqual(display(bindings["DoorControl"]["action"]), "actuator(DoorState(Open))")
-        self.assertIsNone(bindings["DoorObserve"]["action"])
-        self.assertEqual(bindings["DoorObserve"]["status"], "resolved")
+        self.assertEqual(set(contexts), {"DoorControl", "DoorObserve"})
+        self.assertEqual(display(contexts["DoorControl"]["action"]), "actuator(DoorState(Open))")
+        self.assertIsNone(contexts["DoorObserve"]["action"])
+        self.assertEqual(contexts["DoorObserve"]["status"], "resolved")
+        self.assertEqual(
+            [item["system"] for item in transition["execution_action_bindings"]],
+            ["DoorControl"],
+        )
         self.assertTrue(transition["action_scope"]["context_required"])
         self.assertIsNone(transition["display_action"])
 
@@ -122,11 +130,15 @@ system DoorUnknown
 """
         views = compile_source(source)
         transition = opening_transition(views)
-        bindings = {
+        contexts = {
             item["system"]: item
-            for item in transition["execution_action_bindings"]
+            for item in transition["execution_contexts"]
         }
-        self.assertEqual(bindings["DoorUnknown"]["status"], "unresolved")
+        self.assertEqual(contexts["DoorUnknown"]["status"], "unresolved")
+        self.assertEqual(
+            [item["system"] for item in transition["execution_action_bindings"]],
+            ["DoorControl"],
+        )
         self.assertTrue(transition["action_scope"]["context_required"])
         self.assertIsNone(transition["display_action"])
         machine = views["state"]["machines"][0]
@@ -208,7 +220,7 @@ system DoorUnknown
   entry control
   in state:DoorState
   in input:Input
-  out receipt:R<Receipt,AuditError>
+  out receipt:Receipt
   state -> control
   input -> control
   control -> receipt
