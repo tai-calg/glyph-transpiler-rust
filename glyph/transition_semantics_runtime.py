@@ -18,7 +18,6 @@ def enrich_runtime_io_state_views(
     if (
         marker.get("schema") == STATE_TRANSITION_IR_SCHEMA
         and marker.get("version") == STATE_TRANSITION_IR_VERSION
-        and marker.get("stage") == "public"
     ):
         return views
     return enrich_state_transition_ir(model, views)
