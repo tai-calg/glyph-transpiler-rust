@@ -30,6 +30,9 @@ from .transition_operation_action_finalization import (
 from .transition_output_action_compatibility import (
     attach_output_action_compatibility,
 )
+from .transition_result_action_dataflow import (
+    attach_transition_result_consumer_actions,
+)
 
 
 def _target_state_projection_type(
@@ -121,8 +124,12 @@ def enrich_state_transition_ir(
     projected = [
         project_machine_transition_actions(model, machine) for machine in lowered
     ]
+    result_consumed = [
+        attach_transition_result_consumer_actions(model, machine)
+        for machine in projected
+    ]
     compatible = [
-        attach_output_action_compatibility(machine) for machine in projected
+        attach_output_action_compatibility(machine) for machine in result_consumed
     ]
     classified = [
         classify_machine_transition_roles(model, machine) for machine in compatible
@@ -155,6 +162,7 @@ def enrich_state_transition_ir(
     result["transition_input_preimage_version"] = INPUT_PREIMAGE_VERSION
     result["transition_enabling_cases_version"] = ENABLING_CASES_VERSION
     result["transition_operation_action_version"] = 2
+    result["transition_result_consumer_action_version"] = 1
     result["transition_action_target_independence_version"] = 1
     summary = dict(result.get("summary", {}))
     summary["state_warnings"] = sum(
