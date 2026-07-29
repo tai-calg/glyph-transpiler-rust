@@ -27,6 +27,9 @@ from .transition_input_provenance import (
 from .transition_operation_action_finalization import (
     finalize_machine_operation_actions,
 )
+from .transition_output_action_compatibility import (
+    attach_output_action_compatibility,
+)
 
 
 def _target_state_projection_type(
@@ -118,8 +121,11 @@ def enrich_state_transition_ir(
     projected = [
         project_machine_transition_actions(model, machine) for machine in lowered
     ]
+    compatible = [
+        attach_output_action_compatibility(machine) for machine in projected
+    ]
     classified = [
-        classify_machine_transition_roles(model, machine) for machine in projected
+        classify_machine_transition_roles(model, machine) for machine in compatible
     ]
     expanded = [
         expand_machine_transition_inputs(model, machine) for machine in classified
