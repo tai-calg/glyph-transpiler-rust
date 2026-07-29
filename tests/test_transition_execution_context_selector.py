@@ -15,8 +15,8 @@ class TransitionExecutionContextSelectorTests(unittest.TestCase):
         html = enhance_transition_execution_context_selector_html(DIAGRAM_HTML)
         self.assertIn("glyph-transition-execution-context-selector-v1-script", html)
         self.assertIn('id="execution-context-select"', html)
-        self.assertIn('label.textContent="実行コンテキスト"', html)
-        self.assertIn('key:MACHINE,label:"Machineのみ"', html)
+        self.assertIn('both("実行コンテキスト","Execution context")', html)
+        self.assertIn('both("Machineのみ","Machine only")', html)
         self.assertIn("execution_action_bindings", html)
         self.assertIn("machine_action_invocations", html)
         self.assertIn("transition-execution-context-selection", html)
@@ -24,6 +24,7 @@ class TransitionExecutionContextSelectorTests(unittest.TestCase):
         self.assertIn("window.GlyphExecutionContext", html)
         self.assertNotIn("window.fetch=async", html)
         self.assertIn("glyph-execution-context-changed", html)
+        self.assertIn("glyph-locale-changed", html)
 
     def test_prepared_app_installs_context_projection_after_compiler_ui(self) -> None:
         prepare_diagram_app()
