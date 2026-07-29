@@ -30,59 +30,53 @@ jobs:
           npm install playwright@1.54.2
           npx playwright install --with-deps chromium
 
-      - name: Align all regressions with operation-derived Action semantics
+      - name: Align regressions with operation-derived Action semantics
         shell: bash
         run: |
           python - <<'PY'
           from pathlib import Path
 
-          replacements = {
-              "tests/verify_uml_transition_semantics.mjs": [
-                  ('''    compactLabels: [
-                "PumpStart",
-                "PumpStop",
-                "PumpStart | WriteError",
-                "PumpStop | WriteError",
-              ],''', '''    compactLabels: [
-                "PumpStart➡︎write_pump(true)",
-                "PumpStop➡︎write_pump(false)",
-                "PumpStart➡︎write_pump(true) | WriteError",
-                "PumpStop➡︎write_pump(false) | WriteError",
-              ],'''),
-                  ('''    compactLabels: [
-                "ConveyorStart [input.clear]",
-                "ConveyorStop",
-                "ConveyorReset [input.clear]",
-                "ConveyorStart [input.clear] | DriveError",
-              ],''', '''    compactLabels: [
-                "ConveyorStart [input.clear]➡︎set_conveyor(input.speed)",
-                "ConveyorStop➡︎set_conveyor(0.0)",
-                "ConveyorReset [input.clear]➡︎set_conveyor(0.0)",
-                "ConveyorStart [input.clear]➡︎set_conveyor(input.speed) | DriveError",
-              ],'''),
-                  ('''    compactLabels: [
-                "ValveOpenRequest",
-                "ValveCloseRequest",
-                "ValveOpenRequest | ValveError",
-              ],''', '''    compactLabels: [
-                "ValveOpenRequest➡︎write_valve(true)",
-                "ValveCloseRequest➡︎write_valve(false)",
-                "ValveOpenRequest➡︎write_valve(true) | ValveError",
-              ],'''),
+          def replace_once(source: str, old: str, new: str, filename: str) -> str:
+              if old not in source:
+                  raise SystemExit(f"expected text not found in {filename}: {old}")
+              return source.replace(old, new, 1)
+
+          uml_path = Path("tests/verify_uml_transition_semantics.mjs")
+          uml = uml_path.read_text(encoding="utf-8")
+          compact = {
+              "Pump": [
+                  "PumpStart➡︎write_pump(true)",
+                  "PumpStop➡︎write_pump(false)",
+                  "PumpStart➡︎write_pump(true) | WriteError",
+                  "PumpStop➡︎write_pump(false) | WriteError",
               ],
-              "tests/verify_additional_failure_notation.mjs": [
-                  ('''      for (const effect of testCase.expectedEffects) {
-                assert(
-                  machine.transitions.some(transition => (
-                    transition.effect_invocations || []
-                  ).some(invocation => invocation.expression === effect)),
-                  `${testCase.machine}: Effect invocation missing from IR: ${effect}`,
-                );
-                assert(
-                  machine.transitions.every(transition => !actionDisplay(transition).includes(effect)),
-                  `${testCase.machine}: Effect invocation leaked into Action: ${effect}`,
-                );
-              }''', '''      for (const effect of testCase.expectedEffects) {
+              "Conveyor": [
+                  "ConveyorStart [input.clear]➡︎set_conveyor(input.speed)",
+                  "ConveyorStop➡︎set_conveyor(0.0)",
+                  "ConveyorReset [input.clear]➡︎set_conveyor(0.0)",
+                  "ConveyorStart [input.clear]➡︎set_conveyor(input.speed) | DriveError",
+              ],
+              "Valve": [
+                  "ValveOpenRequest➡︎write_valve(true)",
+                  "ValveCloseRequest➡︎write_valve(false)",
+                  "ValveOpenRequest➡︎write_valve(true) | ValveError",
+              ],
+          }
+          for machine, labels in compact.items():
+              machine_at = uml.index(f'machine: "{machine}",')
+              start = uml.index("    compactLabels: [", machine_at)
+              end = uml.index("    ],", start) + len("    ],")
+              rendered = "    compactLabels: [\n" + "\n".join(
+                  f'      "{label}",' for label in labels
+              ) + "\n    ],"
+              uml = uml[:start] + rendered + uml[end:]
+          uml_path.write_text(uml, encoding="utf-8")
+
+          additional_path = Path("tests/verify_additional_failure_notation.mjs")
+          additional = additional_path.read_text(encoding="utf-8")
+          first_start = additional.index("      for (const effect of testCase.expectedEffects) {")
+          first_end = additional.index("\n\n      await fs.writeFile(", first_start)
+          first = '''      for (const effect of testCase.expectedEffects) {
                 const witnesses = machine.transitions.filter(transition => (
                   actionDisplay(transition) === effect
                   && (transition.action_invocations || []).some(invocation => invocation.expression === effect)
@@ -93,41 +87,51 @@ jobs:
                   witnesses.length > 0,
                   `${testCase.machine}: missing Action/Effect dual-role witness: ${effect}`,
                 );
-              }'''),
-                  ('''      for (const effect of testCase.expectedEffects) {
-                assert(
-                  visible.every(label => !label.includes(`➡︎${effect}`) && !label.includes(` / ${effect}`)),
-                  `${testCase.machine}: Effect is visible in Action position: ${effect}`,
-                );
-              }''', '''      for (const effect of testCase.expectedEffects) {
+              }'''
+          additional = additional[:first_start] + first + additional[first_end:]
+          visible_at = additional.index("      const visible =")
+          second_start = additional.index("      for (const effect of testCase.expectedEffects) {", visible_at)
+          second_end = additional.index(
+              '\n      assert(\n        visible.every(label => !label.includes("➡︎—"))',
+              second_start,
+          )
+          second = '''      for (const effect of testCase.expectedEffects) {
                 assert(
                   visible.some(label => label.includes(`➡︎${effect}`)),
                   `${testCase.machine}: operation-derived Action is not visible: ${effect}`,
                 );
-              }'''),
-                  ('console.log(`verified ${cases.length} additional diagrams with separate Action, Effect, and failure notation`);',
-                   'console.log(`verified ${cases.length} additional diagrams with operation Actions, Effect metadata, and failure notation`);'),
-              ],
-              "tests/verify_diagram_editor_exports.mjs": [
-                  ('''      assert(!markup.includes("set_conveyor"), "SVG export leaked Effect invocation into Action labels");
-                assert(!markup.includes(" ➞ "), "SVG export synthesized an Action for a machine without action projection");''', '''      assert(markup.includes("set_conveyor"), "SVG export omitted operation-derived Action labels");
-                assert(markup.includes(" ➞ "), "SVG export omitted the I/O separator");'''),
-              ],
-              "tests/verify_transition_label_readability.mjs": [
-                  ('    requiredLabel: "ConveyorStop",', '    requiredLabel: "ConveyorStop ➞ set_conveyor(0.0)",'),
-              ],
-              "tests/verify_transition_semantic_readability.mjs": [
-                  ('    required: "ConveyorStop",', '    required: "ConveyorStop ➞ set_conveyor(0.0)",'),
-              ],
-          }
+              }'''
+          additional = additional[:second_start] + second + additional[second_end:]
+          additional = replace_once(
+              additional,
+              "verified ${cases.length} additional diagrams with separate Action, Effect, and failure notation",
+              "verified ${cases.length} additional diagrams with operation Actions, Effect metadata, and failure notation",
+              str(additional_path),
+          )
+          additional_path.write_text(additional, encoding="utf-8")
 
-          for filename, edits in replacements.items():
+          export_path = Path("tests/verify_diagram_editor_exports.mjs")
+          export = export_path.read_text(encoding="utf-8")
+          export = replace_once(
+              export,
+              'assert(!markup.includes("set_conveyor"), "SVG export leaked Effect invocation into Action labels");',
+              'assert(markup.includes("set_conveyor"), "SVG export omitted operation-derived Action labels");',
+              str(export_path),
+          )
+          export = replace_once(
+              export,
+              'assert(!markup.includes(" ➞ "), "SVG export synthesized an Action for a machine without action projection");',
+              'assert(markup.includes(" ➞ "), "SVG export omitted the I/O separator");',
+              str(export_path),
+          )
+          export_path.write_text(export, encoding="utf-8")
+
+          for filename, old, new in [
+              ("tests/verify_transition_label_readability.mjs", 'requiredLabel: "ConveyorStop"', 'requiredLabel: "ConveyorStop ➞ set_conveyor(0.0)"'),
+              ("tests/verify_transition_semantic_readability.mjs", 'required: "ConveyorStop"', 'required: "ConveyorStop ➞ set_conveyor(0.0)"'),
+          ]:
               path = Path(filename)
-              source = path.read_text(encoding="utf-8")
-              for old, new in edits:
-                  if old not in source:
-                      raise SystemExit(f"expected block not found in {filename}: {old.splitlines()[0]}")
-                  source = source.replace(old, new, 1)
+              source = replace_once(path.read_text(encoding="utf-8"), old, new, filename)
               path.write_text(source, encoding="utf-8")
           PY
 
@@ -156,7 +160,7 @@ jobs:
           node tests/verify_transition_label_readability.mjs 2>&1 | tee build/transition-label-readability/verify.log
           node tests/verify_transition_semantic_readability.mjs 2>&1 | tee build/transition-semantic-readability/verify.log
 
-      - name: Publish verified files and restore the normal workflow
+      - name: Publish verified files and restore normal workflow
         shell: bash
         run: |
           set -euo pipefail
