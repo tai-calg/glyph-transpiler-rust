@@ -41,7 +41,7 @@ class GlyphLauncherTests(unittest.TestCase):
                 self.assertEqual(second, path)
                 self.assertEqual(path.read_text(encoding="utf-8"), "system Custom\n")
 
-    def test_default_workspace_transitions_render_real_actuator_actions(self) -> None:
+    def test_default_workspace_transitions_are_source_specialized(self) -> None:
         output = CompilationPipeline().compile_text(
             launcher.DEFAULT_SOURCE,
             source_name="default-workspace.glyph",
@@ -49,27 +49,52 @@ class GlyphLauncherTests(unittest.TestCase):
         views = build_io_state_views(output.model, output.diagrams.ir)
         self.assertEqual(views["transition_result_consumer_action_version"], 1)
         machine = views["state"]["machines"][0]
+        transitions = [
+            item
+            for item in machine["transitions"]
+            if not item.get("synthesized_failure")
+        ]
+
+        self.assertEqual(len(transitions), 9)
+        self.assertFalse(
+            any(
+                item["source_state"] == item["target_state"]
+                and item["source_state"] in {"Opening", "Closing"}
+                for item in transitions
+            ),
+            "ordered unconditional branches must suppress later wildcard self-loops",
+        )
+        self.assertFalse(
+            any("actuator(state)" in action_display(item) for item in transitions),
+            "source-state specialization must eliminate the raw state parameter",
+        )
+
         expected = {
-            "Opening": "actuator(DoorState(Opening))",
-            "Alarm": "actuator(DoorState(Alarm))",
-            "Open": "actuator(DoorState(Open))",
-            "Closing": "actuator(DoorState(Closing))",
-            "Closed": "actuator(DoorState(Closed))",
+            ("Closed", "Opening"): "actuator(DoorState(Opening))",
+            ("Opening", "Alarm"): "actuator(DoorState(Alarm))",
+            ("Opening", "Open"): "actuator(DoorState(Open))",
+            ("Open", "Closing"): "actuator(DoorState(Closing))",
+            ("Closing", "Opening"): "actuator(DoorState(Opening))",
+            ("Closing", "Closed"): "actuator(DoorState(Closed))",
+            ("Closed", "Closed"): "actuator(DoorState(Closed))",
+            ("Open", "Open"): "actuator(DoorState(Open))",
+            ("Alarm", "Alarm"): "actuator(DoorState(Alarm))",
         }
-        for target, action in expected.items():
-            matching = [
-                transition
-                for transition in machine["transitions"]
-                if transition["target_state"] == target
-                and action_display(transition) == action
-            ]
-            self.assertTrue(matching, f"missing {target} -> {action}")
-            for transition in matching:
-                self.assertEqual(
-                    transition["action_invocations"][0]["provenance"],
-                    "transition-result-consumer",
-                )
-                self.assertNotEqual(action_display(transition), target)
+        actual = {
+            (item["source_state"], item["target_state"]): action_display(item)
+            for item in transitions
+        }
+        self.assertEqual(actual, expected)
+
+        for transition in transitions:
+            self.assertEqual(
+                transition["action_invocations"][0]["provenance"],
+                "transition-result-consumer",
+            )
+            self.assertNotEqual(
+                action_display(transition),
+                transition["target_state"],
+            )
 
     def test_untouched_legacy_default_is_migrated(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
