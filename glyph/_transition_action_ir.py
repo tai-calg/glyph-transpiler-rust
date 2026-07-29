@@ -13,12 +13,6 @@ def text(value: object) -> str:
     return str(value or "").strip()
 
 
-def invocation_key(
-    invocation: Mapping[str, object],
-) -> tuple[str, object]:
-    return text(invocation.get("expression")), invocation.get("failure_type")
-
-
 def renumber_invocations(
     invocations: Sequence[Mapping[str, object]],
 ) -> list[dict[str, object]]:
@@ -26,21 +20,6 @@ def renumber_invocations(
     for sequence, invocation in enumerate(result, start=1):
         invocation["sequence"] = sequence
     return result
-
-
-def merge_unique_invocations(
-    existing: Sequence[Mapping[str, object]],
-    additions: Sequence[Mapping[str, object]],
-) -> list[dict[str, object]]:
-    result = [dict(item) for item in existing]
-    seen = {invocation_key(item) for item in result}
-    for addition in additions:
-        key = invocation_key(addition)
-        if key in seen:
-            continue
-        result.append(dict(addition))
-        seen.add(key)
-    return renumber_invocations(result)
 
 
 def build_operation_action(
