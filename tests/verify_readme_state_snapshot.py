@@ -20,17 +20,16 @@ COMMITTED_PATH = ROOT / "docs/images/glyph-studio-state-transition.png"
 MOTOR_SOURCE_PATH = ROOT / "examples/acceptance/motor_safety.glyph"
 EXPECTED_SIZE = (1800, 1100)
 
-# Independent Chromium runs on GitHub-hosted runners have two observed raster
-# envelopes for the same DOM, geometry, text, and source: exact/near-exact and a
-# font-antialiasing band of about 5.4k pixels, mean delta 0.0061, max channel
-# delta 84. The publication gate therefore accepts that measured raster-only
-# envelope with margin. Semantic text, Action provenance, target/output
-# separation, line breaks, geometry, and collision freedom are verified before
-# this comparison by compiler and browser assertions. A missing/replaced label
-# changes substantially more pixels and introduces channel deltas above this
-# envelope.
-MAX_CHANGED_PIXELS = 6500
-MAX_MEAN_ABSOLUTE_DELTA = 0.008
+# Chromium can shift antialiased edge pixels by one or two channel levels across
+# otherwise identical hosted runners. Those subpixel differences are removed
+# before the raster statistics are calculated. Semantic text, Action
+# provenance, target/output separation, line breaks, geometry, and collisions
+# are independently asserted before this comparison. The remaining thresholds
+# cover the measured significant-pixel envelope while keeping the publication
+# gate sensitive to actual text or layout changes.
+ANTIALIAS_CHANNEL_FLOOR = 2
+MAX_CHANGED_PIXELS = 2500
+MAX_MEAN_ABSOLUTE_DELTA = 0.0065
 MAX_CHANNEL_DELTA = 96
 
 
@@ -188,12 +187,20 @@ def compare_images(
 
         difference = ImageChops.difference(generated, committed)
         red, green, blue = difference.split()
-        changed_mask = ImageChops.lighter(ImageChops.lighter(red, green), blue)
-        mask_histogram = changed_mask.histogram()
+        maximum_channel = ImageChops.lighter(ImageChops.lighter(red, green), blue)
+        significant_mask = maximum_channel.point(
+            lambda delta: 255 if delta > ANTIALIAS_CHANNEL_FLOOR else 0
+        )
+        significant_difference = Image.composite(
+            difference,
+            Image.new("RGB", difference.size),
+            significant_mask,
+        )
+        mask_histogram = significant_mask.histogram()
         pixel_count = generated.width * generated.height
         changed_pixels = pixel_count - mask_histogram[0]
 
-        histogram = difference.histogram()
+        histogram = significant_difference.histogram()
         absolute_sum = sum(
             delta * histogram[channel * 256 + delta]
             for channel in range(3)
@@ -241,12 +248,13 @@ def main() -> None:
         raise AssertionError(
             "README state-transition PNG is stale or was generated from "
             "different semantics.\n"
-            f"changed pixels: {changed_pixels}/{pixel_count} "
+            f"significant changed pixels: {changed_pixels}/{pixel_count} "
             f"({changed_fraction:.8%}) [limit {MAX_CHANGED_PIXELS}]\n"
-            f"mean absolute channel delta: {mean_absolute_delta:.8f} "
+            f"significant mean absolute channel delta: {mean_absolute_delta:.8f} "
             f"[limit {MAX_MEAN_ABSOLUTE_DELTA}]\n"
-            f"maximum channel delta: {max_channel_delta} "
+            f"maximum significant channel delta: {max_channel_delta} "
             f"[limit {MAX_CHANNEL_DELTA}]\n"
+            f"ignored antialias channel floor: {ANTIALIAS_CHANNEL_FLOOR}\n"
             "Regenerate and verify it with:\n"
             "node tests/verify_state_diagram_rendering.mjs && \\\n"
             "UPDATE_README_STATE_DIAGRAM=1 "
@@ -258,9 +266,10 @@ def main() -> None:
     print(
         "verified operation Action provenance, Action/Target/Output separation, "
         "Input/Guard enabling cases, and README snapshot "
-        f"(changed_pixels={changed_pixels}, "
-        f"mean_delta={mean_absolute_delta:.8f}, "
-        f"max_delta={max_channel_delta})"
+        f"(significant_changed_pixels={changed_pixels}, "
+        f"significant_mean_delta={mean_absolute_delta:.8f}, "
+        f"max_delta={max_channel_delta}, "
+        f"antialias_floor={ANTIALIAS_CHANNEL_FLOOR})"
     )
 
 

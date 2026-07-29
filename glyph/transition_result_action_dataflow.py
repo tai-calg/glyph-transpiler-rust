@@ -2,35 +2,43 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Mapping, Sequence
+from typing import Mapping, Sequence
 
+from ._transition_action_ir import (
+    _RESULT_CONSUMER_PROVENANCE,
+    build_operation_action,
+    merge_unique_invocations,
+    renumber_invocations,
+    text,
+)
+from ._transition_branch_semantics import (
+    MachineBranchContext,
+    branch_value_for_transition,
+    build_machine_branch_context,
+    planned_source_branches,
+    simplify_expr,
+    substitute_expr,
+    truth_value,
+    unwrap_expr,
+)
+from .artifacts import CompilationModel
 from .compiler import (
     AliasDecl,
     BinaryExpr,
-    BoolExpr,
     CallExpr,
     Expr,
     ExternDecl,
     FieldExpr,
-    FunctionDecl,
     NameExpr,
-    NumberExpr,
-    ProductDecl,
-    SumDecl,
     TryExpr,
     TypeRef,
     UnaryExpr,
     parse_expr,
 )
 from .execution_ir import render_expr
-from .state_transition_compiler import _root_branches
-
-if TYPE_CHECKING:
-    from .artifacts import CompilationModel
+from .function_blocks import FunctionBlockLowering
 
 
-ACTION_PROVENANCE = "transition-operation-invocation"
-CONSUMER_PROVENANCE = "transition-result-consumer"
 _AMBIGUOUS_CODE = "STIR_ACTION_RESULT_CONSUMER_AMBIGUOUS"
 _UNRESOLVED_CODE = "STIR_ACTION_RESULT_CONSUMER_UNRESOLVED"
 _MARKER_NAME = "__glyph_transition_result__"
@@ -38,71 +46,37 @@ _MARKER = NameExpr(_MARKER_NAME)
 
 
 @dataclass(frozen=True)
-class _Pair:
+class _ExprPair:
     symbolic: Expr
     concrete: Expr
 
 
 @dataclass(frozen=True)
-class _Context:
+class _ConsumerContext:
     caller: str
     binding_name: str
     binding_index: int
-    line: int
-    block: object
+    block: FunctionBlockLowering
 
 
 @dataclass(frozen=True)
-class _Evaluation:
+class _TraceSite:
+    caller: str
+    line: int
+    path: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class _TraceResult:
     invocations: tuple[dict[str, object], ...]
     unresolved: bool = False
 
 
 @dataclass(frozen=True)
-class _ContextEvaluation:
-    context: _Context
+class _ContextTrace:
+    context: _ConsumerContext
     invocations: tuple[dict[str, object], ...]
     unresolved: bool
-
-
-def _text(value: object) -> str:
-    return str(value or "").strip()
-
-
-def _unwrap(expression: Expr) -> Expr:
-    if isinstance(expression, TryExpr):
-        return _unwrap(expression.expr)
-    if (
-        isinstance(expression, CallExpr)
-        and isinstance(expression.callee, NameExpr)
-        and expression.callee.name == "Ok"
-        and len(expression.args) == 1
-    ):
-        return _unwrap(expression.args[0])
-    return expression
-
-
-def _substitute(expression: Expr, values: Mapping[str, Expr]) -> Expr:
-    if isinstance(expression, NameExpr):
-        return values.get(expression.name, expression)
-    if isinstance(expression, FieldExpr):
-        return FieldExpr(_substitute(expression.base, values), expression.field)
-    if isinstance(expression, UnaryExpr):
-        return UnaryExpr(expression.op, _substitute(expression.expr, values))
-    if isinstance(expression, BinaryExpr):
-        return BinaryExpr(
-            expression.op,
-            _substitute(expression.left, values),
-            _substitute(expression.right, values),
-        )
-    if isinstance(expression, CallExpr):
-        return CallExpr(
-            _substitute(expression.callee, values),
-            tuple(_substitute(argument, values) for argument in expression.args),
-        )
-    if isinstance(expression, TryExpr):
-        return TryExpr(_substitute(expression.expr, values))
-    return expression
 
 
 def _contains_marker(expression: Expr) -> bool:
@@ -145,274 +119,211 @@ def _failure_type(type_ref: TypeRef, aliases: Mapping[str, TypeRef]) -> str | No
     return None
 
 
-def _ground_value(expression: Expr, constants: frozenset[str]) -> bool:
-    if isinstance(expression, (BoolExpr, NumberExpr)):
-        return True
-    if isinstance(expression, NameExpr):
-        return expression.name in constants
-    if isinstance(expression, CallExpr) and isinstance(expression.callee, NameExpr):
-        return expression.callee.name in constants and all(
-            _ground_value(argument, constants) for argument in expression.args
-        )
-    return False
-
-
-def _simplify(
-    expression: Expr,
-    *,
-    products: Mapping[str, ProductDecl],
-    constants: frozenset[str],
-) -> Expr:
-    if isinstance(expression, FieldExpr):
-        base = _simplify(expression.base, products=products, constants=constants)
-        if isinstance(base, CallExpr) and isinstance(base.callee, NameExpr):
-            declaration = products.get(base.callee.name)
-            if declaration is not None and len(base.args) == len(declaration.fields):
-                index = next(
-                    (
-                        index
-                        for index, field in enumerate(declaration.fields)
-                        if field.name == expression.field
-                    ),
-                    None,
-                )
-                if index is not None:
-                    return _simplify(
-                        base.args[index], products=products, constants=constants
-                    )
-        return FieldExpr(base, expression.field)
-    if isinstance(expression, TryExpr):
-        return TryExpr(
-            _simplify(expression.expr, products=products, constants=constants)
-        )
-    if isinstance(expression, UnaryExpr):
-        value = _simplify(expression.expr, products=products, constants=constants)
-        if expression.op == "!" and isinstance(value, BoolExpr):
-            return BoolExpr(not value.value)
-        return UnaryExpr(expression.op, value)
-    if isinstance(expression, CallExpr):
-        return CallExpr(
-            expression.callee,
-            tuple(
-                _simplify(argument, products=products, constants=constants)
-                for argument in expression.args
-            ),
-        )
-    if isinstance(expression, BinaryExpr):
-        left = _simplify(expression.left, products=products, constants=constants)
-        right = _simplify(expression.right, products=products, constants=constants)
-        if expression.op in {"==", "!="}:
-            if _ground_value(left, constants) and _ground_value(right, constants):
-                equal = left == right
-                return BoolExpr(equal if expression.op == "==" else not equal)
-        if expression.op == "&":
-            if isinstance(left, BoolExpr):
-                return right if left.value else BoolExpr(False)
-            if isinstance(right, BoolExpr):
-                return left if right.value else BoolExpr(False)
-        if expression.op == "|":
-            if isinstance(left, BoolExpr):
-                return BoolExpr(True) if left.value else right
-            if isinstance(right, BoolExpr):
-                return BoolExpr(True) if right.value else left
-        return BinaryExpr(expression.op, left, right)
-    return expression
-
-
-def _truth(
-    expression: Expr,
-    *,
-    products: Mapping[str, ProductDecl],
-    constants: frozenset[str],
-) -> bool | None:
-    simplified = _simplify(expression, products=products, constants=constants)
-    return simplified.value if isinstance(simplified, BoolExpr) else None
-
-
-class _Evaluator:
+class _OperationTracer:
     def __init__(
         self,
         *,
-        functions: Mapping[str, FunctionDecl],
+        branch_context: MachineBranchContext,
         externs: Mapping[str, ExternDecl],
         aliases: Mapping[str, TypeRef],
-        products: Mapping[str, ProductDecl],
-        constants: frozenset[str],
-        caller: str,
-        line: int,
-        path: Sequence[str],
     ) -> None:
-        self.functions = functions
-        self.externs = externs
-        self.aliases = aliases
-        self.products = products
-        self.constants = constants
-        self.caller = caller
-        self.line = line
-        self.path = tuple(path)
+        self._context = branch_context
+        self._externs = externs
+        self._aliases = aliases
 
-    def evaluate(
+    def trace(
         self,
-        pair: _Pair,
+        pair: _ExprPair,
+        site: _TraceSite,
         *,
         visited: frozenset[str] = frozenset(),
-        path: Sequence[str] | None = None,
-    ) -> _Evaluation:
+    ) -> _TraceResult:
         symbolic = pair.symbolic
         concrete = pair.concrete
-        current_path = tuple(path or self.path)
 
         if isinstance(symbolic, FieldExpr) and isinstance(concrete, FieldExpr):
-            return self.evaluate(
-                _Pair(symbolic.base, concrete.base),
+            return self.trace(
+                _ExprPair(symbolic.base, concrete.base),
+                site,
                 visited=visited,
-                path=current_path,
             )
         if isinstance(symbolic, TryExpr) and isinstance(concrete, TryExpr):
-            return self.evaluate(
-                _Pair(symbolic.expr, concrete.expr),
+            return self.trace(
+                _ExprPair(symbolic.expr, concrete.expr),
+                site,
                 visited=visited,
-                path=current_path,
             )
         if isinstance(symbolic, UnaryExpr) and isinstance(concrete, UnaryExpr):
-            return self.evaluate(
-                _Pair(symbolic.expr, concrete.expr),
+            return self.trace(
+                _ExprPair(symbolic.expr, concrete.expr),
+                site,
                 visited=visited,
-                path=current_path,
             )
         if isinstance(symbolic, BinaryExpr) and isinstance(concrete, BinaryExpr):
-            left = self.evaluate(
-                _Pair(symbolic.left, concrete.left),
+            left = self.trace(
+                _ExprPair(symbolic.left, concrete.left),
+                site,
                 visited=visited,
-                path=current_path,
             )
-            right = self.evaluate(
-                _Pair(symbolic.right, concrete.right),
+            right = self.trace(
+                _ExprPair(symbolic.right, concrete.right),
+                site,
                 visited=visited,
-                path=current_path,
             )
-            return _Evaluation(
+            return _TraceResult(
                 (*left.invocations, *right.invocations),
                 left.unresolved or right.unresolved,
             )
         if not isinstance(symbolic, CallExpr) or not isinstance(concrete, CallExpr):
-            return _Evaluation(())
+            return _TraceResult(())
 
         nested: list[dict[str, object]] = []
         unresolved = False
         for symbolic_argument, concrete_argument in zip(
-            symbolic.args, concrete.args, strict=False
+            symbolic.args,
+            concrete.args,
+            strict=False,
         ):
-            result = self.evaluate(
-                _Pair(symbolic_argument, concrete_argument),
+            traced = self.trace(
+                _ExprPair(symbolic_argument, concrete_argument),
+                site,
                 visited=visited,
-                path=current_path,
             )
-            nested.extend(result.invocations)
-            unresolved = unresolved or result.unresolved
+            nested.extend(traced.invocations)
+            unresolved = unresolved or traced.unresolved
 
         if not isinstance(symbolic.callee, NameExpr) or not isinstance(
-            concrete.callee, NameExpr
+            concrete.callee,
+            NameExpr,
         ):
-            return _Evaluation(tuple(nested), unresolved or _contains_marker(symbolic))
+            return _TraceResult(
+                tuple(nested),
+                unresolved or _contains_marker(symbolic),
+            )
+
         name = symbolic.callee.name
-        external = self.externs.get(name)
+        external = self._externs.get(name)
         if external is not None:
             if not _contains_marker(symbolic):
-                return _Evaluation(tuple(nested), unresolved)
+                return _TraceResult(tuple(nested), unresolved)
             rendered = render_expr(
-                _simplify(
+                simplify_expr(
                     concrete,
-                    products=self.products,
-                    constants=self.constants,
+                    products=self._context.products,
+                    constants=self._context.constants,
                 )
             )
             nested.append(
                 {
                     "operation": name,
                     "expression": rendered,
-                    "failure_type": _failure_type(external.return_type, self.aliases),
+                    "failure_type": _failure_type(
+                        external.return_type,
+                        self._aliases,
+                    ),
                     "sequence": 0,
                     "effectful": True,
                     "kind": "effect-invocation",
-                    "provenance": CONSUMER_PROVENANCE,
-                    "source": {"line": self.line, "column": 1},
-                    "caller": self.caller,
-                    "dataflow_path": [*current_path, name],
+                    "provenance": _RESULT_CONSUMER_PROVENANCE,
+                    "source": {"line": site.line, "column": 1},
+                    "caller": site.caller,
+                    "dataflow_path": [*site.path, name],
                 }
             )
-            return _Evaluation(tuple(nested), unresolved)
+            return _TraceResult(tuple(nested), unresolved)
 
-        function = self.functions.get(name)
+        function = self._context.functions.get(name)
         if function is None:
-            return _Evaluation(tuple(nested), unresolved)
+            return _TraceResult(tuple(nested), unresolved)
         if name in visited or len(function.params) != len(symbolic.args):
-            return _Evaluation(
-                tuple(nested), unresolved or _contains_marker(symbolic)
+            return _TraceResult(
+                tuple(nested),
+                unresolved or _contains_marker(symbolic),
             )
+
         symbolic_values = {
             parameter.name: argument
-            for parameter, argument in zip(function.params, symbolic.args, strict=True)
+            for parameter, argument in zip(
+                function.params,
+                symbolic.args,
+                strict=True,
+            )
         }
         concrete_values = {
             parameter.name: argument
-            for parameter, argument in zip(function.params, concrete.args, strict=True)
+            for parameter, argument in zip(
+                function.params,
+                concrete.args,
+                strict=True,
+            )
         }
-        next_path = (*current_path, name)
+        next_site = _TraceSite(site.caller, site.line, (*site.path, name))
         next_visited = visited | {name}
+
         if function.expression is not None:
-            body = _Pair(
-                _substitute(function.expression, symbolic_values),
-                _substitute(function.expression, concrete_values),
+            traced = self.trace(
+                _ExprPair(
+                    substitute_expr(function.expression, symbolic_values),
+                    substitute_expr(function.expression, concrete_values),
+                ),
+                next_site,
+                visited=next_visited,
             )
-            result = self.evaluate(body, visited=next_visited, path=next_path)
-            return _Evaluation(
-                (*nested, *result.invocations),
-                unresolved or result.unresolved,
+            return _TraceResult(
+                (*nested, *traced.invocations),
+                unresolved or traced.unresolved,
             )
-        if function.guards:
-            for clause in function.guards:
-                if clause.condition is None:
-                    selected = _Pair(
-                        _substitute(clause.value, symbolic_values),
-                        _substitute(clause.value, concrete_values),
-                    )
-                    result = self.evaluate(
-                        selected, visited=next_visited, path=next_path
-                    )
-                    return _Evaluation(
-                        (*nested, *result.invocations),
-                        unresolved or result.unresolved,
-                    )
-                condition = _substitute(clause.condition, concrete_values)
-                condition_truth = _truth(
-                    condition,
-                    products=self.products,
-                    constants=self.constants,
+
+        for clause in function.guards:
+            if clause.condition is None:
+                selected = _ExprPair(
+                    substitute_expr(clause.value, symbolic_values),
+                    substitute_expr(clause.value, concrete_values),
                 )
-                if condition_truth is False:
-                    continue
-                if condition_truth is None:
-                    return _Evaluation(
-                        tuple(nested), unresolved or _contains_marker(symbolic)
-                    )
-                selected = _Pair(
-                    _substitute(clause.value, symbolic_values),
-                    _substitute(clause.value, concrete_values),
+                traced = self.trace(
+                    selected,
+                    next_site,
+                    visited=next_visited,
                 )
-                result = self.evaluate(
-                    selected, visited=next_visited, path=next_path
+                return _TraceResult(
+                    (*nested, *traced.invocations),
+                    unresolved or traced.unresolved,
                 )
-                return _Evaluation(
-                    (*nested, *result.invocations),
-                    unresolved or result.unresolved,
+
+            condition = substitute_expr(clause.condition, concrete_values)
+            condition_truth = truth_value(
+                condition,
+                products=self._context.products,
+                constants=self._context.constants,
+            )
+            if condition_truth is False:
+                continue
+            if condition_truth is None:
+                return _TraceResult(
+                    tuple(nested),
+                    unresolved or _contains_marker(symbolic),
                 )
-            return _Evaluation(tuple(nested), unresolved or _contains_marker(symbolic))
-        return _Evaluation(tuple(nested), unresolved)
+            traced = self.trace(
+                _ExprPair(
+                    substitute_expr(clause.value, symbolic_values),
+                    substitute_expr(clause.value, concrete_values),
+                ),
+                next_site,
+                visited=next_visited,
+            )
+            return _TraceResult(
+                (*nested, *traced.invocations),
+                unresolved or traced.unresolved,
+            )
+
+        return _TraceResult(
+            tuple(nested),
+            unresolved or _contains_marker(symbolic),
+        )
 
 
 def _direct_call_name(expression: Expr) -> str | None:
-    value = _unwrap(expression)
+    value = unwrap_expr(expression)
     if isinstance(value, CallExpr) and isinstance(value.callee, NameExpr):
         return value.callee.name
     return None
@@ -421,8 +332,8 @@ def _direct_call_name(expression: Expr) -> str | None:
 def _consumer_contexts(
     model: CompilationModel,
     next_function: str,
-) -> tuple[_Context, ...]:
-    contexts: list[_Context] = []
+) -> tuple[_ConsumerContext, ...]:
+    contexts: list[_ConsumerContext] = []
     for block in model.blocks:
         matches: list[tuple[int, object]] = []
         for index, binding in enumerate(block.bindings):
@@ -438,11 +349,10 @@ def _consumer_contexts(
             continue
         index, binding = matches[0]
         contexts.append(
-            _Context(
+            _ConsumerContext(
                 caller=block.name,
                 binding_name=binding.name,
                 binding_index=index,
-                line=binding.line,
                 block=block,
             )
         )
@@ -457,73 +367,73 @@ def _conditional_pair(
     *,
     symbolic_values: Mapping[str, Expr],
     concrete_values: Mapping[str, Expr],
-    products: Mapping[str, ProductDecl],
-    constants: frozenset[str],
-) -> tuple[_Pair | None, bool]:
+    branch_context: MachineBranchContext,
+) -> tuple[_ExprPair | None, bool]:
     clauses: list[tuple[str | None, str]] = []
     for original in source.splitlines():
         stripped = original.strip()
         if "=>" not in stripped:
             return None, True
         condition, value = stripped.split("=>", 1)
-        clauses.append((None if condition.strip() == "_" else condition.strip(), value.strip()))
+        clauses.append(
+            (
+                None if condition.strip() == "_" else condition.strip(),
+                value.strip(),
+            )
+        )
+
     for condition_source, value_source in clauses:
-        if condition_source is None:
+        if condition_source is not None:
             try:
-                value = parse_expr(value_source)
+                condition = substitute_expr(
+                    parse_expr(condition_source),
+                    concrete_values,
+                )
             except Exception:
                 return None, True
-            return _Pair(
-                _substitute(value, symbolic_values),
-                _substitute(value, concrete_values),
-            ), False
-        try:
-            condition = _substitute(parse_expr(condition_source), concrete_values)
-        except Exception:
-            return None, True
-        condition_truth = _truth(
-            condition,
-            products=products,
-            constants=constants,
-        )
-        if condition_truth is False:
-            continue
-        if condition_truth is None:
-            return None, True
+            condition_truth = truth_value(
+                condition,
+                products=branch_context.products,
+                constants=branch_context.constants,
+            )
+            if condition_truth is False:
+                continue
+            if condition_truth is None:
+                return None, True
         try:
             value = parse_expr(value_source)
         except Exception:
             return None, True
-        return _Pair(
-            _substitute(value, symbolic_values),
-            _substitute(value, concrete_values),
+        return _ExprPair(
+            substitute_expr(value, symbolic_values),
+            substitute_expr(value, concrete_values),
         ), False
     return None, True
 
 
 def _evaluate_context(
-    context: _Context,
+    context: _ConsumerContext,
     *,
     branch_value: Expr,
-    evaluator_factory: object,
-    products: Mapping[str, ProductDecl],
-    constants: frozenset[str],
-    next_function: str,
-) -> _ContextEvaluation:
-    block = context.block
+    tracer: _OperationTracer,
+    branch_context: MachineBranchContext,
+) -> _ContextTrace:
     symbolic_values: dict[str, Expr] = {context.binding_name: _MARKER}
     concrete_values: dict[str, Expr] = {context.binding_name: branch_value}
     invocations: list[dict[str, object]] = []
     unresolved = False
+    path = (
+        branch_context.next_function,
+        f"{context.caller}.{context.binding_name}",
+    )
 
-    for binding in block.bindings[context.binding_index + 1 :]:
+    for binding in context.block.bindings[context.binding_index + 1 :]:
         if binding.kind == "conditional":
             pair, failed = _conditional_pair(
                 binding.source,
                 symbolic_values=symbolic_values,
                 concrete_values=concrete_values,
-                products=products,
-                constants=constants,
+                branch_context=branch_context,
             )
             if pair is None:
                 unresolved = unresolved or failed
@@ -534,137 +444,38 @@ def _evaluate_context(
             except Exception:
                 unresolved = True
                 continue
-            pair = _Pair(
-                _substitute(expression, symbolic_values),
-                _substitute(expression, concrete_values),
+            pair = _ExprPair(
+                substitute_expr(expression, symbolic_values),
+                substitute_expr(expression, concrete_values),
             )
-        evaluator = evaluator_factory(
-            caller=context.caller,
-            line=binding.line,
-            path=(next_function, f"{context.caller}.{context.binding_name}"),
+
+        traced = tracer.trace(
+            pair,
+            _TraceSite(context.caller, binding.line, path),
         )
-        result = evaluator.evaluate(pair)
-        invocations.extend(result.invocations)
-        unresolved = unresolved or result.unresolved
+        invocations.extend(traced.invocations)
+        unresolved = unresolved or traced.unresolved
         symbolic_values[binding.name] = pair.symbolic
         concrete_values[binding.name] = pair.concrete
 
     try:
-        final_expression = parse_expr(block.final_source)
+        final_expression = parse_expr(context.block.final_source)
     except Exception:
-        return _ContextEvaluation(context, tuple(invocations), True)
-    final_pair = _Pair(
-        _substitute(final_expression, symbolic_values),
-        _substitute(final_expression, concrete_values),
+        return _ContextTrace(context, tuple(invocations), True)
+    final_pair = _ExprPair(
+        substitute_expr(final_expression, symbolic_values),
+        substitute_expr(final_expression, concrete_values),
     )
-    evaluator = evaluator_factory(
-        caller=context.caller,
-        line=block.final_line,
-        path=(next_function, f"{context.caller}.{context.binding_name}"),
+    traced = tracer.trace(
+        final_pair,
+        _TraceSite(context.caller, context.block.final_line, path),
     )
-    final_result = evaluator.evaluate(final_pair)
-    invocations.extend(final_result.invocations)
-    unresolved = unresolved or final_result.unresolved
-    return _ContextEvaluation(context, tuple(invocations), unresolved)
-
-
-def _branch_for_transition(
-    branches: Sequence[object],
-    transition: Mapping[str, object],
-) -> object | None:
-    source = transition.get("source", {})
-    line = int(source.get("line", 0)) if isinstance(source, Mapping) else 0
-    source_state = _text(transition.get("source_state"))
-    target_state = _text(transition.get("target_state"))
-    synthesized = bool(transition.get("synthesized_failure"))
-    candidates = [item for item in branches if int(getattr(item, "line", 0)) == line]
-    if synthesized:
-        return candidates[0] if candidates else None
-    for item in candidates:
-        target = getattr(item, "target", "")
-        resolved = source_state if target == "__same__" else _text(target)
-        if resolved == target_state:
-            return item
-    return candidates[0] if len(candidates) == 1 else None
-
-
-def _conditional_block_values(
-    model: CompilationModel,
-    function_name: str | None,
-) -> tuple[tuple[int, str, Expr], ...]:
-    if function_name is None:
-        return ()
-    block = next((item for item in model.blocks if item.name == function_name), None)
-    if block is None:
-        return ()
-    values: list[tuple[int, str, Expr]] = []
-    for binding in block.bindings:
-        if binding.kind != "conditional":
-            continue
-        for offset, original in enumerate(binding.source.splitlines(), start=1):
-            stripped = original.strip()
-            arrow = stripped.find("=>")
-            if arrow < 0:
-                continue
-            condition_text = stripped[:arrow].strip()
-            value_text = stripped[arrow + 2 :].strip()
-            if not value_text:
-                continue
-            try:
-                value = parse_expr(value_text)
-                condition = (
-                    "otherwise"
-                    if condition_text == "_"
-                    else render_expr(parse_expr(condition_text))
-                )
-            except Exception:
-                continue
-            values.append((binding.line + offset, condition, value))
-    return tuple(values)
-
-
-def _block_value_for_transition(
-    values: Sequence[tuple[int, str, Expr]],
-    transition: Mapping[str, object],
-) -> Expr | None:
-    source = transition.get("source", {})
-    line = int(source.get("line", 0)) if isinstance(source, Mapping) else 0
-    raw = _text(transition.get("condition_raw") or transition.get("condition"))
-    condition = "otherwise" if raw in {"", "otherwise", "next"} else raw
-    exact = [
-        value
-        for candidate_line, candidate_condition, value in values
-        if candidate_line == line and candidate_condition == condition
-    ]
-    if exact:
-        return exact[0]
-    matching = [
-        value
-        for _, candidate_condition, value in values
-        if candidate_condition == condition
-    ]
-    return matching[0] if len(matching) == 1 else None
-
-
-def _action_value(invocations: Sequence[Mapping[str, object]]) -> dict[str, object] | None:
-    expressions = [_text(item.get("expression")) for item in invocations]
-    expressions = [item for item in expressions if item]
-    if not expressions:
-        return None
-    operations = [_text(item.get("operation")) for item in invocations]
-    operations = [item for item in operations if item]
-    display = "; ".join(expressions)
-    source = invocations[0].get("source", {"line": 1, "column": 1})
-    return {
-        "display": display,
-        "expression": display,
-        "operation": operations[0] if len(operations) == 1 else None,
-        "operations": operations,
-        "kind": "operation-invocation" if len(expressions) == 1 else "operation-sequence",
-        "effectful": True,
-        "provenance": ACTION_PROVENANCE,
-        "source": dict(source) if isinstance(source, Mapping) else source,
-    }
+    invocations.extend(traced.invocations)
+    return _ContextTrace(
+        context,
+        tuple(invocations),
+        unresolved or traced.unresolved,
+    )
 
 
 def _diagnostic(code: str, message: str, line: int) -> dict[str, object]:
@@ -676,60 +487,54 @@ def _diagnostic(code: str, message: str, line: int) -> dict[str, object]:
     }
 
 
-def _sequence_key(invocations: Sequence[Mapping[str, object]]) -> tuple[tuple[str, str | None], ...]:
+def _sequence_key(
+    invocations: Sequence[Mapping[str, object]],
+) -> tuple[tuple[str, str | None], ...]:
     return tuple(
-        (_text(item.get("expression")), item.get("failure_type"))
+        (text(item.get("expression")), item.get("failure_type"))
         for item in invocations
     )
+
+
+def _append_diagnostic_once(
+    diagnostics: list[dict[str, object]],
+    diagnostic: dict[str, object],
+) -> None:
+    key = (
+        diagnostic.get("code"),
+        diagnostic.get("line"),
+        diagnostic.get("message"),
+    )
+    if any(
+        (item.get("code"), item.get("line"), item.get("message")) == key
+        for item in diagnostics
+    ):
+        return
+    diagnostics.append(diagnostic)
 
 
 def attach_transition_result_consumer_actions(
     model: CompilationModel,
     machine_view: dict[str, object],
 ) -> dict[str, object]:
-    """Attribute post-transition operations through proven immutable result flow.
-
-    The pass follows the machine next-function result into a caller binding and then
-    through aliases and pure helpers until an external operation consumes that
-    result. It never substitutes Target State or Emitted Output for an operation.
-    """
+    """Attach only caller operations proven to consume a transition result."""
 
     result = deepcopy(machine_view)
-    machine = next(
-        (item for item in model.machines if item.name == result.get("name")),
-        None,
+    branch_context = build_machine_branch_context(
+        model,
+        str(result.get("name") or ""),
     )
-    if machine is None or not isinstance(machine.next_expr, CallExpr) or not isinstance(
-        machine.next_expr.callee, NameExpr
-    ):
+    if branch_context is None:
         return result
-    next_function = machine.next_expr.callee.name
-    contexts = _consumer_contexts(model, next_function)
+
+    contexts = _consumer_contexts(model, branch_context.next_function)
+    analysis = dict(result.get("analysis", {}))
+    analysis["transition_result_consumer_action_version"] = 1
+    analysis["transition_result_consumer_context_count"] = len(contexts)
     if not contexts:
-        analysis = dict(result.get("analysis", {}))
-        analysis["transition_result_consumer_action_version"] = 1
-        analysis["transition_result_consumer_context_count"] = 0
         result["analysis"] = analysis
         return result
 
-    products = {
-        item.name: item
-        for item in model.program.declarations
-        if isinstance(item, ProductDecl)
-    }
-    sums = {
-        item.name: item
-        for item in model.program.declarations
-        if isinstance(item, SumDecl)
-    }
-    constants = frozenset(
-        variant.name for declaration in sums.values() for variant in declaration.variants
-    )
-    functions = {
-        item.name: item
-        for item in model.program.declarations
-        if isinstance(item, FunctionDecl)
-    }
     externs = {
         item.name: item
         for item in model.program.declarations
@@ -740,45 +545,18 @@ def attach_transition_result_consumer_actions(
         for item in model.program.declarations
         if isinstance(item, AliasDecl)
     }
-
-    state_decl = products.get(machine.state_param.ty.name)
-    if state_decl is None or not isinstance(machine.selector, FieldExpr):
-        return result
-    selector_index = next(
-        (
-            index
-            for index, field in enumerate(state_decl.fields)
-            if field.name == machine.selector.field
-        ),
-        None,
+    tracer = _OperationTracer(
+        branch_context=branch_context,
+        externs=externs,
+        aliases=aliases,
     )
-    if selector_index is None:
-        return result
-    selector_sum = sums.get(state_decl.fields[selector_index].ty.name)
-    if selector_sum is None:
-        return result
-    branches = _root_branches(
-        next_function,
-        functions=functions,
-        state_decl=state_decl,
-        selector_index=selector_index,
-        variants={item.name for item in selector_sum.variants},
-        root_state_param=machine.state_param.name,
+    state_names = [str(item.get("name", "")) for item in result.get("states", [])]
+    unreachable_lines = frozenset(map(int, result.get("unreachable_branches", [])))
+    branch_plan = planned_source_branches(
+        branch_context,
+        state_names,
+        unreachable_lines=unreachable_lines,
     )
-    block_values = _conditional_block_values(model, next_function)
-
-    def evaluator_factory(*, caller: str, line: int, path: Sequence[str]) -> _Evaluator:
-        return _Evaluator(
-            functions=functions,
-            externs=externs,
-            aliases=aliases,
-            products=products,
-            constants=constants,
-            caller=caller,
-            line=line,
-            path=path,
-        )
-
     diagnostics = [dict(item) for item in result.get("diagnostics", [])]
     transitions: list[dict[str, object]] = []
     consumer_action_count = 0
@@ -787,10 +565,11 @@ def attach_transition_result_consumer_actions(
 
     for original in result.get("transitions", []):
         transition = dict(original)
-        branch = _branch_for_transition(branches, transition)
-        branch_value = getattr(branch, "value", None) if branch is not None else None
-        if branch_value is None:
-            branch_value = _block_value_for_transition(block_values, transition)
+        branch_value = branch_value_for_transition(
+            branch_context,
+            transition,
+            branch_plan,
+        )
         if branch_value is None:
             transitions.append(transition)
             continue
@@ -799,10 +578,8 @@ def attach_transition_result_consumer_actions(
             _evaluate_context(
                 context,
                 branch_value=branch_value,
-                evaluator_factory=evaluator_factory,
-                products=products,
-                constants=constants,
-                next_function=next_function,
+                tracer=tracer,
+                branch_context=branch_context,
             )
             for context in contexts
         ]
@@ -810,33 +587,35 @@ def attach_transition_result_consumer_actions(
         line = int(source.get("line", 1)) if isinstance(source, Mapping) else 1
         if any(item.unresolved for item in evaluations):
             unresolved_count += 1
-            diagnostics.append(
+            _append_diagnostic_once(
+                diagnostics,
                 _diagnostic(
                     _UNRESOLVED_CODE,
                     (
-                        f"transition result from `{next_function}` reaches a caller path "
-                        "whose operation cannot be proven; Action remains unchanged"
+                        f"transition result from `{branch_context.next_function}` reaches "
+                        "a caller path whose operation cannot be proven; Action remains unchanged"
                     ),
                     line,
-                )
+                ),
             )
             transitions.append(transition)
             continue
 
-        by_key: dict[tuple[tuple[str, str | None], ...], _ContextEvaluation] = {}
+        by_key: dict[tuple[tuple[str, str | None], ...], _ContextTrace] = {}
         for evaluation in evaluations:
             by_key.setdefault(_sequence_key(evaluation.invocations), evaluation)
         if len(by_key) > 1:
             ambiguous_count += 1
-            diagnostics.append(
+            _append_diagnostic_once(
+                diagnostics,
                 _diagnostic(
                     _AMBIGUOUS_CODE,
                     (
-                        f"transition result from `{next_function}` has multiple caller "
-                        "operation sequences; no downstream Action is invented"
+                        f"transition result from `{branch_context.next_function}` has multiple "
+                        "caller operation sequences; no downstream Action is invented"
                     ),
                     line,
-                )
+                ),
             )
             transitions.append(transition)
             continue
@@ -846,54 +625,44 @@ def attach_transition_result_consumer_actions(
         if not downstream:
             transitions.append(transition)
             continue
+
         existing = [
             dict(item)
             for item in transition.get("action_invocations", [])
             if isinstance(item, Mapping)
         ]
-        combined = [*existing, *downstream]
-        for sequence, invocation in enumerate(combined, start=1):
-            invocation["sequence"] = sequence
+        combined = renumber_invocations([*existing, *downstream])
         transition["action_invocations"] = combined
-        effects = [
+
+        existing_effects = [
             dict(item)
             for item in transition.get("effect_invocations", [])
             if isinstance(item, Mapping)
         ]
-        effect_keys = {
-            (_text(item.get("expression")), item.get("failure_type")) for item in effects
-        }
-        for invocation in downstream:
-            key = (_text(invocation.get("expression")), invocation.get("failure_type"))
-            if key not in effect_keys:
-                effects.append(dict(invocation))
-                effect_keys.add(key)
-        for sequence, invocation in enumerate(effects, start=1):
-            invocation["sequence"] = sequence
-        transition["effect_invocations"] = effects
-        transition["action"] = _action_value(combined)
+        transition["effect_invocations"] = merge_unique_invocations(
+            existing_effects,
+            downstream,
+        )
+        transition["action"] = build_operation_action(combined)
         transition["action_result_dataflow"] = {
-            "provenance": CONSUMER_PROVENANCE,
+            "provenance": _RESULT_CONSUMER_PROVENANCE,
             "caller": selected.context.caller,
             "binding": selected.context.binding_name,
             "path": [
-                next_function,
+                branch_context.next_function,
                 f"{selected.context.caller}.{selected.context.binding_name}",
                 *[
-                    _text(item.get("operation"))
+                    text(item.get("operation"))
                     for item in downstream
-                    if _text(item.get("operation"))
+                    if text(item.get("operation"))
                 ],
             ],
         }
         consumer_action_count += len(downstream)
         transitions.append(transition)
 
-    analysis = dict(result.get("analysis", {}))
     analysis.update(
         {
-            "transition_result_consumer_action_version": 1,
-            "transition_result_consumer_context_count": len(contexts),
             "transition_result_consumer_action_count": consumer_action_count,
             "transition_result_consumer_ambiguous_count": ambiguous_count,
             "transition_result_consumer_unresolved_count": unresolved_count,
@@ -905,8 +674,4 @@ def attach_transition_result_consumer_actions(
     return result
 
 
-__all__ = [
-    "ACTION_PROVENANCE",
-    "CONSUMER_PROVENANCE",
-    "attach_transition_result_consumer_actions",
-]
+__all__ = ["attach_transition_result_consumer_actions"]
