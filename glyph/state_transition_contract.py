@@ -20,13 +20,14 @@ TRANSITION_ENABLING_CASES_VERSION = 1
 TRANSITION_OPERATION_ACTION_VERSION = 2
 # Result-dependency remains an explicitly identified subset for compatibility.
 TRANSITION_RESULT_CONSUMER_ACTION_VERSION = 2
-# v2 preserves actionless, conditional, unresolved, and early-return execution
-# contexts instead of publishing only successful result consumers.
-TRANSITION_SYSTEM_EXECUTION_ACTION_VERSION = 2
-# v2 blocks automatic projection whenever any applicable execution context is
-# absent, unresolved, actionless-but-divergent, or semantically different.
-TRANSITION_ACTION_SCOPE_VERSION = 2
+# v1 means every proven operation sequenced after the machine transition is a
+# System Action. Path completeness is versioned separately below.
+TRANSITION_SYSTEM_EXECUTION_ACTION_VERSION = 1
+TRANSITION_ACTION_SCOPE_VERSION = 1
 TRANSITION_ACTION_TARGET_INDEPENDENCE_VERSION = 1
+# New additive contracts. They do not reinterpret the existing v1 fields.
+TRANSITION_EXECUTION_CONTEXT_CONTROL_FLOW_VERSION = 1
+TRANSITION_EXECUTION_CONTEXT_PROJECTION_VERSION = 1
 
 
 def raw_transition_ir_marker() -> dict[str, object]:
