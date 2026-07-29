@@ -8,8 +8,8 @@ STATE_TRANSITION_IR_SCHEMA = "glyph.state-transition-ir"
 RAW_STATE_TRANSITION_IR_VERSION = 2
 
 # Action-scope fields are additive to the public v4 shape. Existing `action`
-# remains the selected display projection, while the new explicit fields expose
-# machine and system ownership without invalidating v4 consumers.
+# remains the selected display projection, while explicit fields expose machine
+# and system ownership without invalidating v4 consumers.
 STATE_TRANSITION_IR_VERSION = 4
 
 # Input [Guard] ➞ Action remains label contract v2. Scope separation has its own
@@ -20,10 +20,12 @@ TRANSITION_ENABLING_CASES_VERSION = 1
 TRANSITION_OPERATION_ACTION_VERSION = 2
 # Result-dependency remains an explicitly identified subset for compatibility.
 TRANSITION_RESULT_CONSUMER_ACTION_VERSION = 2
-# Complete System Action includes every proven operation sequenced after the
-# machine transition, not only operations that consume the returned state.
-TRANSITION_SYSTEM_EXECUTION_ACTION_VERSION = 1
-TRANSITION_ACTION_SCOPE_VERSION = 1
+# v2 preserves actionless, conditional, unresolved, and early-return execution
+# contexts instead of publishing only successful result consumers.
+TRANSITION_SYSTEM_EXECUTION_ACTION_VERSION = 2
+# v2 blocks automatic projection whenever any applicable execution context is
+# absent, unresolved, actionless-but-divergent, or semantically different.
+TRANSITION_ACTION_SCOPE_VERSION = 2
 TRANSITION_ACTION_TARGET_INDEPENDENCE_VERSION = 1
 
 
