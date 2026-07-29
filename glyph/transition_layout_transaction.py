@@ -51,7 +51,7 @@ _SCRIPT = r"""
 (()=>{
 const MARKER="glyph-transition-layout-transaction-v1";
 const MAX_DISTANCE=96,GAP=4,DENSE_TRANSITIONS=7,MIN_WIDTH=1400,MIN_HEIGHT=1000;
-const RINGS=[0,12,24,36,48,60,72,84,96],ANGLES=72,OPTION_LIMIT=144,SEARCH_MS=1800;
+const RINGS=[0,12,24,36,48,60,72,84,96],ANGLES=72,OPTION_LIMIT=144,SEARCH_STEPS=1000000;
 const control=window.glyphTransitionLegacyControl;
 if(control)control.ownsScheduling=true;
 
@@ -317,12 +317,14 @@ function optionsFor(entry,stage,nodes){
   values.sort((left,right)=>left.score-right.score);
   return values.slice(0,OPTION_LIMIT);
 }
-function solveEntries(entries,deadline){
+function solveEntries(entries,stepLimit=SEARCH_STEPS){
   const ordered=[...entries].sort((left,right)=>Number(right.manual)-Number(left.manual)||left.options.length-right.options.length||left.index-right.index);
   const assignment=new Map(),placed=[];
+  let steps=0;
   function visit(index){
     if(index>=ordered.length)return true;
-    if(performance.now()>deadline)return false;
+    steps+=1;
+    if(steps>stepLimit)return false;
     const entry=ordered[index];
     for(const option of entry.options){
       if(placed.some(rect=>intersects(option.rect,rect)))continue;
@@ -438,7 +440,7 @@ async function transaction(token,reason){
   await nextFrame();
   const entries=layoutEntries(stage,data);
   if(entries.some(entry=>!entry.options.length))throw Error("no valid position exists inside the transition tether");
-  const assignment=solveEntries(entries,performance.now()+SEARCH_MS)||greedyEntries(entries);
+  const assignment=solveEntries(entries)||greedyEntries(entries);
   if(!assignment)throw Error("no collision-free transition label assignment exists");
   applyAssignment(stage,data,entries,assignment);
   await nextFrame();
