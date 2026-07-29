@@ -184,10 +184,17 @@ class TransitionOperationActionTests(unittest.TestCase):
         )
 
     def test_unrelated_post_step_effect_is_not_invented_as_action(self) -> None:
-        source = DIRECT_ACTUATOR_SOURCE.replace(
-            "!actuator(state:DoorState):Receipt\n",
-            "!actuator(state:DoorState):Receipt\n!tick():Receipt\n",
-        ).replace("  actuator(next)\n", "  tick()\n")
+        source = (
+            DIRECT_ACTUATOR_SOURCE.replace(
+                "  control -> actuator\n",
+                "  control -> tick\n",
+            )
+            .replace(
+                "!actuator(state:DoorState):Receipt\n",
+                "!actuator(state:DoorState):Receipt\n!tick():Receipt\n",
+            )
+            .replace("  actuator(next)\n", "  tick()\n")
+        )
         views = compile_source(source)
         machine = views["state"]["machines"][0]
         for transition in machine["transitions"]:
