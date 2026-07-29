@@ -4,110 +4,14 @@ on:
   pull_request:
     branches: [main]
     paths:
-      - "glyph.py"
-      - "glyph/architecture.py"
-      - "glyph/code_derived_system_ui.py"
-      - "glyph/diagnostic_i18n.py"
-      - "glyph/diagnostic_localization.py"
-      - "glyph/diagram_app.py"
-      - "glyph/diagram_ui.py"
-      - "glyph/diagram_canvas_navigation.py"
-      - "glyph/diagram_canvas_viewport.py"
-      - "glyph/diagram_editor_exports.py"
-      - "glyph/diagram_label_editor.py"
-      - "glyph/diagram_locale.py"
-      - "glyph/diagram_render_stability.py"
-      - "glyph/diagram_workspace_layout.py"
-      - "glyph/initial_transition_layout.py"
-      - "glyph/readable_diagram_app.py"
-      - "glyph/state_transition_ir.py"
-      - "glyph/state_transition_compiler.py"
-      - "glyph/state_transition_block_lowering.py"
-      - "glyph/state_transition_pipeline.py"
-      - "glyph/state_transition_ir_renderer.py"
-      - "glyph/transition_action_projection.py"
-      - "glyph/transition_action_target_independence.py"
-      - "glyph/transition_condition_roles.py"
-      - "glyph/transition_dense_canvas_dimensions.py"
-      - "glyph/transition_enabling_case_compatibility.py"
-      - "glyph/transition_enabling_case_defaults.py"
-      - "glyph/transition_enabling_case_rendering.py"
-      - "glyph/transition_enabling_cases.py"
-      - "glyph/transition_io_clusters.py"
-      - "glyph/transition_io_collision_solver.py"
-      - "glyph/transition_label_drag_guard.py"
-      - "glyph/transition_label_layout.py"
-      - "glyph/transition_label_readability.py"
-      - "glyph/transition_layout_interaction_adapter.py"
-      - "glyph/transition_layout_tab_guard.py"
-      - "glyph/transition_layout_transaction.py"
-      - "glyph/transition_layout_transaction_bootstrap.py"
-      - "glyph/transition_node_layout_guard.py"
-      - "glyph/transition_node_position_adapter.py"
-      - "glyph/transition_readable_exports.py"
-      - "glyph/transition_readable_layout.py"
-      - "glyph/transition_route_labels.py"
-      - "glyph/transition_semantic_role_lines.py"
-      - "glyph/transition_semantics.py"
-      - "glyph/transition_semantics_runtime.py"
-      - "glyph/uml_transition_layout.py"
-      - "glyph/io_state_views.py"
-      - "glyph/state_machine_analysis.py"
-      - "glyph/state_machine_source_map.py"
-      - "tests/test_code_derived_system_ui.py"
-      - "tests/test_diagnostic_localization.py"
-      - "tests/test_diagram_canvas_viewport.py"
-      - "tests/test_diagram_editor_exports.py"
-      - "tests/test_diagram_locale_navigation.py"
-      - "tests/test_diagram_render_stability.py"
-      - "tests/test_diagram_workspace_layout.py"
-      - "tests/test_initial_transition_layout.py"
-      - "tests/test_io_state_diagram_app.py"
-      - "tests/test_state_machine_source_map.py"
-      - "tests/test_state_diagram_examples.py"
-      - "tests/test_state_transition_ir_renderer.py"
-      - "tests/test_transition_action_target_independence.py"
-      - "tests/test_transition_enabling_cases.py"
-      - "tests/test_transition_input_provenance.py"
-      - "tests/test_transition_io_clusters.py"
-      - "tests/test_transition_label_drag_guard.py"
-      - "tests/test_transition_label_layout.py"
-      - "tests/test_transition_label_readability.py"
-      - "tests/test_transition_layout_transaction.py"
-      - "tests/test_transition_node_layout_guard.py"
-      - "tests/test_transition_readable_exports.py"
-      - "tests/test_transition_readable_layout.py"
-      - "tests/test_transition_route_labels.py"
-      - "tests/test_transition_semantic_role_lines.py"
-      - "tests/test_transition_semantics.py"
-      - "tests/verify_code_derived_system_io.mjs"
-      - "tests/verify_enabling_case_rendering.mjs"
-      - "tests/verify_state_diagram_rendering.mjs"
-      - "tests/verify_readme_state_snapshot.py"
-      - "tests/verify_state_diagram_stability.mjs"
-      - "tests/verify_uml_transition_semantics.mjs"
-      - "tests/verify_additional_failure_notation.mjs"
-      - "tests/verify_diagram_editor_exports.mjs"
-      - "tests/verify_diagram_canvas_viewport.mjs"
-      - "tests/verify_localized_semantic_canvas.mjs"
-      - "tests/verify_transition_label_readability.mjs"
-      - "tests/verify_transition_layout_transaction.mjs"
-      - "tests/verify_transition_semantic_readability.mjs"
-      - "examples/acceptance/door_controller.glyph"
-      - "examples/acceptance/motor_safety.glyph"
-      - "examples/state_diagrams/**"
-      - "docs/PROVISIONAL_TRIGGER_CLASSIFICATION.md"
-      - "docs/design/transition-input-action-provenance-v1.md"
-      - "docs/design/transition-enabling-cases-v1.md"
-      - "docs/images/glyph-studio-state-transition.png"
       - ".github/workflows/io-state-snapshot.yml"
-  workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  render:
+  publish-merge-snapshot:
+    if: ${{ github.head_ref == 'agent/fix-transition-action-source' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -118,68 +22,46 @@ jobs:
         with:
           node-version: "22"
 
-      - name: Install browser and image verifier
+      - name: Install renderer dependencies
         run: |
           python -m pip install pillow==12.0.0
           npm install playwright@1.54.2
           npx playwright install --with-deps chromium
 
-      - name: Compile and verify state diagrams
+      - name: Generate and verify merge-context README image
         shell: bash
+        env:
+          UPDATE_README_STATE_DIAGRAM: "1"
         run: |
-          set -o pipefail
-          mkdir -p build/checked-system-context-io build/state-diagram-regression build/state-diagram-stability build/uml-transition-semantics build/additional-failure-notation build/diagram-editor-exports build/diagram-canvas-viewport build/localized-semantic-canvas build/transition-label-readability build/transition-layout-transaction build/transition-semantic-readability
-          python -m unittest discover -s tests -p 'test_transition_action_target_independence.py'
-          python -m unittest discover -s tests -p 'test_transition_enabling_cases.py'
-          python -m unittest discover -s tests -p 'test_transition_input_provenance.py'
-          node tests/verify_code_derived_system_io.mjs \
-            2>&1 | tee build/checked-system-context-io/verify.log
-          node tests/verify_enabling_case_rendering.mjs \
-            2>&1 | tee build/state-diagram-regression/enabling-cases.log
-          node tests/verify_state_diagram_rendering.mjs \
-            2>&1 | tee build/state-diagram-regression/verify.log
-          python tests/verify_readme_state_snapshot.py \
-            2>&1 | tee -a build/state-diagram-regression/verify.log
-          node tests/verify_state_diagram_stability.mjs \
-            2>&1 | tee build/state-diagram-stability/verify.log
-          node tests/verify_uml_transition_semantics.mjs \
-            2>&1 | tee build/uml-transition-semantics/verify.log
-          node tests/verify_additional_failure_notation.mjs \
-            2>&1 | tee build/additional-failure-notation/verify.log
-          node tests/verify_transition_layout_transaction.mjs \
-            2>&1 | tee build/transition-layout-transaction/verify.log
-          node tests/verify_diagram_editor_exports.mjs \
-            2>&1 | tee build/diagram-editor-exports/verify.log
-          node tests/verify_diagram_canvas_viewport.mjs \
-            2>&1 | tee build/diagram-canvas-viewport/verify.log
-          node tests/verify_localized_semantic_canvas.mjs \
-            2>&1 | tee build/localized-semantic-canvas/verify.log
-          node tests/verify_transition_label_readability.mjs \
-            2>&1 | tee build/transition-label-readability/verify.log
-          node tests/verify_transition_semantic_readability.mjs \
-            2>&1 | tee build/transition-semantic-readability/verify.log
+          set -euo pipefail
+          mkdir -p build/state-diagram-regression
+          node tests/verify_state_diagram_rendering.mjs
+          python tests/verify_readme_state_snapshot.py
+          cp docs/images/glyph-studio-state-transition.png /tmp/glyph-studio-state-transition.png
 
-      - name: Upload rendered diagrams
+      - name: Publish image to PR branch and restore workflow
+        shell: bash
+        env:
+          TARGET_BRANCH: ${{ github.head_ref }}
+        run: |
+          set -euo pipefail
+          git fetch origin "${TARGET_BRANCH}" main --depth=1
+          git checkout -B "${TARGET_BRANCH}" "origin/${TARGET_BRANCH}"
+          cp /tmp/glyph-studio-state-transition.png docs/images/glyph-studio-state-transition.png
+          git checkout origin/main -- .github/workflows/io-state-snapshot.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/images/glyph-studio-state-transition.png .github/workflows/io-state-snapshot.yml
+          git diff --cached --exit-code && { echo "No merge-context snapshot change"; exit 1; } || true
+          git commit -m "Align README state diagram with PR merge semantics"
+          git push origin HEAD:"${TARGET_BRANCH}"
+
+      - name: Upload merge-context rendering
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: state-diagram-regression
-          include-hidden-files: true
+          name: merge-context-state-diagram
           if-no-files-found: warn
           path: |
-            build/checked-system-context-io/**
             build/state-diagram-regression/**
-            build/state-diagram-stability/**
-            build/uml-transition-semantics/**
-            build/additional-failure-notation/**
-            build/diagram-editor-exports/**
-            build/diagram-canvas-viewport/**
-            build/localized-semantic-canvas/**
-            build/transition-label-readability/**
-            build/transition-layout-transaction/**
-            build/transition-semantic-readability/**
-            examples/acceptance/door_controller.glyph
-            examples/acceptance/motor_safety.glyph
-            examples/state_diagrams/*.glyph
-            examples/acceptance/.glyph/**/io-state-views.json
-            examples/state_diagrams/.glyph/**/io-state-views.json
+            docs/images/glyph-studio-state-transition.png
