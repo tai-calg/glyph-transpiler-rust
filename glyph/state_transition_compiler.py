@@ -2,16 +2,17 @@ from __future__ import annotations
 
 from copy import deepcopy
 
-from ._transition_branch_semantics import (
-    build_machine_branch_context,
-    planned_source_branches,
-)
+from ._transition_branch_semantics import build_machine_branch_context
+from ._transition_source_planning import planned_source_branches
 from .artifacts import CompilationModel
 from .compiler import AliasDecl, ExternDecl
 from .execution_ir import render_expr
-from .state_transition_ir import (
+from .state_transition_contract import (
+    RAW_STATE_TRANSITION_IR_VERSION,
     STATE_TRANSITION_IR_SCHEMA,
-    STATE_TRANSITION_IR_VERSION,
+    raw_transition_ir_marker,
+)
+from .state_transition_ir import (
     _actions_in_expr,
     _deduplicate,
     _display_label,
@@ -197,8 +198,8 @@ def build_machine_state_transition_ir(
             "synthesized_failure_transition_count": sum(
                 1 for item in transitions if item.get("synthesized_failure")
             ),
-            "transition_ir_schema": STATE_TRANSITION_IR_SCHEMA,
-            "transition_ir_version": STATE_TRANSITION_IR_VERSION,
+            "raw_transition_ir_schema": STATE_TRANSITION_IR_SCHEMA,
+            "raw_transition_ir_version": RAW_STATE_TRANSITION_IR_VERSION,
         }
     )
     result.update(
@@ -208,10 +209,7 @@ def build_machine_state_transition_ir(
             "unreachable_states": unreachable_states,
             "diagnostics": diagnostics,
             "analysis": analysis,
-            "transition_ir": {
-                "schema": STATE_TRANSITION_IR_SCHEMA,
-                "version": STATE_TRANSITION_IR_VERSION,
-            },
+            "transition_ir": raw_transition_ir_marker(),
         }
     )
     return result
@@ -221,6 +219,11 @@ def enrich_state_transition_ir(
     model: CompilationModel,
     views: dict[str, object],
 ) -> dict[str, object]:
+    """Build only the normalized machine-transition stage.
+
+    Public StateTransitionIR versioning is owned by ``state_transition_pipeline``.
+    """
+
     result = deepcopy(views)
     state = dict(result.get("state", {}))
     state["machines"] = [
@@ -228,11 +231,7 @@ def enrich_state_transition_ir(
         for machine in state.get("machines", [])
     ]
     result["state"] = state
-    result["state_transition_ir"] = {
-        "schema": STATE_TRANSITION_IR_SCHEMA,
-        "version": STATE_TRANSITION_IR_VERSION,
-    }
-    result["transition_semantics_version"] = 1
+    result["raw_state_transition_ir"] = raw_transition_ir_marker()
     summary = dict(result.get("summary", {}))
     summary["state_warnings"] = sum(
         1
