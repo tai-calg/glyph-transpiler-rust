@@ -3,7 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Mapping, Sequence
 
-from ._transition_action_ir import build_operation_action, renumber_invocations, text
+from ._transition_action_ir import renumber_invocations, text
 
 
 _CONTEXT_REQUIRED_CODE = "STIR_SYSTEM_ACTION_CONTEXT_REQUIRED"
@@ -54,6 +54,20 @@ def _binding_signature(binding: Mapping[str, object]) -> tuple[object, ...]:
         ),
         case_signature,
     )
+
+
+def _context_invocations(context: Mapping[str, object]) -> list[dict[str, object]]:
+    cases = context.get("action_cases", [])
+    if isinstance(cases, Sequence) and not isinstance(cases, (str, bytes)):
+        flattened = [
+            dict(item)
+            for case in cases
+            if isinstance(case, Mapping)
+            for item in _invocations(case.get("action_invocations", []))
+        ]
+        if flattened:
+            return flattened
+    return _invocations(context.get("action_invocations", []))
 
 
 def _diagnostic(message: str, line: int) -> dict[str, object]:
@@ -121,9 +135,9 @@ def project_transition_action_scopes(
 ) -> dict[str, object]:
     """Project display Actions only when every applicable context is represented.
 
-    Actionless, conditional, unresolved, and multiple-call contexts remain explicit.
-    Automatic projection is allowed only when all applicable contexts are resolved and
-    have the same semantic signature. Divergent or incomplete contexts never disappear.
+    `execution_contexts` is the complete set, including actionless and unresolved
+    contexts. `execution_action_bindings` remains a compatibility subset containing
+    only resolved contexts that actually publish an Action.
     """
 
     result = deepcopy(machine_view)
@@ -131,12 +145,12 @@ def project_transition_action_scopes(
     transitions: list[dict[str, object]] = []
     context_required_count = 0
     projected_count = 0
+    result_dependent_count = 0
+    sequenced_count = 0
 
     for original in result.get("transitions", []):
         transition = dict(original)
-        # The finalization pass immediately before this stage may specialize aliases,
-        # decision preimages, or branch-local values. Its compatibility fields are the
-        # authoritative finalized Machine Action at this point in the pipeline.
+        # Finalization immediately before this stage specializes branch-local values.
         machine_action = deepcopy(transition.get("action"))
         machine_invocations = _invocations(transition.get("action_invocations", []))
         machine_effects = _invocations(transition.get("effect_invocations", []))
@@ -144,35 +158,51 @@ def project_transition_action_scopes(
         transition["machine_action_invocations"] = [dict(item) for item in machine_invocations]
         transition["machine_effect_invocations"] = [dict(item) for item in machine_effects]
 
-        bindings = [
+        contexts = [
             dict(item)
-            for item in transition.get("execution_action_bindings", [])
+            for item in transition.get(
+                "execution_contexts",
+                transition.get("execution_action_bindings", []),
+            )
             if isinstance(item, Mapping)
         ]
-        transition["execution_action_bindings"] = bindings
-        transition["execution_contexts"] = [dict(item) for item in bindings]
+        transition["execution_contexts"] = contexts
+        transition["execution_action_bindings"] = [
+            dict(item)
+            for item in contexts
+            if text(item.get("status")) not in _BLOCKING_STATUSES
+            and item.get("action") is not None
+        ]
+
+        for context in contexts:
+            for invocation in _context_invocations(context):
+                relation = invocation.get("execution_relation")
+                if relation == "result-dependency":
+                    result_dependent_count += 1
+                elif relation == "post-transition-control":
+                    sequenced_count += 1
 
         source = transition.get("source", {})
         line = int(source.get("line", 1)) if isinstance(source, Mapping) else 1
-        statuses = [text(item.get("status")) or "resolved" for item in bindings]
+        statuses = [text(item.get("status")) or "resolved" for item in contexts]
         blocking = any(status in _BLOCKING_STATUSES for status in statuses)
         signatures: dict[tuple[object, ...], list[dict[str, object]]] = {}
-        for binding in bindings:
-            signatures.setdefault(_binding_signature(binding), []).append(binding)
+        for context in contexts:
+            signatures.setdefault(_binding_signature(context), []).append(context)
 
         context_required = blocking or len(signatures) > 1
-        selected_bindings: list[dict[str, object]] = []
+        selected_contexts: list[dict[str, object]] = []
         representative: dict[str, object] | None = None
-        if bindings and not context_required and len(signatures) == 1:
-            selected_bindings = next(iter(signatures.values()))
-            representative = selected_bindings[0]
+        if contexts and not context_required and len(signatures) == 1:
+            selected_contexts = next(iter(signatures.values()))
+            representative = selected_contexts[0]
 
         if context_required:
             context_required_count += 1
             names = [
                 f"{item.get('system') or 'implicit'} / {item.get('entry') or '?'}"
                 f" ({item.get('status') or 'resolved'})"
-                for item in bindings
+                for item in contexts
             ]
             _append_once(
                 diagnostics,
@@ -199,14 +229,14 @@ def project_transition_action_scopes(
         systems = sorted(
             {
                 str(item.get("system"))
-                for item in selected_bindings
+                for item in selected_contexts
                 if item.get("system")
             }
         )
         entries = sorted(
             {
                 str(item.get("entry"))
-                for item in selected_bindings
+                for item in selected_contexts
                 if item.get("entry")
             }
         )
@@ -242,8 +272,8 @@ def project_transition_action_scopes(
         transition["display_effect_invocations"] = display_effects
         transition["action_scope"] = {
             "machine": bool(machine_action),
-            "execution_context_count": len(bindings),
-            "selected_context_count": len(selected_bindings),
+            "execution_context_count": len(contexts),
+            "selected_context_count": len(selected_contexts),
             "display_scope": display_scope,
             "systems": systems,
             "entries": entries,
@@ -258,9 +288,12 @@ def project_transition_action_scopes(
     analysis = dict(result.get("analysis", {}))
     analysis.update(
         {
-            "transition_action_scope_version": 2,
+            "transition_action_scope_version": 1,
+            "transition_execution_context_projection_version": 1,
             "display_action_transition_count": projected_count,
             "system_action_context_required_count": context_required_count,
+            "execution_action_result_dependent_count": result_dependent_count,
+            "execution_action_sequenced_count": sequenced_count,
         }
     )
     result["transitions"] = transitions
