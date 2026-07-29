@@ -171,6 +171,7 @@ class TransitionOperationActionTests(unittest.TestCase):
     def test_system_result_consumer_is_not_machine_action(self) -> None:
         views = compile_example("examples/acceptance/door_controller.glyph")
         self.assertEqual(views["transition_result_consumer_action_version"], 2)
+        self.assertEqual(views["transition_system_execution_action_version"], 1)
         machine = views["state"]["machines"][0]
         expected_operations = {
             "RaiseAlarm": "alarm",
@@ -196,6 +197,10 @@ class TransitionOperationActionTests(unittest.TestCase):
             self.assertEqual(
                 bindings[0]["action_invocations"][0]["provenance"],
                 "transition-result-consumer",
+            )
+            self.assertEqual(
+                bindings[0]["action_invocations"][0]["execution_relation"],
+                "result-dependency",
             )
             self.assertEqual(transition["action_scope"]["display_scope"], "system")
             self.assertNotEqual(action, variant)
@@ -285,7 +290,7 @@ class TransitionOperationActionTests(unittest.TestCase):
         )
         self.assertEqual(action_display(opening), "actuator(DoorState(Opening))")
 
-    def test_unrelated_post_step_effect_is_not_invented_as_action(self) -> None:
+    def test_result_independent_post_transition_effect_is_system_action(self) -> None:
         source = (
             DIRECT_ACTUATOR_SOURCE.replace(
                 "  control -> actuator\n",
@@ -299,10 +304,83 @@ class TransitionOperationActionTests(unittest.TestCase):
         )
         views = compile_source(source)
         machine = views["state"]["machines"][0]
+        self.assertGreater(
+            machine["analysis"]["execution_action_sequenced_count"],
+            0,
+        )
         for transition in machine["transitions"]:
             self.assertIsNone(transition["machine_action"])
-            self.assertEqual(execution_bindings(transition), [])
-            self.assertIsNone(transition["display_action"])
+            bindings = execution_bindings(transition)
+            self.assertEqual(len(bindings), 1)
+            self.assertEqual(_display(bindings[0]["action"]), "tick()")
+            invocation = bindings[0]["action_invocations"][0]
+            self.assertEqual(invocation["provenance"], "transition-sequenced-operation")
+            self.assertEqual(
+                invocation["execution_relation"],
+                "post-transition-control",
+            )
+            self.assertEqual(bindings[0]["execution_flow"]["sequenced_operation_count"], 1)
+            self.assertEqual(action_display(transition), "tick()")
+
+    def test_pre_transition_effect_is_not_attached_to_machine_edge(self) -> None:
+        source = (
+            DIRECT_ACTUATOR_SOURCE.replace(
+                "  control -> actuator\n",
+                "  control -> tick\n  control -> actuator\n",
+            )
+            .replace(
+                "!actuator(state:DoorState):Receipt\n",
+                "!actuator(state:DoorState):Receipt\n!tick():Receipt\n",
+            )
+            .replace(
+                "  next := step(state,input)\n",
+                "  prepared := tick()\n  next := step(state,input)\n",
+            )
+        )
+        views = compile_source(source)
+        machine = views["state"]["machines"][0]
+        opening = next(
+            item for item in machine["transitions"] if item["target_state"] == "Opening"
+        )
+        binding = execution_bindings(opening)[0]
+        self.assertEqual(
+            [item["expression"] for item in binding["action_invocations"]],
+            ["actuator(DoorState(Opening))"],
+        )
+
+    def test_post_transition_sequence_preserves_control_and_data_actions(self) -> None:
+        source = (
+            DIRECT_ACTUATOR_SOURCE.replace(
+                "  control -> actuator\n",
+                "  control -> tick\n  control -> actuator\n",
+            )
+            .replace(
+                "!actuator(state:DoorState):Receipt\n",
+                "!actuator(state:DoorState):Receipt\n!tick():Receipt\n",
+            )
+            .replace(
+                "  actuator(next)\n",
+                "  recorded := tick()\n  actuator(next)\n",
+            )
+        )
+        views = compile_source(source)
+        machine = views["state"]["machines"][0]
+        opening = next(
+            item for item in machine["transitions"] if item["target_state"] == "Opening"
+        )
+        binding = execution_bindings(opening)[0]
+        self.assertEqual(
+            [item["expression"] for item in binding["action_invocations"]],
+            ["tick()", "actuator(DoorState(Opening))"],
+        )
+        self.assertEqual(
+            [item["execution_relation"] for item in binding["action_invocations"]],
+            ["post-transition-control", "result-dependency"],
+        )
+        self.assertEqual(
+            action_display(opening),
+            "tick(); actuator(DoorState(Opening))",
+        )
 
     def test_divergent_system_actions_remain_separate_bindings(self) -> None:
         source = DIRECT_ACTUATOR_SOURCE.replace(
