@@ -200,6 +200,12 @@ function semanticLines(cluster){
   if(output)lines.push(...splitComponent(` ➞ ${output}`));
   return lines.filter(line=>line.length>0);
 }
+
+function canonicalLabel(cluster){
+  const input=text(cluster.dataset.inputValue),guard=text(cluster.dataset.guardValue),output=text(cluster.dataset.outputValue);
+  const left=`${input}${guard?`${input?" ":""}[${guard}]`:""}`.trim();
+  return`${left}${output?`${left?" ":""}➞ ${output}`:""}`.trim();
+}
 function formatLabels(stage){
   const clusters=[...stage.querySelectorAll(".transition-io-cluster")];
   for(const cluster of clusters){
@@ -213,7 +219,7 @@ function formatLabels(stage){
       span.textContent=line;
       return span;
     }));
-    if(value.textContent!==expected)throw Error(`transition label formatting changed semantics: ${expected}`);
+    if(canonicalLabel(cluster)!==expected)throw Error(`transition label formatting changed structured semantics: ${expected}`);
     const longest=Math.max(1,...lines.map(line=>line.length));
     const width=clamp(Math.ceil(longest*5.8+22),108,640);
     cluster.style.setProperty("--transaction-label-width",`${width}px`);
@@ -361,7 +367,7 @@ function audit(stage){
   const rects=clusters.map(cluster=>rectAt(cluster,{x:num(cluster.style.left),y:num(cluster.style.top)}));
   clusters.forEach((cluster,index)=>{
     const value=cluster.querySelector(".transition-io-value"),node=cluster.querySelector(".transition-io-node.io"),style=value?getComputedStyle(value):null;
-    const expected=cluster.dataset.ioValue||"",actual=value?.textContent||"",rect=rects[index];
+    const expected=cluster.dataset.ioValue||"",actual=canonicalLabel(cluster),rect=rects[index];
     const reasons=[];
     if(actual!==expected)reasons.push("text-mismatch");
     if((Number.parseFloat(style?.fontSize||"0")||0)<9)reasons.push("font-too-small");

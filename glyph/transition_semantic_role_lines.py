@@ -61,6 +61,12 @@ function linesFor(cluster){
   return lines.filter(line=>line.length>0);
 }
 
+function canonicalLabel(cluster){
+  const input=text(cluster.dataset.inputValue),guard=text(cluster.dataset.guardValue),output=text(cluster.dataset.outputValue);
+  const left=`${input}${guard?`${input?" ":""}[${guard}]`:""}`.trim();
+  return`${left}${output?`${left?" ":""}➞ ${output}`:""}`.trim();
+}
+
 function preserveMultipleCaseLines(cluster,value,signature){
   const lines=[...value.querySelectorAll(".enabling-case-line")].map(element=>text(element.textContent)).filter(Boolean);
   if(!lines.length)return false;
@@ -96,7 +102,7 @@ function format(cluster){
     span.textContent=line;
     return span;
   }));
-  if(value.textContent!==expected)throw Error(`transition label role split changed semantics: ${expected}`);
+  if(canonicalLabel(cluster)!==expected)throw Error(`transition label role split changed structured semantics: ${expected}`);
   const longest=Math.max(1,...lines.map(line=>line.length));
   cluster.style.setProperty("--semantic-role-width",`${clamp(Math.ceil(longest*5.65+18),104,360)}px`);
   cluster.dataset.semanticLineCount=String(lines.length);
