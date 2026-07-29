@@ -137,7 +137,9 @@ def simplify_expr(
                 )
                 if index is not None:
                     return simplify_expr(
-                        base.args[index], products=products, constants=constants
+                        base.args[index],
+                        products=products,
+                        constants=constants,
                     )
         return FieldExpr(base, expression.field)
     if isinstance(expression, TryExpr):
@@ -176,16 +178,6 @@ def simplify_expr(
                 return BoolExpr(True) if right.value else left
         return BinaryExpr(expression.op, left, right)
     return expression
-
-
-def truth_value(
-    expression: Expr,
-    *,
-    products: Mapping[str, ProductDecl],
-    constants: frozenset[str],
-) -> bool | None:
-    simplified = simplify_expr(expression, products=products, constants=constants)
-    return simplified.value if isinstance(simplified, BoolExpr) else None
 
 
 def _unwrap_call(expression: Expr) -> CallExpr | None:
@@ -372,7 +364,8 @@ def _root_branches(
     if declaration is None:
         return ()
     identity = {
-        parameter.name: NameExpr(parameter.name) for parameter in declaration.params
+        parameter.name: NameExpr(parameter.name)
+        for parameter in declaration.params
     }
     return tuple(
         _trace_function(
@@ -472,78 +465,25 @@ def _source_state_value(
     return CallExpr(NameExpr(context.state_decl.name), arguments)
 
 
-def _specialize_for_source(
+def specialize_for_source(
     context: MachineBranchContext,
     expression: Expr,
     source_state: str,
 ) -> Expr:
     substituted = substitute_expr(
         expression,
-        {context.machine.state_param.name: _source_state_value(context, source_state)},
+        {
+            context.machine.state_param.name: _source_state_value(
+                context,
+                source_state,
+            )
+        },
     )
     return simplify_expr(
         substituted,
         products=context.products,
         constants=context.constants,
     )
-
-
-def _condition_truth_for_source(
-    context: MachineBranchContext,
-    condition: Expr | None,
-    source_state: str,
-) -> bool | None:
-    if condition is None:
-        return True
-    specialized = _specialize_for_source(context, condition, source_state)
-    return truth_value(
-        specialized,
-        products=context.products,
-        constants=context.constants,
-    )
-
-
-def planned_source_branches(
-    context: MachineBranchContext,
-    state_names: Sequence[str],
-    *,
-    unreachable_lines: frozenset[int] = frozenset(),
-) -> tuple[PlannedTransitionBranch, ...]:
-    exhausted = {state_name: False for state_name in state_names}
-    planned: list[PlannedTransitionBranch] = []
-    for branch in context.branches:
-        if branch.line in unreachable_lines:
-            continue
-        for source_state in state_names:
-            if exhausted[source_state]:
-                continue
-            condition_truth = _condition_truth_for_source(
-                context,
-                branch.condition,
-                source_state,
-            )
-            if condition_truth is False:
-                continue
-            target_state = (
-                source_state if branch.target == "__same__" else branch.target
-            )
-            if target_state not in state_names:
-                continue
-            planned.append(
-                PlannedTransitionBranch(
-                    branch=branch,
-                    source_state=source_state,
-                    target_state=target_state,
-                    value=_specialize_for_source(
-                        context,
-                        branch.value,
-                        source_state,
-                    ),
-                )
-            )
-            if condition_truth is True:
-                exhausted[source_state] = True
-    return tuple(planned)
 
 
 def _conditional_block_values(
@@ -625,4 +565,4 @@ def branch_value_for_transition(
     block_value = _block_value_for_transition(context, transition)
     if block_value is None or not source_state:
         return block_value
-    return _specialize_for_source(context, block_value, source_state)
+    return specialize_for_source(context, block_value, source_state)
