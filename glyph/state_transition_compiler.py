@@ -197,7 +197,6 @@ def build_machine_state_transition_ir(
             "synthesized_failure_transition_count": sum(
                 1 for item in transitions if item.get("synthesized_failure")
             ),
-            "source_specialized_branch_count": len(transitions),
             "transition_ir_schema": STATE_TRANSITION_IR_SCHEMA,
             "transition_ir_version": STATE_TRANSITION_IR_VERSION,
         }
