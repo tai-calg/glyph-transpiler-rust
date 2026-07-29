@@ -144,10 +144,6 @@ def _combine_results(
     )
 
 
-def _execution_active(after_transition: bool, results: Sequence[_Evaluation]) -> bool:
-    return after_transition or any(result.transition_calls for result in results)
-
-
 class _SystemExecutionEvaluator:
     """Evaluate one system entry while preserving post-transition execution order.
 
@@ -270,6 +266,7 @@ class _SystemExecutionEvaluator:
             tuple(item.value.concrete for item in argument_results),
         )
         base = _combine_results(_ExprPair(symbolic_call, concrete_call), argument_results)
+        sequenced_after_transition = after_transition or base.transition_calls > 0
 
         if not isinstance(symbolic.callee, NameExpr) or not isinstance(
             concrete.callee,
@@ -295,7 +292,6 @@ class _SystemExecutionEvaluator:
         if external is not None:
             invocations = list(base.invocations)
             result_dependent = _contains_marker(symbolic_call)
-            sequenced_after_transition = after_transition or base.transition_calls > 0
             if result_dependent or sequenced_after_transition:
                 rendered = render_expr(
                     simplify_expr(
@@ -384,7 +380,7 @@ class _SystemExecutionEvaluator:
             (*site.path, name),
         )
         nested_visited = visited | {name}
-        nested_after_transition = after_transition or base.transition_calls > 0
+        nested_after_transition = sequenced_after_transition
 
         if function.expression is not None:
             nested = self.evaluate(
