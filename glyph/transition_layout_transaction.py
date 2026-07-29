@@ -459,7 +459,7 @@ function schedule(reason="scheduled",delay=0){
   return requestedGeneration;
 }
 
-for(const eventName of["glyph-state-transition-ir-v3-labels-ready","glyph-uml-transition-ready","glyph-locale-changed"]){
+for(const eventName of["glyph-state-transition-ir-v3-labels-ready","glyph-transition-enabling-cases-ready","glyph-uml-transition-ready","glyph-locale-changed"]){
   document.addEventListener(eventName,()=>{stateCache=null;schedule(eventName,0)});
 }
 document.addEventListener("change",event=>{
