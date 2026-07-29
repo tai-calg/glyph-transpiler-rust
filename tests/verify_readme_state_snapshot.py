@@ -4,6 +4,7 @@ import os
 import shutil
 import sys
 from pathlib import Path
+from typing import Mapping
 
 from PIL import Image, ImageChops
 
@@ -27,6 +28,16 @@ MAX_MEAN_ABSOLUTE_DELTA = 0.001
 MAX_CHANNEL_DELTA = 32
 
 
+def _enabling_cases(machine: Mapping[str, object]) -> list[Mapping[str, object]]:
+    return [
+        item
+        for transition in machine.get("transitions", [])
+        if isinstance(transition, Mapping)
+        for item in transition.get("enabling_cases", [])
+        if isinstance(item, Mapping)
+    ]
+
+
 def verify_readme_semantics() -> None:
     output = CompilationPipeline().compile_text(
         MOTOR_SOURCE_PATH.read_text(encoding="utf-8"),
@@ -35,6 +46,7 @@ def verify_readme_semantics() -> None:
     views = build_io_state_views(output.model, output.diagrams.ir)
     machine = views["state"]["machines"][0]
     independence = machine["analysis"].get("action_target_independence", {})
+    cases = _enabling_cases(machine)
 
     failures: list[str] = []
     if independence.get("version") != 1:
@@ -57,11 +69,46 @@ def verify_readme_semantics() -> None:
             "Action and Target State form a redundant one-to-one mapping"
         )
 
+    if views.get("transition_enabling_cases_version") != 1:
+        failures.append("generic enabling-case analysis is missing")
+    if not machine.get("analysis", {}).get("all_transitions_have_enabling_cases"):
+        failures.append("not every rendered transition has an enabling case")
+
+    priority_witnesses = []
+    fallback_witnesses = []
+    for item in cases:
+        input_pattern = item.get("input_pattern")
+        guard = item.get("guard")
+        terms = guard.get("terms", []) if isinstance(guard, Mapping) else []
+        origins = {
+            str(term.get("origin") or "")
+            for term in terms
+            if isinstance(term, Mapping)
+        }
+        if isinstance(input_pattern, Mapping) and "priority-exclusion" in origins:
+            input_expression = str(input_pattern.get("expression") or "")
+            guard_expression = str(guard.get("expression") or "")
+            if input_expression and guard_expression and guard_expression not in input_expression:
+                priority_witnesses.append(item)
+        if item.get("fallback") and input_pattern is None and "fallback" in origins:
+            if isinstance(guard, Mapping) and guard.get("display") == "otherwise":
+                fallback_witnesses.append(item)
+
+    if not priority_witnesses:
+        failures.append(
+            "the README example does not prove that authored Input and generated priority Guard are separate"
+        )
+    if not fallback_witnesses:
+        failures.append(
+            "the README example does not prove that fallback has no Input and renders as [otherwise]"
+        )
+
     if failures:
         raise AssertionError(
-            "README state diagram does not prove general Action/Target State independence.\n"
+            "README state diagram does not satisfy the semantic publication contract.\n"
             + "\n".join(f"- {item}" for item in failures)
-            + f"\nanalysis: {independence}"
+            + f"\naction_target_analysis: {independence}"
+            + f"\nenabling_cases: {cases}"
         )
 
 
@@ -159,7 +206,7 @@ def main() -> None:
         )
 
     print(
-        "verified generic Action/Target independence and README snapshot "
+        "verified Action/Target independence, Input/Guard enabling cases, and README snapshot "
         f"(changed_pixels={changed_pixels}, "
         f"mean_delta={mean_absolute_delta:.8f}, "
         f"max_delta={max_channel_delta})"
