@@ -157,6 +157,10 @@ class TransitionOperationActionTests(unittest.TestCase):
             )
             self.assertEqual(
                 transition["display_action"]["provenance"],
+                "transition-operation-invocation",
+            )
+            self.assertEqual(
+                transition["display_action"]["projection_provenance"],
                 "transition-display-action-projection",
             )
             self.assertEqual(transition["action_scope"]["display_scope"], "machine")
@@ -187,7 +191,7 @@ class TransitionOperationActionTests(unittest.TestCase):
             self.assertTrue(action.startswith(f"{operation}(DoorState("), action)
             bindings = execution_bindings(transition)
             self.assertEqual(len(bindings), 1)
-            self.assertEqual(bindings[0]["system"], "DoorControl")
+            self.assertEqual(bindings[0]["system"], "DoorController")
             self.assertEqual(bindings[0]["entry"], "control")
             self.assertEqual(
                 bindings[0]["action_invocations"][0]["provenance"],
@@ -212,8 +216,8 @@ class TransitionOperationActionTests(unittest.TestCase):
 
     def test_direct_nested_transition_call_is_detected(self) -> None:
         source = DIRECT_ACTUATOR_SOURCE.replace(
-            "  next := step(state,input)\n  actuator(next)\n",
-            "  actuator(step(state,input))\n",
+            ">control(state:DoorState,input:Input):Receipt\n  next := step(state,input)\n  actuator(next)\n",
+            ">control(state:DoorState,input:Input):Receipt=actuator(step(state,input))\n",
         )
         views = compile_source(source)
         machine = views["state"]["machines"][0]
@@ -302,9 +306,6 @@ class TransitionOperationActionTests(unittest.TestCase):
 
     def test_divergent_system_actions_remain_separate_bindings(self) -> None:
         source = DIRECT_ACTUATOR_SOURCE.replace(
-            "system DoorControl\n  entry control\n",
-            "system DoorControl\n  entry control\n",
-        ).replace(
             "!actuator(state:DoorState):Receipt\n",
             "!actuator(state:DoorState):Receipt\n!audit(state:DoorState):Receipt\n",
         ) + """
