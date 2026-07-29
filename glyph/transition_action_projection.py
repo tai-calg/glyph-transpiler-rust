@@ -3,6 +3,12 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Mapping, Sequence
 
+from ._transition_branch_semantics import (
+    branch_value_for_transition,
+    build_machine_branch_context,
+    field_index,
+    unwrap_expr,
+)
 from .artifacts import CompilationModel
 from .compiler import (
     AliasDecl,
@@ -10,58 +16,27 @@ from .compiler import (
     Expr,
     ExternDecl,
     FieldExpr,
-    FunctionDecl,
     NameExpr,
-    ProductDecl,
     SumDecl,
-    TryExpr,
     TypeRef,
-    parse_expr,
 )
 from .execution_ir import render_expr
-from .state_transition_compiler import _root_branches
 from .state_transition_ir import _actions_in_expr, _render_type
 
 
-ACTION_PROVENANCE = "transition-operation-invocation"
-OUTPUT_PROVENANCE = "machine-output-projection"
-EFFECT_PROVENANCE = "declared-effect-invocation"
-
-
-def _unwrap(expr: Expr) -> Expr:
-    if isinstance(expr, TryExpr):
-        return _unwrap(expr.expr)
-    if (
-        isinstance(expr, CallExpr)
-        and isinstance(expr.callee, NameExpr)
-        and expr.callee.name == "Ok"
-        and len(expr.args) == 1
-    ):
-        return _unwrap(expr.args[0])
-    return expr
-
-
-def _field_index(state_decl: ProductDecl, selector: FieldExpr | None) -> int | None:
-    if selector is None:
-        return None
-    return next(
-        (
-            index
-            for index, field in enumerate(state_decl.fields)
-            if field.name == selector.field
-        ),
-        None,
-    )
+_ACTION_PROVENANCE = "transition-operation-invocation"
+_OUTPUT_PROVENANCE = "machine-output-projection"
+_EFFECT_PROVENANCE = "declared-effect-invocation"
 
 
 def _project_constructor_field(
-    expr: Expr,
+    expression: Expr,
     *,
-    state_decl: ProductDecl,
-    field_index: int,
+    state_decl: object,
+    field_position: int,
     state_param: str,
 ) -> Expr | None:
-    value = _unwrap(expr)
+    value = unwrap_expr(expression)
     if isinstance(value, NameExpr) and value.name == state_param:
         return None
     if not (
@@ -71,15 +46,15 @@ def _project_constructor_field(
         and len(value.args) == len(state_decl.fields)
     ):
         return None
-    return value.args[field_index]
+    return value.args[field_position]
 
 
 def _variant_parts(
-    expr: Expr,
+    expression: Expr,
     declaration: SumDecl,
 ) -> tuple[str | None, tuple[Expr, ...]]:
     variants = {item.name for item in declaration.variants}
-    value = _unwrap(expr)
+    value = unwrap_expr(expression)
     if isinstance(value, NameExpr) and value.name in variants:
         return value.name, ()
     if (
@@ -92,32 +67,32 @@ def _variant_parts(
 
 
 def _output_value(
-    expr: Expr | None,
+    expression: Expr | None,
     *,
     output_type: TypeRef,
     output_sum: SumDecl,
     source: Mapping[str, object],
 ) -> dict[str, object] | None:
-    if expr is None:
+    if expression is None:
         return None
-    variant, payload = _variant_parts(expr, output_sum)
+    variant, payload = _variant_parts(expression, output_sum)
     if variant is None:
         return None
-    rendered = render_expr(expr)
+    rendered = render_expr(expression)
     return {
         "display": rendered,
         "expression": rendered,
         "type": _render_type(output_type),
         "variant": variant,
         "payload": [render_expr(item) for item in payload],
-        "provenance": OUTPUT_PROVENANCE,
+        "provenance": _OUTPUT_PROVENANCE,
         "source": dict(source),
     }
 
 
 def _operation_name(call: str) -> str:
-    open_pos = call.find("(")
-    return call[:open_pos] if open_pos > 0 else call
+    open_position = call.find("(")
+    return call[:open_position] if open_position > 0 else call
 
 
 def _effect_values(
@@ -125,7 +100,7 @@ def _effect_values(
     *,
     legacy_action: object,
     synthesized_failure: bool,
-    functions: Mapping[str, FunctionDecl],
+    functions: Mapping[str, object],
     externs: Mapping[str, ExternDecl],
     aliases: Mapping[str, TypeRef],
     source: Mapping[str, object],
@@ -157,7 +132,7 @@ def _effect_values(
             "sequence": index,
             "effectful": True,
             "kind": "effect-invocation",
-            "provenance": EFFECT_PROVENANCE,
+            "provenance": _EFFECT_PROVENANCE,
             "source": dict(source),
         }
         for index, item in enumerate(effects, start=1)
@@ -193,87 +168,9 @@ def _operation_action(
             else "operation-sequence"
         ),
         "effectful": True,
-        "provenance": ACTION_PROVENANCE,
+        "provenance": _ACTION_PROVENANCE,
         "source": dict(source),
     }
-
-
-def _branch_for_transition(
-    branches: Sequence[object],
-    transition: Mapping[str, object],
-) -> object | None:
-    source = transition.get("source", {})
-    line = int(source.get("line", 0)) if isinstance(source, Mapping) else 0
-    source_state = str(transition.get("source_state", ""))
-    target_state = str(transition.get("target_state", ""))
-    synthesized = bool(transition.get("synthesized_failure"))
-    candidates = [item for item in branches if int(getattr(item, "line", 0)) == line]
-    if synthesized:
-        return candidates[0] if candidates else None
-    for item in candidates:
-        target = getattr(item, "target", "")
-        resolved = source_state if target == "__same__" else str(target)
-        if resolved == target_state:
-            return item
-    return candidates[0] if len(candidates) == 1 else None
-
-
-def _conditional_block_values(
-    model: CompilationModel,
-    function_name: str | None,
-) -> tuple[tuple[int, str, Expr], ...]:
-    if function_name is None:
-        return ()
-    block = next((item for item in model.blocks if item.name == function_name), None)
-    if block is None:
-        return ()
-    values: list[tuple[int, str, Expr]] = []
-    for binding in block.bindings:
-        if binding.kind != "conditional":
-            continue
-        for offset, original in enumerate(binding.source.splitlines(), start=1):
-            stripped = original.strip()
-            arrow = stripped.find("=>")
-            if arrow < 0:
-                continue
-            condition_text = stripped[:arrow].strip()
-            value_text = stripped[arrow + 2 :].strip()
-            if not value_text:
-                continue
-            try:
-                value = parse_expr(value_text)
-                condition = (
-                    "otherwise"
-                    if condition_text == "_"
-                    else render_expr(parse_expr(condition_text))
-                )
-            except Exception:
-                continue
-            values.append((binding.line + offset, condition, value))
-    return tuple(values)
-
-
-def _block_value_for_transition(
-    values: Sequence[tuple[int, str, Expr]],
-    transition: Mapping[str, object],
-) -> Expr | None:
-    source = transition.get("source", {})
-    line = int(source.get("line", 0)) if isinstance(source, Mapping) else 0
-    raw = str(transition.get("condition_raw") or transition.get("condition") or "")
-    condition = "otherwise" if raw in {"", "otherwise", "next"} else raw
-    exact = [
-        value
-        for candidate_line, candidate_condition, value in values
-        if candidate_line == line and candidate_condition == condition
-    ]
-    if exact:
-        return exact[0]
-    matching = [
-        value
-        for _, candidate_condition, value in values
-        if candidate_condition == condition
-    ]
-    return matching[0] if len(matching) == 1 else None
 
 
 def _diagnostic(code: str, message: str, line: int) -> dict[str, object]:
@@ -289,36 +186,13 @@ def project_machine_transition_actions(
     model: CompilationModel,
     machine_view: dict[str, object],
 ) -> dict[str, object]:
-    """Derive edge Actions from executed operations, never from state values.
-
-    The legacy ``machine action=state.field`` selector is retained as an
-    Emitted Output projection for decision provenance and compatibility.
-    Target State and Emitted Output are never Action fallbacks.
-    """
+    """Derive edge Actions from proven operation invocations only."""
 
     result = deepcopy(machine_view)
-    machine = next(
-        (item for item in model.machines if item.name == result.get("name")),
-        None,
-    )
-    if machine is None or not isinstance(machine.selector, FieldExpr):
+    context = build_machine_branch_context(model, str(result.get("name") or ""))
+    if context is None:
         return result
 
-    products = {
-        item.name: item
-        for item in model.program.declarations
-        if isinstance(item, ProductDecl)
-    }
-    sums = {
-        item.name: item
-        for item in model.program.declarations
-        if isinstance(item, SumDecl)
-    }
-    functions = {
-        item.name: item
-        for item in model.program.declarations
-        if isinstance(item, FunctionDecl)
-    }
     externs = {
         item.name: item
         for item in model.program.declarations
@@ -329,66 +203,42 @@ def project_machine_transition_actions(
         for item in model.program.declarations
         if isinstance(item, AliasDecl)
     }
-    state_decl = products.get(machine.state_param.ty.name)
-    if state_decl is None:
-        return result
-    selector_index = _field_index(state_decl, machine.selector)
-    if selector_index is None:
-        return result
-    selector_sum = sums.get(state_decl.fields[selector_index].ty.name)
-    if selector_sum is None:
-        return result
+    machine = context.machine
+    state_decl = context.state_decl
+    state_names = [str(item.get("name", "")) for item in result.get("states", [])]
+    unreachable_lines = frozenset(map(int, result.get("unreachable_branches", [])))
 
     output_selector = (
         machine.action_selector
         if isinstance(machine.action_selector, FieldExpr)
         else None
     )
-    output_index = _field_index(state_decl, output_selector)
+    output_index = field_index(state_decl, output_selector)
     output_type = state_decl.fields[output_index].ty if output_index is not None else None
-    output_sum = sums.get(output_type.name) if output_type is not None else None
-
-    next_call = machine.next_expr if isinstance(machine.next_expr, CallExpr) else None
-    next_name = (
-        next_call.callee.name
-        if next_call is not None and isinstance(next_call.callee, NameExpr)
-        else None
-    )
-    branches = (
-        _root_branches(
-            next_name,
-            functions=functions,
-            state_decl=state_decl,
-            selector_index=selector_index,
-            variants={item.name for item in selector_sum.variants},
-            root_state_param=machine.state_param.name,
-        )
-        if next_name is not None
-        else ()
-    )
-    block_values = _conditional_block_values(model, next_name)
+    output_sum = context.sums.get(output_type.name) if output_type is not None else None
 
     diagnostics = [dict(item) for item in result.get("diagnostics", [])]
     generated: list[dict[str, object]] = []
     transitions: list[dict[str, object]] = []
     for original in result.get("transitions", []):
         transition = dict(original)
-        branch = _branch_for_transition(branches, transition)
-        branch_value = getattr(branch, "value", None) if branch is not None else None
-        if branch_value is None:
-            branch_value = _block_value_for_transition(block_values, transition)
+        branch_value = branch_value_for_transition(
+            context,
+            transition,
+            state_names,
+            unreachable_lines=unreachable_lines,
+        )
         source = transition.get("source", {})
         source_map = (
             dict(source)
             if isinstance(source, Mapping)
             else {"line": 1, "column": 1}
         )
-        legacy_action = transition.get("action")
         effect_invocations = _effect_values(
             branch_value,
-            legacy_action=legacy_action,
+            legacy_action=transition.get("action"),
             synthesized_failure=bool(transition.get("synthesized_failure")),
-            functions=functions,
+            functions=context.functions,
             externs=externs,
             aliases=aliases,
             source=source_map,
@@ -400,11 +250,11 @@ def project_machine_transition_actions(
             source=source_map,
         )
 
-        projected_expr = (
+        projected_expression = (
             _project_constructor_field(
                 branch_value,
                 state_decl=state_decl,
-                field_index=output_index,
+                field_position=output_index,
                 state_param=machine.state_param.name,
             )
             if branch_value is not None and output_index is not None
@@ -412,7 +262,7 @@ def project_machine_transition_actions(
         )
         emitted_output = (
             _output_value(
-                projected_expr,
+                projected_expression,
                 output_type=output_type,
                 output_sum=output_sum,
                 source=source_map,
@@ -424,19 +274,17 @@ def project_machine_transition_actions(
 
         if (
             output_selector is not None
-            and branch_value is not None
-            and projected_expr is not None
+            and projected_expression is not None
             and emitted_output is None
         ):
-            line = int(source_map.get("line", 1))
             generated.append(
                 _diagnostic(
                     "STIR_OUTPUT_UNRESOLVED",
                     (
-                        f"transition output `{render_expr(projected_expr)}` could not be "
+                        f"transition output `{render_expr(projected_expression)}` could not be "
                         f"resolved as a variant of `{_render_type(output_type)}`"
                     ),
-                    line,
+                    int(source_map.get("line", 1)),
                 )
             )
         transitions.append(transition)
@@ -494,9 +342,4 @@ def project_machine_transition_actions(
     return result
 
 
-__all__ = [
-    "ACTION_PROVENANCE",
-    "EFFECT_PROVENANCE",
-    "OUTPUT_PROVENANCE",
-    "project_machine_transition_actions",
-]
+__all__ = ["project_machine_transition_actions"]
