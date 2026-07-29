@@ -15,6 +15,7 @@ from .transition_condition_roles import (
     classify_machine_transition_roles,
 )
 from .transition_enabling_case_compatibility import preserve_legacy_transition_metadata
+from .transition_enabling_case_defaults import ensure_machine_enabling_cases
 from .transition_enabling_cases import (
     ENABLING_CASES_VERSION,
     attach_machine_enabling_cases,
@@ -116,8 +117,10 @@ def enrich_state_transition_ir(
         expand_machine_transition_inputs(model, machine) for machine in classified
     ]
     enabled = [
-        preserve_legacy_transition_metadata(
-            attach_machine_enabling_cases(model, machine)
+        ensure_machine_enabling_cases(
+            preserve_legacy_transition_metadata(
+                attach_machine_enabling_cases(model, machine)
+            )
         )
         for machine in expanded
     ]
