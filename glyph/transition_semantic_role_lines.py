@@ -154,7 +154,7 @@ async function settle(stage,clusters,changed){
     }
     pairs=collisionPairs(stage);
     stage.dataset.transitionIoCollisionCount=String(pairs.length);
-    stage.dataset.transitionIoCollisionSolved=pairs.length?"failed":"fallback";
+    stage.dataset.transitionIoCollisionSolved=pairs.length?"failed":"true";
     stage.dataset.transitionSemanticRoleLinesReady=pairs.length?"failed":"true";
     document.dispatchEvent(new CustomEvent("glyph-transition-semantic-role-lines-ready",{detail:{marker:MARKER,labels:clusters.length,changed,collisions:pairs}}));
   }finally{
