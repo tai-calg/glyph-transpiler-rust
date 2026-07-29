@@ -8,6 +8,12 @@ from glyph.state_transition_contract import (
     RAW_STATE_TRANSITION_IR_VERSION,
     STATE_TRANSITION_IR_VERSION,
 )
+from glyph.state_transition_ir import (
+    STATE_TRANSITION_IR_VERSION as RAW_FACADE_VERSION,
+)
+from glyph.transition_condition_roles import (
+    STATE_TRANSITION_IR_VERSION as ROLE_VERSION,
+)
 from glyph.transition_semantics import (
     STATE_TRANSITION_IR_VERSION as FACADE_VERSION,
 )
@@ -63,6 +69,8 @@ class TransitionBooleanReasoningTests(unittest.TestCase):
         views = compile_source(SOURCE)
         machine = views["state"]["machines"][0]
         self.assertEqual(FACADE_VERSION, STATE_TRANSITION_IR_VERSION)
+        self.assertEqual(ROLE_VERSION, STATE_TRANSITION_IR_VERSION)
+        self.assertEqual(RAW_FACADE_VERSION, RAW_STATE_TRANSITION_IR_VERSION)
         self.assertEqual(STATE_TRANSITION_IR_VERSION, 4)
         self.assertEqual(
             views["state_transition_ir"],
