@@ -21,7 +21,7 @@ machine Motor(state:MotorState,input:Input)
 @STOP_LIMIT=100ms
 
 *Input(raw:F,enabled,emergency,fault,stopped:B)
-+MotorCommand=DisableMotor|SetMotorPower(F)
++MotorCommand=EmergencyBrake|DisableMotor|SetMotorPower(F)|LatchFault
 +Mode=Stopped|Running|Faulted
 *MotorState(mode:Mode,command:MotorCommand)
 *Receipt(command:MotorCommand)
@@ -32,16 +32,19 @@ machine Motor(state:MotorState,input:Input)
 >normalize(raw:F):F=min(raw,1.0)
 
 >decide(input:Input):MotorCommand
-  input.emergency|input.fault >> DisableMotor
+  input.fault >> LatchFault
+  input.emergency >> EmergencyBrake
   !input.enabled >> DisableMotor
   _ >> SetMotorPower(normalize(input.raw))
 
 >step(state:MotorState,input:Input):MotorState
   command := decide(input)
   next :=
+    command==LatchFault >> MotorState(Faulted,LatchFault)
+    command==EmergencyBrake >> MotorState(Stopped,EmergencyBrake)
     command==DisableMotor >> MotorState(Stopped,DisableMotor)
     command==SetMotorPower(power) >> MotorState(Running,SetMotorPower(power))
-    _ >> MotorState(Faulted,DisableMotor)
+    _ >> MotorState(Faulted,LatchFault)
   next
 
 !write_motor(command:MotorCommand):Receipt
