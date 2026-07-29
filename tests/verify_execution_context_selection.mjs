@@ -78,6 +78,10 @@ for (const transition of machine.transitions) {
     new Set((transition.execution_action_bindings || []).map(item => item.system)),
     new Set(["DoorControl", "DoorAudit"]),
   );
+  assert.deepEqual(
+    new Set((transition.execution_contexts || []).map(item => item.system)),
+    new Set(["DoorControl", "DoorAudit"]),
+  );
 }
 
 const browser = await chromium.launch({ headless: true });
@@ -93,7 +97,7 @@ try {
 
   const optionLabels = await page.locator("#execution-context-select option").allTextContents();
   assert.deepEqual(optionLabels, [
-    "自動（単一コンテキスト）",
+    "自動（一致する場合のみ）",
     "Machineのみ",
     "DoorAudit / audit_control",
     "DoorControl / control",
@@ -134,10 +138,43 @@ try {
   ), null, { timeout: 60_000 });
   await waitForProjection(page, auditActions);
 
+  await page.selectOption("#glyph-language", "en");
+  await page.waitForFunction(() => (
+    document.querySelector("#execution-context-control label")?.textContent === "Execution context"
+    && [...document.querySelectorAll("#execution-context-select option")]
+      .some(option => option.textContent === "Machine only")
+  ), null, { timeout: 60_000 });
+
+  const originalSource = await page.locator("#editor").inputValue();
+  const actionlessSource = originalSource.replace("  audit(next)\n", "  Receipt(next)\n");
+  assert.notEqual(actionlessSource, originalSource, "audit action replacement did not match source");
+  await page.locator("#editor").fill(actionlessSource);
+  await page.locator("#editor").dispatchEvent("input");
+  await page.waitForFunction(() => (
+    [...document.querySelectorAll("#execution-context-select option")]
+      .some(option => option.textContent === "DoorAudit / audit_control (no System Action)")
+  ), null, { timeout: 60_000 });
+  await page.selectOption("#execution-context-select", {
+    label: "DoorAudit / audit_control (no System Action)",
+  });
+  await waitForProjection(page, noActions);
+
+  const renamedSource = actionlessSource.replace("system DoorAudit\n", "system DoorObserve\n");
+  assert.notEqual(renamedSource, actionlessSource, "system rename did not match source");
+  await page.locator("#editor").fill(renamedSource);
+  await page.locator("#editor").dispatchEvent("input");
+  await page.waitForFunction(() => {
+    const labels = [...document.querySelectorAll("#execution-context-select option")]
+      .map(option => option.textContent);
+    return labels.includes("DoorObserve / audit_control (no System Action)")
+      && !labels.some(label => label.startsWith("DoorAudit /"));
+  }, null, { timeout: 60_000 });
+  await waitForProjection(page, noActions);
+
   await page.close();
 } finally {
   await browser.close();
   await stopProcess();
 }
 
-console.log("verified explicit Machine/System execution-context selection and SVG projection");
+console.log("verified complete, live, localized execution-context selection and SVG projection");
