@@ -4,10 +4,18 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Mapping, Sequence
 
+from ._transition_action_ir import (
+    _RESULT_CONSUMER_PROVENANCE,
+    build_operation_action,
+    merge_unique_invocations,
+    renumber_invocations,
+    text,
+)
 from ._transition_branch_semantics import (
     MachineBranchContext,
     branch_value_for_transition,
     build_machine_branch_context,
+    planned_source_branches,
     simplify_expr,
     substitute_expr,
     truth_value,
@@ -21,7 +29,6 @@ from .compiler import (
     Expr,
     ExternDecl,
     FieldExpr,
-    FunctionDecl,
     NameExpr,
     TryExpr,
     TypeRef,
@@ -32,8 +39,6 @@ from .execution_ir import render_expr
 from .function_blocks import FunctionBlockLowering
 
 
-_ACTION_PROVENANCE = "transition-operation-invocation"
-_CONSUMER_PROVENANCE = "transition-result-consumer"
 _AMBIGUOUS_CODE = "STIR_ACTION_RESULT_CONSUMER_AMBIGUOUS"
 _UNRESOLVED_CODE = "STIR_ACTION_RESULT_CONSUMER_UNRESOLVED"
 _MARKER_NAME = "__glyph_transition_result__"
@@ -72,10 +77,6 @@ class _ContextTrace:
     context: _ConsumerContext
     invocations: tuple[dict[str, object], ...]
     unresolved: bool
-
-
-def _text(value: object) -> str:
-    return str(value or "").strip()
 
 
 def _contains_marker(expression: Expr) -> bool:
@@ -183,13 +184,13 @@ class _OperationTracer:
             concrete.args,
             strict=False,
         ):
-            result = self.trace(
+            traced = self.trace(
                 _ExprPair(symbolic_argument, concrete_argument),
                 site,
                 visited=visited,
             )
-            nested.extend(result.invocations)
-            unresolved = unresolved or result.unresolved
+            nested.extend(traced.invocations)
+            unresolved = unresolved or traced.unresolved
 
         if not isinstance(symbolic.callee, NameExpr) or not isinstance(
             concrete.callee,
@@ -223,7 +224,7 @@ class _OperationTracer:
                     "sequence": 0,
                     "effectful": True,
                     "kind": "effect-invocation",
-                    "provenance": _CONSUMER_PROVENANCE,
+                    "provenance": _RESULT_CONSUMER_PROVENANCE,
                     "source": {"line": site.line, "column": 1},
                     "caller": site.caller,
                     "dataflow_path": [*site.path, name],
@@ -260,7 +261,7 @@ class _OperationTracer:
         next_visited = visited | {name}
 
         if function.expression is not None:
-            result = self.trace(
+            traced = self.trace(
                 _ExprPair(
                     substitute_expr(function.expression, symbolic_values),
                     substitute_expr(function.expression, concrete_values),
@@ -269,8 +270,8 @@ class _OperationTracer:
                 visited=next_visited,
             )
             return _TraceResult(
-                (*nested, *result.invocations),
-                unresolved or result.unresolved,
+                (*nested, *traced.invocations),
+                unresolved or traced.unresolved,
             )
 
         for clause in function.guards:
@@ -279,14 +280,14 @@ class _OperationTracer:
                     substitute_expr(clause.value, symbolic_values),
                     substitute_expr(clause.value, concrete_values),
                 )
-                result = self.trace(
+                traced = self.trace(
                     selected,
                     next_site,
                     visited=next_visited,
                 )
                 return _TraceResult(
-                    (*nested, *result.invocations),
-                    unresolved or result.unresolved,
+                    (*nested, *traced.invocations),
+                    unresolved or traced.unresolved,
                 )
 
             condition = substitute_expr(clause.condition, concrete_values)
@@ -302,7 +303,7 @@ class _OperationTracer:
                     tuple(nested),
                     unresolved or _contains_marker(symbolic),
                 )
-            result = self.trace(
+            traced = self.trace(
                 _ExprPair(
                     substitute_expr(clause.value, symbolic_values),
                     substitute_expr(clause.value, concrete_values),
@@ -311,8 +312,8 @@ class _OperationTracer:
                 visited=next_visited,
             )
             return _TraceResult(
-                (*nested, *result.invocations),
-                unresolved or result.unresolved,
+                (*nested, *traced.invocations),
+                unresolved or traced.unresolved,
             )
 
         return _TraceResult(
@@ -477,33 +478,6 @@ def _evaluate_context(
     )
 
 
-def _action_value(
-    invocations: Sequence[Mapping[str, object]],
-) -> dict[str, object] | None:
-    expressions = [_text(item.get("expression")) for item in invocations]
-    expressions = [item for item in expressions if item]
-    if not expressions:
-        return None
-    operations = [_text(item.get("operation")) for item in invocations]
-    operations = [item for item in operations if item]
-    display = "; ".join(expressions)
-    source = invocations[0].get("source", {"line": 1, "column": 1})
-    return {
-        "display": display,
-        "expression": display,
-        "operation": operations[0] if len(operations) == 1 else None,
-        "operations": operations,
-        "kind": (
-            "operation-invocation"
-            if len(expressions) == 1
-            else "operation-sequence"
-        ),
-        "effectful": True,
-        "provenance": _ACTION_PROVENANCE,
-        "source": dict(source) if isinstance(source, Mapping) else source,
-    }
-
-
 def _diagnostic(code: str, message: str, line: int) -> dict[str, object]:
     return {
         "severity": "warning",
@@ -517,7 +491,7 @@ def _sequence_key(
     invocations: Sequence[Mapping[str, object]],
 ) -> tuple[tuple[str, str | None], ...]:
     return tuple(
-        (_text(item.get("expression")), item.get("failure_type"))
+        (text(item.get("expression")), item.get("failure_type"))
         for item in invocations
     )
 
@@ -578,6 +552,11 @@ def attach_transition_result_consumer_actions(
     )
     state_names = [str(item.get("name", "")) for item in result.get("states", [])]
     unreachable_lines = frozenset(map(int, result.get("unreachable_branches", [])))
+    branch_plan = planned_source_branches(
+        branch_context,
+        state_names,
+        unreachable_lines=unreachable_lines,
+    )
     diagnostics = [dict(item) for item in result.get("diagnostics", [])]
     transitions: list[dict[str, object]] = []
     consumer_action_count = 0
@@ -589,8 +568,7 @@ def attach_transition_result_consumer_actions(
         branch_value = branch_value_for_transition(
             branch_context,
             transition,
-            state_names,
-            unreachable_lines=unreachable_lines,
+            branch_plan,
         )
         if branch_value is None:
             transitions.append(transition)
@@ -653,43 +631,30 @@ def attach_transition_result_consumer_actions(
             for item in transition.get("action_invocations", [])
             if isinstance(item, Mapping)
         ]
-        combined = [*existing, *downstream]
-        for sequence, invocation in enumerate(combined, start=1):
-            invocation["sequence"] = sequence
+        combined = renumber_invocations([*existing, *downstream])
         transition["action_invocations"] = combined
 
-        effects = [
+        existing_effects = [
             dict(item)
             for item in transition.get("effect_invocations", [])
             if isinstance(item, Mapping)
         ]
-        effect_keys = {
-            (_text(item.get("expression")), item.get("failure_type"))
-            for item in effects
-        }
-        for invocation in downstream:
-            key = (
-                _text(invocation.get("expression")),
-                invocation.get("failure_type"),
-            )
-            if key not in effect_keys:
-                effects.append(dict(invocation))
-                effect_keys.add(key)
-        for sequence, invocation in enumerate(effects, start=1):
-            invocation["sequence"] = sequence
-        transition["effect_invocations"] = effects
-        transition["action"] = _action_value(combined)
+        transition["effect_invocations"] = merge_unique_invocations(
+            existing_effects,
+            downstream,
+        )
+        transition["action"] = build_operation_action(combined)
         transition["action_result_dataflow"] = {
-            "provenance": _CONSUMER_PROVENANCE,
+            "provenance": _RESULT_CONSUMER_PROVENANCE,
             "caller": selected.context.caller,
             "binding": selected.context.binding_name,
             "path": [
                 branch_context.next_function,
                 f"{selected.context.caller}.{selected.context.binding_name}",
                 *[
-                    _text(item.get("operation"))
+                    text(item.get("operation"))
                     for item in downstream
-                    if _text(item.get("operation"))
+                    if text(item.get("operation"))
                 ],
             ],
         }
