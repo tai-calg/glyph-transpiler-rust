@@ -125,7 +125,9 @@ def enrich_state_transition_ir(
         "schema": STATE_TRANSITION_IR_SCHEMA,
         "version": STATE_TRANSITION_IR_VERSION,
     }
-    result["transition_semantics_version"] = 3
+    # Input [Guard] ➞ Action remains the public label contract version 2.
+    # Enabling-case IR is independently versioned.
+    result["transition_semantics_version"] = 2
     result["transition_input_preimage_version"] = INPUT_PREIMAGE_VERSION
     result["transition_enabling_cases_version"] = ENABLING_CASES_VERSION
     result["transition_action_target_independence_version"] = 1
