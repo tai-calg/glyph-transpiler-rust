@@ -12,9 +12,9 @@ from ._transition_branch_semantics import (
     branch_value_for_transition,
     build_machine_branch_context,
     field_index,
-    planned_source_branches,
     unwrap_expr,
 )
+from ._transition_source_planning import planned_source_branches
 from .artifacts import CompilationModel
 from .compiler import (
     AliasDecl,
@@ -134,6 +134,7 @@ def _effect_invocations(
             "effectful": True,
             "kind": "effect-invocation",
             "provenance": _DECLARED_EFFECT_PROVENANCE,
+            "scope": "machine",
             "source": dict(source),
         }
         for sequence, (call, failure_type) in enumerate(records, start=1)
@@ -153,7 +154,11 @@ def project_machine_transition_actions(
     model: CompilationModel,
     machine_view: dict[str, object],
 ) -> dict[str, object]:
-    """Derive edge Actions from proven operation invocations only."""
+    """Derive intrinsic machine-edge operations and emitted outputs.
+
+    System-entry operations are attached by a separate execution-context pass and
+    never mutate ``machine_action`` or ``machine_action_invocations``.
+    """
 
     result = deepcopy(machine_view)
     context = build_machine_branch_context(model, str(result.get("name") or ""))
@@ -214,12 +219,24 @@ def project_machine_transition_actions(
             aliases=aliases,
             source=source_map,
         )
-        transition["effect_invocations"] = effect_invocations
-        transition["action_invocations"] = [dict(item) for item in effect_invocations]
-        transition["action"] = build_operation_action(
-            effect_invocations,
+        action_invocations = [dict(item) for item in effect_invocations]
+        machine_action = build_operation_action(
+            action_invocations,
             source=source_map,
         )
+        if machine_action is not None:
+            machine_action["scope"] = "machine"
+
+        transition["machine_effect_invocations"] = [
+            dict(item) for item in effect_invocations
+        ]
+        transition["machine_action_invocations"] = [
+            dict(item) for item in action_invocations
+        ]
+        transition["machine_action"] = machine_action
+        transition["effect_invocations"] = [dict(item) for item in effect_invocations]
+        transition["action_invocations"] = [dict(item) for item in action_invocations]
+        transition["action"] = deepcopy(machine_action)
 
         projected_expression = (
             _project_constructor_field(
@@ -285,13 +302,15 @@ def project_machine_transition_actions(
     analysis.update(
         {
             "projected_action_count": sum(
-                1 for item in transitions if item.get("action") is not None
+                1 for item in transitions if item.get("machine_action") is not None
             ),
             "operation_action_count": sum(
-                len(item.get("action_invocations", [])) for item in transitions
+                len(item.get("machine_action_invocations", []))
+                for item in transitions
             ),
             "effect_invocation_count": sum(
-                len(item.get("effect_invocations", [])) for item in transitions
+                len(item.get("machine_effect_invocations", []))
+                for item in transitions
             ),
             "emitted_output_count": sum(
                 1 for item in transitions if item.get("emitted_output") is not None
