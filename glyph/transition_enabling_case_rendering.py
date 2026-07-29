@@ -11,7 +11,7 @@ let cache=null,timer=null,running=false;
 const text=value=>String(value??"").trim();
 async function state(){if(cache)return cache;const response=await fetch("/api/state",{cache:"no-store"});if(!response.ok)throw Error("diagram state unavailable");return cache=await response.json()}
 function selectedMachine(data){const machines=data?.views?.state?.machines||[],name=document.getElementById("machine-select")?.selectedOptions?.[0]?.textContent;return machines.find(machine=>machine.name===name)||machines[0]||null}
-function actionOf(transition){const action=transition?.action;if(typeof action==="string")return text(action);return text(action?.display)||text(action?.expression)}
+function actionOf(transition){const action=window.GlyphExecutionContext?.actionFor?.(transition)??transition?.action;if(typeof action==="string")return text(action);return text(action?.display)||text(action?.expression)}
 function casesOf(transition){return Array.isArray(transition?.enabling_cases)?transition.enabling_cases:[]}
 function inputOf(item){const input=item?.input_pattern;return input?`${input.confidence==="fallback"?"? ":""}${text(input.display)||text(input.expression)}`:""}
 function guardOf(item){return text(item?.guard?.display)||text(item?.guard?.expression).replace(/^true$/i,"")}
@@ -19,7 +19,7 @@ function lineOf(item,action){const input=inputOf(item),guard=guardOf(item),left=
 function update(cluster,transition){
   const cases=casesOf(transition);if(!cases.length)return false;
   const action=actionOf(transition),lines=cases.map(item=>lineOf(item,action)).filter(Boolean),value=cluster.querySelector(".transition-io-value");if(!value)return false;
-  const signature=JSON.stringify([cases,action]);if(cluster.dataset.enablingCaseSignature===signature)return false;
+  const signature=JSON.stringify([cases,action,window.GlyphExecutionContext?.signature?.()||""]);if(cluster.dataset.enablingCaseSignature===signature)return false;
   value.replaceChildren(...lines.map(line=>{const span=document.createElement("span");span.className="transition-semantic-line transition-role-line enabling-case-line";span.textContent=line;return span}));
   const first=cases[0]||{};
   cluster.dataset.inputValue=inputOf(first);
@@ -53,7 +53,7 @@ async function apply(){
   }finally{running=false}
 }
 function schedule(delay=0){clearTimeout(timer);timer=setTimeout(()=>apply().catch(error=>console.error("enabling-case rendering failed",error)),delay)}
-for(const event of["glyph-transition-io-clusters-ready","glyph-locale-changed","glyph-state-transition-ir-v3-labels-ready"]){document.addEventListener(event,()=>{cache=null;schedule(0)})}
+for(const event of["glyph-transition-io-clusters-ready","glyph-locale-changed","glyph-state-transition-ir-v3-labels-ready","glyph-execution-context-changed"]){document.addEventListener(event,()=>{cache=null;schedule(0)})}
 document.addEventListener("change",event=>{if(event.target?.id==="machine-select"){cache=null;const stage=document.querySelector(".state-node")?.closest(".graph-stage");if(stage)delete stage.dataset.transitionEnablingCasesReady;schedule(0)}});
 new MutationObserver(()=>schedule(30)).observe(document.getElementById("view")||document.body,{childList:true,subtree:true});
 window.glyphTransitionEnablingCases={marker:MARKER,apply:()=>schedule(0)};
