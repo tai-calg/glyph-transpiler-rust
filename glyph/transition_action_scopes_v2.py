@@ -288,6 +288,8 @@ def project_transition_action_scopes(
     analysis = dict(result.get("analysis", {}))
     analysis.update(
         {
+            "transition_system_execution_action_version": 1,
+            "transition_execution_context_control_flow_version": 1,
             "transition_action_scope_version": 1,
             "transition_execution_context_projection_version": 1,
             "display_action_transition_count": projected_count,
