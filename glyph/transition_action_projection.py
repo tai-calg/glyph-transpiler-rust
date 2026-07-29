@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Mapping, Sequence
+from typing import Mapping
 
+from ._transition_action_ir import (
+    _DECLARED_EFFECT_PROVENANCE,
+    _OUTPUT_PROJECTION_PROVENANCE,
+    build_operation_action,
+)
 from ._transition_branch_semantics import (
     branch_value_for_transition,
     build_machine_branch_context,
     field_index,
+    planned_source_branches,
     unwrap_expr,
 )
 from .artifacts import CompilationModel
@@ -16,7 +22,9 @@ from .compiler import (
     Expr,
     ExternDecl,
     FieldExpr,
+    FunctionDecl,
     NameExpr,
+    ProductDecl,
     SumDecl,
     TypeRef,
 )
@@ -24,15 +32,10 @@ from .execution_ir import render_expr
 from .state_transition_ir import _actions_in_expr, _render_type
 
 
-_ACTION_PROVENANCE = "transition-operation-invocation"
-_OUTPUT_PROVENANCE = "machine-output-projection"
-_EFFECT_PROVENANCE = "declared-effect-invocation"
-
-
 def _project_constructor_field(
     expression: Expr,
     *,
-    state_decl: object,
+    state_decl: ProductDecl,
     field_position: int,
     state_param: str,
 ) -> Expr | None:
@@ -66,7 +69,7 @@ def _variant_parts(
     return None, ()
 
 
-def _output_value(
+def _projected_output(
     expression: Expr | None,
     *,
     output_type: TypeRef,
@@ -85,7 +88,7 @@ def _output_value(
         "type": _render_type(output_type),
         "variant": variant,
         "payload": [render_expr(item) for item in payload],
-        "provenance": _OUTPUT_PROVENANCE,
+        "provenance": _OUTPUT_PROJECTION_PROVENANCE,
         "source": dict(source),
     }
 
@@ -95,17 +98,17 @@ def _operation_name(call: str) -> str:
     return call[:open_position] if open_position > 0 else call
 
 
-def _effect_values(
+def _effect_invocations(
     branch_value: Expr | None,
     *,
     legacy_action: object,
     synthesized_failure: bool,
-    functions: Mapping[str, object],
+    functions: Mapping[str, FunctionDecl],
     externs: Mapping[str, ExternDecl],
     aliases: Mapping[str, TypeRef],
     source: Mapping[str, object],
 ) -> list[dict[str, object]]:
-    effects = (
+    discovered = (
         _actions_in_expr(
             branch_value,
             functions=functions,
@@ -116,61 +119,25 @@ def _effect_values(
         else ()
     )
     legacy = str(legacy_action or "").strip()
+    records = [(item.call, item.failure_type) for item in discovered]
     if synthesized_failure and legacy:
-        effects = tuple(item for item in effects if item.call == legacy)
-    if not effects and legacy:
-        effects = tuple(
-            type("LegacyEffect", (), {"call": item, "failure_type": None})()
-            for item in legacy.split("; ")
-            if item
-        )
+        records = [item for item in records if item[0] == legacy]
+    if not records and legacy:
+        records = [(item, None) for item in legacy.split("; ") if item]
+
     return [
         {
-            "operation": _operation_name(item.call),
-            "expression": item.call,
-            "failure_type": item.failure_type,
-            "sequence": index,
+            "operation": _operation_name(call),
+            "expression": call,
+            "failure_type": failure_type,
+            "sequence": sequence,
             "effectful": True,
             "kind": "effect-invocation",
-            "provenance": _EFFECT_PROVENANCE,
+            "provenance": _DECLARED_EFFECT_PROVENANCE,
             "source": dict(source),
         }
-        for index, item in enumerate(effects, start=1)
+        for sequence, (call, failure_type) in enumerate(records, start=1)
     ]
-
-
-def _operation_action(
-    invocations: Sequence[Mapping[str, object]],
-    *,
-    source: Mapping[str, object],
-) -> dict[str, object] | None:
-    expressions = [
-        str(item.get("expression") or "").strip()
-        for item in invocations
-        if str(item.get("expression") or "").strip()
-    ]
-    if not expressions:
-        return None
-    operations = [
-        str(item.get("operation") or "").strip()
-        for item in invocations
-        if str(item.get("operation") or "").strip()
-    ]
-    display = "; ".join(expressions)
-    return {
-        "display": display,
-        "expression": display,
-        "operation": operations[0] if len(operations) == 1 else None,
-        "operations": operations,
-        "kind": (
-            "operation-invocation"
-            if len(expressions) == 1
-            else "operation-sequence"
-        ),
-        "effectful": True,
-        "provenance": _ACTION_PROVENANCE,
-        "source": dict(source),
-    }
 
 
 def _diagnostic(code: str, message: str, line: int) -> dict[str, object]:
@@ -207,6 +174,11 @@ def project_machine_transition_actions(
     state_decl = context.state_decl
     state_names = [str(item.get("name", "")) for item in result.get("states", [])]
     unreachable_lines = frozenset(map(int, result.get("unreachable_branches", [])))
+    branch_plan = planned_source_branches(
+        context,
+        state_names,
+        unreachable_lines=unreachable_lines,
+    )
 
     output_selector = (
         machine.action_selector
@@ -225,8 +197,7 @@ def project_machine_transition_actions(
         branch_value = branch_value_for_transition(
             context,
             transition,
-            state_names,
-            unreachable_lines=unreachable_lines,
+            branch_plan,
         )
         source = transition.get("source", {})
         source_map = (
@@ -234,7 +205,7 @@ def project_machine_transition_actions(
             if isinstance(source, Mapping)
             else {"line": 1, "column": 1}
         )
-        effect_invocations = _effect_values(
+        effect_invocations = _effect_invocations(
             branch_value,
             legacy_action=transition.get("action"),
             synthesized_failure=bool(transition.get("synthesized_failure")),
@@ -245,7 +216,7 @@ def project_machine_transition_actions(
         )
         transition["effect_invocations"] = effect_invocations
         transition["action_invocations"] = [dict(item) for item in effect_invocations]
-        transition["action"] = _operation_action(
+        transition["action"] = build_operation_action(
             effect_invocations,
             source=source_map,
         )
@@ -261,7 +232,7 @@ def project_machine_transition_actions(
             else None
         )
         emitted_output = (
-            _output_value(
+            _projected_output(
                 projected_expression,
                 output_type=output_type,
                 output_sum=output_sum,
