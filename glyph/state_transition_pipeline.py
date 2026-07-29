@@ -16,6 +16,7 @@ from .state_transition_contract import (
     TRANSITION_OPERATION_ACTION_VERSION,
     TRANSITION_RESULT_CONSUMER_ACTION_VERSION,
     TRANSITION_SEMANTICS_VERSION,
+    TRANSITION_SYSTEM_EXECUTION_ACTION_VERSION,
     public_transition_ir_marker,
 )
 from .transition_action_projection import project_machine_transition_actions
@@ -28,7 +29,9 @@ from .transition_enabling_cases import attach_machine_enabling_cases
 from .transition_input_provenance import expand_machine_transition_inputs
 from .transition_operation_action_finalization import finalize_machine_operation_actions
 from .transition_output_action_compatibility import attach_output_action_compatibility
-from .transition_result_action_dataflow import attach_transition_result_consumer_actions
+from .transition_system_execution_actions import (
+    attach_transition_system_execution_actions,
+)
 
 
 def _target_state_projection_type(
@@ -131,12 +134,12 @@ def enrich_state_transition_ir(
     projected = [
         project_machine_transition_actions(model, machine) for machine in lowered
     ]
-    result_consumed = [
-        attach_transition_result_consumer_actions(model, machine)
+    system_executed = [
+        attach_transition_system_execution_actions(model, machine)
         for machine in projected
     ]
     compatible = [
-        attach_output_action_compatibility(machine) for machine in result_consumed
+        attach_output_action_compatibility(machine) for machine in system_executed
     ]
     classified = [
         classify_machine_transition_roles(model, machine) for machine in compatible
@@ -170,6 +173,9 @@ def enrich_state_transition_ir(
     result["transition_operation_action_version"] = TRANSITION_OPERATION_ACTION_VERSION
     result["transition_result_consumer_action_version"] = (
         TRANSITION_RESULT_CONSUMER_ACTION_VERSION
+    )
+    result["transition_system_execution_action_version"] = (
+        TRANSITION_SYSTEM_EXECUTION_ACTION_VERSION
     )
     result["transition_action_scope_version"] = TRANSITION_ACTION_SCOPE_VERSION
     result["transition_action_target_independence_version"] = (

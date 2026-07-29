@@ -1,0 +1,52 @@
+system DoorControl
+  entry control
+
+  in state:DoorState
+  in input:Input
+  out receipt:Receipt
+
+  state -> control
+  input -> control
+  control -> receipt
+  control -> actuator
+
+system DoorAudit
+  entry audit_control
+
+  in state:DoorState
+  in input:Input
+  out receipt:Receipt
+
+  state -> audit_control
+  input -> audit_control
+  audit_control -> receipt
+  audit_control -> audit
+
+machine Door(state:DoorState,input:Input)
+  select=state.mode
+  init=DoorState(Closed)
+  next=step(state,input)
+  success=Open
+  failure=Alarm
+
+*Input(open_request,authorized,obstruction:B)
++DoorMode=Closed|Opening|Open|Alarm
+*DoorState(mode:DoorMode)
+*Receipt(state:DoorState)
+
+!actuator(state:DoorState):Receipt
+!audit(state:DoorState):Receipt
+
+>step(state:DoorState,input:Input):DoorState
+  state.mode==Closed&input.open_request&input.authorized >> DoorState(Opening)
+  state.mode==Opening&input.obstruction >> DoorState(Alarm)
+  state.mode==Opening >> DoorState(Open)
+  _ >> state
+
+>control(state:DoorState,input:Input):Receipt
+  next := step(state,input)
+  actuator(next)
+
+>audit_control(state:DoorState,input:Input):Receipt
+  next := step(state,input)
+  audit(next)

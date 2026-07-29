@@ -3,7 +3,6 @@ from __future__ import annotations
 
 _MARKER = "glyph-state-transition-ir-v3-renderer"
 
-
 _STYLE = r"""
 <style id="glyph-state-transition-ir-v3-renderer-style">
 .transition-label.provisional-trigger,
@@ -37,7 +36,6 @@ _STYLE = r"""
 }
 </style>
 """
-
 
 _SCRIPT = r"""
 <script id="glyph-state-transition-ir-v3-renderer-script">
@@ -119,7 +117,7 @@ _SCRIPT = r"""
   }
 
   function actionOf(transition) {
-    const raw = transition?.action;
+    const raw = window.GlyphExecutionContext?.actionFor?.(transition) ?? transition?.action;
     return typeof raw === "string"
       ? text(raw)
       : text(raw?.display) || text(raw?.expression);
@@ -174,12 +172,13 @@ _SCRIPT = r"""
     return [
       machine?.name || "",
       machine?.transition_ir?.version || "",
+      window.GlyphExecutionContext?.signature?.() || "auto",
       ...(machine?.transitions || []).map(transition => [
         transition.id ?? "",
         JSON.stringify(transition.trigger ?? null),
         JSON.stringify(transition.guards ?? []),
         JSON.stringify(transition.unclassified_conditions ?? []),
-        JSON.stringify(transition.action ?? null),
+        actionOf(transition),
         transition.failure_type ?? "",
         transition.display_label ?? "",
       ].join("\u001f")),
@@ -262,6 +261,7 @@ _SCRIPT = r"""
   document.addEventListener("glyph-transition-input-action-labels-ready", schedule);
   document.addEventListener("glyph-uml-transition-ready", schedule);
   document.addEventListener("glyph-locale-changed", schedule);
+  document.addEventListener("glyph-execution-context-changed", schedule);
   document.addEventListener("change", event => {
     if (event.target?.id === "machine-select") schedule();
   });
