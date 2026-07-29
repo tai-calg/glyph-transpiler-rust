@@ -38,7 +38,6 @@ class PlannedTransitionBranch:
     source_state: str
     target_state: str
     value: Expr
-    condition_truth: bool | None
 
 
 @dataclass(frozen=True)
@@ -360,7 +359,7 @@ def _trace_function(
     return branches
 
 
-def root_branches(
+def _root_branches(
     root: str,
     *,
     functions: Mapping[str, FunctionDecl],
@@ -443,7 +442,7 @@ def build_machine_branch_context(
         selector_index=selector_index,
         selector_variants=selector_variants,
         next_function=next_function,
-        branches=root_branches(
+        branches=_root_branches(
             next_function,
             functions=functions,
             state_decl=state_decl,
@@ -473,7 +472,7 @@ def _source_state_value(
     return CallExpr(NameExpr(context.state_decl.name), arguments)
 
 
-def specialize_for_source(
+def _specialize_for_source(
     context: MachineBranchContext,
     expression: Expr,
     source_state: str,
@@ -489,14 +488,14 @@ def specialize_for_source(
     )
 
 
-def condition_truth_for_source(
+def _condition_truth_for_source(
     context: MachineBranchContext,
     condition: Expr | None,
     source_state: str,
 ) -> bool | None:
     if condition is None:
         return True
-    specialized = specialize_for_source(context, condition, source_state)
+    specialized = _specialize_for_source(context, condition, source_state)
     return truth_value(
         specialized,
         products=context.products,
@@ -518,7 +517,7 @@ def planned_source_branches(
         for source_state in state_names:
             if exhausted[source_state]:
                 continue
-            condition_truth = condition_truth_for_source(
+            condition_truth = _condition_truth_for_source(
                 context,
                 branch.condition,
                 source_state,
@@ -535,8 +534,11 @@ def planned_source_branches(
                     branch=branch,
                     source_state=source_state,
                     target_state=target_state,
-                    value=specialize_for_source(context, branch.value, source_state),
-                    condition_truth=condition_truth,
+                    value=_specialize_for_source(
+                        context,
+                        branch.value,
+                        source_state,
+                    ),
                 )
             )
             if condition_truth is True:
@@ -602,25 +604,18 @@ def _block_value_for_transition(
 def branch_value_for_transition(
     context: MachineBranchContext,
     transition: Mapping[str, object],
-    state_names: Sequence[str],
-    *,
-    unreachable_lines: frozenset[int] = frozenset(),
+    branch_plan: Sequence[PlannedTransitionBranch],
 ) -> Expr | None:
     source = transition.get("source", {})
     line = int(source.get("line", 0)) if isinstance(source, Mapping) else 0
     source_state = str(transition.get("source_state") or "")
     target_state = str(transition.get("target_state") or "")
-    synthesized = bool(transition.get("synthesized_failure"))
     candidates = [
         item
-        for item in planned_source_branches(
-            context,
-            state_names,
-            unreachable_lines=unreachable_lines,
-        )
+        for item in branch_plan
         if item.branch.line == line and item.source_state == source_state
     ]
-    if synthesized and candidates:
+    if bool(transition.get("synthesized_failure")) and candidates:
         return candidates[0].value
     exact = [item.value for item in candidates if item.target_state == target_state]
     if exact:
@@ -630,22 +625,4 @@ def branch_value_for_transition(
     block_value = _block_value_for_transition(context, transition)
     if block_value is None or not source_state:
         return block_value
-    return specialize_for_source(context, block_value, source_state)
-
-
-__all__ = [
-    "MachineBranchContext",
-    "PlannedTransitionBranch",
-    "TransitionBranch",
-    "branch_value_for_transition",
-    "build_machine_branch_context",
-    "condition_truth_for_source",
-    "field_index",
-    "planned_source_branches",
-    "root_branches",
-    "simplify_expr",
-    "specialize_for_source",
-    "substitute_expr",
-    "truth_value",
-    "unwrap_expr",
-]
+    return _specialize_for_source(context, block_value, source_state)
