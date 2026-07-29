@@ -11,7 +11,9 @@ RAW_STATE_TRANSITION_IR_VERSION = 2
 # system-entry operations and publishes an explicit display projection.
 STATE_TRANSITION_IR_VERSION = 5
 
-TRANSITION_SEMANTICS_VERSION = 3
+# Input [Guard] ➞ Action remains label contract v2. Scope separation has its own
+# additive version and does not redefine the label grammar.
+TRANSITION_SEMANTICS_VERSION = 2
 TRANSITION_INPUT_PREIMAGE_VERSION = 1
 TRANSITION_ENABLING_CASES_VERSION = 1
 TRANSITION_OPERATION_ACTION_VERSION = 2
