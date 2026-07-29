@@ -4,7 +4,7 @@ from __future__ import annotations
 _MARKER = "glyph-transition-execution-context-selector-v2"
 
 _STYLE = r"""
-<style id="glyph-transition-execution-context-selector-v2-style">
+<style id="glyph-transition-execution-context-selector-v1-style">
 .execution-context-control{
   display:flex;
   align-items:center;
@@ -30,7 +30,7 @@ _STYLE = r"""
 """
 
 _SCRIPT = r"""
-<script id="glyph-transition-execution-context-selector-v2-script">
+<script id="glyph-transition-execution-context-selector-v1-script">
 (()=>{
 const MARKER="glyph-transition-execution-context-selector-v2",AUTO="auto",MACHINE="machine";
 let currentMachine=null,currentKey=AUTO,timer=null,running=false,lastSnapshotSignature="";
@@ -41,15 +41,16 @@ const tr=(key,ja,en)=>window.GlyphI18n?.t?.(key)??(english()?en:ja);
 const selectedMachine=data=>{const machines=data?.views?.state?.machines||[],name=document.getElementById("machine-select")?.selectedOptions?.[0]?.textContent;return machines.find(machine=>machine.name===name)||machines[0]||null};
 const contextKey=binding=>`context:${text(binding?.scope)||"system"}:${text(binding?.system)}:${text(binding?.entry)}`;
 const storageKey=machine=>`glyph.transition.execution-context.v2:${text(machine?.name)||"machine"}`;
-const statusRank=status=>({"resolved":0,"conditional":1,"unresolved":2,"multiple-transition-calls":3}[status]??0);
+const statusRank=status=>({"resolved":0,"actionless":1,"conditional":2,"unresolved":3,"multiple-transition-calls":4}[status]??0);
+const contextRecords=transition=>transition?.execution_contexts||transition?.execution_action_bindings||[];
 function presentationStatus(binding){const status=text(binding?.status)||"resolved";return status==="resolved"&&!binding?.action?"actionless":status}
 function contextsFor(machine){
   const contexts=new Map();
   for(const transition of machine?.transitions||[]){
-    for(const binding of transition?.execution_action_bindings||[]){
+    for(const binding of contextRecords(transition)){
       const key=contextKey(binding),status=presentationStatus(binding),known=contexts.get(key);
       if(!known){contexts.set(key,{key,scope:text(binding.scope)||"system",system:text(binding.system),entry:text(binding.entry),status});continue}
-      if(statusRank(status)>statusRank(known.status)||status==="actionless")known.status=status;
+      if(statusRank(status)>statusRank(known.status))known.status=status;
     }
   }
   return[...contexts.values()].sort((a,b)=>(a.system||a.entry).localeCompare(b.system||b.entry)||a.entry.localeCompare(b.entry));
@@ -61,7 +62,7 @@ function selectionFor(machine){
   const saved=sessionStorage.getItem(storageKey(machine))||AUTO;
   return valid.has(saved)?saved:AUTO;
 }
-function bindingFor(transition,key){return(transition?.execution_action_bindings||[]).find(binding=>contextKey(binding)===key)||null}
+function bindingFor(transition,key){return contextRecords(transition).find(binding=>contextKey(binding)===key)||null}
 function composedAction(machineAction,systemAction,context){
   const parts=[actionText(machineAction),actionText(systemAction)].filter(Boolean);
   if(!parts.length)return null;
@@ -88,7 +89,7 @@ function optionLabel(context){const base=context.system&&context.entry?`${contex
 function publish(reason="selection"){document.dispatchEvent(new CustomEvent("glyph-execution-context-changed",{detail:{marker:MARKER,machine:currentMachine?.name||null,key:currentKey,reason}}))}
 function liveState(){return typeof snapshot==="object"&&snapshot?snapshot:null}
 async function state(){const live=liveState();if(live)return live;const response=await fetch("/api/state",{cache:"no-store"});if(!response.ok)throw Error("diagram state unavailable");return response.json()}
-function snapshotSignature(data){return`${data?.version??""}:${data?.digest??""}:${JSON.stringify((data?.views?.state?.machines||[]).map(machine=>[machine.name,(machine.transitions||[]).map(item=>item.execution_action_bindings||[])]))}`}
+function snapshotSignature(data){return`${data?.version??""}:${data?.digest??""}:${JSON.stringify((data?.views?.state?.machines||[]).map(machine=>[machine.name,(machine.transitions||[]).map(item=>item.execution_contexts||item.execution_action_bindings||[])]))}`}
 function ensureControl(machine){
   const host=document.querySelector(".view-controls"),machineSelect=document.getElementById("machine-select");
   if(!host||!machineSelect)return false;
@@ -97,7 +98,7 @@ function ensureControl(machine){
   if(!contexts.length){const changed=Boolean(control)||currentKey!==AUTO||currentMachine?.name!==machine?.name;control?.remove();currentMachine=machine;currentKey=AUTO;return changed}
   if(!control){
     control=document.createElement("div");control.id="execution-context-control";control.className="execution-context-control";
-    const label=document.createElement("label");label.htmlFor="execution-context-select";
+    const label=document.createElement("label");label.htmlFor="execution-context-select";label.textContent="実行コンテキスト";
     const select=document.createElement("select");select.id="execution-context-select";control.append(label,select);host.appendChild(control);
   }
   const label=control.querySelector("label"),select=control.querySelector("select");
@@ -105,7 +106,8 @@ function ensureControl(machine){
   const signature=JSON.stringify([contexts,window.GlyphI18n?.locale||"ja"]);
   if(control.dataset.contextSignature!==signature){
     select.replaceChildren();
-    const options=[{key:AUTO,label:tr("executionContextAuto","自動（一致する場合のみ）","Auto (only when contexts agree)")},{key:MACHINE,label:tr("executionContextMachine","Machineのみ","Machine only")},...contexts.map(item=>({key:item.key,label:optionLabel(item)}))];
+    const options=[{key:AUTO,label:tr("executionContextAuto","自動（一致する場合のみ）","Auto (only when contexts agree)")},{key:MACHINE,label:"Machineのみ"},...contexts.map(item=>({key:item.key,label:optionLabel(item)}))];
+    if(english())options[1].label=tr("executionContextMachine","Machineのみ","Machine only");
     for(const item of options){const option=document.createElement("option");option.value=item.key;option.textContent=item.label;select.appendChild(option)}
     control.dataset.contextSignature=signature;
   }
