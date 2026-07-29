@@ -4,6 +4,8 @@ Status: Implemented
 
 Verification status: compiler IR, DOM rendering, SVG/PNG/PDF export, README snapshot, and target-state independence regressions pass with operation-derived Actions.
 
+Snapshot basis: the committed README image is generated and compared in the pull-request merge context, so it verifies the semantics that will exist on `main` after merge.
+
 ## Purpose
 
 This specification corrects the semantic source of the `Action` rendered on a state-transition edge.
