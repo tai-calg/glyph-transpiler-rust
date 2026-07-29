@@ -20,7 +20,7 @@ from .state_transition_contract import (
     public_transition_ir_marker,
 )
 from .transition_action_projection import project_machine_transition_actions
-from .transition_action_scopes import project_transition_action_scopes
+from .transition_action_scopes_v2 import project_transition_action_scopes
 from .transition_action_target_independence import analyze_action_target_independence
 from .transition_condition_roles import classify_machine_transition_roles
 from .transition_enabling_case_compatibility import preserve_legacy_transition_metadata
@@ -29,7 +29,7 @@ from .transition_enabling_cases import attach_machine_enabling_cases
 from .transition_input_provenance import expand_machine_transition_inputs
 from .transition_operation_action_finalization import finalize_machine_operation_actions
 from .transition_output_action_compatibility import attach_output_action_compatibility
-from .transition_system_execution_actions import (
+from .transition_system_execution_control_flow import (
     attach_transition_system_execution_actions,
 )
 
