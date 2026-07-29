@@ -105,7 +105,7 @@ class TransitionInputProvenanceTests(unittest.TestCase):
         self.assertEqual(emergency_case["guard"]["display"], "!input.fault")
         self.assertEqual(
             emergency["trigger"]["provenance"],
-            "enabling-case-input-pattern",
+            "decision-output-preimage",
         )
 
         disabled = next(
