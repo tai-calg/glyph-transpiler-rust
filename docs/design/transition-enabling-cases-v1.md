@@ -132,7 +132,7 @@ The compatibility fields `trigger`, `guards`, `event`, and `guard` synthesized f
 
 ## 4. IR contract
 
-StateTransitionIR version becomes 5. Each transition may contain:
+StateTransitionIR remains version 4 for reader compatibility. The additive `transition_enabling_cases_version=1` contract allows each transition to contain:
 
 ```json
 {
@@ -285,6 +285,6 @@ Required tests:
 ## 10. Migration
 
 - StateTransitionIR v4 readers continue through Legacy Projection.
-- StateTransitionIR v5 renderers must consume `enabling_cases`.
+- Enabling-case-aware renderers must consume `enabling_cases` when `transition_enabling_cases_version >= 1`.
 - `trigger` and `guards` are compatibility outputs, not semantic inputs.
 - No parser or source-language grammar change is included.
