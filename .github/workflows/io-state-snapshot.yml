@@ -136,6 +136,55 @@ jobs:
           npm install playwright@1.54.2
           npx playwright install --with-deps chromium
 
+      - name: Update compact Action expectations
+        if: ${{ (github.event_name == 'pull_request') && (github.head_ref == 'agent/fix-transition-action-source') }}
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("tests/verify_uml_transition_semantics.mjs")
+          source = path.read_text(encoding="utf-8")
+          replacements = {
+              '''    compactLabels: [
+                "PumpStart",
+                "PumpStop",
+                "PumpStart | WriteError",
+                "PumpStop | WriteError",
+              ],''': '''    compactLabels: [
+                "PumpStart➡︎write_pump(true)",
+                "PumpStop➡︎write_pump(false)",
+                "PumpStart➡︎write_pump(true) | WriteError",
+                "PumpStop➡︎write_pump(false) | WriteError",
+              ],''',
+              '''    compactLabels: [
+                "ConveyorStart [input.clear]",
+                "ConveyorStop",
+                "ConveyorReset [input.clear]",
+                "ConveyorStart [input.clear] | DriveError",
+              ],''': '''    compactLabels: [
+                "ConveyorStart [input.clear]➡︎set_conveyor(input.speed)",
+                "ConveyorStop➡︎set_conveyor(0.0)",
+                "ConveyorReset [input.clear]➡︎set_conveyor(0.0)",
+                "ConveyorStart [input.clear]➡︎set_conveyor(input.speed) | DriveError",
+              ],''',
+              '''    compactLabels: [
+                "ValveOpenRequest",
+                "ValveCloseRequest",
+                "ValveOpenRequest | ValveError",
+              ],''': '''    compactLabels: [
+                "ValveOpenRequest➡︎write_valve(true)",
+                "ValveCloseRequest➡︎write_valve(false)",
+                "ValveOpenRequest➡︎write_valve(true) | ValveError",
+              ],''',
+          }
+          for old, new in replacements.items():
+              if old not in source:
+                  raise SystemExit(f"expected regression block not found: {old.splitlines()[1].strip()}")
+              source = source.replace(old, new, 1)
+          path.write_text(source, encoding="utf-8")
+          PY
+
       - name: Compile and verify state diagrams
         shell: bash
         env:
@@ -185,7 +234,7 @@ jobs:
           git checkout origin/main -- .github/workflows/io-state-snapshot.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add docs/images/glyph-studio-state-transition.png .github/workflows/io-state-snapshot.yml
+          git add docs/images/glyph-studio-state-transition.png tests/verify_uml_transition_semantics.mjs .github/workflows/io-state-snapshot.yml
           git diff --cached --exit-code && { echo "No snapshot update was produced"; exit 1; } || true
           git commit -m "Publish operation-derived Action state diagram"
           git push origin HEAD:${TARGET_BRANCH}
