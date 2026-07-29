@@ -140,7 +140,25 @@ try {
     "[otherwise] ➞ SetMotorPower(normalize(input.raw))",
   );
 
-  await page.waitForTimeout(5000);
+  try {
+    await page.waitForFunction(() => {
+      const stage = document.querySelector(".graph-stage");
+      return stage?.dataset.transitionLayoutState === "ready"
+        && stage?.dataset.transitionIoCollisionSolved === "true"
+        && stage?.dataset.transitionIoCollisionCount === "0";
+    });
+  } catch (error) {
+    const diagnostic = await page.locator(".graph-stage").evaluate(stage => ({
+      dataset: { ...stage.dataset },
+      transaction: window.glyphTransitionLayoutTransaction ? {
+        generation: window.glyphTransitionLayoutTransaction.generation,
+        completedGeneration: window.glyphTransitionLayoutTransaction.completedGeneration,
+        lastReason: window.glyphTransitionLayoutTransaction.lastReason,
+      } : null,
+    }));
+    throw new Error(`enabling-case layout did not settle\n${JSON.stringify(diagnostic, null, 2)}\n${error.stack}`);
+  }
+
   const stageState = await page.locator(".graph-stage").evaluate(stage => ({
     machine: document.querySelector("#machine-select")?.selectedOptions?.[0]?.textContent || "",
     transitionCount: stage.querySelectorAll(".transition-io-cluster").length,
@@ -151,14 +169,13 @@ try {
     semanticRoleLinesReady: stage.dataset.transitionSemanticRoleLinesReady || "",
     layoutState: stage.dataset.transitionLayoutState || "",
     layoutError: stage.dataset.transitionLayoutError || "",
-    transaction: window.glyphTransitionLayoutTransaction ? {
-      generation: window.glyphTransitionLayoutTransaction.generation,
-      completedGeneration: window.glyphTransitionLayoutTransaction.completedGeneration,
-      lastReason: window.glyphTransitionLayoutTransaction.lastReason,
-    } : null,
   }));
+  assert.equal(stageState.transitionCount, machine.transitions.length);
+  assert.equal(stageState.layoutState, "ready");
+  assert.equal(stageState.collisionSolved, "true");
+  assert.equal(stageState.collisionCount, "0");
+  assert.deepEqual(consoleErrors, []);
   console.log(`enabling-case-stage-state ${JSON.stringify(stageState)}`);
-  if (consoleErrors.length) console.log(`enabling-case-console-errors ${JSON.stringify(consoleErrors)}`);
 
   await page.close();
 } finally {
@@ -166,4 +183,4 @@ try {
   await stop(child);
 }
 
-console.log("verified enabling-case Input Pattern, Guard, Action, and fallback DOM roles");
+console.log("verified enabling-case Input Pattern, Guard, Action, fallback, and collision-free layout roles");
