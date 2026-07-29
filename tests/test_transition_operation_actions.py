@@ -73,6 +73,43 @@ machine Door(state:DoorState,input:Input)
 """
 
 
+STRUCTURAL_STATE_SOURCE = """system DeviceControl
+  entry control
+
+  in state:DeviceState
+  in input:Input
+  out receipt:Receipt
+
+  state -> control
+  input -> control
+  control -> receipt
+  control -> actuator
+
+machine Device(state:DeviceState,input:Input)
+  select=state.mode
+  init=DeviceState(Idle,0)
+  next=step(state,input)
+  success=Active
+  failure=Faulted
+
+*Input(start:B)
++Mode=Idle|Active|Faulted
+*DeviceState(mode:Mode,count:U)
+*Receipt(state:DeviceState)
+
+!actuator(state:DeviceState):Receipt
+
+>step(state:DeviceState,input:Input):DeviceState
+  state.mode==Idle&input.start >> DeviceState(Active,state.count+1)
+  state.mode==Active >> DeviceState(Idle,state.count)
+  _ >> state
+
+>control(state:DeviceState,input:Input):Receipt
+  next := step(state,input)
+  actuator(next)
+"""
+
+
 class TransitionOperationActionTests(unittest.TestCase):
     def test_motor_action_is_executed_operation_not_state_output(self) -> None:
         views = compile_example("examples/acceptance/motor_safety.glyph")
@@ -165,6 +202,37 @@ class TransitionOperationActionTests(unittest.TestCase):
             action_display(alarm),
             "actuator(DoorState(Alarm))",
         )
+
+    def test_same_state_result_is_structurally_specialized(self) -> None:
+        views = compile_source(STRUCTURAL_STATE_SOURCE)
+        machine = views["state"]["machines"][0]
+        transitions = [
+            item
+            for item in machine["transitions"]
+            if not item.get("synthesized_failure")
+        ]
+        signature = {
+            (item["source_state"], item["target_state"]): action_display(item)
+            for item in transitions
+        }
+        self.assertEqual(
+            signature[("Idle", "Idle")],
+            "actuator(DeviceState(Idle,state.count))",
+        )
+        self.assertEqual(
+            signature[("Faulted", "Faulted")],
+            "actuator(DeviceState(Faulted,state.count))",
+        )
+        self.assertEqual(
+            signature[("Idle", "Active")],
+            "actuator(DeviceState(Active,state.count+1))",
+        )
+        self.assertEqual(
+            signature[("Active", "Idle")],
+            "actuator(DeviceState(Idle,state.count))",
+        )
+        self.assertNotIn(("Active", "Active"), signature)
+        self.assertFalse(any("actuator(state)" in value for value in signature.values()))
 
     def test_alias_chain_preserves_transition_result_provenance(self) -> None:
         source = DIRECT_ACTUATOR_SOURCE.replace(
