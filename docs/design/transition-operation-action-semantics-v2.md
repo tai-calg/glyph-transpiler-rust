@@ -2,178 +2,169 @@
 
 Status: Implemented
 
-Verification status: compiler IR, DOM rendering, SVG/PNG/PDF export, README snapshot, target-state independence, and transition-result consumer regressions pass with operation-derived Actions.
-
-Snapshot basis: the committed README image is generated and compared in the pull-request merge context, so it verifies the semantics that will exist on `main` after merge.
-
 ## Purpose
 
-This specification corrects the semantic source of the `Action` rendered on a state-transition edge.
+An Action is an operation invocation proven to execute. It is not a Target State, an Emitted Output, a state-field value, or a lexical alias of any of those values.
 
-The previous implementation projected `machine action=state.field` from the next state value and rendered that state-carried value as Action. Renaming the projected variants does not fix the category error: a field transported inside a state value is not proof that an operation was executed.
+No Glyph syntax is added by this contract.
 
-No new Glyph syntax is introduced in this change.
+Action ownership is defined by `state-transition-action-scopes-v1.md`.
 
-Downstream attribution through a caller Result Binding is specified by `transition-result-consumer-action-dataflow-v1.md`.
-
-## Terms
+## Semantic axes
 
 ### Target State
 
-The state value selected only by `machine select=` from the transition result. It is rendered by the destination node and never copied into an edge Action.
+Selected only through `machine select=` and represented by the destination node.
 
 ### Emitted Output
 
-A data value projected from the transition result by the legacy `machine action=state.field` selector. It may be a command, token, request, receipt selector, or other value transported for later interpretation.
+A value projected from the transition result by the legacy source spelling `machine action=state.field`. The public semantic field is `emitted_output`; the value is not an Action.
 
-Despite the legacy source spelling, an Emitted Output is not an Action. IR field: `emitted_output`.
+### Machine Action
 
-### Operation Invocation
+Operations proven to execute inside the machine transition expression.
 
-A call expression whose callee is recognized by the compiler as an executable declared operation.
+IR fields:
 
-### Action
+```text
+machine_action
+machine_action_invocations
+machine_effect_invocations
+```
 
-One or more Operation Invocations proven to execute as part of the transition path. An invocation may occur directly in the transition branch or downstream when the caller consumes that branch's complete result. Action is an execution occurrence, not a state value, state name, target name, command variant, or inferred synonym.
+### System execution Action
 
-### Effect
+Operations executed by a concrete `system entry` after consuming the machine transition result.
 
-The side-effect property and failure semantics of an Operation Invocation. An effectful invocation can simultaneously be an Action occurrence and an Effect occurrence; the two terms describe different axes.
+IR field:
 
-### Action Sequence
+```text
+execution_action_bindings[]
+```
 
-An ordered list of Operation Invocations executed by one transition path. Branch-local operations precede downstream result-consumer operations. IR field: `action_invocations`.
+A System Action never mutates `machine_action`.
+
+### Display Action
+
+The operation sequence selected for the current diagram projection.
+
+IR fields:
+
+```text
+display_action
+display_action_invocations
+display_effect_invocations
+```
+
+Compatibility fields `action`, `action_invocations`, and `effect_invocations` mirror the display projection for existing public StateTransitionIR v4 readers.
 
 ## Invariants
 
-1. `target_state` is obtained only from the state selector.
-2. `emitted_output` is obtained only from the legacy state-field projection.
-3. `action` and `action_invocations` are obtained only from proven Operation Invocations.
-4. Target State is never used as an Action fallback.
-5. Emitted Output is never used as an Action fallback.
-6. A transition with no proven Operation Invocation has `action = null`.
-7. Renderer code consumes structured Action IR and does not infer an Action from names.
-8. Input Pattern, Guard, Action, Emitted Output, Effect, and Target State remain separate semantic roles.
-9. Decision-preimage analysis may use Emitted Output to associate a decision result with a transition, but the renderer must not display that value as Action.
-10. Existing source using `machine action=` remains parse-compatible while its IR role is reclassified.
-11. A downstream operation is attributable only when immutable dataflow proves that it consumes the complete Transition Result.
-12. Ambiguous or unresolved caller paths never create a guessed Action.
+1. Target State is obtained only from the state selector.
+2. Emitted Output is obtained only from the output projection.
+3. Every Action has a structured operation-invocation witness.
+4. Target State is never an Action fallback.
+5. Emitted Output is never an Action fallback.
+6. An intrinsic transition with no operation has `machine_action = null`.
+7. A caller operation belongs to its System execution binding, not to the reusable Machine Action.
+8. Divergent system contexts are retained separately and require context selection.
+9. Machine operations precede downstream system operations in a composed display sequence.
+10. A failed machine operation does not produce a transition result for downstream system consumption.
+11. Renderer code consumes structured IR and performs no name-based Action inference.
+12. Input Pattern, Guard, Action, Emitted Output, Effect, and Target State remain separate roles.
 
-## IR contract
+## Examples
 
-A transition with one branch-local operation:
+Intrinsic Machine Action:
 
 ```json
 {
   "target_state": "Stopped",
   "emitted_output": {
     "display": "EmergencyBrake",
-    "variant": "EmergencyBrake",
     "provenance": "machine-output-projection"
   },
-  "action_invocations": [
-    {
-      "operation": "write_motor",
-      "expression": "write_motor(EmergencyBrake)",
-      "effectful": true,
-      "sequence": 1,
-      "provenance": "declared-effect-invocation"
-    }
-  ],
-  "action": {
+  "machine_action": {
     "display": "write_motor(EmergencyBrake)",
-    "expression": "write_motor(EmergencyBrake)",
-    "kind": "operation-invocation",
-    "effectful": true,
-    "provenance": "transition-operation-invocation"
-  }
+    "provenance": "transition-operation-invocation",
+    "scope": "machine"
+  },
+  "execution_action_bindings": []
 }
 ```
 
-A transition whose result is consumed by its caller:
+System result-consumer Action:
 
 ```json
 {
   "target_state": "Opening",
-  "action_invocations": [
+  "machine_action": null,
+  "execution_action_bindings": [
     {
-      "operation": "actuator",
-      "expression": "actuator(DoorState(Opening))",
-      "sequence": 1,
-      "provenance": "transition-result-consumer"
+      "system": "DoorControl",
+      "entry": "control",
+      "action": {
+        "display": "actuator(DoorState(Opening))"
+      }
     }
   ],
-  "action": {
+  "display_action": {
     "display": "actuator(DoorState(Opening))",
-    "provenance": "transition-operation-invocation"
+    "provenance": "transition-operation-invocation",
+    "projection_provenance": "transition-display-action-projection",
+    "scope": "system"
   }
 }
 ```
 
-A transition that only emits a command and performs no operation:
+Divergent systems:
 
-```json
-{
-  "emitted_output": {
-    "display": "Unlock"
-  },
-  "action_invocations": [],
-  "action": null
-}
+```text
+DoorControl/control → actuator(DoorState(Opening))
+DoorAudit/audit_control → audit(DoorState(Opening))
 ```
+
+Both bindings remain in IR. `display_action` is not guessed until an execution context is selected.
 
 ## Rendering contract
 
-The state-transition label remains:
-
 ```text
-Input Pattern [Guard] ➞ Action
+Input Pattern [Guard] ➞ Display Action
 ```
-
-The arrow destination represents Target State. Emitted Output is not rendered in the Action position.
 
 Examples:
 
 ```text
 input.emergency [!input.fault] ➞ write_motor(EmergencyBrake)
 ? input.open_request&input.authorized ➞ actuator(DoorState(Opening))
-[otherwise] ➞ write_motor(SetMotorPower(normalize(input.raw)))
+[otherwise] ➞ actuator(DoorState(Closed))
 ```
 
-Invalid renderings:
+Invalid:
 
 ```text
 input.emergency ➞ Stopped
 input.emergency ➞ EmergencyBrake
+[otherwise] ➞ actuator(state)
 ```
 
-The first substitutes Target State. The second substitutes a transported command value without proving that an operation was invoked.
+## Compatibility and versions
 
-## Compatibility
-
-- `machine action=state.field` remains accepted in source.
-- Existing machine metadata `action_projection` remains available but is marked as the legacy source spelling for `output_projection`.
-- Transition IR adds `emitted_output` and `action_invocations`.
-- Legacy consumers may continue reading `action`, but its provenance changes to operation invocation only.
-- Decision-preimage and enabling-case passes use `emitted_output.variant` before any legacy fallback.
-- `transition_result_consumer_action_version = 1` identifies downstream caller attribution.
+- `machine action=state.field` remains parse-compatible and maps to `emitted_output`.
+- Public StateTransitionIR remains v4 because the scope fields are additive and compatibility Action fields remain available.
+- `transition_operation_action_version = 2` identifies operation-derived Actions.
+- `transition_result_consumer_action_version = 2` identifies broad caller analysis and per-system bindings.
+- `transition_action_scope_version = 1` identifies explicit Machine/System/Display separation.
 
 ## Verification
 
-Required tests:
+Required regressions cover:
 
-1. A state-field projection produces `emitted_output`, never `action`.
-2. A proven branch-local operation produces `action` and `action_invocations`.
-3. `step → next → actuator(next)` produces a branch-specialized operation Action.
-4. Immutable aliases preserve Transition Result provenance.
-5. A pure guarded helper selects only the operation proven for the concrete Transition Result.
-6. An unrelated operation after `step` is not attributed.
-7. Divergent caller contexts produce a diagnostic and no guessed Action.
-8. A transition with no operation has no Action.
-9. Target State never appears through Action fallback.
-10. Enabling-case association continues through `emitted_output.variant`.
-11. DOM Action text equals the operation expression.
-12. DOM Action text differs from both Target State and Emitted Output.
-13. The exact default workspace source renders `actuator(DoorState(...))` Actions.
-14. README Motor Safety labels render `write_motor(...)` operations.
-15. Compiler, browser, desktop, export, and snapshot regression suites pass.
+- branch-local external operations;
+- direct, bound, aliased, nested, and pure-wrapper transition-result consumers;
+- unrelated operations remaining non-Actions;
+- divergent system bindings;
+- multiple machine calls being diagnosed rather than collapsed;
+- Target State and Emitted Output separation;
+- exact default-workspace concrete actuator values;
+- compiler, browser, SVG, PNG, PDF, layout, and snapshot suites.
