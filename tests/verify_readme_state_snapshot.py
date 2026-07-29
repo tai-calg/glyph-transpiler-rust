@@ -19,30 +19,12 @@ COMMITTED_PATH = ROOT / "docs/images/glyph-studio-state-transition.png"
 MOTOR_SOURCE_PATH = ROOT / "examples/acceptance/motor_safety.glyph"
 EXPECTED_SIZE = (1800, 1100)
 
-# READMEで公開するMotor Safety例は、Actionを命令、Target Stateを状態として
-# 明示的に分離する。文字列が異なるだけのStop/Stoppedは許容しない。
-REQUIRED_ACTION_TARGET_PAIRS = {
-    ("DisableMotor", "Stopped"),
-    ("SetMotorPower(normalize(input.raw))", "Running"),
-}
-FORBIDDEN_ACTION_TARGET_PAIRS = {
-    ("Stop", "Stopped"),
-    ("Drive(normalize(input.raw))", "Running"),
-}
-
 # Chromium can vary a few anti-aliased pixels between otherwise equivalent runs.
 # These limits accept the observed rasterization noise while rejecting changed text,
 # layout, state nodes, or transition semantics.
 MAX_CHANGED_PIXELS = 256
 MAX_MEAN_ABSOLUTE_DELTA = 0.001
 MAX_CHANNEL_DELTA = 32
-
-
-def action_display(transition: dict[str, object]) -> str:
-    action = transition.get("action")
-    if not isinstance(action, dict):
-        return ""
-    return str(action.get("display") or action.get("expression") or "")
 
 
 def verify_readme_semantics() -> None:
@@ -52,21 +34,34 @@ def verify_readme_semantics() -> None:
     )
     views = build_io_state_views(output.model, output.diagrams.ir)
     machine = views["state"]["machines"][0]
-    pairs = {
-        (action_display(transition), str(transition.get("target_state") or ""))
-        for transition in machine["transitions"]
-        if transition.get("input_preimage")
-    }
+    independence = machine["analysis"].get("action_target_independence", {})
 
-    missing = REQUIRED_ACTION_TARGET_PAIRS - pairs
-    forbidden = FORBIDDEN_ACTION_TARGET_PAIRS & pairs
-    if missing or forbidden:
+    failures: list[str] = []
+    if independence.get("version") != 1:
+        failures.append("generic Action/Target independence analysis is missing")
+    if not independence.get("typed_independent"):
+        failures.append(
+            "Action projection type and Target State projection type are not distinct"
+        )
+    if not independence.get("behaviorally_independent"):
+        failures.append(
+            "the example has no behavioral witness that Action and Target State vary independently"
+        )
+    if int(independence.get("near_alias_count", 0)) != 0:
+        failures.append(
+            "Action names are lexical near-aliases of Target State names: "
+            f"{independence.get('near_aliases', [])}"
+        )
+    if independence.get("mapping_shape") == "one-to-one":
+        failures.append(
+            "Action and Target State form a redundant one-to-one mapping"
+        )
+
+    if failures:
         raise AssertionError(
-            "README Motor Safety semantics do not separate command Actions from "
-            "Target States.\n"
-            f"required but missing: {sorted(missing)}\n"
-            f"forbidden but present: {sorted(forbidden)}\n"
-            f"compiled pairs: {sorted(pairs)}"
+            "README state diagram does not prove general Action/Target State independence.\n"
+            + "\n".join(f"- {item}" for item in failures)
+            + f"\nanalysis: {independence}"
         )
 
 
@@ -164,7 +159,7 @@ def main() -> None:
         )
 
     print(
-        "verified README state-transition semantics and snapshot "
+        "verified generic Action/Target independence and README snapshot "
         f"(changed_pixels={changed_pixels}, "
         f"mean_delta={mean_absolute_delta:.8f}, "
         f"max_delta={max_channel_delta})"
