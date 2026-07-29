@@ -85,6 +85,10 @@ try {
   assert.equal(running.item.guard.terms[0].origin, "fallback");
 
   const page = await browser.newPage({ viewport: { width: 1800, height: 1100 } });
+  const consoleErrors = [];
+  page.on("console", message => {
+    if (message.type() === "error") consoleErrors.push(message.text());
+  });
   await page.goto(url, { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => document.querySelector("#status")?.textContent === "ready");
   await page.click('button[data-tab="state"]');
@@ -145,9 +149,16 @@ try {
     collisionSolved: stage.dataset.transitionIoCollisionSolved || "",
     collisionCount: stage.dataset.transitionIoCollisionCount || "",
     semanticRoleLinesReady: stage.dataset.transitionSemanticRoleLinesReady || "",
-    layoutTransactionReady: stage.dataset.transitionLayoutTransactionReady || "",
+    layoutState: stage.dataset.transitionLayoutState || "",
+    layoutError: stage.dataset.transitionLayoutError || "",
+    transaction: window.glyphTransitionLayoutTransaction ? {
+      generation: window.glyphTransitionLayoutTransaction.generation,
+      completedGeneration: window.glyphTransitionLayoutTransaction.completedGeneration,
+      lastReason: window.glyphTransitionLayoutTransaction.lastReason,
+    } : null,
   }));
   console.log(`enabling-case-stage-state ${JSON.stringify(stageState)}`);
+  if (consoleErrors.length) console.log(`enabling-case-console-errors ${JSON.stringify(consoleErrors)}`);
 
   await page.close();
 } finally {
