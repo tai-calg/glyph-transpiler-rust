@@ -32,9 +32,8 @@ _STYLE = r"""
 _SCRIPT = r"""
 <script id="glyph-transition-execution-context-selector-v1-script">
 (()=>{
-const MARKER="glyph-transition-execution-context-selector-v1",AUTO="auto",MACHINE="machine",API_PATHS=new Set(["/api/state","/api/preview","/api/save"]);
+const MARKER="glyph-transition-execution-context-selector-v1",AUTO="auto",MACHINE="machine";
 let cache=null,currentMachine=null,currentKey=AUTO,timer=null,running=false;
-const nativeFetch=window.fetch.bind(window);
 const text=value=>String(value??"").trim();
 const actionText=value=>typeof value==="string"?text(value):text(value?.display)||text(value?.expression);
 const selectedMachine=data=>{const machines=data?.views?.state?.machines||[],name=document.getElementById("machine-select")?.selectedOptions?.[0]?.textContent;return machines.find(machine=>machine.name===name)||machines[0]||null};
@@ -64,7 +63,7 @@ function composedAction(machineAction,systemAction,context){
   const display=parts.join("; ");
   return{display,expression:display,scope:parts.length===2?"composed":(systemAction?"system":"machine"),projection_provenance:"transition-execution-context-selection",system:context?.system||null,entry:context?.entry||null};
 }
-function projectionFor(transition,key){
+function projectionFor(transition,key=currentKey){
   if(key===MACHINE)return{action:transition?.machine_action||null,invocations:transition?.machine_action_invocations||[],effects:transition?.machine_effect_invocations||[]};
   if(key.startsWith("context:")){
     const binding=bindingFor(transition,key),machineInvocations=transition?.machine_action_invocations||[],systemInvocations=binding?.action_invocations||[],machineEffects=transition?.machine_effect_invocations||[],systemEffects=binding?.effect_invocations||[];
@@ -72,37 +71,9 @@ function projectionFor(transition,key){
   }
   return{action:transition?.display_action||transition?.action||null,invocations:transition?.display_action_invocations||transition?.action_invocations||[],effects:transition?.display_effect_invocations||transition?.effect_invocations||[]};
 }
-function actionFor(transition){return projectionFor(transition,currentKey).action}
-function projectPayload(payload){
-  const machines=payload?.views?.state?.machines||[];
-  for(const machine of machines){
-    const key=selectionFor(machine);
-    for(const transition of machine?.transitions||[]){
-      const projection=projectionFor(transition,key);
-      transition.action=projection.action;
-      transition.action_invocations=projection.invocations.map(item=>({...item}));
-      transition.effect_invocations=projection.effects.map(item=>({...item}));
-      transition.ui_execution_context={key,source:"transition-execution-context-selector"};
-    }
-  }
-  return payload;
-}
-window.fetch=async(input,init)=>{
-  const response=await nativeFetch(input,init),raw=typeof input==="string"?input:input?.url||"";
-  let path="";try{path=new URL(raw,window.location.href).pathname}catch{return response}
-  if(!response.ok||!API_PATHS.has(path))return response;
-  let payload;try{payload=await response.clone().json()}catch{return response}
-  const headers=new Headers(response.headers);headers.delete("content-length");headers.delete("content-encoding");
-  return new Response(JSON.stringify(projectPayload(payload)),{status:response.status,statusText:response.statusText,headers});
-};
+function actionFor(transition){return projectionFor(transition).action}
 function optionLabel(context){if(context.system&&context.entry)return`${context.system} / ${context.entry}`;return context.entry||context.system||"implicit caller"}
-function publish(){
-  cache=null;
-  document.dispatchEvent(new CustomEvent("glyph-execution-context-changed",{detail:{marker:MARKER,machine:currentMachine?.name||null,key:currentKey}}));
-  // Existing renderers already use this neutral redraw hook. The locale value is
-  // unchanged; only their API snapshot is re-read through the projection above.
-  document.dispatchEvent(new CustomEvent("glyph-locale-changed",{detail:{source:MARKER}}));
-}
+function publish(){document.dispatchEvent(new CustomEvent("glyph-execution-context-changed",{detail:{marker:MARKER,machine:currentMachine?.name||null,key:currentKey}}))}
 async function state(){if(cache)return cache;const response=await fetch("/api/state",{cache:"no-store"});if(!response.ok)throw Error("diagram state unavailable");return cache=await response.json()}
 function ensureControl(machine){
   const host=document.querySelector(".view-controls"),machineSelect=document.getElementById("machine-select");
@@ -128,15 +99,12 @@ function ensureControl(machine){
   control.dataset.selectedContext=currentKey;
   return previousMachine!==machine?.name||previousKey!==currentKey;
 }
-async function render(){
-  if(running)return;running=true;
-  try{const data=await state(),machine=selectedMachine(data);if(machine&&ensureControl(machine))publish()}finally{running=false}
-}
+async function render(){if(running)return;running=true;try{const data=await state(),machine=selectedMachine(data);if(machine&&ensureControl(machine))publish()}finally{running=false}}
 function schedule(delay=0){clearTimeout(timer);timer=setTimeout(()=>render().catch(error=>console.error("execution-context selector failed",error)),delay)}
 document.addEventListener("change",event=>{if(event.target?.id==="machine-select"){cache=null;currentMachine=null;currentKey=AUTO;schedule(0)}});
 for(const event of["glyph-state-transition-ir-v3-labels-ready","glyph-transition-io-clusters-ready"]){document.addEventListener(event,()=>schedule(0))}
 new MutationObserver(()=>schedule(20)).observe(document.getElementById("view")||document.body,{childList:true,subtree:true});
-window.GlyphExecutionContext={marker:MARKER,actionFor,contextsFor,selectedKey:()=>currentKey,signature:()=>`${currentMachine?.name||""}:${currentKey}`,refresh:()=>{cache=null;schedule(0)}};
+window.GlyphExecutionContext={marker:MARKER,actionFor,projectionFor,contextsFor,selectedKey:()=>currentKey,signature:()=>`${currentMachine?.name||""}:${currentKey}`,refresh:()=>{cache=null;schedule(0)}};
 schedule(0);
 })();
 </script>
