@@ -23,6 +23,30 @@ def _replace_output(
     return expression.replace(original_output, refined_output)
 
 
+def _refine_emitted_output(
+    transition: dict[str, object],
+    action: object,
+) -> tuple[str, str]:
+    emitted = transition.get("emitted_output")
+    if not isinstance(emitted, Mapping):
+        return "", ""
+
+    output = dict(emitted)
+    original_output = _text(output.get("display") or output.get("expression"))
+    refined_output = original_output
+    if isinstance(action, Mapping) and action.get("value_provenance"):
+        action_variant = _text(action.get("variant"))
+        output_variant = _text(output.get("variant"))
+        if action_variant and action_variant == output_variant:
+            refined_output = _text(action.get("display") or action.get("expression"))
+            output["display"] = refined_output
+            output["expression"] = refined_output
+            output["payload"] = list(action.get("payload", []))
+            output["value_provenance"] = action.get("value_provenance")
+            transition["emitted_output"] = output
+    return original_output, refined_output
+
+
 def finalize_machine_operation_actions(
     machine_view: dict[str, object],
 ) -> dict[str, object]:
@@ -41,6 +65,7 @@ def finalize_machine_operation_actions(
     for original in result.get("transitions", []):
         transition = dict(original)
         action = transition.get("action")
+        original_output, refined_output = _refine_emitted_output(transition, action)
         invocations = [
             dict(item)
             for item in transition.get("action_invocations", [])
@@ -64,18 +89,17 @@ def finalize_machine_operation_actions(
 
         value = dict(action)
         decision_variant = _text(value.get("variant"))
-        original_output = _text(value.get("output_expression"))
+        compatibility_output = _text(value.get("output_expression"))
+        if compatibility_output:
+            original_output = compatibility_output
         emitted = transition.get("emitted_output")
         emitted_display = (
             _text(emitted.get("display") or emitted.get("expression"))
             if isinstance(emitted, Mapping)
             else ""
         )
-        refined_output = (
-            _text(value.get("display") or value.get("expression"))
-            if value.get("value_provenance")
-            else emitted_display
-        )
+        if not refined_output:
+            refined_output = emitted_display
         template = _text(value.get("operation_template") or value.get("expression"))
         rendered = _replace_output(
             template,
