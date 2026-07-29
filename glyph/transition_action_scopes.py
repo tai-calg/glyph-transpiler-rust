@@ -7,7 +7,7 @@ from ._transition_action_ir import build_operation_action, renumber_invocations,
 
 
 _CONTEXT_REQUIRED_CODE = "STIR_SYSTEM_ACTION_CONTEXT_REQUIRED"
-_DISPLAY_PROVENANCE = "transition-display-action-projection"
+_DISPLAY_PROJECTION_PROVENANCE = "transition-display-action-projection"
 
 
 def _invocations(value: object) -> list[dict[str, object]]:
@@ -64,7 +64,9 @@ def _display_action(
     )
     action = build_operation_action(combined)
     if action is not None:
-        action["provenance"] = _DISPLAY_PROVENANCE
+        # The value is still operation-derived. Projection is a separate axis,
+        # not a replacement provenance category.
+        action["projection_provenance"] = _DISPLAY_PROJECTION_PROVENANCE
         action["scope"] = scope
         action["systems"] = list(systems)
         action["entries"] = list(entries)
@@ -80,7 +82,7 @@ def project_transition_action_scopes(
     ``execution_action_bindings`` belong to concrete system entries.
     ``display_action`` is a view projection only. The compatibility fields
     ``action`` and ``action_invocations`` mirror that projection for older
-    consumers and carry explicit projection provenance.
+    consumers while retaining explicit projection metadata.
     """
 
     result = deepcopy(machine_view)
@@ -107,6 +109,12 @@ def project_transition_action_scopes(
             for item in transition.get("execution_action_bindings", [])
             if isinstance(item, Mapping)
         ]
+        if transition.get("synthesized_failure"):
+            # A failed machine operation does not return the transition result;
+            # caller operations that consume that result cannot execute.
+            bindings = []
+            transition["execution_action_bindings"] = []
+
         by_sequence: dict[
             tuple[tuple[str, object], ...],
             list[dict[str, object]],
