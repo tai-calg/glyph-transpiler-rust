@@ -24,6 +24,17 @@ from .transition_input_provenance import (
 )
 
 
+_LEGACY_TRANSITION_FIELDS = (
+    "trigger",
+    "guards",
+    "event",
+    "guard",
+    "display_label",
+    "classification",
+    "unclassified_conditions",
+)
+
+
 def _target_state_projection_type(
     model: CompilationModel,
     machine_name: str,
@@ -46,6 +57,32 @@ def _target_state_projection_type(
         None,
     )
     return field.ty.name if field is not None else None
+
+
+def _attach_enabling_cases_preserving_legacy(
+    model: CompilationModel,
+    machine: dict[str, object],
+) -> dict[str, object]:
+    """Add Enabling Cases while keeping the pre-v1 compatibility view unchanged."""
+
+    original_by_id = {
+        str(item.get("id") or f"T{index + 1}"): dict(item)
+        for index, item in enumerate(machine.get("transitions", []))
+    }
+    result = attach_machine_enabling_cases(model, machine)
+    transitions: list[dict[str, object]] = []
+    for index, item in enumerate(result.get("transitions", [])):
+        transition = dict(item)
+        transition_id = str(transition.get("id") or f"T{index + 1}")
+        legacy = original_by_id.get(transition_id, {})
+        for field in _LEGACY_TRANSITION_FIELDS:
+            if field in legacy:
+                transition[field] = deepcopy(legacy[field])
+            else:
+                transition.pop(field, None)
+        transitions.append(transition)
+    result["transitions"] = transitions
+    return result
 
 
 def _attach_action_target_independence(
@@ -115,7 +152,8 @@ def enrich_state_transition_ir(
         expand_machine_transition_inputs(model, machine) for machine in classified
     ]
     cased = [
-        attach_machine_enabling_cases(model, machine) for machine in expanded
+        _attach_enabling_cases_preserving_legacy(model, machine)
+        for machine in expanded
     ]
     state["machines"] = [
         _attach_action_target_independence(model, machine) for machine in cased
