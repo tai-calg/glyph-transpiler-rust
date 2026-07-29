@@ -136,6 +136,19 @@ try {
     "[otherwise] ➞ SetMotorPower(normalize(input.raw))",
   );
 
+  await page.waitForTimeout(5000);
+  const stageState = await page.locator(".graph-stage").evaluate(stage => ({
+    machine: document.querySelector("#machine-select")?.selectedOptions?.[0]?.textContent || "",
+    transitionCount: stage.querySelectorAll(".transition-io-cluster").length,
+    clustersReady: stage.dataset.transitionIoClustersReady || "",
+    enablingCasesReady: stage.dataset.transitionEnablingCasesReady || "",
+    collisionSolved: stage.dataset.transitionIoCollisionSolved || "",
+    collisionCount: stage.dataset.transitionIoCollisionCount || "",
+    semanticRoleLinesReady: stage.dataset.transitionSemanticRoleLinesReady || "",
+    layoutTransactionReady: stage.dataset.transitionLayoutTransactionReady || "",
+  }));
+  console.log(`enabling-case-stage-state ${JSON.stringify(stageState)}`);
+
   await page.close();
 } finally {
   await browser.close();
