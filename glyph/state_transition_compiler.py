@@ -8,6 +8,7 @@ from ._transition_branch_semantics import (
 )
 from .artifacts import CompilationModel
 from .compiler import AliasDecl, ExternDecl
+from .execution_ir import render_expr
 from .state_transition_ir import (
     STATE_TRANSITION_IR_SCHEMA,
     STATE_TRANSITION_IR_VERSION,
@@ -62,9 +63,7 @@ def build_machine_state_transition_ir(
         condition_raw = (
             "otherwise"
             if branch.condition is None
-            else __import__("glyph.execution_ir", fromlist=["render_expr"]).render_expr(
-                branch.condition
-            )
+            else render_expr(branch.condition)
         )
         actions = _actions_in_expr(
             planned.value,
