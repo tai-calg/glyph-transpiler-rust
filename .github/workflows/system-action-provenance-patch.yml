@@ -1,0 +1,117 @@
+name: Apply System Action provenance patch
+
+on:
+  push:
+    branches:
+      - agent/system-action-control-flow-completeness-v2
+    paths:
+      - .github/workflows/system-action-provenance-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/system-action-control-flow-completeness-v2
+          fetch-depth: 0
+
+      - name: Apply argument-provenance refinement
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("glyph/transition_system_execution_control_flow_v2.py")
+          source = path.read_text(encoding="utf-8")
+
+          def replace_once(old: str, new: str) -> None:
+              global source
+              count = source.count(old)
+              if count != 1:
+                  raise SystemExit(f"expected one replacement, found {count}: {old[:80]!r}")
+              source = source.replace(old, new, 1)
+
+          replace_once(
+              "    substitute_expr,\n    unwrap_expr,\n",
+              "    _inline_unguarded,\n    substitute_expr,\n    unwrap_expr,\n",
+          )
+          replace_once(
+              "        self.expected_transition_arguments = _machine_next_arguments(branch_context)\n"
+              "        self.transition_argument_mismatch = False\n\n"
+              "    def evaluate(\n",
+              "        self.expected_transition_arguments = _machine_next_arguments(branch_context)\n"
+              "        self.machine_input_names = frozenset(\n"
+              "            parameter.name for parameter in branch_context.machine.input_params\n"
+              "        )\n"
+              "        self.transition_argument_mismatch = False\n\n"
+              "    def _is_open_machine_input(self, expression: Expr) -> bool:\n"
+              "        expression = _inline_unguarded(expression, self._context.functions)\n"
+              "        if isinstance(expression, NameExpr):\n"
+              "            return expression.name in self.machine_input_names\n"
+              "        if isinstance(expression, FieldExpr):\n"
+              "            return self._is_open_machine_input(expression.base)\n"
+              "        if isinstance(expression, TryExpr):\n"
+              "            return self._is_open_machine_input(expression.expr)\n"
+              "        if not isinstance(expression, CallExpr) or not isinstance(\n"
+              "            expression.callee, NameExpr\n"
+              "        ):\n"
+              "            return False\n"
+              "        name = expression.callee.name\n"
+              "        if name in self._externs:\n"
+              "            return True\n"
+              "        if name in self._context.products:\n"
+              "            return bool(expression.args) and all(\n"
+              "                self._is_open_machine_input(argument) for argument in expression.args\n"
+              "            )\n"
+              "        return False\n\n"
+              "    def _transition_arguments_are_proven(self, call: CallExpr) -> bool:\n"
+              "        if len(call.args) != len(self.expected_transition_arguments):\n"
+              "            return False\n"
+              "        state_name = self._context.machine.state_param.name\n"
+              "        for actual, expected in zip(\n"
+              "            call.args, self.expected_transition_arguments, strict=True\n"
+              "        ):\n"
+              "            if isinstance(expected, NameExpr) and expected.name == state_name:\n"
+              "                if actual != expected:\n"
+              "                    return False\n"
+              "                continue\n"
+              "            if isinstance(expected, NameExpr) and expected.name in self.machine_input_names:\n"
+              "                if not self._is_open_machine_input(actual):\n"
+              "                    return False\n"
+              "                continue\n"
+              "            if actual != expected:\n"
+              "                return False\n"
+              "        return True\n\n"
+              "    def evaluate(\n",
+          )
+          replace_once(
+              "            and symbolic.args != self.expected_transition_arguments\n",
+              "            and not self._transition_arguments_are_proven(symbolic)\n",
+          )
+          replace_once(
+              "            elif evaluator.transition_argument_mismatch:\n",
+              "            elif (\n"
+              "                evaluator.transition_argument_mismatch\n"
+              "                and binding.get(\"status\") != \"multiple-transition-calls\"\n"
+              "            ):\n",
+          )
+
+          path.write_text(source, encoding="utf-8")
+          PY
+
+          python -m py_compile glyph/transition_system_execution_control_flow_v2.py
+          python -m unittest discover -s tests
+
+      - name: Commit verified patch
+        shell: bash
+        run: |
+          git rm .github/workflows/system-action-provenance-patch.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add glyph/transition_system_execution_control_flow_v2.py
+          git commit -m "Refine System transition argument provenance"
+          git push origin HEAD:agent/system-action-control-flow-completeness-v2
