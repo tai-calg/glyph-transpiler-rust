@@ -75,6 +75,41 @@ class OwnershipSemanticsTests(unittest.TestCase):
         self.assertEqual(len(summary.footprint.moves), 1)
         self.assertEqual(len(summary.footprint.writes), 1)
 
+    def test_move_followed_by_capability_cast_preserves_target_capability(self) -> None:
+        function = CapabilityFunction(
+            "publish",
+            ">",
+            (CapabilityParam("owner", owner_type(), 1),),
+            CapabilityType(
+                CapabilityKind.SHARE,
+                "Buffer",
+                state="Ready",
+                raw="share Buffer[Ready]",
+            ),
+            1,
+            1,
+            1,
+        )
+        model = model_with_capabilities(
+            (function,),
+            (
+                CapabilityOperation("publish", "move", "owner", "shared", None, 2),
+                CapabilityOperation(
+                    "publish",
+                    "capability_cast",
+                    "owner",
+                    "shared",
+                    "share",
+                    2,
+                ),
+            ),
+        )
+        summary = build_ownership_summaries(model)["publish"]
+        self.assertTrue(summary.approximation.is_exact, summary.violations)
+        final = {item.name: item for item in summary.final}
+        self.assertEqual(final["owner"].availability, OwnershipAvailability.MOVED)
+        self.assertEqual(final["shared"].capability, CapabilityKind.SHARE)
+
     def test_use_after_move_in_capability_ir_is_not_silently_accepted(self) -> None:
         function = CapabilityFunction(
             "invalid",
