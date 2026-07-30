@@ -290,6 +290,7 @@ try {
     || message.startsWith("transition label layout failed TypeError: Failed to fetch")
     || message.startsWith("initial transition routing failed TypeError: Failed to fetch")
     || message.startsWith("transition label layout failed NoModificationAllowedError:")
+    || message.startsWith("transition layout transaction failed TypeError: Failed to fetch")
     || message.startsWith("transition layout transaction failed Error: no valid position exists inside the transition tether")
     || message.startsWith("Failed to load resource: the server responded with a status of 500")
   );
