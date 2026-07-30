@@ -41,21 +41,17 @@ machine Motor(state:MotorState,input:Input)
 
 !write_motor(command:MotorCommand):Receipt
 
-# 状態遷移は純粋に次状態を計算する。Receipt(command)は公開strict契約上、
-# cycleで実行されるwrite_motor(command)の戻り値と同一である。
 >step(state:MotorState,input:Input):MotorState
   command := decide(input)
-  receipt := Receipt(command)
   next :=
-    command==LatchFault >> MotorState(Faulted,LatchFault,receipt)
-    command==EmergencyBrake >> MotorState(Stopped,EmergencyBrake,receipt)
-    command==DisableMotor >> MotorState(Stopped,DisableMotor,receipt)
-    command==SetMotorPower(power) >> MotorState(Running,SetMotorPower(power),receipt)
-    _ >> MotorState(Faulted,LatchFault,Receipt(LatchFault))
+    command==LatchFault >> MotorState(Faulted,LatchFault,write_motor(LatchFault))
+    command==EmergencyBrake >> MotorState(Stopped,EmergencyBrake,write_motor(EmergencyBrake))
+    command==DisableMotor >> MotorState(Stopped,DisableMotor,write_motor(DisableMotor))
+    command==SetMotorPower(power) >> MotorState(Running,SetMotorPower(power),write_motor(SetMotorPower(power)))
+    _ >> MotorState(Faulted,LatchFault,write_motor(LatchFault))
   next
 
-# 外向き作用はSystem entryで一度だけ実行し、その実結果を返す。
+# entryは遷移を一度だけ実行し、その遷移内で得た作用結果を返す。
 >cycle(state:MotorState,input:Input):Receipt
   next := step(state,input)
-  receipt := write_motor(next.command)
-  receipt
+  next.receipt
