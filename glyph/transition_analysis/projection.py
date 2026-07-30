@@ -30,8 +30,11 @@ def check_exact_action_projection(
     reachability = _mapping(context_evidence.get("reachability"))
     if reachability.get("status") != "proven-reachable":
         return ExactActionDecision(False, "reachability-is-not-proven")
-    if reachability.get("witness") is None:
+    witness = reachability.get("witness")
+    if not isinstance(witness, Mapping):
         return ExactActionDecision(False, "concrete-witness-is-missing")
+    if witness.get("edge_id") != context_evidence.get("edge_id"):
+        return ExactActionDecision(False, "concrete-witness-edge-mismatch")
     if not _is_exact(reachability, "reachability"):
         return ExactActionDecision(False, "reachability-is-not-exact")
 
@@ -57,9 +60,23 @@ def check_exact_action_projection(
     if context_evidence.get("unknown_reasons"):
         return ExactActionDecision(False, "unknown-reasons-are-present")
 
-    action = context_evidence.get("legacy_action")
-    if not isinstance(action, Mapping):
-        return ExactActionDecision(False, "projectable-action-is-missing")
+    alternatives = effect_trace.get("alternatives")
+    if not isinstance(alternatives, list) or len(alternatives) != 1:
+        return ExactActionDecision(False, "effect-trace-structure-is-invalid")
+    alternative = alternatives[0]
+    if not isinstance(alternative, Mapping):
+        return ExactActionDecision(False, "effect-trace-structure-is-invalid")
+    events = alternative.get("events")
+    if not isinstance(events, list):
+        return ExactActionDecision(False, "effect-trace-events-are-invalid")
+    if not events:
+        return ExactActionDecision(True, "exact-no-system-action", None)
+    if not all(isinstance(event, Mapping) for event in events):
+        return ExactActionDecision(False, "effect-trace-events-are-invalid")
+    action = {
+        "kind": "effect-trace",
+        "events": [dict(event) for event in events if isinstance(event, Mapping)],
+    }
     return ExactActionDecision(True, "exact-action-evidence-satisfied", action)
 
 
