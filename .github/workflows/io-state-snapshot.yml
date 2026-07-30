@@ -126,6 +126,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 5
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -181,7 +182,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git show HEAD^:.github/workflows/io-state-snapshot.yml > .github/workflows/io-state-snapshot.yml
+          git show 029988fb2e052adfca3e909bd8bf9951a1ea8dad:.github/workflows/io-state-snapshot.yml > .github/workflows/io-state-snapshot.yml
           git diff --check
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
