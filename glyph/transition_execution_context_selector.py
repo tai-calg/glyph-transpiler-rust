@@ -32,7 +32,7 @@ _SCRIPT = r"""
 <script id="glyph-transition-execution-context-selector-v2-script">
 (()=>{
 const MARKER="glyph-transition-execution-context-selector-v2",AUTO="auto",MACHINE="machine";
-const BLOCKED=new Set(["unresolved","multiple-transition-calls"]);
+const BLOCKED=new Set(["unresolved","multiple-transition-calls","missing"]);
 let currentMachine=null,currentKey=AUTO,timer=null,running=false,pending=false,lastSnapshotSignature="";
 const text=value=>String(value??"").trim();
 const actionText=value=>typeof value==="string"?text(value):text(value?.display)||text(value?.expression);
@@ -41,18 +41,19 @@ const tr=(key,ja,en)=>window.GlyphI18n?.t?.(key)??(english()?en:ja);
 const selectedMachine=data=>{const machines=data?.views?.state?.machines||[],name=document.getElementById("machine-select")?.selectedOptions?.[0]?.textContent;return machines.find(machine=>machine.name===name)||machines[0]||null};
 const contextKey=binding=>`context:${text(binding?.scope)||"system"}:${text(binding?.system)}:${text(binding?.entry)}`;
 const storageKey=machine=>`glyph.transition.execution-context.v2:${text(machine?.name)||"machine"}`;
-const statusRank=status=>({"resolved":0,"actionless":1,"conditional":2,"unresolved":3,"multiple-transition-calls":4}[status]??0);
+const statusRank=status=>({"resolved":0,"actionless":1,"conditional":2,"unresolved":3,"multiple-transition-calls":4,"missing":5}[status]??0);
 const contextRecords=transition=>transition?.execution_contexts||transition?.execution_action_bindings||[];
 function presentationStatus(binding){const status=text(binding?.status)||"resolved";return status==="resolved"&&!binding?.action?"actionless":status}
 function contextsFor(machine){
-  const contexts=new Map();
-  for(const transition of machine?.transitions||[]){
+  const transitions=machine?.transitions||[],contexts=new Map();
+  for(const transition of transitions){
     for(const binding of contextRecords(transition)){
       const key=contextKey(binding),status=presentationStatus(binding),known=contexts.get(key);
       if(!known){contexts.set(key,{key,scope:text(binding.scope)||"system",system:text(binding.system),entry:text(binding.entry),status});continue}
       if(statusRank(status)>statusRank(known.status))known.status=status;
     }
   }
+  for(const context of contexts.values()){if(transitions.some(transition=>!contextRecords(transition).some(binding=>contextKey(binding)===context.key)))context.status="missing"}
   return[...contexts.values()].sort((a,b)=>(a.system||a.entry).localeCompare(b.system||b.entry)||a.entry.localeCompare(b.entry));
 }
 function validKeys(machine){return new Set([AUTO,MACHINE,...contextsFor(machine).map(item=>item.key)])}
@@ -72,8 +73,10 @@ function composedAction(machineAction,systemAction,context){
 function projectionFor(transition,key=currentKey){
   if(key===MACHINE)return{action:transition?.machine_action||null,invocations:transition?.machine_action_invocations||[],effects:transition?.machine_effect_invocations||[],status:"machine",blocked:false};
   if(key.startsWith("context:")){
-    const binding=bindingFor(transition,key),status=binding?.status||"missing",blocked=BLOCKED.has(status),machineInvocations=transition?.machine_action_invocations||[],machineEffects=transition?.machine_effect_invocations||[],systemAction=blocked?null:binding?.action,systemInvocations=blocked?[]:(binding?.action_invocations||[]),systemEffects=blocked?[]:(binding?.effect_invocations||[]);
-    return{action:composedAction(transition?.machine_action,systemAction,binding),invocations:[...machineInvocations,...systemInvocations],effects:[...machineEffects,...systemEffects],status,blocked,cases:binding?.action_cases||[]};
+    const binding=bindingFor(transition,key);
+    if(!binding)return{action:null,invocations:[],effects:[],status:"missing",blocked:true,missing:true,cases:[]};
+    const status=binding.status||"resolved",blocked=BLOCKED.has(status),machineInvocations=transition?.machine_action_invocations||[],machineEffects=transition?.machine_effect_invocations||[],systemAction=blocked?null:binding.action,systemInvocations=blocked?[]:(binding.action_invocations||[]),systemEffects=blocked?[]:(binding.effect_invocations||[]);
+    return{action:composedAction(transition?.machine_action,systemAction,binding),invocations:[...machineInvocations,...systemInvocations],effects:[...machineEffects,...systemEffects],status,blocked,missing:false,cases:binding.action_cases||[]};
   }
   return{action:transition?.display_action||transition?.action||null,invocations:transition?.display_action_invocations||transition?.action_invocations||[],effects:transition?.display_effect_invocations||transition?.effect_invocations||[],status:transition?.action_scope?.context_required?"context-required":"auto",blocked:false};
 }
@@ -83,6 +86,7 @@ function statusSuffix(status){
   if(status==="unresolved")return tr("executionContextUnresolved","（解析不能）"," (unresolved)");
   if(status==="multiple-transition-calls")return tr("executionContextMultiple","（複数遷移）"," (multiple transitions)");
   if(status==="actionless")return tr("executionContextActionless","（System Actionなし）"," (no System Action)");
+  if(status==="missing")return tr("executionContextMissing","（一部遷移に未到達）"," (unreachable transitions)");
   return"";
 }
 function optionLabel(context){const base=context.system&&context.entry?`${context.system} / ${context.entry}`:(context.entry||context.system||tr("executionContextImplicit","暗黙の呼出し元","implicit caller"));return`${base}${statusSuffix(context.status)}`}

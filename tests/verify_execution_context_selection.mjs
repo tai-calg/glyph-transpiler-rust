@@ -132,6 +132,10 @@ for (const transition of machine.transitions) {
 const browser = await chromium.launch({ headless: true });
 try {
   const page = await browser.newPage({ viewport: { width: 1800, height: 1100 } });
+  const pageErrors = [];
+  const consoleErrors = [];
+  page.on("pageerror", error => pageErrors.push(String(error)));
+  page.on("console", message => { if (message.type() === "error") consoleErrors.push(message.text()); });
   await page.goto(url, { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => document.querySelector("#status")?.textContent === "ready");
   await page.click('button[data-tab="state"]');
@@ -219,6 +223,18 @@ try {
   assert.deepEqual(blocked.invocations, []);
   assert.deepEqual(blocked.effects, []);
 
+  const missing = await page.evaluate(() => window.GlyphExecutionContext.projectionFor({
+    machine_action: { display: "machine_action()" },
+    machine_action_invocations: [{ expression: "machine_action()" }],
+    machine_effect_invocations: [{ expression: "machine_action()" }],
+    execution_contexts: [],
+  }, "context:system:MissingSystem:run"));
+  assert.equal(missing.status, "missing");
+  assert.equal(missing.blocked, true);
+  assert.equal(missing.action, null);
+  assert.deepEqual(missing.invocations, []);
+  assert.deepEqual(missing.effects, []);
+
   const originalSource = await page.locator("#editor").inputValue();
   const actionlessSource = originalSource
     .replace("  audit_control -> audit\n", "")
@@ -245,6 +261,32 @@ try {
   }, null, { timeout: 60_000 });
   await waitForProjection(page, noActions);
 
+  let delayedSaveSeen = false;
+  await page.route("**/api/save", async route => {
+    delayedSaveSeen = true;
+    await new Promise(resolve => setTimeout(resolve, 500));
+    await route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: JSON.stringify({ error: "stale save failure" }),
+    });
+  });
+  const raceSource = `${renamedSource}\n# stale-save-race\n`;
+  await page.locator("#editor").fill(raceSource);
+  await page.click("#save");
+  await page.waitForFunction(() => document.querySelector("#status")?.textContent === "busy");
+  await page.click("#compile");
+  await page.waitForFunction(expected => (
+    snapshot?.source === expected
+    && document.querySelector("#status")?.textContent === "ready"
+  ), raceSource, { timeout: 60_000 });
+  await new Promise(resolve => setTimeout(resolve, 700));
+  assert.equal(delayedSaveSeen, true);
+  assert.equal(await page.locator("#status").textContent(), "ready");
+  await page.unroute("**/api/save");
+
+  assert.deepEqual(pageErrors, [], `browser page errors:\n${pageErrors.join("\n")}`);
+  assert.deepEqual(consoleErrors, [], `browser console errors:\n${consoleErrors.join("\n")}`);
   await page.close();
 } finally {
   await browser.close();

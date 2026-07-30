@@ -222,6 +222,78 @@ machine Door(state:DoorState,input:Input)
 """
 
 
+
+SWAPPED_INPUT_ARGUMENT_SOURCE = """system DoorControl
+  entry control
+
+  in state:DoorState
+  in event:Signal
+  in mode:Signal
+  out state_out:DoorState
+
+  state -> control
+  event -> control
+  mode -> control
+  control -> state_out
+  control -> actuator
+
+machine Door(state:DoorState,event:Signal,mode:Signal)
+  select=state.mode
+  init=DoorState(Closed)
+  next=step(state,event,mode)
+  success=Open
+  failure=Alarm
+
++Signal=Active|Inactive
++DoorMode=Closed|Open|Alarm
+*DoorState(mode:DoorMode)
+
+!actuator(state:DoorState):DoorState
+
+>step(state:DoorState,event:Signal,mode:Signal):DoorState
+  state.mode==Closed&event==Active >> DoorState(Open)
+  state.mode==Closed&mode==Active >> DoorState(Alarm)
+  _ >> state
+
+>control(state:DoorState,event:Signal,mode:Signal):DoorState
+  next := step(state,mode,event)
+  actuator(next)
+"""
+
+
+UNWIRED_INPUT_ARGUMENT_SOURCE = """system DoorControl
+  entry control
+
+  in state:DoorState
+  out state_out:DoorState
+
+  state -> control
+  control -> state_out
+  control -> actuator
+
+machine Door(state:DoorState,event:Signal)
+  select=state.mode
+  init=DoorState(Closed)
+  next=step(state,event)
+  success=Open
+  failure=Alarm
+
++Signal=Active|Inactive
++DoorMode=Closed|Open|Alarm
+*DoorState(mode:DoorMode)
+
+!actuator(state:DoorState):DoorState
+
+>step(state:DoorState,event:Signal):DoorState
+  state.mode==Closed&event==Active >> DoorState(Open)
+  _ >> state
+
+>control(state:DoorState,event:Signal):DoorState
+  next := step(state,event)
+  actuator(next)
+"""
+
+
 def multiple_state_source(*, wire_current_state: bool) -> str:
     state_port = "  in state:DoorState\n" if wire_current_state else ""
     state_edge = "  state -> control\n" if wire_current_state else ""
@@ -258,7 +330,6 @@ machine Door(state:DoorState,input:Input)
   next := step(state,input)
   actuator(next)
 """
-
 
 def compile_source(source: str, name: str) -> dict[str, object]:
     output = CompilationPipeline().compile_text(source, source_name=name)
@@ -425,6 +496,35 @@ class TransitionSystemExecutionSafetyTests(unittest.TestCase):
                 for context in contexts
             )
         )
+
+
+    def test_machine_inputs_cannot_be_swapped_by_position(self) -> None:
+        views = compile_source(SWAPPED_INPUT_ARGUMENT_SOURCE, "swapped-inputs.glyph")
+        machine = views["state"]["machines"][0]
+        self.assertTrue(
+            any(
+                item.get("code") == "STIR_SYSTEM_TRANSITION_ARGUMENT_UNPROVEN"
+                for item in machine["diagnostics"]
+            )
+        )
+        contexts = all_contexts(machine)
+        self.assertTrue(contexts)
+        self.assertTrue(all(context.get("status") == "unresolved" for context in contexts))
+        self.assertTrue(all(context.get("action") is None for context in contexts))
+
+    def test_machine_input_requires_explicit_system_wiring(self) -> None:
+        views = compile_source(UNWIRED_INPUT_ARGUMENT_SOURCE, "unwired-input.glyph")
+        machine = views["state"]["machines"][0]
+        self.assertTrue(
+            any(
+                item.get("code") == "STIR_SYSTEM_TRANSITION_ARGUMENT_UNPROVEN"
+                for item in machine["diagnostics"]
+            )
+        )
+        contexts = all_contexts(machine)
+        self.assertTrue(contexts)
+        self.assertTrue(all(context.get("status") == "unresolved" for context in contexts))
+        self.assertTrue(all(context.get("action") is None for context in contexts))
 
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 from typing import Mapping, Sequence
 
 from . import _transition_system_execution_core as _base
@@ -32,6 +33,55 @@ _SUCCESS_VALUE_NAME = "__glyph_success_value__"
 _UNPROVEN_STATE_INPUT_CODE = "STIR_SYSTEM_STATE_INPUT_UNPROVEN"
 _UNPROVEN_TRANSITION_ARGUMENT_CODE = "STIR_SYSTEM_TRANSITION_ARGUMENT_UNPROVEN"
 _UNPROVEN_TRANSITION_VALUE_NAME = "__glyph_unproven_transition_result__"
+
+
+@dataclass(frozen=True)
+class _SystemWiringEvidence:
+    explicit: bool
+    valid_context: bool
+    entry_inputs: frozenset[str]
+    external_inputs: frozenset[str]
+
+
+def _system_wiring_evidence(
+    model: CompilationModel,
+    context: _base._ExecutionContext,
+    branch_context: _base.MachineBranchContext,
+) -> _SystemWiringEvidence:
+    declaration = context.function or branch_context.functions.get(context.entry)
+    if context.system is None:
+        return _SystemWiringEvidence(
+            explicit=False,
+            valid_context=declaration is not None,
+            entry_inputs=frozenset(
+                parameter.name for parameter in declaration.params
+            ) if declaration is not None else frozenset(),
+            external_inputs=frozenset(),
+        )
+
+    system = next((item for item in model.systems if item.name == context.system), None)
+    if system is None or system.entry_name != context.entry or declaration is None:
+        return _SystemWiringEvidence(True, False, frozenset(), frozenset())
+
+    parameters = {parameter.name: parameter for parameter in declaration.params}
+    input_ports = {
+        port.name: port for port in system.ports if port.direction == "input"
+    }
+    edges = {(edge.source_name, edge.target_name) for edge in system.edges}
+    entry_inputs = frozenset(
+        name
+        for name, port in input_ports.items()
+        if (name, context.entry) in edges
+        and name in parameters
+        and port.type_text == _base._render_type(parameters[name].ty)
+    )
+    external_inputs = frozenset(
+        name
+        for name in input_ports
+        if name in system.external_names
+        and any(edge.source_name == name for edge in system.edges)
+    )
+    return _SystemWiringEvidence(True, True, entry_inputs, external_inputs)
 
 
 def _conditions_expression(conditions: Sequence[str]) -> Expr | None:
@@ -142,9 +192,9 @@ def _machine_next_arguments(context: _base.MachineBranchContext) -> tuple[Expr, 
 
 
 def _state_specialization_proof(
-    model: CompilationModel,
     context: _base._ExecutionContext,
     branch_context: _base.MachineBranchContext,
+    wiring: _SystemWiringEvidence,
 ) -> tuple[bool, str]:
     declaration = context.function or branch_context.functions.get(context.entry)
     if declaration is None:
@@ -166,25 +216,30 @@ def _state_specialization_proof(
         if state_parameters:
             return False, "entry state parameter does not match the Machine state parameter"
         return True, ""
-    if context.system is None:
+    if not wiring.explicit:
         return False, "implicit caller has no explicit System state-input wiring"
-
-    system = next((item for item in model.systems if item.name == context.system), None)
-    if system is None or system.entry_name != context.entry:
+    if not wiring.valid_context:
         return False, "System entry does not match the execution context"
-    has_input_port = any(
-        port.direction == "input"
-        and port.name == expected_name
-        and port.type_text == _base._render_type(state_type)
-        for port in system.ports
-    )
-    has_entry_edge = any(
-        edge.source_name == expected_name and edge.target_name == context.entry
-        for edge in system.edges
-    )
-    if not has_input_port or not has_entry_edge:
+    if expected_name not in wiring.entry_inputs:
         return False, "current Machine state is not proven by System input wiring"
     return True, ""
+
+
+def _local_input_sources(
+    context: _base._ExecutionContext,
+) -> dict[str, Expr]:
+    if context.block is None:
+        return {}
+    sources: dict[str, Expr] = {}
+    for binding in context.block.bindings:
+        if not binding.name or binding.kind == "conditional":
+            continue
+        try:
+            expression = parse_expr(binding.source)
+        except Exception:
+            continue
+        sources[binding.name] = substitute_expr(expression, sources)
+    return sources
 
 
 def _blocked_binding(
@@ -234,6 +289,8 @@ class _SystemExecutionEvaluator(_base._SystemExecutionEvaluator):
         aliases: Mapping[str, TypeRef],
         branch_value: Expr,
         source_state: str,
+        wiring: _SystemWiringEvidence,
+        local_input_sources: Mapping[str, Expr],
     ) -> None:
         super().__init__(
             branch_context=branch_context,
@@ -242,32 +299,80 @@ class _SystemExecutionEvaluator(_base._SystemExecutionEvaluator):
             branch_value=branch_value,
         )
         self.source_state = source_state
+        self.wiring = wiring
+        self.local_input_sources = dict(local_input_sources)
         self.expected_transition_arguments = _machine_next_arguments(branch_context)
         self.machine_input_names = frozenset(
             parameter.name for parameter in branch_context.machine.input_params
         )
         self.transition_argument_mismatch = False
 
-    def _is_open_machine_input(self, expression: Expr) -> bool:
+    def _input_roots(
+        self,
+        expression: Expr,
+        *,
+        visited_names: frozenset[str] = frozenset(),
+    ) -> frozenset[tuple[str, str]] | None:
         expression = _inline_unguarded(expression, self._context.functions)
         if isinstance(expression, NameExpr):
-            return expression.name in self.machine_input_names
+            if expression.name in visited_names:
+                return None
+            local_source = self.local_input_sources.get(expression.name)
+            if local_source is not None:
+                return self._input_roots(
+                    local_source,
+                    visited_names=visited_names | {expression.name},
+                )
+            if (
+                expression.name in self.machine_input_names
+                or expression.name in self.wiring.entry_inputs
+            ):
+                return frozenset({("entry", expression.name)})
+            return frozenset()
         if isinstance(expression, FieldExpr):
-            return self._is_open_machine_input(expression.base)
+            return self._input_roots(
+                expression.base, visited_names=visited_names
+            )
         if isinstance(expression, TryExpr):
-            return self._is_open_machine_input(expression.expr)
+            return self._input_roots(
+                expression.expr, visited_names=visited_names
+            )
         if not isinstance(expression, CallExpr) or not isinstance(
             expression.callee, NameExpr
         ):
-            return False
+            return None
         name = expression.callee.name
         if name in self._externs:
-            return True
-        if name in self._context.products:
-            return bool(expression.args) and all(
-                self._is_open_machine_input(argument) for argument in expression.args
+            return frozenset({("external", name)})
+        if name not in self._context.products:
+            return None
+        roots: set[tuple[str, str]] = set()
+        for argument in expression.args:
+            argument_roots = self._input_roots(
+                argument, visited_names=visited_names
             )
-        return False
+            if argument_roots is None:
+                return None
+            roots.update(argument_roots)
+        return frozenset(roots)
+
+    def _input_argument_is_proven(self, expression: Expr, expected_name: str) -> bool:
+        roots = self._input_roots(expression)
+        if not roots:
+            return False
+        for kind, name in roots:
+            if kind == "entry":
+                if name not in self.wiring.entry_inputs:
+                    return False
+                if name in self.machine_input_names and name != expected_name:
+                    return False
+                continue
+            if kind == "external":
+                if self.wiring.explicit and name not in self.wiring.external_inputs:
+                    return False
+                continue
+            return False
+        return True
 
     def _transition_arguments_are_proven(self, call: CallExpr) -> bool:
         if len(call.args) != len(self.expected_transition_arguments):
@@ -281,7 +386,7 @@ class _SystemExecutionEvaluator(_base._SystemExecutionEvaluator):
                     return False
                 continue
             if isinstance(expected, NameExpr) and expected.name in self.machine_input_names:
-                if not self._is_open_machine_input(actual):
+                if not self._input_argument_is_proven(actual, expected.name):
                     return False
                 continue
             if actual != expected:
@@ -663,6 +768,14 @@ def attach_transition_system_execution_actions(
         return result
     functions = branch_context.functions
     contexts = _base._execution_contexts(model, functions)
+    context_wiring = tuple(
+        (
+            context,
+            _system_wiring_evidence(model, context, branch_context),
+            _local_input_sources(context),
+        )
+        for context in contexts
+    )
     externs = {
         item.name: item
         for item in model.program.declarations
@@ -711,13 +824,15 @@ def attach_transition_system_execution_actions(
         source = transition.get("source", {})
         line = int(source.get("line", 1)) if isinstance(source, Mapping) else 1
         bindings: list[dict[str, object]] = []
-        for context in contexts:
+        for context, wiring, local_input_sources in context_wiring:
             evaluator = _SystemExecutionEvaluator(
                 branch_context=branch_context,
                 externs=externs,
                 aliases=aliases,
                 branch_value=branch_value,
                 source_state=source_state,
+                wiring=wiring,
+                local_input_sources=local_input_sources,
             )
             evaluation = (
                 _evaluate_block(context, evaluator)
@@ -730,9 +845,9 @@ def attach_transition_system_execution_actions(
 
             proof_blocked = False
             state_proven, proof_reason = _state_specialization_proof(
-                model,
                 context,
                 branch_context,
+                wiring,
             )
             if not state_proven:
                 proof_blocked = True
