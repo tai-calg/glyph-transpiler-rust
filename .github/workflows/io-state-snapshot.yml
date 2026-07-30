@@ -70,6 +70,7 @@ on:
       - "tests/test_diagram_workspace_layout.py"
       - "tests/test_initial_transition_layout.py"
       - "tests/test_io_state_diagram_app.py"
+      - "tests/test_public_strict_effect_contracts.py"
       - "tests/test_rtai_semantic_status.py"
       - "tests/test_rtai_targeted_witnesses.py"
       - "tests/test_rtai_witness_generation.py"
@@ -163,6 +164,7 @@ jobs:
             echo "::endgroup::"
           }
 
+          python -m unittest discover -s tests -p 'test_public_strict_effect_contracts.py'
           python -m unittest discover -s tests -p 'test_rtai_semantic_status.py'
           python -m unittest discover -s tests -p 'test_rtai_targeted_witnesses.py'
           python -m unittest discover -s tests -p 'test_rtai_witness_generation.py'
