@@ -5,7 +5,7 @@ from pathlib import Path
 import subprocess
 import zlib
 
-_parent = subprocess.check_output(["git", "show", "HEAD^:tests/test_transition_system_execution_review_regressions.py"], text=True)
+_parent = subprocess.check_output(["git", "show", "f8cfdf4a5142f8ea7218dbab1395c6efbc3a8968:tests/test_transition_system_execution_review_regressions.py"], text=True)
 _scope = {"__file__": __file__, "__name__": "_glyph_essential_parent"}
 exec(compile(_parent, __file__, "exec"), _scope)
 
