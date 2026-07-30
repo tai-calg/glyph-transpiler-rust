@@ -11,33 +11,23 @@ if str(ROOT) not in sys.path:
 
 from glyph.compilation import CompilationPipeline
 from glyph.transition_analysis import (
-    VerifiedEffectContractRegistry,
     build_strict_io_state_views,
-    read_only_identity_contract,
+    public_strict_program,
 )
 
 
 SOURCE = ROOT / "examples/acceptance/rtai_strict_projection.glyph"
+SOURCE_ID = str(SOURCE.relative_to(ROOT))
 OUTPUT = ROOT / "build/rtai-strict-projection/io-state-views.json"
 
 
 def main() -> None:
     compiled = CompilationPipeline().compile_text(
         SOURCE.read_text(encoding="utf-8"),
-        source_name=str(SOURCE.relative_to(ROOT)),
+        source_name=SOURCE_ID,
     )
-    contracts = VerifiedEffectContractRegistry(
-        defaults=(
-            (
-                "actuator",
-                read_only_identity_contract(
-                    "actuator",
-                    "state",
-                    source="strict snapshot: reviewed read-only identity actuator",
-                ),
-            ),
-        )
-    )
+    program = public_strict_program(SOURCE_ID)
+    contracts = program.registry()
     views = build_strict_io_state_views(
         compiled.model,
         compiled.diagrams.ir,
@@ -96,6 +86,7 @@ def main() -> None:
                 "ready": True,
                 "legacy_analyzer_enabled": False,
                 "transition_count": transition_count,
+                "effect_contract_surface": program.source_id,
                 "output": str(OUTPUT.relative_to(ROOT)),
             },
             sort_keys=True,
