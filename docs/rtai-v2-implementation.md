@@ -3,9 +3,10 @@
 ## Status
 
 RTAI v2 is implemented as a **shadow semantic analysis**. It publishes TEIR,
-Machine relations, structural transition preimages, guarded abstract-analysis
-foundations and Evidence-compatible safety metadata, but it does not replace the
-active System Action projection.
+Machine relations, structural transition preimages and Evidence-compatible safety
+metadata. Guarded abstract execution is implemented and tested as an internal
+analysis API, but its alternatives are not yet converted into public edge Evidence
+and do not replace the active System Action projection.
 
 The current implementation establishes the semantic and validation layers needed
 before the UI switch. Unsupported RTAI constructs produce explicit `unknown` or
@@ -309,7 +310,9 @@ Each Machine receives additive `rtai_semantic_bootstrap` data containing:
 - block-local alias-resolved transition calls
 - structural edge preimages
 
-`projection_source` remains `false`.
+`projection_source` remains `false`. Guarded abstract-analysis results remain an
+internal API until they can be transformed into property-scoped Evidence without
+weakening the exact-action checker.
 
 ## Trusted computing base
 
