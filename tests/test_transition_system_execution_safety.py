@@ -1,14 +1,9 @@
 from __future__ import annotations
 
 import unittest
-from types import SimpleNamespace
-from unittest.mock import patch
 
 from glyph.compilation import CompilationPipeline
 from glyph.io_state_views import build_io_state_views
-from glyph.transition_system_execution_critical import (
-    attach_transition_system_execution_actions,
-)
 
 
 SOURCE = """system DoorControl
@@ -120,9 +115,124 @@ machine Door(state:DoorState,input:Input)
 """
 
 
+UNPROVEN_CALL_ARGUMENT_SOURCE = """system DoorControl
+  entry control
+
+  in state:DoorState
+  in input:Input
+  out state_out:DoorState
+
+  state -> control
+  input -> control
+  control -> state_out
+  control -> actuator
+
+machine Door(state:DoorState,input:Input)
+  select=state.mode
+  init=DoorState(Closed)
+  next=step(state,input)
+  success=Open
+  failure=Alarm
+
+*Input(open_request:B)
++DoorMode=Closed|Open|Alarm
+*DoorState(mode:DoorMode)
+
+!actuator(state:DoorState):DoorState
+
+>step(state:DoorState,input:Input):DoorState
+  state.mode==Closed&input.open_request >> DoorState(Open)
+  _ >> state
+
+>control(state:DoorState,input:Input):DoorState
+  next := step(DoorState(Closed),input)
+  actuator(next)
+"""
+
+
+UNPROVEN_INPUT_ARGUMENT_SOURCE = """system DoorControl
+  entry control
+
+  in state:DoorState
+  in input:Input
+  out state_out:DoorState
+
+  state -> control
+  input -> control
+  control -> state_out
+  control -> actuator
+
+machine Door(state:DoorState,input:Input)
+  select=state.mode
+  init=DoorState(Closed)
+  next=step(state,input)
+  success=Open
+  failure=Alarm
+
+*Input(open_request:B)
++DoorMode=Closed|Open|Alarm
+*DoorState(mode:DoorMode)
+
+!actuator(state:DoorState):DoorState
+
+>step(state:DoorState,input:Input):DoorState
+  state.mode==Closed&input.open_request >> DoorState(Open)
+  _ >> state
+
+>control(state:DoorState,input:Input):DoorState
+  next := step(state,Input(false))
+  actuator(next)
+"""
+
+
+PROVEN_ALIAS_CALL_SOURCE = """system DoorControl
+  entry control
+
+  in state:DoorState
+  in input:Input
+  out state_out:DoorState
+
+  state -> control
+  input -> control
+  control -> state_out
+  control -> actuator
+
+machine Door(state:DoorState,input:Input)
+  select=state.mode
+  init=DoorState(Closed)
+  next=step(state,input)
+  success=Open
+  failure=Alarm
+
+*Input(open_request:B)
++DoorMode=Closed|Open|Alarm
+*DoorState(mode:DoorMode)
+
+!actuator(state:DoorState):DoorState
+
+>step(state:DoorState,input:Input):DoorState
+  state.mode==Closed&input.open_request >> DoorState(Open)
+  _ >> state
+
+>control(state:DoorState,input:Input):DoorState
+  current := state
+  event := input
+  next := step(current,event)
+  actuator(next)
+"""
+
+
 def compile_source(source: str, name: str) -> dict[str, object]:
     output = CompilationPipeline().compile_text(source, source_name=name)
     return build_io_state_views(output.model, output.diagrams.ir)
+
+
+def all_contexts(machine: dict[str, object]) -> list[dict[str, object]]:
+    return [
+        context
+        for transition in machine["transitions"]
+        for context in transition.get("execution_contexts", [])
+    ]
 
 
 class TransitionSystemExecutionSafetyTests(unittest.TestCase):
@@ -141,48 +251,6 @@ class TransitionSystemExecutionSafetyTests(unittest.TestCase):
                 for transition in machine["transitions"]
             )
         )
-
-    def test_critical_guard_strips_synthesized_failure_bindings(self) -> None:
-        fake_machine = {
-            "name": "Pump",
-            "analysis": {},
-            "diagnostics": [],
-            "transitions": [
-                {
-                    "id": "T1",
-                    "synthesized_failure": True,
-                    "execution_action_bindings": [
-                        {
-                            "scope": "system",
-                            "system": "PumpControl",
-                            "entry": "control",
-                            "status": "resolved",
-                            "action": {"display": "notify(PumpState(PumpOn))"},
-                            "action_invocations": [
-                                {
-                                    "operation": "notify",
-                                    "expression": "notify(PumpState(PumpOn))",
-                                }
-                            ],
-                        }
-                    ],
-                    "execution_contexts": [{"system": "PumpControl"}],
-                }
-            ],
-        }
-        model = SimpleNamespace(
-            program=SimpleNamespace(declarations=()),
-            machines=(),
-            systems=(),
-        )
-        with patch(
-            "glyph.transition_system_execution_critical._attach_execution_actions",
-            return_value=fake_machine,
-        ):
-            guarded = attach_transition_system_execution_actions(model, {})
-        transition = guarded["transitions"][0]
-        self.assertEqual(transition["execution_action_bindings"], [])
-        self.assertEqual(transition["execution_contexts"], [])
 
     def test_synthesized_failure_never_runs_caller_post_transition_actions(self) -> None:
         views = compile_source(SYNTHESIZED_FAILURE_SOURCE, "failure-caller.glyph")
@@ -212,18 +280,70 @@ class TransitionSystemExecutionSafetyTests(unittest.TestCase):
                 for item in machine["diagnostics"]
             )
         )
-        bindings = [
-            binding
-            for transition in machine["transitions"]
-            for binding in transition.get("execution_action_bindings", [])
-        ]
-        self.assertTrue(all(binding.get("status") == "unresolved" for binding in bindings))
-        self.assertTrue(all(binding.get("action") is None for binding in bindings))
-        self.assertTrue(all(not binding.get("action_invocations") for binding in bindings))
+        contexts = all_contexts(machine)
+        self.assertTrue(contexts)
+        self.assertTrue(all(context.get("status") == "unresolved" for context in contexts))
+        self.assertTrue(all(context.get("action") is None for context in contexts))
+        self.assertTrue(all(not context.get("action_invocations") for context in contexts))
         self.assertTrue(
             all(
                 transition.get("display_action") is None
                 for transition in machine["transitions"]
+            )
+        )
+
+    def test_machine_call_requires_original_argument_provenance(self) -> None:
+        views = compile_source(UNPROVEN_CALL_ARGUMENT_SOURCE, "unproven-call-args.glyph")
+        machine = views["state"]["machines"][0]
+        self.assertTrue(
+            any(
+                item.get("code") == "STIR_SYSTEM_TRANSITION_ARGUMENT_UNPROVEN"
+                for item in machine["diagnostics"]
+            )
+        )
+        contexts = all_contexts(machine)
+        self.assertTrue(contexts)
+        self.assertTrue(all(context.get("status") == "unresolved" for context in contexts))
+        self.assertTrue(all(context.get("action") is None for context in contexts))
+        self.assertTrue(all(not context.get("action_invocations") for context in contexts))
+        self.assertTrue(
+            all(
+                transition.get("display_action") is None
+                for transition in machine["transitions"]
+            )
+        )
+
+    def test_machine_call_requires_original_input_argument_provenance(self) -> None:
+        views = compile_source(UNPROVEN_INPUT_ARGUMENT_SOURCE, "unproven-input-args.glyph")
+        machine = views["state"]["machines"][0]
+        self.assertTrue(
+            any(
+                item.get("code") == "STIR_SYSTEM_TRANSITION_ARGUMENT_UNPROVEN"
+                for item in machine["diagnostics"]
+            )
+        )
+        contexts = all_contexts(machine)
+        self.assertTrue(contexts)
+        self.assertTrue(all(context.get("status") == "unresolved" for context in contexts))
+        self.assertTrue(all(context.get("action") is None for context in contexts))
+
+    def test_aliases_preserve_machine_call_argument_provenance(self) -> None:
+        views = compile_source(PROVEN_ALIAS_CALL_SOURCE, "proven-call-aliases.glyph")
+        machine = views["state"]["machines"][0]
+        self.assertFalse(
+            any(
+                item.get("code") == "STIR_SYSTEM_TRANSITION_ARGUMENT_UNPROVEN"
+                for item in machine["diagnostics"]
+            )
+        )
+        contexts = all_contexts(machine)
+        self.assertTrue(contexts)
+        self.assertTrue(all(context.get("status") != "unresolved" for context in contexts))
+        self.assertTrue(
+            any(
+                context.get("action") is not None
+                and "actuator(" in context["action"].get("display", "")
+                for context in contexts
             )
         )
 
