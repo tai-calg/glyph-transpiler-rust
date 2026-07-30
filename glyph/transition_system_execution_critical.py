@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-# Compatibility import. Correctness-critical validation now lives in the
-# execution-control-flow implementation instead of a second post-processing pass.
+# Compatibility import. Execution control flow, argument provenance, and
+# correctness-critical projection guards share one implementation.
 from .transition_system_execution_control_flow_v2 import (
     attach_transition_system_execution_actions,
 )
