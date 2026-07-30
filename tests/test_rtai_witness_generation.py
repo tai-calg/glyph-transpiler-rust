@@ -132,7 +132,7 @@ class WitnessGenerationTests(unittest.TestCase):
                 transition["strict_system_action"],
             )
 
-    def test_strict_full_view_campaign_is_ready_without_legacy_fallback(self) -> None:
+    def test_strict_full_view_campaign_is_ready_without_legacy_analyzer(self) -> None:
         result = build_strict_io_state_views(
             self.model,
             self.execution,
@@ -141,14 +141,25 @@ class WitnessGenerationTests(unittest.TestCase):
         campaign = result["strict_projection_campaign"]
         self.assertTrue(campaign["ready"], campaign)
         self.assertFalse(campaign["legacy_fallback_allowed"])
+        self.assertFalse(campaign["legacy_system_action_analyzer_enabled"])
+        self.assertFalse(result["rtai_legacy_system_action_analyzer_enabled"])
+        self.assertFalse(
+            result["summary"]["rtai_legacy_system_action_analyzer_enabled"]
+        )
         self.assertEqual(
             result["summary"]["rtai_strict_projection_ready_machines"],
             1,
         )
         for machine in result["state"]["machines"]:
             self.assertTrue(machine["strict_projection_campaign"]["ready"])
+            self.assertFalse(
+                machine["analysis"]["rtai_strict_projection_legacy_analyzer_enabled"]
+            )
             for transition in machine["transitions"]:
                 self.assertFalse(transition["legacy_system_action_fallback_allowed"])
+                self.assertNotIn("execution_evidence_v2", transition)
+                self.assertEqual(transition.get("execution_action_bindings", []), [])
+                self.assertEqual(transition.get("execution_contexts", []), [])
 
     def test_strict_candidate_fails_closed_without_effect_contract(self) -> None:
         machine = self.views["state"]["machines"][0]
