@@ -27,6 +27,7 @@ from .transition_action_scopes import project_transition_action_scopes
 from .transition_action_target_independence import analyze_action_target_independence
 from .transition_analysis import (
     RTAI_SEMANTIC_BOOTSTRAP_VERSION,
+    VerifiedEffectContractRegistry,
     attach_execution_evidence_v2,
     attach_rtai_semantic_bootstrap,
 )
@@ -139,8 +140,17 @@ def _publish_machine_contract(machine: dict[str, object]) -> dict[str, object]:
 def enrich_state_transition_ir(
     model: CompilationModel,
     views: dict[str, object],
+    *,
+    rtai_effect_contracts: VerifiedEffectContractRegistry | None = None,
+    rtai_projection_mode: EvidenceProjectionMode = EvidenceProjectionMode.SHADOW,
+    rtai_witness_max_cases: int = 4096,
 ) -> dict[str, object]:
-    """Compile and publish the complete StateTransitionIR contract."""
+    """Compile and publish the complete StateTransitionIR contract.
+
+    The default remains legacy-compatible shadow mode.  ``STRICT_EXACT`` is an
+    explicit migration/campaign mode: native Evidence becomes the sole System
+    Action source and missing proof fails closed without legacy fallback.
+    """
 
     original = deepcopy(views)
     result = compile_state_transition_ir(model, views)
@@ -164,8 +174,8 @@ def enrich_state_transition_ir(
         attach_transition_system_execution_actions(model, machine)
         for machine in projected
     ]
-    # Legacy Evidence, native abstract Evidence, rendered-edge bindings and both
-    # readiness reports are shadow outputs. None changes active display projection.
+    # Legacy Evidence remains available for comparison. Native Evidence is active
+    # only when an explicit non-shadow projection mode is requested.
     rtai_report = lower_compilation_model_report(model)
     evidenced = [attach_execution_evidence_v2(machine) for machine in system_executed]
     bootstrapped = [
@@ -182,7 +192,12 @@ def enrich_state_transition_ir(
         for machine in bootstrapped
     ]
     native_evidenced = [
-        attach_rtai_abstract_execution_evidence(model, machine)
+        attach_rtai_abstract_execution_evidence(
+            model,
+            machine,
+            effect_contracts=rtai_effect_contracts,
+            witness_max_cases=rtai_witness_max_cases,
+        )
         for machine in specialized
     ]
     native_readiness = [
@@ -217,6 +232,15 @@ def enrich_state_transition_ir(
         finalize_machine_operation_actions(machine) for machine in enabled
     ]
     scoped = [project_transition_action_scopes(machine) for machine in finalized]
+    if rtai_projection_mode is not EvidenceProjectionMode.SHADOW:
+        scoped = [
+            project_machine_from_evidence(
+                machine,
+                mode=rtai_projection_mode,
+                evidence_field="rtai_execution_evidence_v2",
+            )
+            for machine in scoped
+        ]
     state["machines"] = [
         _publish_machine_contract(
             _attach_action_target_independence(model, machine)
@@ -256,6 +280,8 @@ def enrich_state_transition_ir(
         NATIVE_EVIDENCE_READINESS_VERSION
     )
     result["rtai_evidence_projection_version"] = EVIDENCE_PROJECTION_VERSION
+    result["rtai_projection_mode"] = rtai_projection_mode.value
+    result["rtai_effect_contracts_configured"] = rtai_effect_contracts is not None
     result["transition_action_target_independence_version"] = (
         TRANSITION_ACTION_TARGET_INDEPENDENCE_VERSION
     )
@@ -276,6 +302,11 @@ def enrich_state_transition_ir(
                 "rtai_native_evidence_projection_ready"
             )
         )
+        for machine in state["machines"]
+    )
+    summary["rtai_strict_projection_active_machines"] = sum(
+        machine.get("analysis", {}).get("evidence_projection_mode")
+        == EvidenceProjectionMode.STRICT_EXACT.value
         for machine in state["machines"]
     )
     summary["rtai_abstract_execution_exact_projection_count"] = sum(
