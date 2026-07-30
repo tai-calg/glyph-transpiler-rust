@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 
 from glyph.compilation import CompilationPipeline
+from glyph.compiler import BoolExpr, CallExpr, FieldExpr, NameExpr
 from glyph.transition_analysis.concrete import (
     ConcreteInterpreter,
     ConstructorValue,
@@ -12,6 +13,10 @@ from glyph.transition_analysis.concrete import (
 from glyph.transition_analysis.lowering import lower_compilation_model
 from glyph.transition_analysis.machine_relation import build_machine_relation
 from glyph.transition_analysis.oracle import compare_bounded_ast_and_teir
+from glyph.transition_analysis.preimage import (
+    PreimageStatus,
+    compute_transition_call_preimage,
+)
 from glyph.transition_analysis.teir import Branch, TransitionCall
 
 
@@ -148,6 +153,47 @@ class MachineRelationTests(unittest.TestCase):
         self.assertIn("UnaryExpr", repr(relation.edges[2].effective_guard))
 
 
+class RelationalPreimageTests(unittest.TestCase):
+    def test_field_permutation_changes_the_substituted_preimage(self) -> None:
+        model = compile_model(DOOR_SOURCE, "door-preimage-permutation.glyph")
+        state = CallExpr(NameExpr("DoorState"), (NameExpr("Closed"),))
+        normal_input = CallExpr(
+            NameExpr("Input"),
+            (
+                FieldExpr(NameExpr("input"), "open_request"),
+                FieldExpr(NameExpr("input"), "authorized"),
+            ),
+        )
+        swapped_input = CallExpr(
+            NameExpr("Input"),
+            (
+                FieldExpr(NameExpr("input"), "authorized"),
+                FieldExpr(NameExpr("input"), "open_request"),
+            ),
+        )
+        normal = compute_transition_call_preimage(model, "Door", (state, normal_input))
+        swapped = compute_transition_call_preimage(model, "Door", (state, swapped_input))
+        self.assertIsNotNone(normal)
+        self.assertIsNotNone(swapped)
+        assert normal is not None and swapped is not None
+        self.assertNotEqual(
+            repr(normal.edges[1].condition),
+            repr(swapped.edges[1].condition),
+        )
+        self.assertIn("authorized", repr(swapped.edges[1].condition))
+
+    def test_concrete_constructor_arguments_prove_selected_edges(self) -> None:
+        model = compile_model(DOOR_SOURCE, "door-preimage-concrete.glyph")
+        state = CallExpr(NameExpr("DoorState"), (NameExpr("Closed"),))
+        event = CallExpr(NameExpr("Input"), (BoolExpr(True), BoolExpr(False)))
+        preimage = compute_transition_call_preimage(model, "Door", (state, event))
+        self.assertIsNotNone(preimage)
+        assert preimage is not None
+        self.assertEqual(preimage.edges[0].status, PreimageStatus.PROVEN_FALSE)
+        self.assertEqual(preimage.edges[1].status, PreimageStatus.PROVEN_TRUE)
+        self.assertEqual(preimage.edges[2].status, PreimageStatus.PROVEN_FALSE)
+
+
 class ConcreteOracleTests(unittest.TestCase):
     def test_finite_block_domain_matches_source_and_teir(self) -> None:
         model = compile_model(CONDITIONAL_BLOCK_SOURCE, "conditional-oracle.glyph")
@@ -204,10 +250,17 @@ class ConcreteOracleTests(unittest.TestCase):
             effect_handlers=handlers,
         )
         self.assertTrue(report.exact, report.mismatches[:1])
-        failed = [case.teir for case in report.cases if case.teir.completion == "propagated-failure"]
+        failed = [
+            case.teir
+            for case in report.cases
+            if case.teir.completion == "propagated-failure"
+        ]
         self.assertTrue(failed)
         for result in failed:
-            self.assertEqual([event.operation for event in result.effect_trace], ["write_pump"])
+            self.assertEqual(
+                [event.operation for event in result.effect_trace],
+                ["write_pump"],
+            )
             self.assertNotIn("actuator", [event.operation for event in result.effect_trace])
 
 
