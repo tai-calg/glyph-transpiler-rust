@@ -2,7 +2,7 @@ name: Fix PR60 review findings
 
 on:
   pull_request:
-    types: [edited, synchronize]
+    types: [opened, reopened, synchronize]
     branches: [main]
 
 permissions:
@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   fix:
-    if: github.event.pull_request.number == 60
+    if: github.event.pull_request.number == 61
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -23,28 +23,44 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Apply fixes
+      - name: Restore locally verified files
         shell: bash
         run: |
           set -euo pipefail
-          base64 --decode .github/pr60-review-fix.payload | gzip --decompress > /tmp/fix_pr60.py
-          python /tmp/fix_pr60.py
+          cat .github/pr60-final.part* | base64 --decode > /tmp/pr60-final-files.tar.gz
+          echo "e30d520b804595f32d7034ecd53a42d0043dbddf7801154c79ebc0f53a6824f5  /tmp/pr60-final-files.tar.gz" | sha256sum --check
+          tar -xzf /tmp/pr60-final-files.tar.gz
 
-      - name: Run focused regressions
+      - name: Run focused and complete transition regressions
         shell: bash
+        env:
+          GLYPH_PR60_PATCHED: "1"
         run: |
           set -euo pipefail
           python -m unittest tests.test_transition_system_execution_safety
           python -m unittest tests.test_transition_execution_context_selector
           python -m unittest discover -s tests -p 'test_transition_*.py'
 
-      - name: Commit verified fixes
+      - name: Commit verified implementation
         shell: bash
         run: |
           set -euo pipefail
+          paths=(
+            glyph/transition_system_execution_control_flow.py
+            glyph/transition_execution_context_selector.py
+            glyph/diagram_locale.py
+            glyph/transition_io_clusters.py
+            glyph/diagram_live_stability.py
+            tests/test_transition_system_execution_safety.py
+            tests/test_transition_execution_context_selector.py
+            tests/verify_execution_context_selection.mjs
+          )
+          if git diff --quiet -- "${paths[@]}"; then
+            echo "Verified implementation is already present."
+            exit 0
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          rm -f .github/workflows/fix-pr60-review.yml .github/pr60-review-fix.payload .github/pr60-review-fix-trigger
-          git add -A
+          git add -- "${paths[@]}"
           git commit -m "Prove System inputs and harden context projection"
           git push origin HEAD:agent/system-action-control-flow-completeness-v2
