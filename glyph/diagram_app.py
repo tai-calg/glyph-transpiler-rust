@@ -9,13 +9,16 @@ import json
 import os
 from pathlib import Path
 import threading
-from typing import Any
+from typing import Any, Callable
 import webbrowser
 
 from .compiler import GlyphError
 from .diagram_ui import DIAGRAM_HTML
 from .incremental import IncrementalCompiler
 from .io_state_views import build_io_state_views, empty_io_state_views
+
+
+ViewBuilder = Callable[[object, object], dict[str, object]]
 
 
 @dataclass(frozen=True)
@@ -60,7 +63,12 @@ def _atomic_write(path: Path, content: str) -> None:
 class GlyphDiagramApp:
     """Compile one Glyph file and render generic I/O and state-machine diagrams."""
 
-    def __init__(self, input_path: str | Path):
+    def __init__(
+        self,
+        input_path: str | Path,
+        *,
+        view_builder: ViewBuilder = build_io_state_views,
+    ):
         self.input_path = Path(input_path).resolve()
         self.output_path = (
             self.input_path.parent
@@ -69,6 +77,7 @@ class GlyphDiagramApp:
             / "io-state-views.json"
         )
         self.compiler = IncrementalCompiler()
+        self.view_builder = view_builder
         self._lock = threading.RLock()
         self._stop = threading.Event()
         self._watcher: threading.Thread | None = None
@@ -106,7 +115,7 @@ class GlyphDiagramApp:
                 source_href=str(self.input_path),
             )
             compilation = result.snapshot
-            views = build_io_state_views(
+            views = self.view_builder(
                 compilation.model,
                 compilation.diagrams.ir,
             )
@@ -294,5 +303,9 @@ class GlyphDiagramApp:
         return 0
 
 
-def run_diagram_app(input_path: str | Path) -> int:
-    return GlyphDiagramApp(input_path).serve()
+def run_diagram_app(
+    input_path: str | Path,
+    *,
+    view_builder: ViewBuilder = build_io_state_views,
+) -> int:
+    return GlyphDiagramApp(input_path, view_builder=view_builder).serve()
