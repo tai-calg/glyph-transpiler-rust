@@ -69,6 +69,8 @@ on:
       - "tests/test_diagram_workspace_layout.py"
       - "tests/test_initial_transition_layout.py"
       - "tests/test_io_state_diagram_app.py"
+      - "tests/test_rtai_semantic_status.py"
+      - "tests/test_rtai_targeted_witnesses.py"
       - "tests/test_rtai_witness_generation.py"
       - "tests/test_state_machine_source_map.py"
       - "tests/test_state_diagram_examples.py"
@@ -91,10 +93,12 @@ on:
       - "tests/test_transition_system_execution_control_flow.py"
       - "tests/test_transition_system_execution_review_regressions.py"
       - "tests/test_transition_system_execution_safety.py"
+      - "tests/run_rtai_strict_diagram_app.py"
       - "tests/verify_code_derived_system_io.mjs"
       - "tests/verify_enabling_case_rendering.mjs"
       - "tests/verify_execution_context_selection.mjs"
       - "tests/verify_rtai_strict_projection_snapshot.py"
+      - "tests/verify_rtai_strict_projection_ui.mjs"
       - "tests/verify_state_diagram_rendering.mjs"
       - "tests/verify_readme_state_snapshot.py"
       - "tests/verify_state_diagram_stability.mjs"
@@ -155,6 +159,8 @@ jobs:
             echo "::endgroup::"
           }
 
+          python -m unittest discover -s tests -p 'test_rtai_semantic_status.py'
+          python -m unittest discover -s tests -p 'test_rtai_targeted_witnesses.py'
           python -m unittest discover -s tests -p 'test_rtai_witness_generation.py'
           python -m unittest discover -s tests -p 'test_transition_action_target_independence.py'
           python -m unittest discover -s tests -p 'test_transition_enabling_cases.py'
@@ -165,6 +171,7 @@ jobs:
           python -m unittest discover -s tests -p 'test_transition_system_execution_safety.py'
           python tests/verify_rtai_strict_projection_snapshot.py \
             2>&1 | tee build/rtai-strict-projection/verify.log
+          run_node tests/verify_rtai_strict_projection_ui.mjs build/rtai-strict-projection/ui-verify.log
           run_node tests/verify_code_derived_system_io.mjs build/checked-system-context-io/verify.log
           run_node tests/verify_execution_context_selection.mjs build/execution-context-selection/verify.log
           run_node tests/verify_enabling_case_rendering.mjs build/state-diagram-regression/enabling-cases.log
