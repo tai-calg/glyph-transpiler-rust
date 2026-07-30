@@ -17,6 +17,7 @@ from .compiler import (
     CallExpr,
     ExternDecl,
     Expr,
+    FieldExpr,
     NameExpr,
     TryExpr,
     TypeRef,
@@ -76,8 +77,71 @@ def _is_success_value(expression: Expr) -> bool:
     )
 
 
+def _source_state_value(
+    context: _base.MachineBranchContext,
+    source_state: str,
+    parameter_name: str,
+) -> Expr:
+    arguments = tuple(
+        NameExpr(source_state)
+        if index == context.selector_index
+        else FieldExpr(NameExpr(parameter_name), field.name)
+        for index, field in enumerate(context.state_decl.fields)
+    )
+    return CallExpr(NameExpr(context.state_decl.name), arguments)
+
+
+def _entry_values(
+    execution_context: _base._ExecutionContext,
+    evaluator: _SystemExecutionEvaluator,
+) -> tuple[dict[str, Expr], dict[str, Expr]]:
+    declaration = execution_context.function or evaluator._context.functions.get(
+        execution_context.entry
+    )
+    if declaration is None:
+        return {}, {}
+    symbolic = {parameter.name: NameExpr(parameter.name) for parameter in declaration.params}
+    concrete = dict(symbolic)
+    state_type = evaluator._context.machine.state_param.ty
+    candidates = [parameter for parameter in declaration.params if parameter.ty == state_type]
+    selected = next(
+        (
+            parameter
+            for parameter in candidates
+            if parameter.name == evaluator._context.machine.state_param.name
+        ),
+        candidates[0] if len(candidates) == 1 else None,
+    )
+    if selected is not None:
+        value = _source_state_value(
+            evaluator._context,
+            evaluator.source_state,
+            selected.name,
+        )
+        symbolic[selected.name] = value
+        concrete[selected.name] = value
+    return symbolic, concrete
+
+
 class _SystemExecutionEvaluator(_base._SystemExecutionEvaluator):
-    """Path evaluator with feasible-path pruning and explicit `?` continuations."""
+    """Path evaluator with feasible paths, source specialization, and `?` flow."""
+
+    def __init__(
+        self,
+        *,
+        branch_context: _base.MachineBranchContext,
+        externs: Mapping[str, ExternDecl],
+        aliases: Mapping[str, TypeRef],
+        branch_value: Expr,
+        source_state: str,
+    ) -> None:
+        super().__init__(
+            branch_context=branch_context,
+            externs=externs,
+            aliases=aliases,
+            branch_value=branch_value,
+        )
+        self.source_state = source_state
 
     def evaluate(
         self,
@@ -188,8 +252,6 @@ def _merge_block_state(
         if _is_success_value(result.value.symbolic) and _is_success_value(
             result.value.concrete
         ):
-            # `?` binds the successful payload once. Keep the source-level binding
-            # name in later expressions instead of embedding or replaying the call.
             symbolic_values[binding_name] = NameExpr(binding_name)
             concrete_values[binding_name] = NameExpr(binding_name)
         else:
@@ -212,7 +274,10 @@ def _evaluate_block(
     evaluator: _SystemExecutionEvaluator,
 ) -> _base._ContextEvaluation:
     assert context.block is not None
-    states: list[_base._BlockState] = [_base._BlockState({}, {})]
+    symbolic_values, concrete_values = _entry_values(context, evaluator)
+    states: list[_base._BlockState] = [
+        _base._BlockState(symbolic_values, concrete_values)
+    ]
     path = (context.entry,)
     for binding in context.block.bindings:
         next_states: list[_base._BlockState] = []
@@ -314,6 +379,29 @@ def _evaluate_block(
     )
 
 
+def _evaluate_function(
+    context: _base._ExecutionContext,
+    evaluator: _SystemExecutionEvaluator,
+) -> _base._ContextEvaluation:
+    assert context.function is not None
+    symbolic_values, concrete_values = _entry_values(context, evaluator)
+    cases = evaluator._evaluate_function_decl(
+        context.function,
+        symbolic_values,
+        concrete_values,
+        _base._TraceSite(
+            context.system,
+            context.entry,
+            context.function.line,
+            (context.entry,),
+        ),
+        visited=frozenset({context.function.name}),
+        after_transition=False,
+        conditions=(),
+    )
+    return _base._ContextEvaluation(context, cases)
+
+
 def _diagnostic(code: str, message: str, line: int) -> dict[str, object]:
     return {"severity": "warning", "code": code, "message": message, "line": line}
 
@@ -357,12 +445,13 @@ def attach_transition_system_execution_actions(
 
     for original in result.get("transitions", []):
         transition = dict(original)
+        source_state = str(transition.get("source_state") or "")
         branch_value = branch_value_for_transition(
             branch_context,
             transition,
             branch_plan,
         )
-        if branch_value is None:
+        if branch_value is None or not source_state:
             transition["execution_action_bindings"] = []
             transition["execution_contexts"] = []
             transitions.append(transition)
@@ -376,11 +465,12 @@ def attach_transition_system_execution_actions(
                 externs=externs,
                 aliases=aliases,
                 branch_value=branch_value,
+                source_state=source_state,
             )
             evaluation = (
                 _evaluate_block(context, evaluator)
                 if context.block is not None
-                else _base._evaluate_function(context, evaluator)
+                else _evaluate_function(context, evaluator)
             )
             binding = _base._binding(evaluation)
             if binding is None:
