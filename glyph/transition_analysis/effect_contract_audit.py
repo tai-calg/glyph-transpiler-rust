@@ -10,7 +10,7 @@ from .lowering import LoweringIssue, lower_compilation_model_report
 from .teir import Assign, Branch, EffectCall, PropagateFailure, Return, TransitionCall
 
 
-EFFECT_CONTRACT_AUDIT_VERSION = 3
+EFFECT_CONTRACT_AUDIT_VERSION = 4
 
 
 @dataclass(frozen=True)
@@ -79,6 +79,11 @@ def audit_effect_contract_coverage(
     internal declaration class is not sufficient to decide Effect ownership. The
     public source spelling is authoritative: only top-level ``!name(...)``
     declarations belong to the System Action contract surface.
+
+    ``TransitionCall`` is also a real call-graph edge. The called Machine transition
+    function may contain an Effect in its selected result expression; omitting that
+    edge would make the contract audit disagree with concrete execution and could
+    activate strict mode without the required contract.
 
     The audit is structural and conservative. A reachable Effect call requires an
     explicit entry-visible contract even when a branch later proves unreachable.
@@ -164,6 +169,7 @@ def _function_facts(
             elif isinstance(instruction, Assign):
                 expressions = (instruction.expression,)
             elif isinstance(instruction, TransitionCall):
+                calls.add(instruction.function)
                 expressions = instruction.arguments
             else:
                 expressions = ()
