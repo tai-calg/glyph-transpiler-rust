@@ -219,8 +219,10 @@ try {
   assert.deepEqual(blocked.effects, []);
 
   const originalSource = await page.locator("#editor").inputValue();
-  const actionlessSource = originalSource.replace("  audit(next)\n", "  Receipt(next)\n");
-  assert.notEqual(actionlessSource, originalSource, "audit action replacement did not match source");
+  const actionlessSource = originalSource
+    .replace("  audit_control -> audit\n", "")
+    .replace("  audit(next)\n", "  Receipt(next)\n");
+  assert.notEqual(actionlessSource, originalSource, "actionless route replacement did not match source");
   await compileSource(page, actionlessSource);
   await page.waitForFunction(() => (
     [...document.querySelectorAll("#execution-context-select option")]
