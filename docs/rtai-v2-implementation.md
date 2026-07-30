@@ -65,7 +65,7 @@ Each transition receives an additive `execution_evidence_v2` record containing:
 
 - edge identity
 - synthesized-failure status
-- context evidence
+- context evidence bound to the same edge identity
 - reachability status and precondition
 - call-cardinality upper bound
 - effect-trace alternatives
@@ -86,15 +86,17 @@ transition_execution_evidence_version = 2
 Exact projection requires all of the following:
 
 1. proven reachability
-2. a concrete witness
+2. a concrete witness whose `edge_id` equals the selected context edge
 3. reachability-scoped exactness proof
 4. exact `at-most-one` call-cardinality evidence
 5. exact singleton effect trace
 6. exact uniformly normal completion
 7. no unknown reason
-8. a projectable action value
+8. structurally valid EffectTrace events
 
 A missing condition causes rejection.
+
+The projected action is constructed directly from the exact singleton EffectTrace. A separately supplied legacy action or display string is never trusted as semantic evidence.
 
 ### Legacy shadow adapter
 
@@ -111,6 +113,8 @@ Current `unresolved` values are marked:
 ```text
 unknown(legacy-unresolved)
 ```
+
+An edge without an execution context is also `unknown` unless it is an explicit synthesized-failure edge with no caller continuation.
 
 Therefore the shadow evidence cannot currently authorize an exact System Action projection.
 
@@ -185,7 +189,7 @@ and substituted_source_predicate
 and substituted_effective_guard
 ```
 
-`UNSAT` may prove an edge unreachable only when encoding and solver handling are sound. `SAT` on an over-approximation means only `may-reachable` unless a concrete witness is replayed successfully.
+`UNSAT` may prove an edge unreachable only when encoding and solver handling are sound. `SAT` on an over-approximation means only `may-reachable` unless a concrete witness is replayed successfully against the same edge.
 
 ### Stage F: effect and store semantics
 
