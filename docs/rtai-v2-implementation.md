@@ -132,7 +132,9 @@ evidence.
 Function guards and `:=` blocks lower into the same CFG representation.
 Function-block pipeline and lambda syntax are not parsed twice. TEIR consumes the
 compiler-generated value/final helper ASTs, preserving the existing syntax
-lowering as the sole syntax implementation.
+lowering as the sole syntax implementation. Regression tests compile `/>` pipeline
+and lambda block syntax and verify that TEIR contains the lowered helper expression,
+not the original pipeline tokens.
 
 The public shadow pipeline uses non-fatal lowering. Unsupported functions are
 listed in `lowering_issues`; the existing compiler and UI continue to operate.
