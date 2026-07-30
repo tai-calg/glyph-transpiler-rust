@@ -182,7 +182,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git show 029988fb2e052adfca3e909bd8bf9951a1ea8dad:.github/workflows/io-state-snapshot.yml > .github/workflows/io-state-snapshot.yml
           git diff --check
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -190,8 +189,7 @@ jobs:
             glyph/transition_action_scopes.py \
             glyph/_transition_system_execution_core.py \
             glyph/transition_system_execution_control_flow.py \
-            tests/test_transition_system_execution_review_regressions.py \
-            .github/workflows/io-state-snapshot.yml
+            tests/test_transition_system_execution_review_regressions.py
           if git diff --cached --quiet; then
             exit 0
           fi
