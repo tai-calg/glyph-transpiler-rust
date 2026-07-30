@@ -42,6 +42,14 @@ machine Door(state:DoorState,input:Input)
 """
 
 
+PIPELINE_SOURCE = """*Input(raw:F)
+
+>clamp(input:Input):F
+  value := input.raw /> |x| min(x,1.0)
+  value
+"""
+
+
 class RtaiSemanticBootstrapTests(unittest.TestCase):
     def test_pipeline_publishes_relation_teir_and_call_preimages_in_shadow_mode(self) -> None:
         output = CompilationPipeline().compile_text(
@@ -74,6 +82,24 @@ class RtaiSemanticBootstrapTests(unittest.TestCase):
         self.assertEqual(len(call["preimage"]["edges"]), 2)
         self.assertFalse(machine["analysis"]["rtai_semantic_bootstrap_is_projection_source"])
         self.assertEqual(views["rtai_semantic_bootstrap_version"], 1)
+
+    def test_pipeline_and_lambda_source_use_compiler_helper_ast(self) -> None:
+        output = CompilationPipeline().compile_text(
+            PIPELINE_SOURCE,
+            source_name="rtai-pipeline.glyph",
+        )
+        from glyph.transition_analysis.lowering import lower_compilation_model_report
+
+        report = lower_compilation_model_report(output.model)
+        self.assertEqual(report.issues, ())
+        self.assertIn("clamp", report.functions)
+        instructions = [
+            instruction
+            for block in report.functions["clamp"].blocks
+            for instruction in block.instructions
+        ]
+        self.assertEqual(len(instructions), 1)
+        self.assertNotIn("/>", repr(instructions[0]))
 
 
 if __name__ == "__main__":
