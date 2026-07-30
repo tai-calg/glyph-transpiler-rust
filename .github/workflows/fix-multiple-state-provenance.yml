@@ -1,0 +1,201 @@
+name: Fix multiple-state provenance
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/system-action-control-flow-completeness-v2
+          fetch-depth: 0
+
+      - name: Apply and verify provenance fix
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          source_path = Path("glyph/transition_system_execution_control_flow.py")
+          source = source_path.read_text(encoding="utf-8")
+
+          old_entry = '''    state_type = evaluator._context.machine.state_param.ty
+    candidates = [parameter for parameter in declaration.params if parameter.ty == state_type]
+    # Keep symbolic values as provenance witnesses. Only concrete values are
+    # specialized for source-state evaluation and rendering.
+    selected = candidates[0] if len(candidates) == 1 else None
+'''
+          new_entry = '''    state_type = evaluator._context.machine.state_param.ty
+    state_name = evaluator._context.machine.state_param.name
+    # Identify the current state by the Machine parameter name. Other parameters
+    # may intentionally carry previous, comparison, or saved states of the same type.
+    selected = next(
+        (
+            parameter
+            for parameter in declaration.params
+            if parameter.name == state_name and parameter.ty == state_type
+        ),
+        None,
+    )
+    # Keep symbolic values as provenance witnesses. Only the explicitly named
+    # current-state parameter is specialized for source-state evaluation/rendering.
+'''
+          if source.count(old_entry) != 1:
+              raise SystemExit("entry specialization block did not match exactly once")
+          source = source.replace(old_entry, new_entry, 1)
+
+          old_proof = '''    state_type = branch_context.machine.state_param.ty
+    state_parameters = [
+        parameter for parameter in declaration.params if parameter.ty == state_type
+    ]
+    # No state substitution occurs when there are zero or multiple candidates.
+    if len(state_parameters) != 1:
+        return True, ""
+
+    parameter = state_parameters[0]
+    expected_name = branch_context.machine.state_param.name
+    if parameter.name != expected_name:
+        return False, "entry state parameter does not match the Machine state parameter"
+'''
+          new_proof = '''    state_type = branch_context.machine.state_param.ty
+    expected_name = branch_context.machine.state_param.name
+    state_parameters = [
+        parameter for parameter in declaration.params if parameter.ty == state_type
+    ]
+    parameter = next(
+        (item for item in state_parameters if item.name == expected_name),
+        None,
+    )
+    # A state-typed parameter under another name is not evidence for the Machine
+    # current state. An entry with no state-typed parameter is checked later by
+    # transition-call argument provenance instead of state specialization.
+    if parameter is None:
+        if state_parameters:
+            return False, "entry state parameter does not match the Machine state parameter"
+        return True, ""
+'''
+          if source.count(old_proof) != 1:
+              raise SystemExit("state proof block did not match exactly once")
+          source_path.write_text(source.replace(old_proof, new_proof, 1), encoding="utf-8")
+
+          test_path = Path("tests/test_transition_system_execution_safety.py")
+          tests = test_path.read_text(encoding="utf-8")
+          helper = '''
+
+def multiple_state_source(*, wire_current_state: bool) -> str:
+    state_port = "  in state:DoorState\\n" if wire_current_state else ""
+    state_edge = "  state -> control\\n" if wire_current_state else ""
+    return f"""system DoorCompare
+  entry control
+
+{state_port}  in previous:DoorState
+  in input:Input
+  out state_out:DoorState
+
+{state_edge}  previous -> control
+  input -> control
+  control -> state_out
+  control -> actuator
+
+machine Door(state:DoorState,input:Input)
+  select=state.mode
+  init=DoorState(Closed)
+  next=step(state,input)
+  success=Open
+  failure=Alarm
+
+*Input(open_request:B)
++DoorMode=Closed|Open|Alarm
+*DoorState(mode:DoorMode)
+
+!actuator(state:DoorState):DoorState
+
+>step(state:DoorState,input:Input):DoorState
+  state.mode==Closed&input.open_request >> DoorState(Open)
+  _ >> state
+
+>control(state:DoorState,previous:DoorState,input:Input):DoorState
+  next := step(state,input)
+  actuator(next)
+"""
+'''
+          marker = '\n\ndef compile_source(source: str, name: str) -> dict[str, object]:\n'
+          if tests.count(marker) != 1:
+              raise SystemExit("compile_source marker did not match exactly once")
+          tests = tests.replace(marker, helper + marker, 1)
+
+          methods = '''
+
+    def test_named_current_state_requires_wiring_with_other_state_values(self) -> None:
+        views = compile_source(
+            multiple_state_source(wire_current_state=False),
+            "unproven-multiple-state.glyph",
+        )
+        machine = views["state"]["machines"][0]
+        self.assertTrue(
+            any(
+                item.get("code") == "STIR_SYSTEM_STATE_INPUT_UNPROVEN"
+                for item in machine["diagnostics"]
+            )
+        )
+        contexts = all_contexts(machine)
+        self.assertTrue(contexts)
+        self.assertTrue(all(context.get("status") == "unresolved" for context in contexts))
+        self.assertTrue(all(context.get("action") is None for context in contexts))
+
+    def test_named_current_state_is_specialized_with_other_state_values(self) -> None:
+        views = compile_source(
+            multiple_state_source(wire_current_state=True),
+            "proven-multiple-state.glyph",
+        )
+        machine = views["state"]["machines"][0]
+        self.assertFalse(
+            any(
+                item.get("code") == "STIR_SYSTEM_STATE_INPUT_UNPROVEN"
+                for item in machine["diagnostics"]
+            )
+        )
+        contexts = all_contexts(machine)
+        self.assertTrue(contexts)
+        self.assertTrue(all(context.get("status") != "unresolved" for context in contexts))
+        self.assertTrue(
+            any(
+                context.get("action") is not None
+                and "actuator(DoorState(Open))" in context["action"].get("display", "")
+                for context in contexts
+            )
+        )
+'''
+          end_marker = '\n\nif __name__ == "__main__":\n'
+          if tests.count(end_marker) != 1:
+              raise SystemExit("test module end marker did not match exactly once")
+          test_path.write_text(tests.replace(end_marker, methods + end_marker, 1), encoding="utf-8")
+          PY
+
+          python -m py_compile glyph/transition_system_execution_control_flow.py
+          python -m unittest \
+            tests.test_transition_system_execution_safety \
+            tests.test_transition_system_execution_control_flow \
+            tests.test_transition_system_execution_review_regressions
+          python -m unittest discover -s tests -p 'test_transition*.py'
+          python -m unittest discover -s tests
+
+      - name: Commit verified fix
+        shell: bash
+        run: |
+          rm -f libgenerated.rlib libhost_binding.rlib
+          git rm .github/workflows/fix-multiple-state-provenance.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add \
+            glyph/transition_system_execution_control_flow.py \
+            tests/test_transition_system_execution_safety.py
+          git commit -m "Require named current-state wiring"
+          git push origin HEAD:agent/system-action-control-flow-completeness-v2
