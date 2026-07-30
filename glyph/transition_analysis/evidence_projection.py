@@ -9,7 +9,7 @@ from typing import Mapping, Sequence
 from .projection import ExactActionDecision, check_exact_action_projection
 
 
-EVIDENCE_PROJECTION_VERSION = 1
+EVIDENCE_PROJECTION_VERSION = 2
 
 
 class EvidenceProjectionMode(str, Enum):
@@ -113,9 +113,9 @@ def project_machine_from_evidence(
 ) -> dict[str, object]:
     """Publish or apply exact Evidence actions without AST or legacy strings.
 
-    The main compiler invokes this only for the legacy-compatible Evidence field in
-    shadow mode. Tests and migration tooling may explicitly select the native
-    `rtai_execution_evidence_v2` field.
+    ``STRICT_EXACT`` with native ``rtai_execution_evidence_v2`` is fail closed:
+    legacy System execution bindings are removed and ``system_action`` is supplied
+    only by exact native Evidence. Machine-owned ``action`` data is not modified.
     """
 
     result = deepcopy(dict(machine_view))
@@ -126,6 +126,7 @@ def project_machine_from_evidence(
     )
     readiness = {item.edge_id: item for item in report.transitions}
     projected: list[dict[str, object]] = []
+    native_evidence = evidence_field == "rtai_execution_evidence_v2"
 
     for index, original in enumerate(_mappings(result.get("transitions"))):
         transition = dict(original)
@@ -149,10 +150,22 @@ def project_machine_from_evidence(
                     else "unresolved-evidence"
                 )
             if mode is EvidenceProjectionMode.STRICT_EXACT:
-                transition["evidence_display_action"] = (
+                strict_action = (
                     dict(item.action) if item.ready and item.action is not None else None
                 )
+                transition["evidence_display_action"] = strict_action
                 transition["legacy_system_action_fallback_allowed"] = False
+                transition["system_action"] = strict_action
+                transition["system_action_projection_source"] = (
+                    "rtai-execution-evidence-v2"
+                    if native_evidence
+                    else _projection_source_name(evidence_field)
+                )
+                if native_evidence:
+                    transition["execution_action_bindings"] = []
+                    transition["execution_contexts"] = []
+                    transition["system_execution_actions"] = []
+                    transition["system_actions"] = []
         projected.append(transition)
 
     analysis = dict(_mapping(result.get("analysis")))
@@ -167,6 +180,10 @@ def project_machine_from_evidence(
             ),
             "evidence_projection_ready_transition_count": report.ready_transition_count,
             "evidence_projection_rejected_context_count": report.rejected_context_count,
+            "evidence_projection_legacy_fallback_allowed": (
+                mode is not EvidenceProjectionMode.STRICT_EXACT
+            ),
+            "evidence_projection_native_source": native_evidence,
         }
     )
     result["transitions"] = projected
