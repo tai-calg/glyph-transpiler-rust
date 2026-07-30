@@ -23,10 +23,10 @@ def build_strict_projection_candidate(
 ) -> dict[str, object]:
     """Build a fail-closed native-Evidence projection candidate.
 
-    This API is intentionally separate from the normal compiler pipeline.  It
+    This API is intentionally separate from the default compiler pipeline. It
     disables legacy System Action fallback for every rendered transition, retains
-    Machine-owned actions, and publishes an explicit campaign report.  An unready
-    edge receives no strict System Action instead of borrowing legacy output.
+    Machine-owned actions, and publishes an explicit campaign report. An unready
+    edge receives no System Action instead of borrowing legacy output.
     """
 
     specialized = attach_view_edge_specialization(model, dict(machine_view))
@@ -47,12 +47,14 @@ def build_strict_projection_candidate(
     transitions: list[dict[str, object]] = []
     for original in _mappings(result.get("transitions")):
         transition = dict(original)
+        strict_action = transition.get("evidence_display_action")
+        _remove_legacy_system_projection(transition)
         transition["legacy_system_action_fallback_allowed"] = False
-        transition["strict_system_action"] = transition.get("evidence_display_action")
+        transition["system_action"] = strict_action
+        transition["strict_system_action"] = strict_action
         transition["strict_system_action_projection_source"] = (
             "rtai-execution-evidence-v2"
         )
-        _remove_legacy_system_projection(transition)
         transitions.append(transition)
 
     native_report = _mapping(
@@ -89,13 +91,73 @@ def build_strict_projection_candidate(
     return result
 
 
+def build_strict_io_state_views(
+    model: CompilationModel,
+    execution: object,
+    effect_contracts: VerifiedEffectContractRegistry,
+    *,
+    witness_max_cases: int = 4096,
+) -> dict[str, object]:
+    """Build complete I/O and State views for a no-legacy-fallback campaign."""
+
+    # Local import avoids a package initialization cycle: io_state_views imports the
+    # normal state-transition pipeline, which imports the transition_analysis API.
+    from ..io_state_views import build_io_state_views
+
+    base = build_io_state_views(model, execution)  # type: ignore[arg-type]
+    result = deepcopy(base)
+    state = dict(_mapping(result.get("state")))
+    machines = [
+        build_strict_projection_candidate(
+            model,
+            machine,
+            effect_contracts,
+            witness_max_cases=witness_max_cases,
+        )
+        for machine in _mappings(state.get("machines"))
+    ]
+    machine_reports = [
+        {
+            "machine": machine.get("name"),
+            **dict(_mapping(machine.get("strict_projection_campaign"))),
+        }
+        for machine in machines
+    ]
+    ready = bool(machines) and all(report.get("ready") is True for report in machine_reports)
+    blockers = [
+        {
+            "machine": report.get("machine"),
+            **dict(blocker),
+        }
+        for report in machine_reports
+        for blocker in _mappings(report.get("blockers"))
+    ]
+
+    state["machines"] = machines
+    summary = dict(_mapping(result.get("summary")))
+    summary["rtai_strict_projection_ready_machines"] = sum(
+        report.get("ready") is True for report in machine_reports
+    )
+    summary["rtai_strict_projection_machine_count"] = len(machine_reports)
+    result["state"] = state
+    result["summary"] = summary
+    result["strict_projection_campaign"] = {
+        "version": STRICT_PROJECTION_CAMPAIGN_VERSION,
+        "ready": ready,
+        "projection_source": "rtai-execution-evidence-v2",
+        "legacy_fallback_allowed": False,
+        "machines": machine_reports,
+        "blockers": blockers,
+    }
+    return result
+
+
 def _remove_legacy_system_projection(transition: dict[str, object]) -> None:
     """Remove legacy System-only projections without touching Machine actions."""
 
     transition["execution_action_bindings"] = []
     transition["execution_contexts"] = []
     transition["system_execution_actions"] = []
-    transition["system_action"] = None
     transition["system_actions"] = []
 
 
@@ -145,5 +207,6 @@ def _mappings(value: object) -> tuple[Mapping[str, object], ...]:
 
 __all__ = [
     "STRICT_PROJECTION_CAMPAIGN_VERSION",
+    "build_strict_io_state_views",
     "build_strict_projection_candidate",
 ]
