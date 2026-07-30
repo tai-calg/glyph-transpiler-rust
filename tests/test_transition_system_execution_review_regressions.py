@@ -99,13 +99,16 @@ class TransitionSystemExecutionReviewRegressions(unittest.TestCase):
         success_expressions = [
             invocation["expression"] for invocation in success["action_invocations"]
         ]
-        self.assertEqual(success_expressions[0], "audit(DoorState(Open))")
-        self.assertEqual(sum(item.startswith("audit(") for item in success_expressions), 1)
-        self.assertIn(
-            "__glyph_success_value__(audit(DoorState(Open)))",
-            success_expressions[1],
+        self.assertEqual(
+            success_expressions,
+            [
+                "audit(DoorState(Open))",
+                "apply_checked(checked,DoorState(Open))",
+            ],
         )
-        self.assertNotIn("audit(DoorState(Open))?", success_expressions[1])
+        self.assertEqual(sum(item.startswith("audit(") for item in success_expressions), 1)
+        self.assertFalse(any("__glyph_success_value__" in item for item in success_expressions))
+        self.assertFalse(any("audit(DoorState(Open))?" in item for item in success_expressions))
         self.assertEqual(
             [invocation["expression"] for invocation in failure["action_invocations"]],
             ["audit(DoorState(Open))"],
