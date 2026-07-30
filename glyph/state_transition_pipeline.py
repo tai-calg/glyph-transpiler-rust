@@ -30,6 +30,10 @@ from .transition_analysis import (
     attach_execution_evidence_v2,
     attach_rtai_semantic_bootstrap,
 )
+from .transition_analysis.abstract_evidence_shadow import (
+    RTAI_ABSTRACT_EVIDENCE_SHADOW_VERSION,
+    attach_rtai_abstract_execution_evidence,
+)
 from .transition_analysis.evidence_projection import (
     EVIDENCE_PROJECTION_VERSION,
     EvidenceProjectionMode,
@@ -152,9 +156,8 @@ def enrich_state_transition_ir(
         attach_transition_system_execution_actions(model, machine)
         for machine in projected
     ]
-    # RTAI Evidence, semantic bootstrap and UI readiness are all shadow outputs.
-    # Unsupported constructs are recorded but cannot break normal compilation or
-    # change the active display projection.
+    # Legacy Evidence, native abstract Evidence, semantic bootstrap and UI
+    # readiness are shadow outputs. None can change active display projection.
     rtai_report = lower_compilation_model_report(model)
     evidenced = [attach_execution_evidence_v2(machine) for machine in system_executed]
     bootstrapped = [
@@ -166,12 +169,16 @@ def enrich_state_transition_ir(
         )
         for machine in evidenced
     ]
+    native_evidenced = [
+        attach_rtai_abstract_execution_evidence(model, machine)
+        for machine in bootstrapped
+    ]
     evidence_audited = [
         project_machine_from_evidence(
             machine,
             mode=EvidenceProjectionMode.SHADOW,
         )
-        for machine in bootstrapped
+        for machine in native_evidenced
     ]
     compatible = [
         attach_output_action_compatibility(machine) for machine in evidence_audited
@@ -223,6 +230,9 @@ def enrich_state_transition_ir(
         TRANSITION_EXECUTION_EVIDENCE_VERSION
     )
     result["rtai_semantic_bootstrap_version"] = RTAI_SEMANTIC_BOOTSTRAP_VERSION
+    result["rtai_abstract_execution_evidence_version"] = (
+        RTAI_ABSTRACT_EVIDENCE_SHADOW_VERSION
+    )
     result["rtai_evidence_projection_version"] = EVIDENCE_PROJECTION_VERSION
     result["transition_action_target_independence_version"] = (
         TRANSITION_ACTION_TARGET_INDEPENDENCE_VERSION
@@ -236,6 +246,15 @@ def enrich_state_transition_ir(
     )
     summary["rtai_evidence_projection_ready_machines"] = sum(
         bool(machine.get("analysis", {}).get("evidence_projection_ready"))
+        for machine in state["machines"]
+    )
+    summary["rtai_abstract_execution_exact_projection_count"] = sum(
+        int(
+            machine.get("analysis", {}).get(
+                "rtai_abstract_execution_exact_projection_count",
+                0,
+            )
+        )
         for machine in state["machines"]
     )
     result["summary"] = summary
