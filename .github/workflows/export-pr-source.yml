@@ -1,0 +1,26 @@
+name: Export PR source
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/system-action-control-flow-completeness-v2
+      - name: Package source
+        shell: bash
+        run: |
+          tar --exclude=.git --exclude=.glyph --exclude=build -czf /tmp/glyph-pr-source.tar.gz .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: glyph-pr-source
+          path: /tmp/glyph-pr-source.tar.gz
+          if-no-files-found: error
