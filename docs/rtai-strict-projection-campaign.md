@@ -6,14 +6,15 @@ This campaign proves that a supported Glyph program can publish System Actions
 without executing or falling back to the legacy System Action analyzer.
 
 The default application pipeline remains `shadow`. Strict mode is an explicit,
-fail-closed migration path until the public Effect surface is fully contracted and
-the default switch is approved.
+fail-closed migration path until the selected public Effect surface remains stable
+and the default switch is approved.
 
 ## Implemented chain
 
 ```text
-verified Effect contracts
-  -> reachable Effect contract audit
+reviewed public Effect surface
+  -> exact return / failure / external-store contracts
+  -> reachable outbound Effect contract audit
   -> finite exhaustive or reviewed targeted inputs
   -> independent TEIR concrete replay
   -> same-edge and completion-class witnesses
@@ -26,37 +27,82 @@ verified Effect contracts
 
 ## Verified Effect contracts
 
-`VerifiedEffectContract` couples three reviewed facts:
+`VerifiedEffectContract` couples reviewed abstract and concrete semantics:
 
 - an exact abstract `EffectSummary`
 - an explicit concrete replay handler
-- a source string identifying the reviewed contract
+- the exact return relation represented by the abstract value DAG
+- the declared failure vocabulary
+- the external read and write footprint
+- a source string and review note identifying the contract decision
 
 A contract is rejected when its operation does not match the summary, the summary
 is not exact, the write footprint is unknown, or completion contains `unknown`.
-Concrete replay never synthesizes an Effect handler from the Glyph declaration.
+Concrete replay never synthesizes an Effect handler from a Glyph declaration.
+
+`reviewed_deterministic_contract` constructs deterministic release contracts with
+an explicit return value and concrete external-store writes. The proof kind is
+`reviewed-contract`; it is distinct from structural identity.
 
 `VerifiedEffectContractRegistry` supports default and System-entry-specific
 contracts. An entry-specific contract does not leak to another entry.
 
+## Public strict Effect surface v1
+
+The normative catalog is `glyph/transition_analysis/public_effect_contracts.py`.
+Every included source is compiled in CI, its reachable outbound Effect set is
+compared with the catalog, and each reviewed handler is replayed against a concrete
+case. Contract IR exposes the return value, failure vocabulary and external writes.
+
+### Included
+
+| Public source | System entry | Effect | Return contract | Failure contract | External state change |
+|---|---|---|---|---|---|
+| built-in first-run workspace | `DoorControl.control` | `actuator(state)` | `Receipt(state)` | no failure channel | `door-actuator.current-state := state` |
+| `examples/acceptance/motor_safety.glyph` | `MotorSafety.cycle` | `write_motor(command)` | `Receipt(command)` | no failure channel | `motor.command := command` |
+| `examples/acceptance/job_scheduler.glyph` | `BatchRuntime.run` | `submit_batch(layout)` | `SubmitReceipt(layout.lane)` | no failure channel | `batch-runtime.last-submission := layout` |
+| `examples/door_sketch.glyph` | `Door.control` | `lock(command)` | `true` acknowledgement | no failure channel | `door.lock-command := command` |
+| `examples/door_sketch.glyph` | `Door.control` | `log(command)` | `true` acknowledgement | no failure channel | `door.log-command := command` |
+| `examples/acceptance/rtai_strict_projection.glyph` | `DoorControl.control` | `actuator(state)` | identity `state` | no failure channel | none; read-only strict fixture |
+
+“No failure channel” is a real contract constraint, not an assumption that Host
+failures never occur. A Host implementation that can fail must change the Glyph
+Effect type and receive a new reviewed contract before strict projection.
+
+### Explicitly excluded
+
+| Source | Effect | Why it is excluded from strict v1 |
+|---|---|---|
+| `examples/acceptance/door_controller.glyph` | `lock`, `alarm` | `Receipt|ControlError` is declared, but the operation-specific error set and whether external state changes before each failure are not specified |
+| `examples/system_controller.glyph` | `write_actuator` | `Cycle|Error` is declared without a reviewed `Actuator` failure relation or failure-time external store; `report_violation` is not reachable from `cycle` |
+| `examples/controller.glyph` | `exec` | there is no explicit public `system` entry, so strict System execution projection has no context |
+
+These exclusions prevent a successful sample handler from being misused as proof
+that all executions succeed. Failure-capable Effects are admitted only after the
+abstract domain can represent their exact result alternatives and the Host contract
+specifies success and failure store transforms.
+
+README-only signatures such as `save_file` are syntax illustrations, not strict
+release entries. They have no compiled System context or reviewed Host contract.
+
 ## Reachable Effect contract audit
 
 `audit_effect_contract_coverage` traverses the TEIR call graph from every System
-entry and collects each reachable external Effect. The strict campaign is blocked
-when:
+entry and collects each reachable outbound `!Effect`. The strict campaign is
+blocked when:
 
 - a reachable Effect has no entry-visible verified contract
 - a reachable function has a TEIR lowering issue
 - the contract audit is not configured
 
+Glyph currently represents `ext` inputs and `!` Effects with the same internal
+declaration class. Audit version 2 preserves the source-level distinction: top-level
+`ext` calls are inbound inputs and are not accepted as outbound Effect coverage.
+This prevents a sensor or panel input handler from being mistaken for a System
+Action contract.
+
 The audit is deliberately conservative. It does not use solver reachability to omit
 an external boundary contract.
-
-This infrastructure defines and enforces the supported Effect surface. It does not
-invent semantics for unreviewed production Effects. The current strict acceptance
-surface contains a reviewed read-only identity `actuator` contract; additional
-public Effects must receive real reviewed contracts before they are added to the
-strict release surface.
 
 ## Automatic and targeted witnesses
 
@@ -135,7 +181,21 @@ compatibility.
 
 ## Browser campaigns
 
-The I/O State Diagram Snapshot workflow verifies three semantic UI states.
+The I/O State Diagram Snapshot workflow verifies the public contract catalog and
+three semantic UI states.
+
+### Public contract gate
+
+`tests/test_public_strict_effect_contracts.py` requires:
+
+- every included public source compiles
+- reachable outbound Effects equal the catalog exactly
+- inbound `ext` inputs are not counted as Effects
+- contract parameter order matches the Glyph declaration
+- concrete replay returns the reviewed value
+- failure vocabulary and completion match the reviewed contract
+- every external write has a named singleton location and reviewed value
+- excluded failure-capable sources remain incomplete without fabricated contracts
 
 ### Exact
 
@@ -196,13 +256,15 @@ checks the Tauri Rust shell, and verifies Rust formatting.
 
 ## Remaining before default application activation
 
-- define reviewed contracts for every Effect included in the intended public strict
-  release surface
-- add reviewed targeted cases or solver-model witness providers for every supported
-  non-finite or oversized input domain
-- complete any recursive-summary or ownership/lifetime precision specifically
-  required by that release surface
-- switch the normal application configuration from `shadow` to `strict-exact`
+- decide whether each explicitly excluded failure-capable Effect is part of the
+  intended strict release; if so, define its exact success/failure return relation
+  and success/failure external-store transforms
+- add reviewed targeted cases or solver-model witness providers for any selected
+  public entry whose finite input domain exceeds the campaign budget
+- complete only the recursive-summary or ownership/lifetime precision required by
+  the selected release surface
+- switch the normal application configuration from `shadow` to `strict-exact` for
+  the cataloged surface
 - remove shadow compatibility after the strict default campaign is stable
 - delete legacy analyzer modules after no supported path references them
 
