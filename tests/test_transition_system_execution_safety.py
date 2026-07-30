@@ -1,9 +1,14 @@
 from __future__ import annotations
 
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from glyph.compilation import CompilationPipeline
 from glyph.io_state_views import build_io_state_views
+from glyph.transition_system_execution_critical import (
+    attach_transition_system_execution_actions,
+)
 
 
 SOURCE = """system DoorControl
@@ -137,24 +142,51 @@ class TransitionSystemExecutionSafetyTests(unittest.TestCase):
             )
         )
 
+    def test_critical_guard_strips_synthesized_failure_bindings(self) -> None:
+        fake_machine = {
+            "name": "Pump",
+            "analysis": {},
+            "diagnostics": [],
+            "transitions": [
+                {
+                    "id": "T1",
+                    "synthesized_failure": True,
+                    "execution_action_bindings": [
+                        {
+                            "scope": "system",
+                            "system": "PumpControl",
+                            "entry": "control",
+                            "status": "resolved",
+                            "action": {"display": "notify(PumpState(PumpOn))"},
+                            "action_invocations": [
+                                {
+                                    "operation": "notify",
+                                    "expression": "notify(PumpState(PumpOn))",
+                                }
+                            ],
+                        }
+                    ],
+                    "execution_contexts": [{"system": "PumpControl"}],
+                }
+            ],
+        }
+        model = SimpleNamespace(
+            program=SimpleNamespace(declarations=()),
+            machines=(),
+            systems=(),
+        )
+        with patch(
+            "glyph.transition_system_execution_critical._attach_execution_actions",
+            return_value=fake_machine,
+        ):
+            guarded = attach_transition_system_execution_actions(model, {})
+        transition = guarded["transitions"][0]
+        self.assertEqual(transition["execution_action_bindings"], [])
+        self.assertEqual(transition["execution_contexts"], [])
+
     def test_synthesized_failure_never_runs_caller_post_transition_actions(self) -> None:
         views = compile_source(SYNTHESIZED_FAILURE_SOURCE, "failure-caller.glyph")
         machine = views["state"]["machines"][0]
-        normal = [
-            transition
-            for transition in machine["transitions"]
-            if not transition.get("synthesized_failure")
-            and transition.get("execution_action_bindings")
-        ]
-        self.assertTrue(normal)
-        self.assertTrue(
-            any(
-                invocation.get("operation") == "notify"
-                for transition in normal
-                for binding in transition["execution_action_bindings"]
-                for invocation in binding.get("action_invocations", [])
-            )
-        )
         failures = [
             transition
             for transition in machine["transitions"]
