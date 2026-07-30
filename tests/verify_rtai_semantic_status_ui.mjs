@@ -148,7 +148,17 @@ try {
     '.transition-io-cluster[data-rtai-semantic-status="may"]',
   );
   assert.equal(await mayClusters.count(), mayMachine.transitions.length);
-  const mayPresentation = await mayClusters.evaluateAll(elements => elements.map(semanticPresentation));
+  const mayPresentation = await mayClusters.evaluateAll(elements => elements.map(element => {
+    const pseudo = getComputedStyle(element, "::after");
+    return {
+      status: element.dataset.rtaiSemanticStatus,
+      label: element.dataset.rtaiSemanticLabel,
+      reason: element.dataset.rtaiSemanticReason,
+      title: element.dataset.rtaiSemanticTitle,
+      content: pseudo.content.replace(/^"|"$/g, ""),
+      display: pseudo.display,
+    };
+  }));
   assert(mayPresentation.every(item => item.label === "May"));
   assert(mayPresentation.every(item => item.content === "May"));
   assert(mayPresentation.every(item => item.display !== "none"));
