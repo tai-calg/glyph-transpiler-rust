@@ -27,7 +27,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cat .github/pr60-final.part* | base64 --decode > /tmp/pr60-final-files.tar.gz
+          cat \
+            .github/pr60-final.part00 \
+            .github/pr60-final.part01 \
+            .github/pr60-final.part02 \
+            .github/pr60-final.part03 \
+            .github/pr60-final.part04 \
+            .github/pr60-final.part05 \
+            .github/pr60-final.part06a \
+            .github/pr60-final.part06b \
+            | base64 --decode > /tmp/pr60-final-files.tar.gz
           echo "e30d520b804595f32d7034ecd53a42d0043dbddf7801154c79ebc0f53a6824f5  /tmp/pr60-final-files.tar.gz" | sha256sum --check
           tar -xzf /tmp/pr60-final-files.tar.gz
 
