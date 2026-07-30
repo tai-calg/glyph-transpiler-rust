@@ -12,9 +12,8 @@ if str(ROOT) not in sys.path:
 from glyph import diagram_app
 from glyph.readable_diagram_app import prepare_diagram_app
 from glyph.transition_analysis import (
-    VerifiedEffectContractRegistry,
     build_strict_io_state_views,
-    read_only_identity_contract,
+    public_strict_program,
 )
 
 
@@ -26,18 +25,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = build_parser().parse_args()
-    contracts = VerifiedEffectContractRegistry(
-        defaults=(
-            (
-                "actuator",
-                read_only_identity_contract(
-                    "actuator",
-                    "state",
-                    source="strict UI campaign: reviewed identity actuator",
-                ),
-            ),
-        )
-    )
+    source_id = str(args.input.resolve().relative_to(ROOT))
+    contracts = public_strict_program(source_id).registry()
 
     def strict_views(model: object, execution: object) -> dict[str, object]:
         return build_strict_io_state_views(  # type: ignore[arg-type]
