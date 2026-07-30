@@ -53,7 +53,10 @@ def specialize_view_edges(
     relation = build_machine_relation(model, str(machine_view.get("name") or ""))
     transitions = _mappings(machine_view.get("transitions"))
     if relation is None:
-        return tuple(_unmapped(index, transition) for index, transition in enumerate(transitions))
+        return tuple(
+            _unmapped(index, transition)
+            for index, transition in enumerate(transitions)
+        )
     return tuple(
         _bind_transition(relation, index, transition)
         for index, transition in enumerate(transitions)
@@ -117,18 +120,22 @@ def _bind_transition(
     source_state = str(transition.get("source_state") or "")
     target_state = str(transition.get("target_state") or "")
     source_line = _source_line(transition)
+    synthesized_failure = bool(transition.get("synthesized_failure"))
     candidates = tuple(
         edge
         for edge in relation.edges
         if edge.source_line == source_line
-        and _target_matches(edge, source_state, target_state)
+        and (
+            synthesized_failure
+            or _target_matches(edge, source_state, target_state)
+        )
     )
     candidate_ids = tuple(edge.edge_id for edge in candidates)
 
     if len(candidates) == 1:
         status = (
             ViewEdgeBindingStatus.SYNTHESIZED_FAILURE
-            if bool(transition.get("synthesized_failure"))
+            if synthesized_failure
             else ViewEdgeBindingStatus.EXACT
         )
         return ViewEdgeBinding(
