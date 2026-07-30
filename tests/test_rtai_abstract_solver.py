@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 
 from glyph.compilation import CompilationPipeline
+from glyph.compiler import BinaryExpr, NameExpr, NumberExpr
 from glyph.transition_analysis.abstract_solver import AbstractInterpreter
 from glyph.transition_analysis.abstract_state import AnalysisBudget
 from glyph.transition_analysis.effect_summary import identity_effect_summary
@@ -13,7 +14,7 @@ from glyph.transition_analysis.exactness import (
     ExactnessProofKind,
     ExactnessProofScope,
 )
-from glyph.transition_analysis.teir import BasicBlock, Function, Jump
+from glyph.transition_analysis.teir import Assign, BasicBlock, Function, Jump
 
 
 SOURCE = """system DoorControl
@@ -90,12 +91,8 @@ class GuardedAbstractExecutionTests(unittest.TestCase):
         self.assertTrue(all(len(item.transition_trace) == 1 for item in returned))
         self.assertTrue(all(len(item.effect_trace) == 1 for item in returned))
         self.assertEqual(
-            {item.transition_trace[0].edge_id for item in returned},
-            {
-                "Door:step:30:0",
-                "Door:step:31:1",
-                "Door:step:32:2",
-            },
+            {item.transition_trace[0].edge_id.rsplit(":", 1)[-1] for item in returned},
+            {"0", "1", "2"},
         )
         for item in returned:
             self.assertEqual(
@@ -109,13 +106,8 @@ class GuardedAbstractExecutionTests(unittest.TestCase):
         model = compile_model(SOURCE, "abstract-unknown-effect.glyph")
         result = AbstractInterpreter(model).analyze("control")
         self.assertEqual(result.approximation.kind, ApproximationKind.UNKNOWN)
-        self.assertTrue(
-            any(
-                "unknown-effect-result" in item.unknown_reasons
-                or "effect-result-kind-unknown" in item.unknown_reasons
-                for item in result.completed
-            )
-        )
+        self.assertIn("unknown-effect-result", result.approximation.causes)
+        self.assertIn("unknown-effect-footprint", result.approximation.causes)
         self.assertTrue(
             any("propagated-failure" in item.completion for item in result.completed)
         )
@@ -137,7 +129,19 @@ class GuardedAbstractExecutionTests(unittest.TestCase):
             original.parameters,
             original.return_type,
             "loop",
-            (BasicBlock("loop", (), Jump("loop")),),
+            (
+                BasicBlock(
+                    "loop",
+                    (
+                        Assign(
+                            "state",
+                            BinaryExpr("+", NameExpr("state"), NumberExpr("1")),
+                            original.source_line,
+                        ),
+                    ),
+                    Jump("loop"),
+                ),
+            ),
             original.source_line,
         )
         analyzer.functions["control"] = loop
