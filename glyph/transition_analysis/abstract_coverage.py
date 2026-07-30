@@ -34,12 +34,12 @@ def abstract_value_covers(
     if isinstance(value, BottomValue):
         return False
     if isinstance(value, ConstantValue):
+        if isinstance(concrete, VariantValue) and not concrete.arguments:
+            return value.value == concrete.name
         return value.value == concrete
     if isinstance(value, ParameterValue):
         if input_context is not None and value.context == input_context and value.name in inputs:
             return inputs[value.name] == concrete
-        # A parameter from an instantiated helper/effect summary is an abstract
-        # symbolic value unless its call context is explicitly tied to entry input.
         return True
     if isinstance(value, PhiValue):
         return any(
@@ -154,6 +154,8 @@ def concrete_from_abstract(
     input_context: str | None = None,
 ) -> object:
     if isinstance(value, ConstantValue):
+        if isinstance(value.value, str):
+            return VariantValue(value.value)
         return value.value
     if isinstance(value, ParameterValue):
         if input_context is not None and value.context == input_context:
