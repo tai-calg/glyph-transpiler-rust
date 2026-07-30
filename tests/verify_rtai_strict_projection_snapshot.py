@@ -51,19 +51,29 @@ def main() -> None:
         )
     if campaign.get("legacy_fallback_allowed") is not False:
         raise AssertionError("strict campaign unexpectedly allows legacy fallback")
+    if campaign.get("legacy_system_action_analyzer_enabled") is not False:
+        raise AssertionError("strict campaign executed the legacy System Action analyzer")
+    if views.get("rtai_legacy_system_action_analyzer_enabled") is not False:
+        raise AssertionError("strict StateTransitionIR reports legacy analyzer enabled")
 
     transition_count = 0
     for machine in views["state"]["machines"]:
         report = machine.get("strict_projection_campaign", {})
         if report.get("ready") is not True:
             raise AssertionError(f"machine strict campaign is not ready: {report!r}")
+        if machine.get("analysis", {}).get(
+            "rtai_strict_projection_legacy_analyzer_enabled"
+        ) is not False:
+            raise AssertionError("machine reports legacy analyzer enabled")
         for transition in machine.get("transitions", []):
             transition_count += 1
             if transition.get("legacy_system_action_fallback_allowed") is not False:
                 raise AssertionError("transition allows legacy System Action fallback")
-            if transition.get("execution_action_bindings") != []:
+            if "execution_evidence_v2" in transition:
+                raise AssertionError("legacy Evidence adapter output remains published")
+            if transition.get("execution_action_bindings", []) != []:
                 raise AssertionError("legacy execution_action_bindings remain published")
-            if transition.get("execution_contexts") != []:
+            if transition.get("execution_contexts", []) != []:
                 raise AssertionError("legacy execution_contexts remain published")
             if transition.get("system_action_projection_source") != (
                 "rtai-execution-evidence-v2"
@@ -84,6 +94,7 @@ def main() -> None:
         json.dumps(
             {
                 "ready": True,
+                "legacy_analyzer_enabled": False,
                 "transition_count": transition_count,
                 "output": str(OUTPUT.relative_to(ROOT)),
             },
