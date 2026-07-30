@@ -1,17 +1,16 @@
 name: Fix PR60 review findings
 
 on:
-  push:
-    branches:
-      - agent/system-action-control-flow-completeness-v2
-    paths:
-      - .github/pr60-review-fix-trigger
+  pull_request:
+    types: [synchronize]
+    branches: [main]
 
 permissions:
   contents: write
 
 jobs:
   fix:
+    if: github.event.pull_request.number == 60
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
