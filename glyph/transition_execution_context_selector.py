@@ -101,8 +101,8 @@ function ensureControl(machine){
     const label=document.createElement("label");label.htmlFor="execution-context-select";
     const select=document.createElement("select");select.id="execution-context-select";control.append(label,select);host.appendChild(control);
   }
-  const label=control.querySelector("label"),select=control.querySelector("select");
-  label.textContent=tr("executionContextLabel","実行コンテキスト","Execution context");
+  const label=control.querySelector("label"),select=control.querySelector("select"),labelText=tr("executionContextLabel","実行コンテキスト","Execution context");
+  if(label.textContent!==labelText)label.textContent=labelText;
   const signature=JSON.stringify([contexts,window.GlyphI18n?.locale||"ja"]);
   if(control.dataset.contextSignature!==signature){
     select.replaceChildren();
