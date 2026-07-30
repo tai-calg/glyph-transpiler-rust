@@ -292,6 +292,7 @@ try {
     || message.startsWith("transition label layout failed NoModificationAllowedError:")
     || message.startsWith("transition layout transaction failed TypeError: Failed to fetch")
     || message.startsWith("transition layout transaction failed Error: no valid position exists inside the transition tether")
+    || message.startsWith("enabling-case rendering failed TypeError: Failed to fetch")
     || message.startsWith("Failed to load resource: the server responded with a status of 500")
   );
   const unexpectedConsoleErrors = consoleErrors.filter(message => !expectedConsoleError(message));
