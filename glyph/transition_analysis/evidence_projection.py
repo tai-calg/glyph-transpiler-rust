@@ -66,6 +66,9 @@ class ProjectionReadinessReport:
 
 def audit_evidence_projection(
     machine_view: Mapping[str, object],
+    *,
+    evidence_field: str = "execution_evidence_v2",
+    include_empty_evidence: bool = False,
 ) -> ProjectionReadinessReport:
     transitions: list[TransitionProjectionReadiness] = []
     rejected = 0
@@ -73,15 +76,22 @@ def audit_evidence_projection(
     ready = 0
 
     for index, transition in enumerate(_mappings(machine_view.get("transitions"))):
-        evidence = _mapping(transition.get("execution_evidence_v2"))
+        evidence = _mapping(transition.get(evidence_field))
+        if not evidence:
+            continue
         contexts = _mappings(evidence.get("contexts"))
-        if not contexts:
+        if not contexts and not include_empty_evidence:
             continue
         relevant += 1
         decisions = tuple(check_exact_action_projection(context) for context in contexts)
         rejected += sum(not decision.allowed for decision in decisions)
         item = _transition_readiness(
-            str(evidence.get("edge_id") or transition.get("edge_id") or index),
+            str(
+                evidence.get("edge_id")
+                or transition.get("id")
+                or transition.get("edge_id")
+                or index
+            ),
             decisions,
         )
         transitions.append(item)
@@ -99,25 +109,33 @@ def project_machine_from_evidence(
     machine_view: Mapping[str, object],
     *,
     mode: EvidenceProjectionMode = EvidenceProjectionMode.SHADOW,
+    evidence_field: str = "execution_evidence_v2",
 ) -> dict[str, object]:
-    """Publish or apply exact Evidence actions without consulting AST/legacy strings.
+    """Publish or apply exact Evidence actions without AST or legacy strings.
 
-    Shadow mode only attaches readiness metadata. ``PREFER_EXACT`` publishes an
-    evidence projection candidate while retaining the active display field.
-    ``STRICT_EXACT`` additionally makes ``evidence_display_action`` the explicit
-    UI source and removes legacy fallback for relevant but unproven contexts. The
-    main compiler pipeline does not enable strict mode yet.
+    The main compiler invokes this only for the legacy-compatible Evidence field in
+    shadow mode. Tests and migration tooling may explicitly select the native
+    `rtai_execution_evidence_v2` field.
     """
 
     result = deepcopy(dict(machine_view))
-    report = audit_evidence_projection(result)
+    report = audit_evidence_projection(
+        result,
+        evidence_field=evidence_field,
+        include_empty_evidence=True,
+    )
     readiness = {item.edge_id: item for item in report.transitions}
     projected: list[dict[str, object]] = []
 
     for index, original in enumerate(_mappings(result.get("transitions"))):
         transition = dict(original)
-        evidence = _mapping(transition.get("execution_evidence_v2"))
-        edge_id = str(evidence.get("edge_id") or transition.get("edge_id") or index)
+        evidence = _mapping(transition.get(evidence_field))
+        edge_id = str(
+            evidence.get("edge_id")
+            or transition.get("id")
+            or transition.get("edge_id")
+            or index
+        )
         item = readiness.get(edge_id)
         if item is not None:
             transition["evidence_projection"] = item.to_ir()
@@ -126,7 +144,7 @@ def project_machine_from_evidence(
                     dict(item.action) if item.ready and item.action is not None else None
                 )
                 transition["evidence_projection_source"] = (
-                    "execution-evidence-v2" if item.ready else "unresolved-evidence"
+                    evidence_field if item.ready else "unresolved-evidence"
                 )
             if mode is EvidenceProjectionMode.STRICT_EXACT:
                 transition["evidence_display_action"] = (
@@ -140,6 +158,7 @@ def project_machine_from_evidence(
         {
             "evidence_projection_version": EVIDENCE_PROJECTION_VERSION,
             "evidence_projection_mode": mode.value,
+            "evidence_projection_field": evidence_field,
             "evidence_projection_ready": report.ready,
             "evidence_projection_relevant_transition_count": (
                 report.relevant_transition_count
@@ -158,6 +177,15 @@ def _transition_readiness(
     edge_id: str,
     decisions: Sequence[ExactActionDecision],
 ) -> TransitionProjectionReadiness:
+    if not decisions:
+        return TransitionProjectionReadiness(
+            edge_id,
+            0,
+            0,
+            False,
+            "no-evidence-contexts",
+            None,
+        )
     allowed = tuple(decision for decision in decisions if decision.allowed)
     if len(allowed) != len(decisions):
         first = next(decision for decision in decisions if not decision.allowed)
@@ -181,7 +209,7 @@ def _transition_readiness(
             "exact-context-actions-disagree",
             None,
         )
-    action = actions[0] if actions else None
+    action = actions[0]
     return TransitionProjectionReadiness(
         edge_id,
         len(decisions),
