@@ -40,6 +40,10 @@ from .transition_analysis.evidence_projection import (
     project_machine_from_evidence,
 )
 from .transition_analysis.lowering import lower_compilation_model_report
+from .transition_analysis.native_projection_readiness import (
+    NATIVE_EVIDENCE_READINESS_VERSION,
+    attach_native_evidence_projection_readiness,
+)
 from .transition_analysis.view_edge_specialization import (
     VIEW_EDGE_SPECIALIZATION_VERSION,
     attach_view_edge_specialization,
@@ -160,8 +164,8 @@ def enrich_state_transition_ir(
         attach_transition_system_execution_actions(model, machine)
         for machine in projected
     ]
-    # Legacy Evidence, native abstract Evidence, semantic bootstrap, rendered-edge
-    # bindings and UI readiness are shadow outputs. None changes active projection.
+    # Legacy Evidence, native abstract Evidence, rendered-edge bindings and both
+    # readiness reports are shadow outputs. None changes active display projection.
     rtai_report = lower_compilation_model_report(model)
     evidenced = [attach_execution_evidence_v2(machine) for machine in system_executed]
     bootstrapped = [
@@ -181,12 +185,16 @@ def enrich_state_transition_ir(
         attach_rtai_abstract_execution_evidence(model, machine)
         for machine in specialized
     ]
+    native_readiness = [
+        attach_native_evidence_projection_readiness(machine)
+        for machine in native_evidenced
+    ]
     evidence_audited = [
         project_machine_from_evidence(
             machine,
             mode=EvidenceProjectionMode.SHADOW,
         )
-        for machine in native_evidenced
+        for machine in native_readiness
     ]
     compatible = [
         attach_output_action_compatibility(machine) for machine in evidence_audited
@@ -244,6 +252,9 @@ def enrich_state_transition_ir(
     result["rtai_view_edge_specialization_version"] = (
         VIEW_EDGE_SPECIALIZATION_VERSION
     )
+    result["rtai_native_evidence_readiness_version"] = (
+        NATIVE_EVIDENCE_READINESS_VERSION
+    )
     result["rtai_evidence_projection_version"] = EVIDENCE_PROJECTION_VERSION
     result["transition_action_target_independence_version"] = (
         TRANSITION_ACTION_TARGET_INDEPENDENCE_VERSION
@@ -257,6 +268,14 @@ def enrich_state_transition_ir(
     )
     summary["rtai_evidence_projection_ready_machines"] = sum(
         bool(machine.get("analysis", {}).get("evidence_projection_ready"))
+        for machine in state["machines"]
+    )
+    summary["rtai_native_evidence_projection_ready_machines"] = sum(
+        bool(
+            machine.get("analysis", {}).get(
+                "rtai_native_evidence_projection_ready"
+            )
+        )
         for machine in state["machines"]
     )
     summary["rtai_abstract_execution_exact_projection_count"] = sum(
