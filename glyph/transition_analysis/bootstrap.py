@@ -3,11 +3,13 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Mapping
 
+from .._transition_branch_semantics import substitute_expr
 from ..artifacts import CompilationModel
+from ..compiler import Expr, NameExpr
 from .lowering import lower_compilation_model
 from .machine_relation import build_machine_relation
 from .preimage import compute_transition_call_preimage
-from .teir import Function, TransitionCall
+from .teir import Assign, EffectCall, Function, TransitionCall
 
 
 RTAI_SEMANTIC_BOOTSTRAP_VERSION = 1
@@ -33,15 +35,31 @@ def attach_rtai_semantic_bootstrap(
             if function is None:
                 continue
             for block in function.blocks:
+                environment: dict[str, Expr] = {}
                 for instruction in block.instructions:
+                    if isinstance(instruction, Assign):
+                        environment[instruction.target] = substitute_expr(
+                            instruction.expression,
+                            environment,
+                        )
+                        continue
+                    if isinstance(instruction, EffectCall):
+                        if instruction.target is not None:
+                            environment[instruction.target] = NameExpr(instruction.target)
+                        continue
                     if not isinstance(instruction, TransitionCall):
                         continue
+                    actual_arguments = tuple(
+                        substitute_expr(argument, environment)
+                        for argument in instruction.arguments
+                    )
                     if instruction.machine != relation.machine_id:
+                        environment[instruction.target] = NameExpr(instruction.target)
                         continue
                     preimage = compute_transition_call_preimage(
                         model,
                         relation.machine_id,
-                        instruction.arguments,
+                        actual_arguments,
                     )
                     call_sites.append(
                         {
@@ -50,9 +68,12 @@ def attach_rtai_semantic_bootstrap(
                             "line": instruction.line,
                             "target": instruction.target,
                             "propagate_failure": instruction.propagate_failure,
+                            "alias_resolution": "block-local",
+                            "actual_arguments": [repr(item) for item in actual_arguments],
                             "preimage": preimage.to_ir() if preimage is not None else None,
                         }
                     )
+                    environment[instruction.target] = NameExpr(instruction.target)
 
     relevant_functions = sorted(
         {
