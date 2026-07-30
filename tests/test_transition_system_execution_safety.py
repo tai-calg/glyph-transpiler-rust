@@ -45,7 +45,7 @@ SYNTHESIZED_FAILURE_SOURCE = """system PumpControl
 
   in state:PumpState
   in event:PumpEvent
-  out result:PumpState|WriteError
+  out result:PumpState
 
   state -> control
   event -> control
@@ -76,6 +76,41 @@ machine Pump(state:PumpState,event:PumpEvent)
 >control(state:PumpState,event:PumpEvent):PumpState|WriteError
   next := pump_step(state,event)?
   Ok(notify(next))
+"""
+
+
+UNPROVEN_STATE_SOURCE = """system DoorObserve
+  entry control
+
+  in previous:DoorState
+  in input:Input
+  out state_out:DoorState
+
+  previous -> control
+  input -> control
+  control -> state_out
+  control -> actuator
+
+machine Door(state:DoorState,input:Input)
+  select=state.mode
+  init=DoorState(Closed)
+  next=step(state,input)
+  success=Open
+  failure=Alarm
+
+*Input(open_request:B)
++DoorMode=Closed|Open|Alarm
+*DoorState(mode:DoorMode)
+
+!actuator(state:DoorState):DoorState
+
+>step(state:DoorState,input:Input):DoorState
+  state.mode==Closed&input.open_request >> DoorState(Open)
+  _ >> state
+
+>control(previous:DoorState,input:Input):DoorState
+  next := step(previous,input)
+  actuator(next)
 """
 
 
@@ -136,15 +171,7 @@ class TransitionSystemExecutionSafetyTests(unittest.TestCase):
             )
 
     def test_state_specialization_requires_explicit_current_state_wiring(self) -> None:
-        source = SOURCE.replace("in state:DoorState", "in previous:DoorState")
-        source = source.replace("state -> control", "previous -> control")
-        source = source.replace(
-            ">control(state:DoorState,input:Input):DoorState\n"
-            "  next := step(state,input)\n",
-            ">control(previous:DoorState,input:Input):DoorState\n"
-            "  next := step(previous,input)\n",
-        )
-        views = compile_source(source, "unproven-state.glyph")
+        views = compile_source(UNPROVEN_STATE_SOURCE, "unproven-state.glyph")
         machine = views["state"]["machines"][0]
         self.assertTrue(
             any(
