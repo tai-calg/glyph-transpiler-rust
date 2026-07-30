@@ -14,6 +14,7 @@ from .state_transition_contract import (
     TRANSITION_ENABLING_CASES_VERSION,
     TRANSITION_EXECUTION_CONTEXT_CONTROL_FLOW_VERSION,
     TRANSITION_EXECUTION_CONTEXT_PROJECTION_VERSION,
+    TRANSITION_EXECUTION_EVIDENCE_VERSION,
     TRANSITION_INPUT_PREIMAGE_VERSION,
     TRANSITION_OPERATION_ACTION_VERSION,
     TRANSITION_RESULT_CONSUMER_ACTION_VERSION,
@@ -24,6 +25,7 @@ from .state_transition_contract import (
 from .transition_action_projection import project_machine_transition_actions
 from .transition_action_scopes import project_transition_action_scopes
 from .transition_action_target_independence import analyze_action_target_independence
+from .transition_analysis import attach_execution_evidence_v2
 from .transition_condition_roles import classify_machine_transition_roles
 from .transition_enabling_case_compatibility import preserve_legacy_transition_metadata
 from .transition_enabling_case_defaults import ensure_machine_enabling_cases
@@ -140,8 +142,12 @@ def enrich_state_transition_ir(
         attach_transition_system_execution_actions(model, machine)
         for machine in projected
     ]
+    # RTAI Evidence v2 is emitted in shadow mode. Existing display projection
+    # remains unchanged until exact reachability, singleton trace, completion,
+    # and cardinality evidence are available.
+    evidenced = [attach_execution_evidence_v2(machine) for machine in system_executed]
     compatible = [
-        attach_output_action_compatibility(machine) for machine in system_executed
+        attach_output_action_compatibility(machine) for machine in evidenced
     ]
     classified = [
         classify_machine_transition_roles(model, machine) for machine in compatible
@@ -185,6 +191,9 @@ def enrich_state_transition_ir(
     )
     result["transition_execution_context_projection_version"] = (
         TRANSITION_EXECUTION_CONTEXT_PROJECTION_VERSION
+    )
+    result["transition_execution_evidence_version"] = (
+        TRANSITION_EXECUTION_EVIDENCE_VERSION
     )
     result["transition_action_target_independence_version"] = (
         TRANSITION_ACTION_TARGET_INDEPENDENCE_VERSION
