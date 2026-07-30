@@ -78,6 +78,7 @@ async function compileSource(page, sourceText) {
       }
       snapshot = next;
       render();
+      window.GlyphExecutionContext?.refresh?.();
       return {
         status: next.status || "",
         source: next.source ?? null,
