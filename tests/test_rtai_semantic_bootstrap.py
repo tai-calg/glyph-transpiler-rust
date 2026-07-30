@@ -92,13 +92,9 @@ class RtaiSemanticBootstrapTests(unittest.TestCase):
         report = lower_compilation_model_report(output.model)
         self.assertEqual(report.issues, ())
         self.assertIn("clamp", report.functions)
-        instructions = [
-            instruction
-            for block in report.functions["clamp"].blocks
-            for instruction in block.instructions
-        ]
-        self.assertEqual(len(instructions), 1)
-        self.assertNotIn("/>", repr(instructions[0]))
+        rendered = repr(report.functions["clamp"].to_ir())
+        self.assertNotIn("/>", rendered)
+        self.assertIn("min", rendered)
 
 
 if __name__ == "__main__":
