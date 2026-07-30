@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Mapping, Sequence
+from typing import Sequence
 
 from ..compiler import BoolExpr
 from .abstract_state import AbstractAnalysisResult, GuardedAlternative
+from .concrete import ConcreteExecutionResult
 from .evidence import (
     CallCardinalityEvidence,
     CallUpperBound,
@@ -30,12 +31,53 @@ ABSTRACT_EVIDENCE_ADAPTER_VERSION = 1
 
 
 @dataclass(frozen=True)
+class VerifiedReachabilityWitness:
+    edge_id: str
+    arguments: tuple[object, ...]
+    completion: str
+    transition_edges: tuple[str, ...]
+    source: str = "teir-concrete-replay"
+
+    def to_ir(self) -> dict[str, object]:
+        return {
+            "edge_id": self.edge_id,
+            "arguments": [repr(item) for item in self.arguments],
+            "completion": self.completion,
+            "transition_edges": list(self.transition_edges),
+            "source": self.source,
+        }
+
+
+def verified_reachability_witness(
+    execution: ConcreteExecutionResult,
+    arguments: Sequence[object],
+    edge_id: str,
+) -> VerifiedReachabilityWitness:
+    edges = tuple(event.edge_id for event in execution.transition_trace)
+    if edge_id not in edges:
+        raise ValueError(
+            f"concrete execution did not traverse requested edge {edge_id}"
+        )
+    return VerifiedReachabilityWitness(
+        edge_id,
+        tuple(arguments),
+        execution.completion,
+        edges,
+    )
+
+
+@dataclass(frozen=True)
 class AbstractEvidenceContext:
     edge_id: str
     system: str | None
     entry: str
     scope: str = "system"
-    witness: Mapping[str, object] | None = None
+    witness: VerifiedReachabilityWitness | None = None
+    analysis_edge_id: str | None = None
+
+    @property
+    def source_edge_id(self) -> str:
+        return self.analysis_edge_id or self.edge_id
 
 
 def context_evidence_from_analysis(
@@ -44,16 +86,17 @@ def context_evidence_from_analysis(
 ) -> ContextExecutionEvidence:
     """Project one edge-specific abstract result into independently scoped evidence."""
 
+    source_edge_id = context.source_edge_id
     relevant = tuple(
         alternative
         for alternative in analysis.completed
         if any(
-            event.edge_id == context.edge_id
+            event.edge_id == source_edge_id
             for event in alternative.transition_trace
         )
     )
     reachability = _reachability(analysis, relevant, context)
-    cardinality = _cardinality(analysis, relevant, context.edge_id)
+    cardinality = _cardinality(analysis, relevant, source_edge_id)
     effect_trace = _effect_trace(analysis, relevant)
     completion = _completion(analysis, relevant)
     reasons = tuple(
@@ -123,7 +166,7 @@ def _reachability(
                 None,
                 _exact(
                     ExactnessProofScope.REACHABILITY,
-                    f"exact abstract execution contains no edge {context.edge_id}",
+                    f"exact abstract execution contains no edge {context.source_edge_id}",
                 ),
             )
         return ReachabilityEvidence(
@@ -133,20 +176,21 @@ def _reachability(
             Approximation.unknown("abstract-reachability-incomplete"),
         )
 
-    if context.witness is not None:
-        witness = dict(context.witness)
-        witness.setdefault("edge_id", context.edge_id)
-        if witness.get("edge_id") == context.edge_id:
-            return ReachabilityEvidence(
-                ReachabilityStatus.PROVEN_REACHABLE,
-                precondition,
-                witness,
-                _exact(
-                    ExactnessProofScope.REACHABILITY,
-                    f"concrete witness replayed for edge {context.edge_id}",
-                    kind=ExactnessProofKind.EXHAUSTIVE_FINITE_ORACLE,
-                ),
-            )
+    witness = context.witness
+    if witness is not None and witness.edge_id == context.source_edge_id:
+        witness_ir = witness.to_ir()
+        witness_ir["edge_id"] = context.edge_id
+        witness_ir["analysis_edge_id"] = context.source_edge_id
+        return ReachabilityEvidence(
+            ReachabilityStatus.PROVEN_REACHABLE,
+            precondition,
+            witness_ir,
+            _exact(
+                ExactnessProofScope.REACHABILITY,
+                f"concrete TEIR replay traversed edge {context.source_edge_id}",
+                kind=ExactnessProofKind.CONCRETE_REPLAY,
+            ),
+        )
 
     return ReachabilityEvidence(
         ReachabilityStatus.MAY_REACHABLE,
