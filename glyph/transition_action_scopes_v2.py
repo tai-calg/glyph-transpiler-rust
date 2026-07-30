@@ -4,6 +4,12 @@ from copy import deepcopy
 from typing import Mapping, Sequence
 
 from ._transition_action_ir import renumber_invocations, text
+from .state_transition_contract import (
+    TRANSITION_ACTION_SCOPE_VERSION,
+    TRANSITION_EXECUTION_CONTEXT_CONTROL_FLOW_VERSION,
+    TRANSITION_EXECUTION_CONTEXT_PROJECTION_VERSION,
+    TRANSITION_SYSTEM_EXECUTION_ACTION_VERSION,
+)
 
 
 _CONTEXT_REQUIRED_CODE = "STIR_SYSTEM_ACTION_CONTEXT_REQUIRED"
@@ -150,7 +156,6 @@ def project_transition_action_scopes(
 
     for original in result.get("transitions", []):
         transition = dict(original)
-        # Finalization immediately before this stage specializes branch-local values.
         machine_action = deepcopy(transition.get("action"))
         machine_invocations = _invocations(transition.get("action_invocations", []))
         machine_effects = _invocations(transition.get("effect_invocations", []))
@@ -288,10 +293,10 @@ def project_transition_action_scopes(
     analysis = dict(result.get("analysis", {}))
     analysis.update(
         {
-            "transition_system_execution_action_version": 1,
-            "transition_execution_context_control_flow_version": 1,
-            "transition_action_scope_version": 1,
-            "transition_execution_context_projection_version": 1,
+            "transition_system_execution_action_version": TRANSITION_SYSTEM_EXECUTION_ACTION_VERSION,
+            "transition_execution_context_control_flow_version": TRANSITION_EXECUTION_CONTEXT_CONTROL_FLOW_VERSION,
+            "transition_action_scope_version": TRANSITION_ACTION_SCOPE_VERSION,
+            "transition_execution_context_projection_version": TRANSITION_EXECUTION_CONTEXT_PROJECTION_VERSION,
             "display_action_transition_count": projected_count,
             "system_action_context_required_count": context_required_count,
             "execution_action_result_dependent_count": result_dependent_count,
