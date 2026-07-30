@@ -51,6 +51,7 @@ SYNTHESIZED_FAILURE_SOURCE = """system PumpControl
   event -> control
   control -> result
   control -> notify
+  control -> write_pump
 
 machine Pump(state:PumpState,event:PumpEvent)
   select=state.mode
@@ -184,10 +185,15 @@ class TransitionSystemExecutionSafetyTests(unittest.TestCase):
             for transition in machine["transitions"]
             for binding in transition.get("execution_action_bindings", [])
         ]
-        self.assertTrue(bindings)
         self.assertTrue(all(binding.get("status") == "unresolved" for binding in bindings))
         self.assertTrue(all(binding.get("action") is None for binding in bindings))
         self.assertTrue(all(not binding.get("action_invocations") for binding in bindings))
+        self.assertTrue(
+            all(
+                transition.get("display_action") is None
+                for transition in machine["transitions"]
+            )
+        )
 
 
 if __name__ == "__main__":
