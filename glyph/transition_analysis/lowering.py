@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import Mapping
 
 from ..artifacts import CompilationModel
-from ..compiler import CallExpr, Expr, ExternDecl, FunctionDecl, NameExpr, TryExpr, parse_expr
+from ..compiler import CallExpr, Expr, ExternDecl, FunctionDecl, NameExpr, TryExpr
 from ..function_blocks import FunctionBlockLowering
 from .machine_relation import relation_by_transition_function
 from .teir import (
@@ -54,10 +54,10 @@ class _Builder:
 def lower_compilation_model(model: CompilationModel) -> dict[str, Function]:
     """Lower user-visible Glyph functions into one CFG representation.
 
-    Generated continuation helpers remain an implementation detail of Rust code
-    generation and are deliberately excluded.  Original ``:=`` blocks are
-    lowered from ``CompilationModel.blocks`` so function-guard and block syntax
-    converge before concrete or abstract execution.
+    Function-block source may contain pipeline and lambda syntax that the ordinary
+    expression parser intentionally does not accept.  The compiler has already
+    lowered that syntax into generated value/final helpers, so TEIR consumes those
+    parsed helper ASTs rather than parsing source text a second time.
     """
 
     relations = relation_by_transition_function(model)
@@ -70,15 +70,19 @@ def lower_compilation_model(model: CompilationModel) -> dict[str, Function]:
         if isinstance(declaration, ExternDecl)
     )
     blocks = {block.name: block for block in model.blocks}
+    declarations = {
+        declaration.name: declaration
+        for declaration in model.program.declarations
+        if isinstance(declaration, FunctionDecl)
+    }
     result: dict[str, Function] = {}
-    for declaration in model.program.declarations:
-        if not isinstance(declaration, FunctionDecl):
-            continue
+    for declaration in declarations.values():
         if declaration.name.startswith("__glyph_block_"):
             continue
         result[declaration.name] = lower_function(
             declaration,
             block=blocks.get(declaration.name),
+            helper_functions=declarations,
             transition_functions=transition_functions,
             effect_names=effects,
         )
@@ -89,53 +93,27 @@ def lower_function(
     declaration: FunctionDecl,
     *,
     block: FunctionBlockLowering | None = None,
-    transition_functions: Mapping[str, str] = {},
+    helper_functions: Mapping[str, FunctionDecl] | None = None,
+    transition_functions: Mapping[str, str] | None = None,
     effect_names: frozenset[str] = frozenset(),
 ) -> Function:
+    transition_functions = transition_functions or {}
+    helper_functions = helper_functions or {}
     if block is not None:
         return _lower_block_function(
             declaration,
             block,
+            helper_functions=helper_functions,
             transition_functions=transition_functions,
             effect_names=effect_names,
         )
-    return _lower_decl_function(
-        declaration,
-        transition_functions=transition_functions,
-        effect_names=effect_names,
-    )
+    return _lower_decl_function(declaration)
 
 
-def _lower_decl_function(
-    declaration: FunctionDecl,
-    *,
-    transition_functions: Mapping[str, str],
-    effect_names: frozenset[str],
-) -> Function:
+def _lower_decl_function(declaration: FunctionDecl) -> Function:
     builder = _Builder()
     entry = builder.new_block("entry")
-    if declaration.expression is not None:
-        entry.terminator = Return(declaration.expression, declaration.line)
-    elif declaration.guards:
-        current = entry
-        for index, clause in enumerate(declaration.guards):
-            if clause.condition is None:
-                current.terminator = Return(clause.value, clause.line)
-                break
-            selected = builder.new_block(f"guard{index}.selected")
-            selected.terminator = Return(clause.value, clause.line)
-            next_guard = builder.new_block(f"guard{index}.next")
-            current.terminator = Branch(
-                clause.condition,
-                selected.block_id,
-                next_guard.block_id,
-                clause.line,
-            )
-            current = next_guard
-        if current.terminator is None:
-            current.terminator = Return(None, declaration.line)
-    else:
-        entry.terminator = Return(None, declaration.line)
+    _terminate_with_declaration(builder, entry, declaration, prefix="guard")
     return Function(
         declaration.name,
         declaration.params,
@@ -150,35 +128,54 @@ def _lower_block_function(
     declaration: FunctionDecl,
     block: FunctionBlockLowering,
     *,
+    helper_functions: Mapping[str, FunctionDecl],
     transition_functions: Mapping[str, str],
     effect_names: frozenset[str],
 ) -> Function:
     builder = _Builder()
     current = builder.new_block("entry")
     for binding_index, binding in enumerate(block.bindings):
-        if binding.kind == "conditional":
-            current = _lower_conditional_binding(
+        helper = helper_functions.get(binding.value_helper)
+        if helper is None:
+            raise ValueError(
+                f"compiler helper {binding.value_helper} is unavailable for TEIR lowering"
+            )
+        if helper.guards:
+            current = _lower_guarded_binding(
                 builder,
                 current,
                 binding.name,
-                binding.source,
-                binding.line,
+                helper,
                 binding_index,
                 transition_functions=transition_functions,
                 effect_names=effect_names,
             )
             continue
-        expression = parse_expr(binding.source)
+        if helper.expression is None:
+            raise ValueError(
+                f"compiler helper {binding.value_helper} has no value expression"
+            )
         current.instructions.append(
             _lower_binding_instruction(
                 binding.name,
-                expression,
+                helper.expression,
                 binding.line,
                 transition_functions=transition_functions,
                 effect_names=effect_names,
             )
         )
-    current.terminator = Return(parse_expr(block.final_source), block.final_line)
+
+    final_helper = helper_functions.get(block.final_helper)
+    if final_helper is None:
+        raise ValueError(
+            f"compiler helper {block.final_helper} is unavailable for TEIR lowering"
+        )
+    _terminate_with_declaration(
+        builder,
+        current,
+        final_helper,
+        prefix="final",
+    )
     return Function(
         declaration.name,
         declaration.params,
@@ -189,68 +186,74 @@ def _lower_block_function(
     )
 
 
-def _lower_conditional_binding(
+def _terminate_with_declaration(
+    builder: _Builder,
+    current: _BlockDraft,
+    declaration: FunctionDecl,
+    *,
+    prefix: str,
+) -> None:
+    if declaration.expression is not None:
+        current.terminator = Return(declaration.expression, declaration.line)
+        return
+    if not declaration.guards:
+        current.terminator = Return(None, declaration.line)
+        return
+    cursor = current
+    for index, clause in enumerate(declaration.guards):
+        if clause.condition is None:
+            cursor.terminator = Return(clause.value, clause.line)
+            return
+        selected = builder.new_block(f"{prefix}{index}.selected")
+        selected.terminator = Return(clause.value, clause.line)
+        next_guard = builder.new_block(f"{prefix}{index}.next")
+        cursor.terminator = Branch(
+            clause.condition,
+            selected.block_id,
+            next_guard.block_id,
+            clause.line,
+        )
+        cursor = next_guard
+    cursor.terminator = Return(None, declaration.line)
+
+
+def _lower_guarded_binding(
     builder: _Builder,
     current: _BlockDraft,
     target: str,
-    source: str,
-    line: int,
+    helper: FunctionDecl,
     binding_index: int,
     *,
     transition_functions: Mapping[str, str],
     effect_names: frozenset[str],
 ) -> _BlockDraft:
-    clauses = _conditional_clauses(source, line)
     merge = builder.new_block(f"binding{binding_index}.merge")
     cursor = current
-    for clause_index, (condition, value, clause_line) in enumerate(clauses):
+    for clause_index, clause in enumerate(helper.guards):
         selected = builder.new_block(f"binding{binding_index}.case{clause_index}")
         selected.instructions.append(
             _lower_binding_instruction(
                 target,
-                value,
-                clause_line,
+                clause.value,
+                clause.line,
                 transition_functions=transition_functions,
                 effect_names=effect_names,
             )
         )
         selected.terminator = Jump(merge.block_id)
-        if condition is None:
+        if clause.condition is None:
             cursor.terminator = Jump(selected.block_id)
-            break
+            return merge
         next_clause = builder.new_block(f"binding{binding_index}.next{clause_index}")
         cursor.terminator = Branch(
-            condition,
+            clause.condition,
             selected.block_id,
             next_clause.block_id,
-            clause_line,
+            clause.line,
         )
         cursor = next_clause
-    if cursor.terminator is None:
-        cursor.terminator = Jump(merge.block_id)
+    cursor.terminator = Jump(merge.block_id)
     return merge
-
-
-def _conditional_clauses(
-    source: str,
-    line: int,
-) -> tuple[tuple[Expr | None, Expr, int], ...]:
-    result: list[tuple[Expr | None, Expr, int]] = []
-    for offset, original in enumerate(source.splitlines()):
-        condition_text, separator, value_text = original.partition("=>")
-        if not separator or not value_text.strip():
-            raise ValueError(f"invalid conditional binding at line {line + offset}")
-        condition_text = condition_text.strip()
-        result.append(
-            (
-                None if condition_text == "_" else parse_expr(condition_text),
-                parse_expr(value_text.strip()),
-                line + offset,
-            )
-        )
-    if not result or result[-1][0] is not None:
-        raise ValueError(f"conditional binding at line {line} requires final fallback")
-    return tuple(result)
 
 
 def _lower_binding_instruction(
