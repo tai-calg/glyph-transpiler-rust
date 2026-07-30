@@ -7,6 +7,9 @@ from glyph.io_state_views import build_io_state_views
 from glyph.transition_analysis.abstract_evidence_shadow import (
     attach_rtai_abstract_execution_evidence,
 )
+from glyph.transition_analysis.native_projection_readiness import (
+    attach_native_evidence_projection_readiness,
+)
 
 
 SOURCE = """system DoorControl
@@ -58,6 +61,10 @@ class AbstractEvidenceShadowTests(unittest.TestCase):
         self.assertFalse(payload["projection_source"])
         self.assertEqual(len(payload["edges"]), 2)
         self.assertEqual(
+            len(payload["view_edges"]),
+            len(result["transitions"]),
+        )
+        self.assertEqual(
             result["analysis"]["rtai_abstract_execution_evidence_context_count"],
             2,
         )
@@ -69,6 +76,36 @@ class AbstractEvidenceShadowTests(unittest.TestCase):
         for edge in payload["edges"]:
             self.assertEqual(len(edge["contexts"]), 1)
             self.assertFalse(edge["exact_action_projection_checks"][0]["allowed"])
+        for transition in result["transitions"]:
+            self.assertIn("rtai_execution_evidence_v2", transition)
+            evidence = transition["rtai_execution_evidence_v2"]
+            self.assertEqual(evidence["edge_id"], transition["id"])
+            self.assertIsNotNone(evidence["analysis_edge_id"])
+            self.assertEqual(
+                evidence["view_edge_specialization_status"],
+                "exact",
+            )
+
+    def test_native_readiness_rejects_missing_replay_witnesses(self) -> None:
+        output = CompilationPipeline().compile_text(
+            SOURCE,
+            source_name="abstract-evidence-readiness.glyph",
+        )
+        views = build_io_state_views(output.model, output.diagrams.ir)
+        machine = views["state"]["machines"][0]
+        result = attach_native_evidence_projection_readiness(machine)
+        report = result["rtai_native_evidence_projection_readiness"]
+        self.assertFalse(report["ready"])
+        self.assertEqual(
+            report["relevant_transition_count"],
+            len(result["transitions"]),
+        )
+        self.assertTrue(
+            all(not item["ready"] for item in report["transitions"])
+        )
+        self.assertFalse(
+            result["analysis"]["rtai_native_evidence_projection_ready"]
+        )
 
 
 if __name__ == "__main__":
