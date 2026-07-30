@@ -24,6 +24,15 @@ from .concrete import (
     VariantValue,
 )
 from .evidence import EXECUTION_EVIDENCE_SCHEMA, EXECUTION_EVIDENCE_VERSION
+from .function_summary import (
+    FUNCTION_SUMMARY_VERSION,
+    FunctionSummarySet,
+    PureFunctionSummary,
+    SummaryApplication,
+    build_pure_function_summaries,
+    inline_exact_pure_calls,
+    instantiate_pure_summary,
+)
 from .legacy_shadow import attach_execution_evidence_v2
 from .lowering import (
     LoweringIssue,
@@ -39,6 +48,11 @@ from .oracle import (
     compare_bounded_ast_and_teir,
     compare_bounded_teir_and_abstract,
 )
+from .ownership_semantics import (
+    OWNERSHIP_SEMANTICS_VERSION,
+    OwnershipFunctionSummary,
+    build_ownership_summaries,
+)
 from .preimage import (
     PreimageStatus,
     TransitionCallPreimage,
@@ -46,6 +60,10 @@ from .preimage import (
 )
 from .projection import ExactActionDecision, check_exact_action_projection
 from .reference import ReferenceInterpreter
+from .summary_interpreter import (
+    ContextualEffectSummaryRegistry,
+    SummaryAwareAbstractInterpreter,
+)
 from .typed_smt import (
     TYPED_SMT_ENCODING_VERSION,
     SatModel,
@@ -68,20 +86,28 @@ __all__ = [
     "ConcreteExecutionResult",
     "ConcreteInterpreter",
     "ConstructorValue",
+    "ContextualEffectSummaryRegistry",
     "EXECUTION_EVIDENCE_SCHEMA",
     "EXECUTION_EVIDENCE_VERSION",
     "ExactActionDecision",
+    "FUNCTION_SUMMARY_VERSION",
+    "FunctionSummarySet",
     "GuardedAlternative",
     "LoweringIssue",
     "LoweringReport",
     "MachineRelation",
+    "OWNERSHIP_SEMANTICS_VERSION",
+    "OwnershipFunctionSummary",
     "PreimageStatus",
+    "PureFunctionSummary",
     "RTAI_SEMANTIC_BOOTSTRAP_VERSION",
     "ReferenceInterpreter",
     "ResultValue",
     "SatModel",
     "SolverOutcome",
     "SolverUnknown",
+    "SummaryApplication",
+    "SummaryAwareAbstractInterpreter",
     "TYPED_SMT_ENCODING_VERSION",
     "TransitionCallPreimage",
     "TypedConstraintSolver",
@@ -91,12 +117,16 @@ __all__ = [
     "attach_execution_evidence_v2",
     "attach_rtai_semantic_bootstrap",
     "build_machine_relation",
+    "build_ownership_summaries",
+    "build_pure_function_summaries",
     "check_exact_action_projection",
     "compare_bounded_ast_and_teir",
     "compare_bounded_teir_and_abstract",
     "compute_transition_call_preimage",
     "context_evidence_from_analysis",
     "edge_evidence_from_analysis",
+    "inline_exact_pure_calls",
+    "instantiate_pure_summary",
     "lower_compilation_model",
     "lower_compilation_model_report",
     "lower_function",
