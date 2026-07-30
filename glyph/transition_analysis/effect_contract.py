@@ -3,8 +3,20 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Mapping
 
+from .abstract_store import AbstractLocation
+from .abstract_value import (
+    AbstractValue,
+    ApplicationValue,
+    BottomValue,
+    ConstantValue,
+    ConstructorValue,
+    FieldValue,
+    ParameterValue,
+    PhiValue,
+    TopValue,
+)
 from .concrete import EffectHandler
-from .effect_summary import EffectSummary, identity_effect_summary
+from .effect_summary import EffectSummary, EffectWrite, identity_effect_summary
 from .exactness import (
     Approximation,
     ExactnessProof,
@@ -14,7 +26,7 @@ from .exactness import (
 from .summary_interpreter import ContextualEffectSummaryRegistry
 
 
-EFFECT_CONTRACT_REGISTRY_VERSION = 1
+EFFECT_CONTRACT_REGISTRY_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -22,14 +34,21 @@ class VerifiedEffectContract:
     """One reviewed abstract/concrete contract for an external Effect.
 
     Witness generation is allowed to execute only handlers paired with an exact
-    abstract summary.  A handler alone is not evidence, and an abstract summary
+    abstract summary. A handler alone is not evidence, and an abstract summary
     alone is insufficient for concrete replay.
+
+    ``failure_values`` records the reviewed failure vocabulary of the operation.
+    It is empty for the deterministic public strict surface. Failure-capable
+    operations must not be admitted to that surface until their exact result
+    relation is represented by the analyzer.
     """
 
     operation: str
     summary: EffectSummary
     handler: EffectHandler
     source: str
+    failure_values: tuple[str, ...] = ()
+    review_notes: str = ""
 
     def __post_init__(self) -> None:
         if not self.operation.strip():
@@ -51,15 +70,21 @@ class VerifiedEffectContract:
             )
         if not self.source.strip():
             raise ValueError("Effect contract source must not be empty")
+        normalized_failures = tuple(sorted(set(self.failure_values)))
+        object.__setattr__(self, "failure_values", normalized_failures)
 
     def to_ir(self) -> dict[str, object]:
         return {
             "operation": self.operation,
             "parameters": list(self.summary.parameters),
+            "return_value": _abstract_value_ir(self.summary.return_value),
+            "failure_values": list(self.failure_values),
             "completions": list(self.summary.completions),
-            "read_count": len(self.summary.reads),
-            "write_count": len(self.summary.writes),
+            "reads": [_location_ir(item) for item in self.summary.reads],
+            "writes": [_write_ir(item) for item in self.summary.writes],
+            "unknown_write_footprint": self.summary.unknown_write_footprint,
             "source": self.source,
+            "review_notes": self.review_notes or None,
             "approximation": self.summary.approximation.to_ir(),
         }
 
@@ -136,6 +161,44 @@ class VerifiedEffectContractRegistry:
         }
 
 
+def reviewed_deterministic_contract(
+    operation: str,
+    parameters: tuple[str, ...],
+    return_value: AbstractValue,
+    handler: EffectHandler,
+    *,
+    source: str,
+    reads: tuple[AbstractLocation, ...] = (),
+    writes: tuple[EffectWrite, ...] = (),
+    review_notes: str = "",
+) -> VerifiedEffectContract:
+    """Build one exact deterministic contract from a reviewed release spec."""
+
+    approximation = Approximation.exact(
+        ExactnessProof(
+            ExactnessProofKind.REVIEWED_CONTRACT,
+            ExactnessProofScope.EFFECT_CONTRACT,
+            source,
+        )
+    )
+    summary = EffectSummary(
+        operation=operation,
+        parameters=parameters,
+        return_value=return_value,
+        reads=reads,
+        writes=writes,
+        completions=("normal",),
+        approximation=approximation,
+    )
+    return VerifiedEffectContract(
+        operation,
+        summary,
+        handler,
+        source,
+        failure_values=(),
+        review_notes=review_notes,
+    )
+
 
 def read_only_identity_contract(
     operation: str,
@@ -168,7 +231,6 @@ def read_only_identity_contract(
     return VerifiedEffectContract(operation, summary, handler, source)
 
 
-
 def _validate_contract_pairs(
     pairs: tuple[tuple[str, VerifiedEffectContract], ...],
     *,
@@ -185,9 +247,72 @@ def _validate_contract_pairs(
             )
 
 
+def _location_ir(location: AbstractLocation) -> dict[str, str]:
+    return {"kind": location.kind, "key": location.key}
+
+
+def _write_ir(write: EffectWrite) -> dict[str, object]:
+    return {
+        "address": {
+            "locations": [
+                _location_ir(location)
+                for location in sorted(write.address.locations)
+            ],
+            "singleton_proven": write.address.singleton_proven,
+        },
+        "value": None if write.value is None else _abstract_value_ir(write.value),
+    }
+
+
+def _abstract_value_ir(value: AbstractValue) -> dict[str, object]:
+    if isinstance(value, BottomValue):
+        return {"kind": "bottom"}
+    if isinstance(value, ParameterValue):
+        return {"kind": "parameter", "context": value.context, "name": value.name}
+    if isinstance(value, ConstantValue):
+        item = value.value
+        if not isinstance(item, (str, int, float, bool, type(None))):
+            item = repr(item)
+        return {"kind": "constant", "value": item}
+    if isinstance(value, FieldValue):
+        return {
+            "kind": "field",
+            "base": _abstract_value_ir(value.base),
+            "field": value.field,
+        }
+    if isinstance(value, ConstructorValue):
+        return {
+            "kind": "constructor",
+            "type": value.type_name,
+            "fields": [
+                {"name": name, "value": _abstract_value_ir(argument)}
+                for name, argument in zip(
+                    value.field_names,
+                    value.arguments,
+                    strict=True,
+                )
+            ],
+        }
+    if isinstance(value, ApplicationValue):
+        return {
+            "kind": "application",
+            "operation": value.operation,
+            "arguments": [_abstract_value_ir(item) for item in value.arguments],
+        }
+    if isinstance(value, PhiValue):
+        return {
+            "kind": "phi",
+            "values": [_abstract_value_ir(item) for item in value.values],
+        }
+    if isinstance(value, TopValue):
+        return {"kind": "top", "reason": value.reason}
+    raise TypeError(f"unsupported abstract value {value!r}")
+
+
 __all__ = [
     "EFFECT_CONTRACT_REGISTRY_VERSION",
     "VerifiedEffectContract",
     "VerifiedEffectContractRegistry",
     "read_only_identity_contract",
+    "reviewed_deterministic_contract",
 ]
