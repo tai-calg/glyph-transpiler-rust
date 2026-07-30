@@ -115,12 +115,10 @@ def build_ownership_summaries(
         writes: set[AbstractLocation] = set()
         moves: set[AbstractLocation] = set()
         violations: list[OwnershipViolation] = []
-        operations = tuple(
-            sorted(
-                operations_by_function.get(name, ()),
-                key=lambda item: (item.line, item.kind, item.source or ""),
-            )
-        )
+        operations = tuple(operations_by_function.get(name, ()))
+        completed_moves: dict[
+            tuple[int, str | None, str | None], OwnershipBinding
+        ] = {}
 
         for operation in operations:
             source = current.get(operation.source or "")
@@ -138,6 +136,9 @@ def build_ownership_summaries(
                     continue
                 moves.add(location)
                 writes.add(location)
+                completed_moves[
+                    (operation.line, operation.source, operation.target)
+                ] = source
                 current[source.name] = _replace_availability(
                     source,
                     OwnershipAvailability.MOVED,
@@ -185,7 +186,16 @@ def build_ownership_summaries(
                 continue
 
             if operation.kind == "capability_cast":
-                if source is None or source.availability is not OwnershipAvailability.AVAILABLE:
+                moved_source = completed_moves.get(
+                    (operation.line, operation.source, operation.target)
+                )
+                cast_source = (
+                    source
+                    if source is not None
+                    and source.availability is OwnershipAvailability.AVAILABLE
+                    else moved_source
+                )
+                if cast_source is None:
                     violations.append(
                         OwnershipViolation(
                             "cast-from-unavailable",
@@ -200,9 +210,9 @@ def build_ownership_summaries(
                     target_kind = _capability_kind(operation.capability)
                     current[operation.target] = OwnershipBinding(
                         operation.target,
-                        target_kind or source.capability,
-                        source.resource,
-                        source.state,
+                        target_kind or cast_source.capability,
+                        cast_source.resource,
+                        cast_source.state,
                         OwnershipAvailability.AVAILABLE,
                     )
                 continue
