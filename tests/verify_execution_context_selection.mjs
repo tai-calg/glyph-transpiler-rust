@@ -175,7 +175,7 @@ try {
   assert.deepEqual(blocked.effects, []);
 
   const originalSource = await page.locator("#editor").inputValue();
-  const actionlessSource = originalSource.replace("  audit(next)\n", "  Receipt(next)\n");
+  const actionlessSource = originalSource.replace("  audit(next)\n", "  next\n");
   assert.notEqual(actionlessSource, originalSource, "audit action replacement did not match source");
   await page.locator("#editor").fill(actionlessSource);
   await page.locator("#editor").dispatchEvent("input");
