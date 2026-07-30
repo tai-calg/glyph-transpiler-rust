@@ -10,6 +10,7 @@ from glyph.transition_analysis.exactness import (
     ApproximationKind,
     ExactnessProof,
     ExactnessProofKind,
+    ExactnessProofScope,
 )
 from glyph.transition_analysis.legacy_shadow import attach_execution_evidence_v2
 from glyph.transition_analysis.projection import check_exact_action_projection
@@ -59,6 +60,7 @@ class ApproximationSafetyTests(unittest.TestCase):
         exact = Approximation.exact(
             ExactnessProof(
                 ExactnessProofKind.STRUCTURAL_IDENTITY,
+                ExactnessProofScope.STRUCTURAL,
                 "unit-test structural identity",
             )
         )
@@ -119,22 +121,25 @@ class ExactActionProjectionTests(unittest.TestCase):
         self.assertEqual(context["effect_trace"]["approximation"]["kind"], "over-approximate")
 
     def test_checker_accepts_only_fully_proven_singleton_action(self) -> None:
-        proof = Approximation.exact(
-            ExactnessProof(
-                ExactnessProofKind.EXHAUSTIVE_FINITE_ORACLE,
-                "all finite input combinations matched the concrete interpreter",
-            )
-        ).to_ir()
+        def proof(scope: ExactnessProofScope) -> dict[str, object]:
+            return Approximation.exact(
+                ExactnessProof(
+                    ExactnessProofKind.EXHAUSTIVE_FINITE_ORACLE,
+                    scope,
+                    "all finite input combinations matched the concrete interpreter",
+                )
+            ).to_ir()
+
         context = {
             "reachability": {
                 "status": "proven-reachable",
                 "witness": {"input": "OpenRequest"},
-                "approximation": proof,
+                "approximation": proof(ExactnessProofScope.REACHABILITY),
             },
             "cardinality": {
                 "upper_bound": "at-most-one",
                 "witness": {"count": 1},
-                "approximation": proof,
+                "approximation": proof(ExactnessProofScope.CARDINALITY),
             },
             "effect_trace": {
                 "alternatives": [
@@ -149,11 +154,11 @@ class ExactActionProjectionTests(unittest.TestCase):
                     }
                 ],
                 "is_singleton": True,
-                "approximation": proof,
+                "approximation": proof(ExactnessProofScope.EFFECT_TRACE),
             },
             "completion": {
                 "kinds": ["normal"],
-                "approximation": proof,
+                "approximation": proof(ExactnessProofScope.COMPLETION),
             },
             "unknown_reasons": [],
             "legacy_action": {"display": "actuator(Open)"},
