@@ -116,61 +116,9 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  # BEGIN TEMP PR60 FIX
-  apply-review-fix:
-    if: github.event_name == 'pull_request' && github.event.pull_request.number == 60
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: agent/system-action-control-flow-completeness-v2
-          fetch-depth: 0
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Apply semantic and UI fixes
-        shell: bash
-        run: |
-          set -euo pipefail
-          base64 --decode .github/pr60-review-fix.payload | gzip --decompress > /tmp/fix_pr60.py
-          python /tmp/fix_pr60.py
-
-      - name: Run focused regressions
-        shell: bash
-        run: |
-          set -euo pipefail
-          python -m unittest tests.test_transition_system_execution_safety
-          python -m unittest tests.test_transition_execution_context_selector
-          python -m unittest discover -s tests -p 'test_transition_*.py'
-
-      - name: Commit verified fixes and restore workflow
-        shell: bash
-        run: |
-          set -euo pipefail
-          python - <<'PY'
-          from pathlib import Path
-          path = Path('.github/workflows/io-state-snapshot.yml')
-          text = path.read_text()
-          start = text.index('  # BEGIN TEMP PR60 FIX\n')
-          end = text.index('  # END TEMP PR60 FIX\n') + len('  # END TEMP PR60 FIX\n')
-          text = text[:start] + text[end:]
-          text = text.replace('permissions:\n  contents: write\n', 'permissions:\n  contents: read\n', 1)
-          path.write_text(text)
-          PY
-          rm -f .github/workflows/fix-pr60-review.yml .github/pr60-review-fix.payload .github/pr60-review-fix-trigger
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "Prove System inputs and harden context projection"
-          git push origin HEAD:agent/system-action-control-flow-completeness-v2
-  # END TEMP PR60 FIX
-
   render:
     runs-on: ubuntu-latest
     timeout-minutes: 30
