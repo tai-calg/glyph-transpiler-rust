@@ -74,17 +74,24 @@ class AbstractEvidenceContext:
     scope: str = "system"
     witness: VerifiedReachabilityWitness | None = None
     analysis_edge_id: str | None = None
+    completion_filter: frozenset[str] | None = None
 
     @property
     def source_edge_id(self) -> str:
         return self.analysis_edge_id or self.edge_id
+
+    def accepts_completion(self, completion: str) -> bool:
+        return (
+            self.completion_filter is None
+            or completion in self.completion_filter
+        )
 
 
 def context_evidence_from_analysis(
     analysis: AbstractAnalysisResult,
     context: AbstractEvidenceContext,
 ) -> ContextExecutionEvidence:
-    """Project one edge-specific abstract result into independently scoped evidence."""
+    """Project one edge and terminal-class partition into scoped Evidence."""
 
     source_edge_id = context.source_edge_id
     relevant = tuple(
@@ -93,6 +100,10 @@ def context_evidence_from_analysis(
         if any(
             event.edge_id == source_edge_id
             for event in alternative.transition_trace
+        )
+        and (
+            context.completion_filter is None
+            or bool(alternative.completion & context.completion_filter)
         )
     )
     reachability = _reachability(analysis, relevant, context)
@@ -160,13 +171,20 @@ def _reachability(
             and all(not item.transition_trace_top for item in analysis.completed)
         )
         if exact:
+            terminal_label = (
+                ""
+                if context.completion_filter is None
+                else " in completion partition "
+                + ",".join(sorted(context.completion_filter))
+            )
             return ReachabilityEvidence(
                 ReachabilityStatus.PROVEN_UNREACHABLE,
                 None,
                 None,
                 _exact(
                     ExactnessProofScope.REACHABILITY,
-                    f"exact abstract execution contains no edge {context.source_edge_id}",
+                    "exact abstract execution contains no edge "
+                    f"{context.source_edge_id}{terminal_label}",
                 ),
             )
         return ReachabilityEvidence(
@@ -177,7 +195,11 @@ def _reachability(
         )
 
     witness = context.witness
-    if witness is not None and witness.edge_id == context.source_edge_id:
+    if (
+        witness is not None
+        and witness.edge_id == context.source_edge_id
+        and context.accepts_completion(witness.completion)
+    ):
         witness_ir = witness.to_ir()
         witness_ir["edge_id"] = context.edge_id
         witness_ir["analysis_edge_id"] = context.source_edge_id
@@ -187,7 +209,8 @@ def _reachability(
             witness_ir,
             _exact(
                 ExactnessProofScope.REACHABILITY,
-                f"concrete TEIR replay traversed edge {context.source_edge_id}",
+                "concrete TEIR replay traversed edge "
+                f"{context.source_edge_id} with completion {witness.completion}",
                 kind=ExactnessProofKind.CONCRETE_REPLAY,
             ),
         )
@@ -213,7 +236,7 @@ def _cardinality(
         )
     counts = tuple(
         sum(event.edge_id == edge_id for event in item.transition_trace)
-        for item in analysis.completed
+        for item in relevant
     )
     maximum = max(counts, default=0)
     upper_bound = (
