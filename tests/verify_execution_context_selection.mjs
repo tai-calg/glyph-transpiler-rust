@@ -150,19 +150,31 @@ try {
   await page.waitForFunction(() => document.querySelector("#glyph-settings-dialog")?.open === false);
 
   const originalSource = await page.locator("#editor").inputValue();
-  const unresolvedSource = originalSource
-    .replace("  audit_control -> audit\n", "  audit_control -> loop\n")
-    .replace("  audit(next)\n", "  loop(next)\n")
-    .concat("\n>loop(value:DoorState):Receipt=loop(value)\n");
-  assert.notEqual(unresolvedSource, originalSource, "unresolved route replacement did not match source");
+  const unresolvedSource = originalSource.concat(`
+
+system DoorUnknown
+  entry unknown
+  in state:DoorState
+  in input:Input
+  out state_out:DoorState
+  state -> unknown
+  input -> unknown
+  unknown -> state_out
+
+>loop(value:DoorState):DoorState=loop(value)
+
+>unknown(state:DoorState,input:Input):DoorState
+  next := step(state,input)
+  loop(next)
+`);
   await page.locator("#editor").fill(unresolvedSource);
   await page.locator("#editor").dispatchEvent("input");
   await page.waitForFunction(() => (
     [...document.querySelectorAll("#execution-context-select option")]
-      .some(option => option.textContent === "DoorAudit / audit_control (unresolved)")
+      .some(option => option.textContent === "DoorUnknown / unknown (unresolved)")
   ), null, { timeout: 60_000 });
   await page.selectOption("#execution-context-select", {
-    label: "DoorAudit / audit_control (unresolved)",
+    label: "DoorUnknown / unknown (unresolved)",
   });
   await waitForProjection(page, noActions);
   const blocked = await page.evaluate(() => {
