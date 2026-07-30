@@ -129,6 +129,7 @@ class CompletionEvidence:
 
 @dataclass(frozen=True)
 class ContextExecutionEvidence:
+    edge_id: str
     system: str | None
     entry: str
     scope: str
@@ -137,10 +138,11 @@ class ContextExecutionEvidence:
     effect_trace: EffectTraceEvidence
     completion: CompletionEvidence
     unknown_reasons: tuple[str, ...] = ()
-    legacy_action: Mapping[str, object] | None = None
+    legacy_projection: Mapping[str, object] | None = None
 
     def to_ir(self) -> dict[str, object]:
         return {
+            "edge_id": self.edge_id,
             "system": self.system,
             "entry": self.entry,
             "scope": self.scope,
@@ -149,8 +151,10 @@ class ContextExecutionEvidence:
             "effect_trace": self.effect_trace.to_ir(),
             "completion": self.completion.to_ir(),
             "unknown_reasons": list(self.unknown_reasons),
-            "legacy_action": (
-                dict(self.legacy_action) if self.legacy_action is not None else None
+            "legacy_projection": (
+                dict(self.legacy_projection)
+                if self.legacy_projection is not None
+                else None
             ),
         }
 
