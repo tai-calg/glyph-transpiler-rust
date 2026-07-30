@@ -102,6 +102,30 @@ jobs:
           PY
 
           python -m py_compile glyph/transition_system_execution_control_flow_v2.py
+          python - <<'PY'
+          import runpy
+
+          namespace = runpy.run_path("tests/test_transition_system_execution_safety.py")
+          for source_name in (
+              "UNPROVEN_CALL_ARGUMENT_SOURCE",
+              "UNPROVEN_INPUT_ARGUMENT_SOURCE",
+          ):
+              views = namespace["compile_source"](
+                  namespace[source_name],
+                  f"debug-{source_name.lower()}.glyph",
+              )
+              machine = views["state"]["machines"][0]
+              print(source_name, "diagnostics=", machine["diagnostics"])
+              print(
+                  source_name,
+                  "contexts=",
+                  [
+                      context
+                      for transition in machine["transitions"]
+                      for context in transition.get("execution_contexts", [])
+                  ],
+              )
+          PY
           python -m unittest discover -s tests
 
       - name: Commit verified patch
