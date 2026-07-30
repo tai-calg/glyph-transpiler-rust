@@ -1,17 +1,15 @@
 name: Apply System Action provenance patch
 
 on:
-  push:
-    branches:
-      - agent/system-action-control-flow-completeness-v2
-    paths:
-      - .github/workflows/system-action-provenance-patch.yml
+  pull_request:
+    types: [opened, reopened, synchronize]
 
 permissions:
   contents: write
 
 jobs:
   patch:
+    if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
