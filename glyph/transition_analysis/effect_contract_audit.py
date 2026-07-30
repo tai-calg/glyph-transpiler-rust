@@ -4,13 +4,13 @@ from dataclasses import dataclass
 from typing import Iterable
 
 from ..artifacts import CompilationModel
-from ..compiler import CallExpr, Expr, ExternDecl, NameExpr
+from ..compiler import CallExpr, Expr, NameExpr
 from .effect_contract import VerifiedEffectContractRegistry
 from .lowering import LoweringIssue, lower_compilation_model_report
 from .teir import Assign, Branch, EffectCall, PropagateFailure, Return, TransitionCall
 
 
-EFFECT_CONTRACT_AUDIT_VERSION = 2
+EFFECT_CONTRACT_AUDIT_VERSION = 3
 
 
 @dataclass(frozen=True)
@@ -72,12 +72,13 @@ def audit_effect_contract_coverage(
     entries: Iterable[str],
     contracts: VerifiedEffectContractRegistry,
 ) -> EffectContractCoverageReport:
-    """Audit every outbound Effect reachable from each System entry.
+    """Audit every outbound ``!Effect`` reachable from each System entry.
 
-    Glyph uses the same internal declaration node for ``ext`` inputs and ``!``
-    Effects. The public source spelling remains authoritative here: inbound
-    ``ext`` calls are not Effect contracts and therefore must not be accepted as
-    outbound Effect coverage.
+    Glyph currently lowers ``ext`` inputs, ``~`` Host-pure functions and ``!``
+    outbound Effects through a shared declaration representation. Therefore the
+    internal declaration class is not sufficient to decide Effect ownership. The
+    public source spelling is authoritative: only top-level ``!name(...)``
+    declarations belong to the System Action contract surface.
 
     The audit is structural and conservative. A reachable Effect call requires an
     explicit entry-visible contract even when a branch later proves unreachable.
@@ -88,13 +89,7 @@ def audit_effect_contract_coverage(
     lowering = lower_compilation_model_report(model)
     functions = dict(lowering.functions)
     function_names = frozenset(functions)
-    external_inputs = _source_external_input_names(model)
-    effect_names = frozenset(
-        declaration.name
-        for declaration in model.program.declarations
-        if isinstance(declaration, ExternDecl)
-        and declaration.name not in external_inputs
-    )
+    effect_names = _source_outbound_effect_names(model)
     facts = {
         name: _function_facts(function, function_names, effect_names)
         for name, function in functions.items()
@@ -139,14 +134,14 @@ def audit_effect_contract_coverage(
     return EffectContractCoverageReport(tuple(results))
 
 
-def _source_external_input_names(model: CompilationModel) -> frozenset[str]:
+def _source_outbound_effect_names(model: CompilationModel) -> frozenset[str]:
     names: set[str] = set()
     for original in model.preprocess.source.splitlines():
         code = original.split("#", 1)[0].rstrip()
         stripped = code.strip()
-        if not stripped or code[:1].isspace() or not stripped.startswith("ext "):
+        if not stripped or code[:1].isspace() or not stripped.startswith("!"):
             continue
-        signature = stripped[len("ext ") :].strip()
+        signature = stripped[1:].strip()
         open_pos = signature.find("(")
         if open_pos > 0:
             names.add(signature[:open_pos].strip())
