@@ -104,14 +104,10 @@ def _entry_values(
     concrete = dict(symbolic)
     state_type = evaluator._context.machine.state_param.ty
     candidates = [parameter for parameter in declaration.params if parameter.ty == state_type]
-    selected = next(
-        (
-            parameter
-            for parameter in candidates
-            if parameter.name == evaluator._context.machine.state_param.name
-        ),
-        candidates[0] if len(candidates) == 1 else None,
-    )
+    # Source specialization is sound only when the entry has one unambiguous
+    # parameter of the machine state type. Multiple state-typed parameters require
+    # argument-level provenance and therefore remain symbolic here.
+    selected = candidates[0] if len(candidates) == 1 else None
     if selected is not None:
         value = _source_state_value(
             evaluator._context,
@@ -213,6 +209,73 @@ class _SystemExecutionEvaluator(_base._SystemExecutionEvaluator):
             context=self._context,
         )
 
+    def _evaluate_pure_call(
+        self,
+        symbolic: CallExpr,
+        concrete: CallExpr,
+        site: _base._TraceSite,
+        *,
+        visited: frozenset[str],
+        after_transition: bool,
+        conditions: tuple[str, ...],
+    ) -> tuple[_base._Case, ...]:
+        argument_states: list[tuple[list[Expr], list[Expr], _base._Case]] = [
+            (
+                [],
+                [],
+                _base._Case(
+                    _base._ExprPair(NameExpr("_"), NameExpr("_")),
+                    conditions=conditions,
+                ),
+            )
+        ]
+        for symbolic_argument, concrete_argument in zip(
+            symbolic.args,
+            concrete.args,
+            strict=False,
+        ):
+            next_states: list[tuple[list[Expr], list[Expr], _base._Case]] = []
+            for symbolic_values, concrete_values, prefix in argument_states:
+                if prefix.terminated:
+                    next_states.append((symbolic_values, concrete_values, prefix))
+                    continue
+                cases = self.evaluate(
+                    _base._ExprPair(symbolic_argument, concrete_argument),
+                    site,
+                    visited=visited,
+                    after_transition=after_transition or prefix.transition_calls > 0,
+                    conditions=prefix.conditions,
+                )
+                for case in cases:
+                    combined = _base._with_prefix(prefix, case)
+                    next_states.append(
+                        (
+                            [*symbolic_values, case.value.symbolic],
+                            [*concrete_values, case.value.concrete],
+                            combined,
+                        )
+                    )
+            argument_states = next_states
+
+        result: list[_base._Case] = []
+        for symbolic_values, concrete_values, prefix in argument_states:
+            if prefix.terminated:
+                result.append(prefix)
+                continue
+            result.append(
+                _base._Case(
+                    _base._ExprPair(
+                        CallExpr(symbolic.callee, tuple(symbolic_values)),
+                        CallExpr(concrete.callee, tuple(concrete_values)),
+                    ),
+                    prefix.invocations,
+                    prefix.unresolved,
+                    prefix.transition_calls,
+                    prefix.conditions,
+                )
+            )
+        return _base._deduplicate_cases(result)
+
     def _evaluate_call(
         self,
         symbolic: CallExpr,
@@ -229,6 +292,23 @@ class _SystemExecutionEvaluator(_base._SystemExecutionEvaluator):
                     _base._ExprPair(symbolic, concrete),
                     conditions=conditions,
                 ),
+            )
+        if (
+            isinstance(symbolic.callee, NameExpr)
+            and isinstance(concrete.callee, NameExpr)
+            and symbolic.callee.name == concrete.callee.name
+            and (
+                symbolic.callee.name in self._context.products
+                or symbolic.callee.name in self._context.constants
+            )
+        ):
+            return self._evaluate_pure_call(
+                symbolic,
+                concrete,
+                site,
+                visited=visited,
+                after_transition=after_transition,
+                conditions=conditions,
             )
         return super()._evaluate_call(
             symbolic,
