@@ -134,6 +134,7 @@ class AnalysisEvidenceTests(unittest.TestCase):
         self.assertIn(
             decision.reason,
             {
+                "transition-cardinality-is-not-exact",
                 "effect-trace-is-not-exact",
                 "completion-is-not-exact",
                 "unknown-reasons-are-present",
