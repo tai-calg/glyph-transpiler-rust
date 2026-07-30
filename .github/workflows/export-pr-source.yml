@@ -1,26 +1,143 @@
-name: Export PR source
+name: Consolidate System execution modules
 
 on:
   pull_request:
     types: [opened, reopened, synchronize]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  export:
+  consolidate:
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: agent/system-action-control-flow-completeness-v2
-      - name: Package source
+          fetch-depth: 0
+
+      - name: Consolidate implementation layers
         shell: bash
         run: |
-          tar --exclude=.git --exclude=.glyph --exclude=build -czf /tmp/glyph-pr-source.tar.gz .
-      - uses: actions/upload-artifact@v4
-        with:
-          name: glyph-pr-source
-          path: /tmp/glyph-pr-source.tar.gz
-          if-no-files-found: error
+          python - <<'PY'
+          from pathlib import Path
+          import ast
+
+          root = Path(".")
+          canonical = root / "glyph/transition_system_execution_control_flow.py"
+          versioned = root / "glyph/transition_system_execution_control_flow_v2.py"
+
+          base_source = canonical.read_text(encoding="utf-8")
+          tree = ast.parse(base_source)
+          remove = {
+              "_merge_block_state",
+              "_evaluate_block",
+              "_evaluate_function",
+              "_diagnostic",
+              "attach_transition_system_execution_actions",
+          }
+          ranges = [
+              (node.lineno, node.end_lineno)
+              for node in tree.body
+              if isinstance(node, (ast.FunctionDef, ast.ClassDef))
+              and node.name in remove
+          ]
+          lines = base_source.splitlines()
+          for start, end in sorted(ranges, reverse=True):
+              del lines[start - 1 : end]
+          core = "\n".join(lines).rstrip() + "\n"
+          core = core.replace("from copy import deepcopy\n", "")
+          core = core.replace(
+              "    branch_value_for_transition,\n    build_machine_branch_context,\n",
+              "",
+          )
+          core = core.replace(
+              "from ._transition_source_planning import planned_source_branches, semantic_truth_value\n",
+              "from ._transition_source_planning import semantic_truth_value\n",
+          )
+          core = core.replace("    AliasDecl,\n", "")
+          core = core.replace(
+              '\n\n\n\n__all__ = ["attach_transition_system_execution_actions"]\n',
+              "\n",
+          )
+          (root / "glyph/_transition_system_execution_core.py").write_text(
+              core,
+              encoding="utf-8",
+          )
+
+          final_source = versioned.read_text(encoding="utf-8").replace(
+              "from . import transition_system_execution_control_flow as _base",
+              "from . import _transition_system_execution_core as _base",
+          )
+          canonical.write_text(final_source, encoding="utf-8")
+          versioned.unlink()
+
+          actions = root / "glyph/transition_system_execution_actions.py"
+          actions.write_text(
+              actions.read_text(encoding="utf-8").replace(
+                  "from .transition_system_execution_control_flow_v2 import (",
+                  "from .transition_system_execution_control_flow import (",
+              ),
+              encoding="utf-8",
+          )
+
+          pipeline = root / "glyph/state_transition_pipeline.py"
+          pipeline_source = pipeline.read_text(encoding="utf-8")
+          pipeline_source = pipeline_source.replace(
+              "from .transition_action_scopes_v2 import project_transition_action_scopes",
+              "from .transition_action_scopes import project_transition_action_scopes",
+          )
+          pipeline_source = pipeline_source.replace(
+              "from .transition_system_execution_critical import (",
+              "from .transition_system_execution_control_flow import (",
+          )
+          pipeline.write_text(pipeline_source, encoding="utf-8")
+
+          scopes = root / "glyph/transition_action_scopes.py"
+          scopes_v2 = root / "glyph/transition_action_scopes_v2.py"
+          scopes.write_text(scopes_v2.read_text(encoding="utf-8"), encoding="utf-8")
+          scopes_v2.unlink()
+
+          (root / "glyph/transition_system_execution_critical.py").unlink()
+
+          workflow = root / ".github/workflows/io-state-snapshot.yml"
+          workflow_source = workflow.read_text(encoding="utf-8")
+          workflow_source = workflow_source.replace(
+              '      - "glyph/transition_action_scopes_v2.py"\n',
+              "",
+          )
+          workflow_source = workflow_source.replace(
+              '      - "glyph/transition_system_execution_control_flow_v2.py"\n',
+              "",
+          )
+          workflow_source = workflow_source.replace(
+              '      - "glyph/transition_system_execution_critical.py"\n',
+              "",
+          )
+          marker = '      - "glyph/transition_system_execution_control_flow.py"\n'
+          if "glyph/_transition_system_execution_core.py" not in workflow_source:
+              workflow_source = workflow_source.replace(
+                  marker,
+                  '      - "glyph/_transition_system_execution_core.py"\n' + marker,
+              )
+          workflow.write_text(workflow_source, encoding="utf-8")
+          PY
+
+          python -m py_compile \
+            glyph/_transition_system_execution_core.py \
+            glyph/transition_system_execution_control_flow.py \
+            glyph/transition_action_scopes.py \
+            glyph/state_transition_pipeline.py
+          python -m unittest discover -s tests -p 'test_transition*.py'
+          python -m unittest discover -s tests
+
+      - name: Commit consolidated implementation
+        shell: bash
+        run: |
+          git rm .github/workflows/export-pr-source.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "Consolidate System execution analysis layers"
+          git push origin HEAD:agent/system-action-control-flow-completeness-v2
