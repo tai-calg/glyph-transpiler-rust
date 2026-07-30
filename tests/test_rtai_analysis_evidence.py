@@ -7,6 +7,12 @@ from glyph.transition_analysis.abstract_solver import AbstractInterpreter
 from glyph.transition_analysis.analysis_evidence import (
     AbstractEvidenceContext,
     context_evidence_from_analysis,
+    verified_reachability_witness,
+)
+from glyph.transition_analysis.concrete import (
+    ConcreteInterpreter,
+    ConstructorValue,
+    VariantValue,
 )
 from glyph.transition_analysis.effect_summary import identity_effect_summary
 from glyph.transition_analysis.exactness import (
@@ -81,7 +87,25 @@ class AnalysisEvidenceTests(unittest.TestCase):
                 )
             },
         ).analyze("control")
-        cls.edge_id = cls.analysis.completed[0].transition_trace[0].edge_id
+        state = ConstructorValue(
+            "DoorState",
+            (("mode", VariantValue("Closed")),),
+        )
+        input_value = ConstructorValue(
+            "Input",
+            (("open_request", True),),
+        )
+        cls.arguments = (state, input_value)
+        cls.execution = ConcreteInterpreter(
+            cls.model,
+            effect_handlers={"actuator": lambda arguments: arguments[0]},
+        ).run("control", cls.arguments)
+        cls.edge_id = cls.execution.transition_trace[0].edge_id
+        cls.witness = verified_reachability_witness(
+            cls.execution,
+            cls.arguments,
+            cls.edge_id,
+        )
 
     def test_missing_witness_does_not_promote_reachability(self) -> None:
         evidence = context_evidence_from_analysis(
@@ -108,7 +132,7 @@ class AnalysisEvidenceTests(unittest.TestCase):
                 self.edge_id,
                 "DoorControl",
                 "control",
-                witness={"edge_id": self.edge_id, "source": "bounded-oracle"},
+                witness=self.witness,
             ),
         ).to_ir()
         decision = check_exact_action_projection(evidence)
@@ -116,17 +140,20 @@ class AnalysisEvidenceTests(unittest.TestCase):
         self.assertIsNotNone(decision.action)
         assert decision.action is not None
         self.assertEqual(decision.action["kind"], "effect-trace")
+        self.assertEqual(
+            evidence["reachability"]["approximation"]["proofs"][0]["kind"],
+            "concrete-replay",
+        )
 
     def test_unknown_effect_summary_remains_rejected(self) -> None:
         analysis = AbstractInterpreter(self.model).analyze("control")
-        edge_id = analysis.completed[0].transition_trace[0].edge_id
         evidence = context_evidence_from_analysis(
             analysis,
             AbstractEvidenceContext(
-                edge_id,
+                self.edge_id,
                 "DoorControl",
                 "control",
-                witness={"edge_id": edge_id},
+                witness=self.witness,
             ),
         ).to_ir()
         decision = check_exact_action_projection(evidence)
@@ -140,6 +167,14 @@ class AnalysisEvidenceTests(unittest.TestCase):
                 "unknown-reasons-are-present",
             },
         )
+
+    def test_witness_factory_rejects_edge_not_seen_in_execution(self) -> None:
+        with self.assertRaises(ValueError):
+            verified_reachability_witness(
+                self.execution,
+                self.arguments,
+                "Door:step:missing:99",
+            )
 
 
 if __name__ == "__main__":
