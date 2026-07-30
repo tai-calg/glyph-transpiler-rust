@@ -44,6 +44,13 @@ class ConstructorValue:
     field_names: tuple[str, ...]
     arguments: tuple["AbstractValue", ...]
 
+    def __post_init__(self) -> None:
+        if len(self.field_names) != len(self.arguments):
+            raise ValueError(
+                f"constructor {self.type_name} has {len(self.field_names)} fields "
+                f"but {len(self.arguments)} arguments"
+            )
+
 
 @dataclass(frozen=True)
 class ApplicationValue:
@@ -99,12 +106,15 @@ def normalize_value(value: AbstractValue) -> AbstractValue:
                 flattened.extend(normalized.values)
             elif not isinstance(normalized, BottomValue):
                 flattened.append(normalized)
-        unique = tuple(dict.fromkeys(flattened))
+        unique: list[AbstractValue] = []
+        for item in flattened:
+            if not any(item == existing for existing in unique):
+                unique.append(item)
         if not unique:
             return BottomValue()
         if len(unique) == 1:
             return unique[0]
-        return PhiValue(unique)
+        return PhiValue(tuple(unique))
     return value
 
 
@@ -139,7 +149,9 @@ def substitute_value(
     if isinstance(value, ParameterValue):
         return parameters.get(value.name, value)
     if isinstance(value, FieldValue):
-        return normalize_value(FieldValue(substitute_value(value.base, parameters), value.field))
+        return normalize_value(
+            FieldValue(substitute_value(value.base, parameters), value.field)
+        )
     if isinstance(value, ConstructorValue):
         return normalize_value(
             ConstructorValue(
@@ -167,11 +179,12 @@ def value_from_expr(
     environment: Mapping[str, AbstractValue],
     *,
     context: str,
-    product_fields: Mapping[str, tuple[str, ...]] = {},
+    product_fields: Mapping[str, tuple[str, ...]] | None = None,
     constants: frozenset[str] = frozenset(),
 ) -> AbstractValue:
     """Convert one Glyph expression to a structure-preserving abstract value."""
 
+    product_fields = product_fields or {}
     if isinstance(expression, BoolExpr):
         return ConstantValue(expression.value)
     if isinstance(expression, NumberExpr):
