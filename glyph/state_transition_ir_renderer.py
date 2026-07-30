@@ -30,9 +30,13 @@ _STYLE = r"""
 .transition-label[data-rtai-semantic-status]::after,
 .transition-detail-id[data-rtai-semantic-status]::after{
   content:attr(data-rtai-semantic-label);
-  display:inline-flex;
+  display:none;
+  position:absolute;
+  left:calc(100% + 5px);
+  top:50%;
+  transform:translateY(-50%);
+  z-index:12;
   align-items:center;
-  margin-left:6px;
   padding:1px 5px;
   border:1px solid currentColor;
   border-radius:999px;
@@ -42,6 +46,16 @@ _STYLE = r"""
   letter-spacing:.02em;
   vertical-align:1px;
   white-space:nowrap;
+  pointer-events:none;
+  box-shadow:0 1px 4px rgba(15,23,42,.12);
+}
+.graph-stage[data-rtai-projection-mode="strict-exact"]
+  .transition-label[data-rtai-semantic-status]::after,
+.graph-stage[data-rtai-projection-mode="strict-exact"]
+  .transition-detail-id[data-rtai-semantic-status]::after,
+.transition-label[data-rtai-semantic-status]:hover::after,
+.transition-detail-id[data-rtai-semantic-status]:hover::after{
+  display:inline-flex;
 }
 .transition-label.rtai-semantic-exact,
 .transition-detail-id.rtai-semantic-exact{
@@ -62,7 +76,7 @@ _STYLE = r"""
 .transition-detail-id.rtai-semantic-may::after,
 .transition-detail-id.rtai-semantic-unknown::after{
   color:var(--rtai-semantic-color);
-  background:color-mix(in srgb,var(--rtai-semantic-color) 8%,transparent);
+  background:color-mix(in srgb,var(--rtai-semantic-color) 8%,white);
 }
 .glyph-visually-hidden{
   position:absolute!important;
@@ -251,6 +265,7 @@ _SCRIPT = r"""
     return [
       machine?.name || "",
       machine?.transition_ir?.version || "",
+      machine?.analysis?.evidence_projection_mode || "shadow",
       window.GlyphExecutionContext?.signature?.() || "auto",
       ...(machine?.transitions || []).map(transition => [
         transition.id ?? "",
@@ -273,6 +288,7 @@ _SCRIPT = r"""
     try {
       const machine = await readMachine();
       if (!machine || Number(machine?.transition_ir?.version) < 2) return;
+      stage.dataset.rtaiProjectionMode = text(machine?.analysis?.evidence_projection_mode) || "shadow";
       const signature = signatureOf(machine);
       let changed = stage.dataset.stateTransitionIRV4Labels !== signature;
 
