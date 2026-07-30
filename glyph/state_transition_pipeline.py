@@ -40,6 +40,10 @@ from .transition_analysis.evidence_projection import (
     project_machine_from_evidence,
 )
 from .transition_analysis.lowering import lower_compilation_model_report
+from .transition_analysis.view_edge_specialization import (
+    VIEW_EDGE_SPECIALIZATION_VERSION,
+    attach_view_edge_specialization,
+)
 from .transition_condition_roles import classify_machine_transition_roles
 from .transition_enabling_case_compatibility import preserve_legacy_transition_metadata
 from .transition_enabling_case_defaults import ensure_machine_enabling_cases
@@ -156,8 +160,8 @@ def enrich_state_transition_ir(
         attach_transition_system_execution_actions(model, machine)
         for machine in projected
     ]
-    # Legacy Evidence, native abstract Evidence, semantic bootstrap and UI
-    # readiness are shadow outputs. None can change active display projection.
+    # Legacy Evidence, native abstract Evidence, semantic bootstrap, rendered-edge
+    # bindings and UI readiness are shadow outputs. None changes active projection.
     rtai_report = lower_compilation_model_report(model)
     evidenced = [attach_execution_evidence_v2(machine) for machine in system_executed]
     bootstrapped = [
@@ -169,9 +173,13 @@ def enrich_state_transition_ir(
         )
         for machine in evidenced
     ]
+    specialized = [
+        attach_view_edge_specialization(model, machine)
+        for machine in bootstrapped
+    ]
     native_evidenced = [
         attach_rtai_abstract_execution_evidence(model, machine)
-        for machine in bootstrapped
+        for machine in specialized
     ]
     evidence_audited = [
         project_machine_from_evidence(
@@ -233,6 +241,9 @@ def enrich_state_transition_ir(
     result["rtai_abstract_execution_evidence_version"] = (
         RTAI_ABSTRACT_EVIDENCE_SHADOW_VERSION
     )
+    result["rtai_view_edge_specialization_version"] = (
+        VIEW_EDGE_SPECIALIZATION_VERSION
+    )
     result["rtai_evidence_projection_version"] = EVIDENCE_PROJECTION_VERSION
     result["transition_action_target_independence_version"] = (
         TRANSITION_ACTION_TARGET_INDEPENDENCE_VERSION
@@ -252,6 +263,15 @@ def enrich_state_transition_ir(
         int(
             machine.get("analysis", {}).get(
                 "rtai_abstract_execution_exact_projection_count",
+                0,
+            )
+        )
+        for machine in state["machines"]
+    )
+    summary["rtai_view_edge_exact_binding_count"] = sum(
+        int(
+            machine.get("analysis", {}).get(
+                "rtai_view_edge_exact_binding_count",
                 0,
             )
         )
