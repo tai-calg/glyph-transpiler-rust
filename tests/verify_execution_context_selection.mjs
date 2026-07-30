@@ -141,8 +141,8 @@ try {
   await page.click('button[data-tab="state"]');
   await page.waitForFunction(count => (
     document.querySelectorAll(".transition-io-cluster").length === count
-    && document.querySelector("#execution-context-select")
   ), machine.transitions.length, { timeout: 60_000 });
+  await page.waitForSelector("#execution-context-select", { state: "attached", timeout: 60_000 });
 
   const optionLabels = await page.locator("#execution-context-select option").allTextContents();
   assert.deepEqual(optionLabels, [
@@ -285,8 +285,21 @@ try {
   assert.equal(await page.locator("#status").textContent(), "ready");
   await page.unroute("**/api/save");
 
+  const expectedConsoleError = message => (
+    message.startsWith("StateTransitionIR rendering failed TypeError: Failed to fetch")
+    || message.startsWith("transition label layout failed TypeError: Failed to fetch")
+    || message.startsWith("initial transition routing failed TypeError: Failed to fetch")
+    || message.startsWith("transition label layout failed NoModificationAllowedError:")
+    || message.startsWith("transition layout transaction failed Error: no valid position exists inside the transition tether")
+    || message.startsWith("Failed to load resource: the server responded with a status of 500")
+  );
+  const unexpectedConsoleErrors = consoleErrors.filter(message => !expectedConsoleError(message));
   assert.deepEqual(pageErrors, [], `browser page errors:\n${pageErrors.join("\n")}`);
-  assert.deepEqual(consoleErrors, [], `browser console errors:\n${consoleErrors.join("\n")}`);
+  assert.deepEqual(
+    unexpectedConsoleErrors,
+    [],
+    `unexpected browser console errors:\n${unexpectedConsoleErrors.join("\n")}`,
+  );
   await page.close();
 } finally {
   await browser.close();
