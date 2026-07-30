@@ -51,6 +51,7 @@ on:
       - "glyph/transition_result_action_dataflow.py"
       - "glyph/transition_route_labels.py"
       - "glyph/transition_semantic_role_lines.py"
+      - "glyph/transition_semantic_status_ui.py"
       - "glyph/transition_semantics.py"
       - "glyph/transition_semantics_runtime.py"
       - "glyph/transition_system_execution_actions.py"
@@ -93,10 +94,12 @@ on:
       - "tests/test_transition_system_execution_control_flow.py"
       - "tests/test_transition_system_execution_review_regressions.py"
       - "tests/test_transition_system_execution_safety.py"
+      - "tests/run_rtai_may_diagram_app.py"
       - "tests/run_rtai_strict_diagram_app.py"
       - "tests/verify_code_derived_system_io.mjs"
       - "tests/verify_enabling_case_rendering.mjs"
       - "tests/verify_execution_context_selection.mjs"
+      - "tests/verify_rtai_semantic_status_ui.mjs"
       - "tests/verify_rtai_strict_projection_snapshot.py"
       - "tests/verify_rtai_strict_projection_ui.mjs"
       - "tests/verify_state_diagram_rendering.mjs"
@@ -113,6 +116,7 @@ on:
       - "examples/acceptance/door_controller.glyph"
       - "examples/acceptance/door_execution_contexts.glyph"
       - "examples/acceptance/motor_safety.glyph"
+      - "examples/acceptance/rtai_may_projection.glyph"
       - "examples/acceptance/rtai_strict_projection.glyph"
       - "examples/state_diagrams/**"
       - "docs/PROVISIONAL_TRIGGER_CLASSIFICATION.md"
@@ -149,7 +153,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p build/checked-system-context-io build/execution-context-selection build/rtai-strict-projection build/state-diagram-regression build/state-diagram-stability build/uml-transition-semantics build/additional-failure-notation build/diagram-editor-exports build/diagram-canvas-viewport build/localized-semantic-canvas build/transition-label-readability build/transition-layout-transaction build/transition-semantic-readability
+          mkdir -p build/checked-system-context-io build/execution-context-selection build/rtai-semantic-status build/rtai-strict-projection build/state-diagram-regression build/state-diagram-stability build/uml-transition-semantics build/additional-failure-notation build/diagram-editor-exports build/diagram-canvas-viewport build/localized-semantic-canvas build/transition-label-readability build/transition-layout-transaction build/transition-semantic-readability
 
           run_node() {
             local script="$1"
@@ -172,6 +176,7 @@ jobs:
           python tests/verify_rtai_strict_projection_snapshot.py \
             2>&1 | tee build/rtai-strict-projection/verify.log
           run_node tests/verify_rtai_strict_projection_ui.mjs build/rtai-strict-projection/ui-verify.log
+          run_node tests/verify_rtai_semantic_status_ui.mjs build/rtai-semantic-status/verify.log
           run_node tests/verify_code_derived_system_io.mjs build/checked-system-context-io/verify.log
           run_node tests/verify_execution_context_selection.mjs build/execution-context-selection/verify.log
           run_node tests/verify_enabling_case_rendering.mjs build/state-diagram-regression/enabling-cases.log
@@ -198,6 +203,7 @@ jobs:
           path: |
             build/checked-system-context-io/**
             build/execution-context-selection/**
+            build/rtai-semantic-status/**
             build/rtai-strict-projection/**
             build/state-diagram-regression/**
             build/state-diagram-stability/**
@@ -212,6 +218,7 @@ jobs:
             examples/acceptance/door_controller.glyph
             examples/acceptance/door_execution_contexts.glyph
             examples/acceptance/motor_safety.glyph
+            examples/acceptance/rtai_may_projection.glyph
             examples/acceptance/rtai_strict_projection.glyph
             examples/state_diagrams/*.glyph
             examples/acceptance/.glyph/**/io-state-views.json
