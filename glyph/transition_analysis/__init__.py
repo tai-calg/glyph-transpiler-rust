@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from .abstract_evidence_shadow import (
+    RTAI_ABSTRACT_EVIDENCE_SHADOW_VERSION,
+    attach_rtai_abstract_execution_evidence,
+)
 from .abstract_solver import AbstractInterpreter
 from .abstract_state import (
     AbstractAnalysisResult,
@@ -9,8 +13,10 @@ from .abstract_state import (
 from .analysis_evidence import (
     ABSTRACT_EVIDENCE_ADAPTER_VERSION,
     AbstractEvidenceContext,
+    VerifiedReachabilityWitness,
     context_evidence_from_analysis,
     edge_evidence_from_analysis,
+    verified_reachability_witness,
 )
 from .bootstrap import (
     RTAI_SEMANTIC_BOOTSTRAP_VERSION,
@@ -24,6 +30,14 @@ from .concrete import (
     VariantValue,
 )
 from .evidence import EXECUTION_EVIDENCE_SCHEMA, EXECUTION_EVIDENCE_VERSION
+from .evidence_projection import (
+    EVIDENCE_PROJECTION_VERSION,
+    EvidenceProjectionMode,
+    ProjectionReadinessReport,
+    TransitionProjectionReadiness,
+    audit_evidence_projection,
+    project_machine_from_evidence,
+)
 from .function_summary import (
     FUNCTION_SUMMARY_VERSION,
     FunctionSummarySet,
@@ -43,6 +57,7 @@ from .lowering import (
 )
 from .machine_relation import MachineRelation, build_machine_relation
 from .oracle import (
+    AbstractCoverageCase,
     BoundedOracleReport,
     BoundedSoundnessReport,
     compare_bounded_ast_and_teir,
@@ -51,6 +66,7 @@ from .oracle import (
 from .ownership_semantics import (
     OWNERSHIP_SEMANTICS_VERSION,
     OwnershipFunctionSummary,
+    OwnershipViolation,
     build_ownership_summaries,
 )
 from .preimage import (
@@ -60,6 +76,11 @@ from .preimage import (
 )
 from .projection import ExactActionDecision, check_exact_action_projection
 from .reference import ReferenceInterpreter
+from .stateful_concrete import (
+    StatefulConcreteExecutionResult,
+    StatefulConcreteInterpreter,
+    StatefulEffectResult,
+)
 from .summary_interpreter import (
     ContextualEffectSummaryRegistry,
     SummaryAwareAbstractInterpreter,
@@ -78,6 +99,7 @@ from .typed_smt import (
 __all__ = [
     "ABSTRACT_EVIDENCE_ADAPTER_VERSION",
     "AbstractAnalysisResult",
+    "AbstractCoverageCase",
     "AbstractEvidenceContext",
     "AbstractInterpreter",
     "AnalysisBudget",
@@ -87,8 +109,10 @@ __all__ = [
     "ConcreteInterpreter",
     "ConstructorValue",
     "ContextualEffectSummaryRegistry",
+    "EVIDENCE_PROJECTION_VERSION",
     "EXECUTION_EVIDENCE_SCHEMA",
     "EXECUTION_EVIDENCE_VERSION",
+    "EvidenceProjectionMode",
     "ExactActionDecision",
     "FUNCTION_SUMMARY_VERSION",
     "FunctionSummarySet",
@@ -98,24 +122,34 @@ __all__ = [
     "MachineRelation",
     "OWNERSHIP_SEMANTICS_VERSION",
     "OwnershipFunctionSummary",
+    "OwnershipViolation",
     "PreimageStatus",
+    "ProjectionReadinessReport",
     "PureFunctionSummary",
+    "RTAI_ABSTRACT_EVIDENCE_SHADOW_VERSION",
     "RTAI_SEMANTIC_BOOTSTRAP_VERSION",
     "ReferenceInterpreter",
     "ResultValue",
     "SatModel",
     "SolverOutcome",
     "SolverUnknown",
+    "StatefulConcreteExecutionResult",
+    "StatefulConcreteInterpreter",
+    "StatefulEffectResult",
     "SummaryApplication",
     "SummaryAwareAbstractInterpreter",
     "TYPED_SMT_ENCODING_VERSION",
     "TransitionCallPreimage",
+    "TransitionProjectionReadiness",
     "TypedConstraintSolver",
     "TypedPredicateEncoder",
     "UnsatProven",
     "VariantValue",
+    "VerifiedReachabilityWitness",
     "attach_execution_evidence_v2",
+    "attach_rtai_abstract_execution_evidence",
     "attach_rtai_semantic_bootstrap",
+    "audit_evidence_projection",
     "build_machine_relation",
     "build_ownership_summaries",
     "build_pure_function_summaries",
@@ -130,4 +164,6 @@ __all__ = [
     "lower_compilation_model",
     "lower_compilation_model_report",
     "lower_function",
+    "project_machine_from_evidence",
+    "verified_reachability_witness",
 ]
