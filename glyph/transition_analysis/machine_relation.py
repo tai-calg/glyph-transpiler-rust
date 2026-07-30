@@ -2,15 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .._transition_branch_semantics import (
-    MachineBranchContext,
-    build_machine_branch_context,
-    simplify_expr,
-)
+from .._transition_branch_semantics import build_machine_branch_context, simplify_expr
 from ..artifacts import CompilationModel
-from ..compiler import BinaryExpr, BoolExpr, Expr, FunctionDecl, TryExpr, UnaryExpr
+from ..compiler import BinaryExpr, BoolExpr, Expr, TryExpr, UnaryExpr
 from .exactness import (
     Approximation,
+    ApproximationCause,
     ExactnessProof,
     ExactnessProofKind,
     ExactnessProofScope,
@@ -65,9 +62,9 @@ def build_machine_relation(
 ) -> MachineRelation | None:
     """Normalize Glyph's ordered Machine guards exactly once.
 
-    The source function's branch order is part of Glyph semantics.  For source
+    The source function's branch order is part of Glyph semantics. For source
     guards ``g1, g2, ...`` this constructs ``g1``, ``!g1 & g2``, ... and the
-    final fallback ``!g1 & !g2 ...``.  System analysis consumes these effective
+    final fallback ``!g1 & !g2 ...``. System analysis consumes these effective
     guards and must not reinterpret the original guard list.
     """
 
@@ -98,7 +95,7 @@ def build_machine_relation(
                 target_state=branch.target,
                 completion=(
                     "may-propagate-failure"
-                    if _contains_try(branch.value) or _returns_result(declaration)
+                    if _contains_try(branch.value)
                     else "returns-normally"
                 ),
                 source_line=branch.line,
@@ -106,6 +103,18 @@ def build_machine_relation(
         )
         if raw_guard is not None:
             remaining = _and(remaining, UnaryExpr("!", raw_guard))
+
+    if not edges:
+        return MachineRelation(
+            machine_id=machine_name,
+            transition_function=context.next_function,
+            formals=tuple(parameter.name for parameter in declaration.params),
+            edges=(),
+            approximation=Approximation.unknown(
+                ApproximationCause.UNSUPPORTED_EXPRESSION,
+                "machine-relation-branches-unavailable",
+            ),
+        )
 
     proof = ExactnessProof(
         ExactnessProofKind.STRUCTURAL_IDENTITY,
@@ -151,7 +160,3 @@ def _contains_try(expression: Expr) -> bool:
         ):
             return True
     return False
-
-
-def _returns_result(declaration: FunctionDecl) -> bool:
-    return declaration.return_type.name == "R" and len(declaration.return_type.args) == 2
