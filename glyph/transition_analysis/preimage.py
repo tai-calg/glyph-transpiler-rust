@@ -18,10 +18,10 @@ from .exactness import (
     ExactnessProofScope,
 )
 from .machine_relation import EdgeSpec, build_machine_relation
+from .type_environment import unique_parameter_types
 from .typed_smt import (
     SatModel,
     SolverResult,
-    SolverUnknown,
     TypedConstraintSolver,
     UnsatProven,
 )
@@ -84,13 +84,7 @@ def compute_transition_call_preimage(
     type_environment: Mapping[str, TypeRef] | None = None,
     solver: TypedConstraintSolver | None = None,
 ) -> TransitionCallPreimage | None:
-    """Substitute caller actual arguments into normalized Machine edge guards.
-
-    The returned condition is always the structural relational preimage.  Solver
-    results are separate and three-valued: only ``UnsatProven`` authorizes edge
-    removal, ``SatModel`` supplies an existence witness, and every unsupported or
-    over-budget case remains ``Unknown``.
-    """
+    """Compute caller-path and normalized-Machine-edge relational preimages."""
 
     relation = build_machine_relation(model, machine_name)
     context = build_machine_branch_context(model, machine_name)
@@ -115,6 +109,7 @@ def compute_transition_call_preimage(
     active_solver = solver or TypedConstraintSolver(model)
     edges = tuple(
         _edge_preimage(
+            model,
             edge,
             substitution,
             caller,
@@ -139,6 +134,7 @@ def compute_transition_call_preimage(
 
 
 def _edge_preimage(
+    model: CompilationModel,
     edge: EdgeSpec,
     substitution: Mapping[str, Expr],
     caller_condition: Expr,
@@ -148,9 +144,11 @@ def _edge_preimage(
     type_environment: Mapping[str, TypeRef] | None,
     solver: TypedConstraintSolver,
 ) -> EdgePreimage:
-    substituted_guard = substitute_expr(edge.effective_guard, substitution)
     condition = simplify_expr(
-        _and(caller_condition, substituted_guard),
+        _and(
+            caller_condition,
+            substitute_expr(edge.effective_guard, substitution),
+        ),
         products=products,  # type: ignore[arg-type]
         constants=constants,
     )
@@ -159,17 +157,20 @@ def _edge_preimage(
         products=products,  # type: ignore[arg-type]
         constants=constants,
     )
-
+    environment = (
+        dict(type_environment)
+        if type_environment is not None
+        else unique_parameter_types(model, condition)
+    )
+    solver_result: SolverResult
     if isinstance(condition, BoolExpr):
-        solver_result: SolverResult = (
+        solver_result = (
             SatModel(())
             if condition.value
             else UnsatProven("predicate simplified to literal false")
         )
-    elif type_environment is None:
-        solver_result = SolverUnknown("solver type environment is unavailable")
     else:
-        solver_result = solver.solve(condition, type_environment)
+        solver_result = solver.solve(condition, environment)
 
     if isinstance(solver_result, UnsatProven):
         status = PreimageStatus.PROVEN_FALSE
@@ -179,7 +180,7 @@ def _edge_preimage(
             if isinstance(condition, BoolExpr) and condition.value
             else PreimageStatus.SAT_MODEL
         )
-    elif type_environment is None:
+    elif type_environment is None and not environment:
         status = PreimageStatus.SYMBOLIC
     else:
         status = PreimageStatus.UNKNOWN
