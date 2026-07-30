@@ -38,6 +38,11 @@ jobs:
               "    _inline_unguarded,\n    substitute_expr,\n    unwrap_expr,\n",
           )
           replace_once(
+              "_UNPROVEN_TRANSITION_ARGUMENT_CODE = \"STIR_SYSTEM_TRANSITION_ARGUMENT_UNPROVEN\"\n",
+              "_UNPROVEN_TRANSITION_ARGUMENT_CODE = \"STIR_SYSTEM_TRANSITION_ARGUMENT_UNPROVEN\"\n"
+              "_UNPROVEN_TRANSITION_VALUE_NAME = \"__glyph_unproven_transition_result__\"\n",
+          )
+          replace_once(
               "        self.expected_transition_arguments = _machine_next_arguments(branch_context)\n"
               "        self.transition_argument_mismatch = False\n\n"
               "    def evaluate(\n",
@@ -91,6 +96,27 @@ jobs:
               "            and not self._transition_arguments_are_proven(symbolic)\n",
           )
           replace_once(
+              "            self.transition_argument_mismatch = True\n"
+              "            return (\n"
+              "                _base._Case(\n"
+              "                    _base._ExprPair(symbolic, concrete),\n"
+              "                    unresolved=True,\n"
+              "                    transition_calls=1,\n"
+              "                    conditions=conditions,\n"
+              "                ),\n"
+              "            )\n",
+              "            self.transition_argument_mismatch = True\n"
+              "            opaque = NameExpr(_UNPROVEN_TRANSITION_VALUE_NAME)\n"
+              "            return (\n"
+              "                _base._Case(\n"
+              "                    _base._ExprPair(opaque, opaque),\n"
+              "                    unresolved=True,\n"
+              "                    transition_calls=1,\n"
+              "                    conditions=conditions,\n"
+              "                ),\n"
+              "            )\n",
+          )
+          replace_once(
               "            elif evaluator.transition_argument_mismatch:\n",
               "            elif (\n"
               "                evaluator.transition_argument_mismatch\n"
@@ -102,30 +128,6 @@ jobs:
           PY
 
           python -m py_compile glyph/transition_system_execution_control_flow_v2.py
-          python - <<'PY'
-          import runpy
-
-          namespace = runpy.run_path("tests/test_transition_system_execution_safety.py")
-          for source_name in (
-              "UNPROVEN_CALL_ARGUMENT_SOURCE",
-              "UNPROVEN_INPUT_ARGUMENT_SOURCE",
-          ):
-              views = namespace["compile_source"](
-                  namespace[source_name],
-                  f"debug-{source_name.lower()}.glyph",
-              )
-              machine = views["state"]["machines"][0]
-              print(source_name, "diagnostics=", machine["diagnostics"])
-              print(
-                  source_name,
-                  "contexts=",
-                  [
-                      context
-                      for transition in machine["transitions"]
-                      for context in transition.get("execution_contexts", [])
-                  ],
-              )
-          PY
           python -m unittest discover -s tests
 
       - name: Commit verified patch
