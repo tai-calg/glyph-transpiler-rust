@@ -222,6 +222,44 @@ machine Door(state:DoorState,input:Input)
 """
 
 
+def multiple_state_source(*, wire_current_state: bool) -> str:
+    state_port = "  in state:DoorState\n" if wire_current_state else ""
+    state_edge = "  state -> control\n" if wire_current_state else ""
+    return f"""system DoorCompare
+  entry control
+
+{state_port}  in previous:DoorState
+  in input:Input
+  out state_out:DoorState
+
+{state_edge}  previous -> control
+  input -> control
+  control -> state_out
+  control -> actuator
+
+machine Door(state:DoorState,input:Input)
+  select=state.mode
+  init=DoorState(Closed)
+  next=step(state,input)
+  success=Open
+  failure=Alarm
+
+*Input(open_request:B)
++DoorMode=Closed|Open|Alarm
+*DoorState(mode:DoorMode)
+
+!actuator(state:DoorState):DoorState
+
+>step(state:DoorState,input:Input):DoorState
+  state.mode==Closed&input.open_request >> DoorState(Open)
+  _ >> state
+
+>control(state:DoorState,previous:DoorState,input:Input):DoorState
+  next := step(state,input)
+  actuator(next)
+"""
+
+
 def compile_source(source: str, name: str) -> dict[str, object]:
     output = CompilationPipeline().compile_text(source, source_name=name)
     return build_io_state_views(output.model, output.diagrams.ir)
@@ -343,6 +381,47 @@ class TransitionSystemExecutionSafetyTests(unittest.TestCase):
             any(
                 context.get("action") is not None
                 and "actuator(" in context["action"].get("display", "")
+                for context in contexts
+            )
+        )
+
+
+    def test_named_current_state_requires_wiring_with_other_state_values(self) -> None:
+        views = compile_source(
+            multiple_state_source(wire_current_state=False),
+            "unproven-multiple-state.glyph",
+        )
+        machine = views["state"]["machines"][0]
+        self.assertTrue(
+            any(
+                item.get("code") == "STIR_SYSTEM_STATE_INPUT_UNPROVEN"
+                for item in machine["diagnostics"]
+            )
+        )
+        contexts = all_contexts(machine)
+        self.assertTrue(contexts)
+        self.assertTrue(all(context.get("status") == "unresolved" for context in contexts))
+        self.assertTrue(all(context.get("action") is None for context in contexts))
+
+    def test_named_current_state_is_specialized_with_other_state_values(self) -> None:
+        views = compile_source(
+            multiple_state_source(wire_current_state=True),
+            "proven-multiple-state.glyph",
+        )
+        machine = views["state"]["machines"][0]
+        self.assertFalse(
+            any(
+                item.get("code") == "STIR_SYSTEM_STATE_INPUT_UNPROVEN"
+                for item in machine["diagnostics"]
+            )
+        )
+        contexts = all_contexts(machine)
+        self.assertTrue(contexts)
+        self.assertTrue(all(context.get("status") != "unresolved" for context in contexts))
+        self.assertTrue(
+            any(
+                context.get("action") is not None
+                and "actuator(DoorState(Open))" in context["action"].get("display", "")
                 for context in contexts
             )
         )

@@ -108,10 +108,19 @@ def _entry_values(
     symbolic = {parameter.name: NameExpr(parameter.name) for parameter in declaration.params}
     concrete = dict(symbolic)
     state_type = evaluator._context.machine.state_param.ty
-    candidates = [parameter for parameter in declaration.params if parameter.ty == state_type]
-    # Keep symbolic values as provenance witnesses. Only concrete values are
-    # specialized for source-state evaluation and rendering.
-    selected = candidates[0] if len(candidates) == 1 else None
+    state_name = evaluator._context.machine.state_param.name
+    # Identify the current state by the Machine parameter name. Other parameters
+    # may intentionally carry previous, comparison, or saved states of the same type.
+    selected = next(
+        (
+            parameter
+            for parameter in declaration.params
+            if parameter.name == state_name and parameter.ty == state_type
+        ),
+        None,
+    )
+    # Keep symbolic values as provenance witnesses. Only the explicitly named
+    # current-state parameter is specialized for source-state evaluation/rendering.
     if selected is not None:
         concrete[selected.name] = _source_state_value(
             evaluator._context,
@@ -142,17 +151,21 @@ def _state_specialization_proof(
         return False, "System entry declaration is unavailable"
 
     state_type = branch_context.machine.state_param.ty
+    expected_name = branch_context.machine.state_param.name
     state_parameters = [
         parameter for parameter in declaration.params if parameter.ty == state_type
     ]
-    # No state substitution occurs when there are zero or multiple candidates.
-    if len(state_parameters) != 1:
+    parameter = next(
+        (item for item in state_parameters if item.name == expected_name),
+        None,
+    )
+    # A state-typed parameter under another name is not evidence for the Machine
+    # current state. An entry with no state-typed parameter is checked later by
+    # transition-call argument provenance instead of state specialization.
+    if parameter is None:
+        if state_parameters:
+            return False, "entry state parameter does not match the Machine state parameter"
         return True, ""
-
-    parameter = state_parameters[0]
-    expected_name = branch_context.machine.state_param.name
-    if parameter.name != expected_name:
-        return False, "entry state parameter does not match the Machine state parameter"
     if context.system is None:
         return False, "implicit caller has no explicit System state-input wiring"
 
