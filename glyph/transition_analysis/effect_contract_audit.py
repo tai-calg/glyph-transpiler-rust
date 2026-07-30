@@ -10,7 +10,7 @@ from .lowering import LoweringIssue, lower_compilation_model_report
 from .teir import Assign, Branch, EffectCall, PropagateFailure, Return, TransitionCall
 
 
-EFFECT_CONTRACT_AUDIT_VERSION = 1
+EFFECT_CONTRACT_AUDIT_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -72,20 +72,28 @@ def audit_effect_contract_coverage(
     entries: Iterable[str],
     contracts: VerifiedEffectContractRegistry,
 ) -> EffectContractCoverageReport:
-    """Audit every externally declared call reachable from each System entry.
+    """Audit every outbound Effect reachable from each System entry.
 
-    The audit is structural and conservative. A reachable call requires an explicit
-    entry-visible contract even when a branch later proves unreachable. This avoids
-    treating solver precision as permission to omit an external boundary contract.
+    Glyph uses the same internal declaration node for ``ext`` inputs and ``!``
+    Effects. The public source spelling remains authoritative here: inbound
+    ``ext`` calls are not Effect contracts and therefore must not be accepted as
+    outbound Effect coverage.
+
+    The audit is structural and conservative. A reachable Effect call requires an
+    explicit entry-visible contract even when a branch later proves unreachable.
+    This avoids treating solver precision as permission to omit an external
+    boundary contract.
     """
 
     lowering = lower_compilation_model_report(model)
     functions = dict(lowering.functions)
     function_names = frozenset(functions)
+    external_inputs = _source_external_input_names(model)
     effect_names = frozenset(
         declaration.name
         for declaration in model.program.declarations
         if isinstance(declaration, ExternDecl)
+        and declaration.name not in external_inputs
     )
     facts = {
         name: _function_facts(function, function_names, effect_names)
@@ -131,6 +139,20 @@ def audit_effect_contract_coverage(
     return EffectContractCoverageReport(tuple(results))
 
 
+def _source_external_input_names(model: CompilationModel) -> frozenset[str]:
+    names: set[str] = set()
+    for original in model.preprocess.source.splitlines():
+        code = original.split("#", 1)[0].rstrip()
+        stripped = code.strip()
+        if not stripped or code[:1].isspace() or not stripped.startswith("ext "):
+            continue
+        signature = stripped[len("ext ") :].strip()
+        open_pos = signature.find("(")
+        if open_pos > 0:
+            names.add(signature[:open_pos].strip())
+    return frozenset(names)
+
+
 def _function_facts(
     function: object,
     function_names: frozenset[str],
@@ -141,7 +163,8 @@ def _function_facts(
     for block in getattr(function, "blocks", ()):
         for instruction in block.instructions:
             if isinstance(instruction, EffectCall):
-                effects.add(instruction.operation)
+                if instruction.operation in effect_names:
+                    effects.add(instruction.operation)
                 expressions = instruction.arguments
             elif isinstance(instruction, Assign):
                 expressions = (instruction.expression,)
