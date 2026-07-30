@@ -29,6 +29,12 @@ from .concrete import (
     ResultValue,
     VariantValue,
 )
+from .effect_contract import (
+    EFFECT_CONTRACT_REGISTRY_VERSION,
+    VerifiedEffectContract,
+    VerifiedEffectContractRegistry,
+    read_only_identity_contract,
+)
 from .evidence import EXECUTION_EVIDENCE_SCHEMA, EXECUTION_EVIDENCE_VERSION
 from .evidence_projection import (
     EVIDENCE_PROJECTION_VERSION,
@@ -105,6 +111,13 @@ from .view_edge_specialization import (
     attach_view_edge_specialization,
     specialize_view_edges,
 )
+from .witness_generation import (
+    BoundedWitnessGenerationReport,
+    GeneratedWitness,
+    WITNESS_GENERATION_VERSION,
+    WitnessGenerationIssue,
+    generate_bounded_system_witnesses,
+)
 
 
 __all__ = [
@@ -116,10 +129,12 @@ __all__ = [
     "AnalysisBudget",
     "BoundedOracleReport",
     "BoundedSoundnessReport",
+    "BoundedWitnessGenerationReport",
     "ConcreteExecutionResult",
     "ConcreteInterpreter",
     "ConstructorValue",
     "ContextualEffectSummaryRegistry",
+    "EFFECT_CONTRACT_REGISTRY_VERSION",
     "EVIDENCE_PROJECTION_VERSION",
     "EXECUTION_EVIDENCE_SCHEMA",
     "EXECUTION_EVIDENCE_VERSION",
@@ -127,6 +142,7 @@ __all__ = [
     "ExactActionDecision",
     "FUNCTION_SUMMARY_VERSION",
     "FunctionSummarySet",
+    "GeneratedWitness",
     "GuardedAlternative",
     "LoweringIssue",
     "LoweringReport",
@@ -158,9 +174,13 @@ __all__ = [
     "UnsatProven",
     "VIEW_EDGE_SPECIALIZATION_VERSION",
     "VariantValue",
+    "VerifiedEffectContract",
+    "VerifiedEffectContractRegistry",
     "VerifiedReachabilityWitness",
     "ViewEdgeBinding",
     "ViewEdgeBindingStatus",
+    "WITNESS_GENERATION_VERSION",
+    "WitnessGenerationIssue",
     "attach_execution_evidence_v2",
     "attach_native_evidence_projection_readiness",
     "attach_rtai_abstract_execution_evidence",
@@ -176,12 +196,14 @@ __all__ = [
     "compute_transition_call_preimage",
     "context_evidence_from_analysis",
     "edge_evidence_from_analysis",
+    "generate_bounded_system_witnesses",
     "inline_exact_pure_calls",
     "instantiate_pure_summary",
     "lower_compilation_model",
     "lower_compilation_model_report",
     "lower_function",
     "project_machine_from_evidence",
+    "read_only_identity_contract",
     "specialize_view_edges",
     "verified_reachability_witness",
 ]
