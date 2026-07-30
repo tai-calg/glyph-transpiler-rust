@@ -31,18 +31,29 @@ class ApproximationCause(str, Enum):
 
 
 class ExactnessProofKind(str, Enum):
-    """Exactを構築できる根拠の種類。"""
+    """Exactを構築できる根拠の生成方式。"""
 
     STRUCTURAL_IDENTITY = "structural-identity"
     LOWERING_EQUIVALENCE = "lowering-equivalence"
     EXHAUSTIVE_FINITE_ORACLE = "exhaustive-finite-oracle"
     SOLVER_CERTIFICATE = "solver-certificate"
-    CONCRETE_WITNESS = "concrete-witness"
+
+
+class ExactnessProofScope(str, Enum):
+    """証拠が保証する性質。別の性質へ流用してはならない。"""
+
+    STRUCTURAL = "structural"
+    LOWERING = "lowering"
+    REACHABILITY = "reachability"
+    CARDINALITY = "cardinality"
+    EFFECT_TRACE = "effect-trace"
+    COMPLETION = "completion"
 
 
 @dataclass(frozen=True)
 class ExactnessProof:
     kind: ExactnessProofKind
+    scope: ExactnessProofScope
     detail: str
 
     def __post_init__(self) -> None:
@@ -50,7 +61,11 @@ class ExactnessProof:
             raise ValueError("Exactness proof detail must not be empty")
 
     def to_ir(self) -> dict[str, str]:
-        return {"kind": self.kind.value, "detail": self.detail}
+        return {
+            "kind": self.kind.value,
+            "scope": self.scope.value,
+            "detail": self.detail,
+        }
 
 
 @dataclass(frozen=True)
