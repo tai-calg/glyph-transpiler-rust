@@ -138,12 +138,16 @@ try {
   ), null, { timeout: 60_000 });
   await waitForProjection(page, auditActions);
 
+  await page.click("#glyph-settings");
+  await page.waitForFunction(() => document.querySelector("#glyph-settings-dialog")?.open === true);
   await page.selectOption("#glyph-language", "en");
   await page.waitForFunction(() => (
     document.querySelector("#execution-context-control label")?.textContent === "Execution context"
     && [...document.querySelectorAll("#execution-context-select option")]
       .some(option => option.textContent === "Machine only")
   ), null, { timeout: 60_000 });
+  await page.click("#glyph-settings-close");
+  await page.waitForFunction(() => document.querySelector("#glyph-settings-dialog")?.open === false);
 
   const originalSource = await page.locator("#editor").inputValue();
   const actionlessSource = originalSource.replace("  audit(next)\n", "  Receipt(next)\n");
