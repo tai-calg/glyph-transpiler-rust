@@ -13,6 +13,11 @@ from .effect_contract import (
     EFFECT_CONTRACT_REGISTRY_VERSION,
     VerifiedEffectContractRegistry,
 )
+from .effect_contract_audit import (
+    EFFECT_CONTRACT_AUDIT_VERSION,
+    EffectContractCoverageReport,
+    audit_effect_contract_coverage,
+)
 from .evidence import (
     CompletionEvidence,
     CompletionKind,
@@ -26,13 +31,14 @@ from .summary_interpreter import SummaryAwareAbstractInterpreter
 from .view_edge_specialization import ViewEdgeBindingStatus
 from .witness_generation import (
     BoundedWitnessGenerationReport,
+    TargetedWitnessRegistry,
     WITNESS_GENERATION_VERSION,
     disabled_witness_generation_ir,
     generate_bounded_system_witnesses,
 )
 
 
-RTAI_ABSTRACT_EVIDENCE_SHADOW_VERSION = 2
+RTAI_ABSTRACT_EVIDENCE_SHADOW_VERSION = 3
 
 
 def attach_rtai_abstract_execution_evidence(
@@ -41,6 +47,7 @@ def attach_rtai_abstract_execution_evidence(
     *,
     effect_contracts: VerifiedEffectContractRegistry | None = None,
     witness_max_cases: int = 4096,
+    targeted_witnesses: TargetedWitnessRegistry | None = None,
 ) -> dict[str, object]:
     """Attach native RTAI Evidence without replacing legacy UI projection.
 
@@ -50,8 +57,9 @@ def attach_rtai_abstract_execution_evidence(
     synthesized-failure transitions use disjoint completion partitions.
 
     Automatic concrete witnesses are generated only when an explicit verified
-    Effect-contract registry is supplied.  Missing contracts never fall back to an
-    inferred handler.
+    Effect-contract registry is supplied. Missing contracts never fall back to an
+    inferred handler. Finite domains are exhausted when possible; reviewed targeted
+    inputs may provide existence witnesses for unsupported or oversized domains.
     """
 
     result = deepcopy(machine_view)
@@ -68,6 +76,7 @@ def attach_rtai_abstract_execution_evidence(
     analyses = {}
     systems_by_entry: dict[str, list[str]] = {}
     witness_report: BoundedWitnessGenerationReport | None = None
+    contract_coverage: EffectContractCoverageReport | None = None
     if relation is not None:
         analyzer = SummaryAwareAbstractInterpreter(
             model,
@@ -81,11 +90,36 @@ def attach_rtai_abstract_execution_evidence(
             systems_by_entry.setdefault(system.entry_name, []).append(system.name)
 
         if effect_contracts is not None:
+            contract_coverage = audit_effect_contract_coverage(
+                model,
+                systems_by_entry,
+                effect_contracts,
+            )
+            issues.extend(
+                {
+                    "entry": entry.entry,
+                    "reason": f"missing-effect-contract: {operation}",
+                }
+                for entry in contract_coverage.entries
+                for operation in entry.missing_operations
+            )
+            issues.extend(
+                {
+                    "entry": entry.entry,
+                    "reason": (
+                        f"effect-contract-audit-lowering: {item.function} "
+                        f"line {item.line}: {item.reason}"
+                    ),
+                }
+                for entry in contract_coverage.entries
+                for item in entry.lowering_issues
+            )
             witness_report = generate_bounded_system_witnesses(
                 model,
                 systems_by_entry,
                 effect_contracts,
                 max_cases_per_entry=witness_max_cases,
+                targeted_witnesses=targeted_witnesses,
             )
             issues.extend(
                 {
@@ -202,6 +236,22 @@ def attach_rtai_abstract_execution_evidence(
                 "by_entry": [],
             }
         ),
+        "effect_contract_coverage": (
+            contract_coverage.to_ir()
+            if contract_coverage is not None
+            else {
+                "version": EFFECT_CONTRACT_AUDIT_VERSION,
+                "configured": False,
+                "complete": False,
+                "missing_operations": [],
+                "entries": [],
+            }
+        ),
+        "targeted_witnesses": (
+            targeted_witnesses.to_ir()
+            if targeted_witnesses is not None
+            else {"cases": []}
+        ),
         "witness_generation": (
             witness_report.to_ir()
             if witness_report is not None
@@ -231,13 +281,30 @@ def attach_rtai_abstract_execution_evidence(
                 EFFECT_CONTRACT_REGISTRY_VERSION
             ),
             "rtai_effect_contracts_configured": effect_contracts is not None,
+            "rtai_effect_contract_audit_version": EFFECT_CONTRACT_AUDIT_VERSION,
+            "rtai_effect_contract_coverage_complete": (
+                contract_coverage.complete if contract_coverage is not None else False
+            ),
+            "rtai_missing_effect_contract_count": (
+                len(contract_coverage.missing_operations)
+                if contract_coverage is not None
+                else 0
+            ),
             "rtai_witness_generation_version": WITNESS_GENERATION_VERSION,
             "rtai_witness_generation_enabled": witness_report is not None,
             "rtai_witness_generation_complete": (
                 witness_report.complete if witness_report is not None else False
             ),
+            "rtai_witness_generation_exhaustive": (
+                witness_report.exhaustive if witness_report is not None else False
+            ),
             "rtai_generated_witness_count": (
                 len(witness_report.witnesses) if witness_report is not None else 0
+            ),
+            "rtai_targeted_witness_case_count": (
+                len(targeted_witnesses.cases)
+                if targeted_witnesses is not None
+                else 0
             ),
         }
     )
