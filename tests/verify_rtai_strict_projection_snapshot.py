@@ -2,6 +2,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import sys
+
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from glyph.compilation import CompilationPipeline
 from glyph.transition_analysis import (
@@ -11,14 +17,14 @@ from glyph.transition_analysis import (
 )
 
 
-SOURCE = Path("examples/acceptance/rtai_strict_projection.glyph")
-OUTPUT = Path("build/rtai-strict-projection/io-state-views.json")
+SOURCE = ROOT / "examples/acceptance/rtai_strict_projection.glyph"
+OUTPUT = ROOT / "build/rtai-strict-projection/io-state-views.json"
 
 
 def main() -> None:
     compiled = CompilationPipeline().compile_text(
         SOURCE.read_text(encoding="utf-8"),
-        source_name=str(SOURCE),
+        source_name=str(SOURCE.relative_to(ROOT)),
     )
     contracts = VerifiedEffectContractRegistry(
         defaults=(
@@ -79,7 +85,7 @@ def main() -> None:
             {
                 "ready": True,
                 "transition_count": transition_count,
-                "output": str(OUTPUT),
+                "output": str(OUTPUT.relative_to(ROOT)),
             },
             sort_keys=True,
         )
