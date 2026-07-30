@@ -4,6 +4,7 @@ import unittest
 
 from glyph.compilation import CompilationPipeline
 from glyph.io_state_views import build_io_state_views
+from glyph.transition_analysis.lowering import lower_compilation_model_report
 
 
 SOURCE = """system DoorControl
@@ -88,8 +89,6 @@ class RtaiSemanticBootstrapTests(unittest.TestCase):
             PIPELINE_SOURCE,
             source_name="rtai-pipeline.glyph",
         )
-        from glyph.transition_analysis.lowering import lower_compilation_model_report
-
         report = lower_compilation_model_report(output.model)
         self.assertEqual(report.issues, ())
         self.assertIn("clamp", report.functions)
