@@ -109,7 +109,11 @@ def context_evidence_from_analysis(
     reachability = _reachability(analysis, relevant, context)
     cardinality = _cardinality(analysis, relevant, source_edge_id)
     effect_trace = _effect_trace(analysis, relevant)
-    completion = _completion(analysis, relevant)
+    completion = _completion(
+        analysis,
+        relevant,
+        allowed=context.completion_filter,
+    )
     reasons = tuple(
         sorted(
             {
@@ -301,6 +305,8 @@ def _effect_trace(
 def _completion(
     analysis: AbstractAnalysisResult,
     relevant: Sequence[GuardedAlternative],
+    *,
+    allowed: frozenset[str] | None,
 ) -> CompletionEvidence:
     if not relevant:
         return CompletionEvidence(
@@ -319,7 +325,7 @@ def _completion(
         _completion_kind(kind)
         for alternative in relevant
         for kind in alternative.completion
-        if kind != "running"
+        if kind != "running" and (allowed is None or kind in allowed)
     ) or (CompletionKind.UNKNOWN,)
     exact = analysis.approximation.is_exact and all(
         item.approximation.is_exact for item in relevant
