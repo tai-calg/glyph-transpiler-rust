@@ -91,6 +91,11 @@ from .stateful_concrete import (
     StatefulConcreteInterpreter,
     StatefulEffectResult,
 )
+from .strict_projection_campaign import (
+    STRICT_PROJECTION_CAMPAIGN_VERSION,
+    build_strict_io_state_views,
+    build_strict_projection_candidate,
+)
 from .summary_interpreter import (
     ContextualEffectSummaryRegistry,
     SummaryAwareAbstractInterpreter,
@@ -158,6 +163,7 @@ __all__ = [
     "RTAI_SEMANTIC_BOOTSTRAP_VERSION",
     "ReferenceInterpreter",
     "ResultValue",
+    "STRICT_PROJECTION_CAMPAIGN_VERSION",
     "SatModel",
     "SolverOutcome",
     "SolverUnknown",
@@ -190,6 +196,8 @@ __all__ = [
     "build_machine_relation",
     "build_ownership_summaries",
     "build_pure_function_summaries",
+    "build_strict_io_state_views",
+    "build_strict_projection_candidate",
     "check_exact_action_projection",
     "compare_bounded_ast_and_teir",
     "compare_bounded_teir_and_abstract",
