@@ -34,6 +34,7 @@ class ExactnessProofKind(str, Enum):
     """Exactを構築できる根拠の生成方式。"""
 
     STRUCTURAL_IDENTITY = "structural-identity"
+    REVIEWED_CONTRACT = "reviewed-contract"
     LOWERING_EQUIVALENCE = "lowering-equivalence"
     CONCRETE_REPLAY = "concrete-replay"
     EXHAUSTIVE_FINITE_ORACLE = "exhaustive-finite-oracle"
