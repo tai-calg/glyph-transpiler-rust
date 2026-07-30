@@ -35,6 +35,7 @@ class ExactnessProofKind(str, Enum):
 
     STRUCTURAL_IDENTITY = "structural-identity"
     LOWERING_EQUIVALENCE = "lowering-equivalence"
+    CONCRETE_REPLAY = "concrete-replay"
     EXHAUSTIVE_FINITE_ORACLE = "exhaustive-finite-oracle"
     SOLVER_CERTIFICATE = "solver-certificate"
 
