@@ -6,7 +6,8 @@ RTAI v2 is implemented as a **shadow semantic analysis**. The current branch
 contains executable TEIR semantics, normalized Machine relations, typed finite
 constraint solving, guarded abstract execution, function and Effect summaries,
 Capability-IR ownership replay, bounded soundness oracles, property-scoped
-Evidence generation, and an Evidence projection readiness gate.
+Evidence generation, rendered-edge specialization and Evidence projection
+readiness gates.
 
 The active System Action UI remains on the legacy projection. RTAI output is
 published in parallel and cannot change the active display action in the normal
@@ -34,8 +35,8 @@ execution.
 ### Exact projection safety
 
 A System Action may be displayed as exact only when all executions represented by
-the selected System context and Machine edge have one identical post-transition
-Effect trace.
+the selected System context and rendered Machine edge have one identical
+post-transition Effect trace.
 
 ```text
 DisplayedExactAction(context, edge, trace)
@@ -80,22 +81,27 @@ The legacy compatibility path still emits additive `execution_evidence_v2` data.
 Legacy `resolved` values are not exact proofs; they remain
 `over-approximate(legacy-adapter)`. Legacy unresolved values remain `unknown`.
 
-RTAI now also emits a separate native abstract Evidence contract:
+RTAI also emits native abstract Evidence:
 
 ```text
 rtai_abstract_execution_evidence_v2
 ```
 
-This native contract is keyed by normalized MachineRelation edges and contains
-RTAI-generated reachability, cardinality, Effect-trace and completion evidence.
-It remains `projection_source = false`.
+This contract contains normalized MachineRelation-edge Evidence and rendered
+view-edge Evidence. Each rendered transition receives:
+
+```text
+rtai_execution_evidence_v2
+```
+
+All native contracts remain `projection_source = false`.
 
 ### Verified reachability witnesses
 
 `analysis_evidence.py` does not accept an arbitrary dictionary as an exact
 reachability witness. `verified_reachability_witness(...)` replays a concrete TEIR
-execution and verifies that the requested edge occurs in its transition trace.
-Exact reachability evidence uses proof kind `concrete-replay`.
+execution and verifies that the requested normalized edge occurs in its transition
+trace. Exact reachability evidence uses proof kind `concrete-replay`.
 
 A concrete witness proves existence only. It does not prove Effect-trace
 completeness, cardinality or completion uniformity.
@@ -181,7 +187,7 @@ and substituted_effective_guard
 System actual arguments are structurally substituted into Machine formals.
 Constructor order, field projection and expression structure are retained.
 
-Each edge now publishes a separate three-valued solver result:
+Each edge publishes a separate three-valued solver result:
 
 - `UnsatProven`
 - `SatModel`
@@ -287,13 +293,36 @@ The current replay models:
 - shared borrow reads
 - mutable borrow reads/writes
 - capability casts
-- move/cast operation sequences
+- ordered move/cast operation sequences
 - resource read/write/move footprints
 - use-after-move and nonexclusive mutable-borrow violations
 
 Invalid or incomplete Capability IR becomes `unknown`. This layer is not yet a
 complete lifetime, place-sensitive alias and allocation semantics for every Glyph
 resource construct.
+
+### Rendered-edge specialization
+
+`view_edge_specialization.py` maps normalized MachineRelation edges to rendered
+StateTransitionIR edges using semantic fields:
+
+- Machine branch source line
+- normalized target state
+- rendered source and target state
+- synthesized-failure marker
+
+Normal same-state edges are matched through `__same__`. Synthesized failure edges
+are bound to the unique normalized branch at the same source line and retain a
+separate `synthesized-failure` binding status. Ambiguous and unmapped edges remain
+explicit and cannot be projected as exact.
+
+Native view Evidence partitions terminal alternatives:
+
+- normal rendered edge: `returned | normal`
+- synthesized failure edge: `propagated-failure`
+
+The partition restricts the reported completion kind but never upgrades an
+unknown analysis to exact.
 
 ## Validation
 
@@ -339,17 +368,22 @@ unbounded programs.
 The normal compiler pipeline uses only `shadow`.
 
 The readiness gate verifies that every relevant context passes the independent
-exact-action checker and that exact actions agree across contexts. `prefer-exact`
-can publish a candidate without replacing the active display. `strict-exact`
-removes legacy fallback for relevant unproven contexts, but is not enabled by the
-main pipeline.
+exact-action checker and that exact actions agree across contexts. Empty native
+Evidence, ambiguous mappings, missing witnesses, non-normal completion and unknown
+precision are explicit rejection reasons.
+
+Legacy-compatible and native readiness reports are stored separately. Native
+readiness audits `rtai_execution_evidence_v2` and cannot overwrite legacy
+readiness metadata.
 
 StateTransitionIR currently publishes:
 
 - legacy-compatible `execution_evidence_v2`
 - `rtai_semantic_bootstrap`
-- `rtai_abstract_execution_evidence_v2`
-- Evidence projection readiness metadata
+- normalized `rtai_abstract_execution_evidence_v2`
+- per-transition `rtai_view_edge_specialization`
+- per-transition `rtai_execution_evidence_v2`
+- separate legacy and native Evidence readiness metadata
 
 None is the active UI projection source.
 
@@ -362,6 +396,7 @@ correctness-critical:
 - syntax-to-helper lowering
 - helper-AST-to-TEIR lowering
 - Machine relation normalization
+- rendered-edge specialization
 - typed predicate encoding
 - finite solver or future general solver backend
 - Effect summaries and write footprints
@@ -370,7 +405,6 @@ correctness-critical:
 - concrete interpreters and bounded oracles
 - Evidence serialization
 - exact-action checker
-- MachineRelation-to-view-edge specialization
 
 ## Remaining implementation work
 
@@ -403,24 +437,24 @@ External Effects without verified summaries remain unknown. Projection migration
 requires verified return, completion and write-footprint contracts for the
 supported production surface.
 
-### Witness generation and edge specialization
+### Automatic witness generation
 
-The native shadow Evidence adapter currently publishes MachineRelation-edge
-Evidence without automatic concrete witnesses. The pipeline still needs:
+Rendered-edge specialization and completion partitioning are implemented. Native
+reachable contexts still require a verified concrete replay witness. Remaining
+work includes:
 
-- bounded or targeted witness generation
-- concrete replay retention
-- MachineRelation-edge to rendered view-edge specialization
-- synthesized-failure specialization
+- bounded or targeted System-entry input generation
+- verified concrete handlers derived from trusted Effect contracts
+- replay retention keyed by entry, normalized edge and completion
+- resource limits and explicit incomplete-generation diagnostics
 
-Until then, native reachable contexts remain `may-reachable` and cannot authorize
-exact display.
+Until a witness exists, native reachable contexts remain `may-reachable` and
+cannot authorize exact display.
 
 ### Strict UI switch and legacy removal
 
 The active UI may switch only after:
 
-- native RTAI Evidence is bound to rendered edges
 - exact contexts possess verified replay witnesses
 - every supported Effect has an adequate contract
 - targeted concrete-inclusion campaigns pass
@@ -437,13 +471,15 @@ The implementation currently claims:
 
 - structure-preserving TEIR and MachineRelation foundations
 - typed exact finite-domain `UnsatProven / SatModel / Unknown`
-- independent concrete replay witnesses
+- independently verified concrete replay witnesses
 - context-sensitive pure and Effect summary infrastructure
 - safe recursive SCC fallback
 - Capability-IR ownership replay
 - bounded return and final-store inclusion checks
-- property-scoped native abstract Evidence
-- Evidence projection readiness auditing
+- property-scoped normalized and rendered native Evidence
+- exact/ambiguous/unmapped rendered-edge specialization
+- normal/synthesized-failure completion partitioning
+- separate native and legacy Evidence readiness auditing
 - no change to active UI semantics
 
 It does not yet claim:
