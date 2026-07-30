@@ -13,7 +13,8 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from . import diagram_app
-from .diagram_app import GlyphDiagramApp
+from .diagram_app import GlyphDiagramApp, ViewBuilder
+from .io_state_views import build_io_state_views
 from .readable_diagram_app import prepare_diagram_app
 
 
@@ -68,11 +69,17 @@ def create_desktop_server(
     host: str = "127.0.0.1",
     port: int = 0,
     token: str | None = None,
+    view_builder: ViewBuilder = build_io_state_views,
 ) -> DesktopServer:
-    """Create a loopback-only authenticated server for the Tauri shell."""
+    """Create a loopback-only authenticated server for the Tauri shell.
+
+    ``view_builder`` allows a reviewed strict-exact Evidence configuration to be
+    exercised through the same authenticated desktop sidecar without changing the
+    default shadow-compatible application mode.
+    """
 
     prepare_diagram_app()
-    app = GlyphDiagramApp(source_path)
+    app = GlyphDiagramApp(source_path, view_builder=view_builder)
     app.rebuild()
     app.start_watching()
     session_token = token or secrets.token_urlsafe(32)
