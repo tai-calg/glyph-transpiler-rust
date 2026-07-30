@@ -32,23 +32,23 @@ def check_exact_action_projection(
         return ExactActionDecision(False, "reachability-is-not-proven")
     if reachability.get("witness") is None:
         return ExactActionDecision(False, "concrete-witness-is-missing")
-    if not _is_exact(reachability):
+    if not _is_exact(reachability, "reachability"):
         return ExactActionDecision(False, "reachability-is-not-exact")
 
     cardinality = _mapping(context_evidence.get("cardinality"))
-    if cardinality.get("upper_bound") not in {"zero", "at-most-one"}:
+    if cardinality.get("upper_bound") != "at-most-one":
         return ExactActionDecision(False, "transition-cardinality-is-not-at-most-one")
-    if not _is_exact(cardinality):
+    if not _is_exact(cardinality, "cardinality"):
         return ExactActionDecision(False, "transition-cardinality-is-not-exact")
 
     effect_trace = _mapping(context_evidence.get("effect_trace"))
-    if not _is_exact(effect_trace):
+    if not _is_exact(effect_trace, "effect-trace"):
         return ExactActionDecision(False, "effect-trace-is-not-exact")
     if effect_trace.get("is_singleton") is not True:
         return ExactActionDecision(False, "effect-trace-is-not-singleton")
 
     completion = _mapping(context_evidence.get("completion"))
-    if not _is_exact(completion):
+    if not _is_exact(completion, "completion"):
         return ExactActionDecision(False, "completion-is-not-exact")
     kinds = set(completion.get("kinds") or [])
     if not kinds or not kinds.issubset({"normal"}):
@@ -63,12 +63,18 @@ def check_exact_action_projection(
     return ExactActionDecision(True, "exact-action-evidence-satisfied", action)
 
 
-def _is_exact(evidence: Mapping[str, object]) -> bool:
+def _is_exact(evidence: Mapping[str, object], required_scope: str) -> bool:
     approximation = _mapping(evidence.get("approximation"))
+    proofs = approximation.get("proofs")
+    if not isinstance(proofs, list):
+        return False
     return (
         approximation.get("kind") == "exact"
         and not approximation.get("causes")
-        and bool(approximation.get("proofs"))
+        and any(
+            isinstance(proof, Mapping) and proof.get("scope") == required_scope
+            for proof in proofs
+        )
     )
 
 
