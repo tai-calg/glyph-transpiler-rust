@@ -3,9 +3,12 @@ from __future__ import annotations
 import unittest
 
 from glyph.compilation import CompilationPipeline
-from glyph.transition_analysis.abstract_store import AbstractLocation
+from glyph.transition_analysis.abstract_store import (
+    AbstractAddress,
+    AbstractLocation,
+)
 from glyph.transition_analysis.abstract_value import ParameterValue
-from glyph.transition_analysis.effect_summary import EffectSummary
+from glyph.transition_analysis.effect_summary import EffectSummary, EffectWrite
 from glyph.transition_analysis.exactness import (
     Approximation,
     ExactnessProof,
@@ -49,9 +52,14 @@ class StatefulStoreOracleTests(unittest.TestCase):
             parameters=("value",),
             return_value=ParameterValue("write_flag", "value"),
             reads=(),
-            writes=(location,),
-            store_updates=(
-                (location, ParameterValue("write_flag", "value")),
+            writes=(
+                EffectWrite(
+                    AbstractAddress(
+                        frozenset({location}),
+                        singleton_proven=True,
+                    ),
+                    ParameterValue("write_flag", "value"),
+                ),
             ),
             completions=("normal",),
             approximation=exact_effect(),
