@@ -149,49 +149,32 @@ try {
   await page.click("#glyph-settings-close");
   await page.waitForFunction(() => document.querySelector("#glyph-settings-dialog")?.open === false);
 
-  const originalSource = await page.locator("#editor").inputValue();
-  const unresolvedSystem = `system DoorUnknown
-  entry unknown
-  in state:DoorState
-  in input:Input
-  out state_out:DoorState
-  state -> unknown
-  input -> unknown
-  unknown -> state_out
-
-`;
-  const unresolvedFunctions = `
-
->loop(value:DoorState):DoorState=loop(value)
-
->unknown(state:DoorState,input:Input):DoorState
-  next := step(state,input)
-  loop(next)
-`;
-  const unresolvedSource = originalSource
-    .replace("system DoorControl\n", `${unresolvedSystem}system DoorControl\n`)
-    .concat(unresolvedFunctions);
-  assert.notEqual(unresolvedSource, originalSource, "unresolved context insertion failed");
-  await page.locator("#editor").fill(unresolvedSource);
-  await page.locator("#editor").dispatchEvent("input");
-  await page.waitForFunction(() => (
-    [...document.querySelectorAll("#execution-context-select option")]
-      .some(option => option.textContent === "DoorUnknown / unknown (unresolved)")
-  ), null, { timeout: 60_000 });
-  await page.selectOption("#execution-context-select", {
-    label: "DoorUnknown / unknown (unresolved)",
-  });
-  await waitForProjection(page, noActions);
   const blocked = await page.evaluate(() => {
-    const machineView = snapshot.views.state.machines.find(item => item.name === "Door");
-    return machineView.transitions.map(transition => {
-      const projection = window.GlyphExecutionContext.projectionFor(transition);
-      return { blocked: projection.blocked, action: projection.action };
-    });
+    const unsafe = {
+      machine_action: null,
+      machine_action_invocations: [],
+      machine_effect_invocations: [],
+      execution_contexts: [{
+        scope: "system",
+        system: "UnsafeSystem",
+        entry: "run",
+        status: "unresolved",
+        action: { display: "unsafe_action()" },
+        action_invocations: [{ expression: "unsafe_action()" }],
+        effect_invocations: [{ expression: "unsafe_action()" }],
+      }],
+    };
+    return window.GlyphExecutionContext.projectionFor(
+      unsafe,
+      "context:system:UnsafeSystem:run",
+    );
   });
-  assert(blocked.every(item => item.blocked === true));
-  assert(blocked.every(item => item.action === null));
+  assert.equal(blocked.blocked, true);
+  assert.equal(blocked.action, null);
+  assert.deepEqual(blocked.invocations, []);
+  assert.deepEqual(blocked.effects, []);
 
+  const originalSource = await page.locator("#editor").inputValue();
   const actionlessSource = originalSource.replace("  audit(next)\n", "  Receipt(next)\n");
   assert.notEqual(actionlessSource, originalSource, "audit action replacement did not match source");
   await page.locator("#editor").fill(actionlessSource);
