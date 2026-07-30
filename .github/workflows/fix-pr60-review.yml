@@ -2,7 +2,7 @@ name: Fix PR60 review findings
 
 on:
   pull_request:
-    types: [synchronize]
+    types: [edited, synchronize]
     branches: [main]
 
 permissions:
