@@ -8,10 +8,12 @@ from .abstract_evidence_shadow import attach_rtai_abstract_execution_evidence
 from .effect_contract import VerifiedEffectContractRegistry
 from .evidence_projection import EvidenceProjectionMode, project_machine_from_evidence
 from .native_projection_readiness import attach_native_evidence_projection_readiness
+from .semantic_status import attach_rtai_semantic_status
 from .view_edge_specialization import attach_view_edge_specialization
+from .witness_generation import TargetedWitnessRegistry
 
 
-STRICT_PROJECTION_CAMPAIGN_VERSION = 2
+STRICT_PROJECTION_CAMPAIGN_VERSION = 3
 
 
 def build_strict_projection_candidate(
@@ -20,6 +22,7 @@ def build_strict_projection_candidate(
     effect_contracts: VerifiedEffectContractRegistry,
     *,
     witness_max_cases: int = 4096,
+    targeted_witnesses: TargetedWitnessRegistry | None = None,
 ) -> dict[str, object]:
     """Build a fail-closed native-Evidence projection candidate.
 
@@ -36,10 +39,12 @@ def build_strict_projection_candidate(
         specialized,
         effect_contracts=effect_contracts,
         witness_max_cases=witness_max_cases,
+        targeted_witnesses=targeted_witnesses,
     )
     readiness = attach_native_evidence_projection_readiness(evidenced)
+    status = attach_rtai_semantic_status(readiness)
     projected = project_machine_from_evidence(
-        readiness,
+        status,
         mode=EvidenceProjectionMode.STRICT_EXACT,
         evidence_field="rtai_execution_evidence_v2",
     )
@@ -83,6 +88,7 @@ def build_strict_io_state_views(
     effect_contracts: VerifiedEffectContractRegistry,
     *,
     witness_max_cases: int = 4096,
+    targeted_witnesses: TargetedWitnessRegistry | None = None,
 ) -> dict[str, object]:
     """Build complete views without executing the legacy System Action analyzer."""
 
@@ -147,6 +153,7 @@ def build_strict_io_state_views(
         rtai_effect_contracts=effect_contracts,
         rtai_projection_mode=EvidenceProjectionMode.STRICT_EXACT,
         rtai_witness_max_cases=witness_max_cases,
+        rtai_targeted_witnesses=targeted_witnesses,
     )
     if result.get("rtai_legacy_system_action_analyzer_enabled") is not False:
         raise AssertionError("strict pipeline executed the legacy System Action analyzer")
@@ -209,16 +216,25 @@ def _machine_campaign_report(machine: Mapping[str, object]) -> dict[str, object]
     )
     evidence_payload = _mapping(machine.get("rtai_abstract_execution_evidence_v2"))
     witness_report = _mapping(evidence_payload.get("witness_generation"))
-    ready = bool(native_report.get("ready")) and bool(
-        witness_report.get("complete")
+    contract_report = _mapping(evidence_payload.get("effect_contract_coverage"))
+    ready = (
+        bool(native_report.get("ready"))
+        and bool(witness_report.get("complete"))
+        and bool(contract_report.get("complete"))
     )
     return {
         "version": STRICT_PROJECTION_CAMPAIGN_VERSION,
         "ready": ready,
         "projection_source": "rtai-execution-evidence-v2",
         "legacy_fallback_allowed": False,
+        "effect_contract_coverage_complete": bool(contract_report.get("complete")),
         "witness_generation_complete": bool(witness_report.get("complete")),
-        "blockers": _campaign_blockers(native_report, witness_report),
+        "witness_generation_exhaustive": bool(witness_report.get("exhaustive")),
+        "blockers": _campaign_blockers(
+            native_report,
+            witness_report,
+            contract_report,
+        ),
     }
 
 
@@ -234,6 +250,7 @@ def _remove_legacy_system_projection(transition: dict[str, object]) -> None:
 def _campaign_blockers(
     native_report: Mapping[str, object],
     witness_report: Mapping[str, object],
+    contract_report: Mapping[str, object],
 ) -> list[dict[str, object]]:
     blockers: list[dict[str, object]] = []
     for item in _mappings(native_report.get("transitions")):
@@ -246,6 +263,25 @@ def _campaign_blockers(
                 "reason": item.get("reason"),
             }
         )
+    for entry in _mappings(contract_report.get("entries")):
+        for operation in entry.get("missing_operations") or []:
+            blockers.append(
+                {
+                    "kind": "missing-effect-contract",
+                    "entry": entry.get("entry"),
+                    "operation": operation,
+                }
+            )
+        for issue in _mappings(entry.get("lowering_issues")):
+            blockers.append(
+                {
+                    "kind": "effect-contract-audit-lowering",
+                    "entry": entry.get("entry"),
+                    "function": issue.get("function"),
+                    "line": issue.get("line"),
+                    "reason": issue.get("reason"),
+                }
+            )
     for item in _mappings(witness_report.get("issues")):
         blockers.append(
             {
@@ -253,6 +289,13 @@ def _campaign_blockers(
                 "entry": item.get("entry"),
                 "reason": item.get("code"),
                 "detail": item.get("detail"),
+            }
+        )
+    if not contract_report.get("complete") and not contract_report.get("entries"):
+        blockers.append(
+            {
+                "kind": "effect-contract-coverage",
+                "reason": "effect-contract-audit-disabled",
             }
         )
     if not witness_report.get("enabled"):
