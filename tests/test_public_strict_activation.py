@@ -52,6 +52,14 @@ def _views(source: str, source_name: str) -> dict[str, object]:
     return build_io_state_views(compiled.model, compiled.diagrams.ir)
 
 
+def _transitions(views: dict[str, object]) -> list[dict[str, object]]:
+    return [
+        transition
+        for machine in views["state"]["machines"]
+        for transition in machine["transitions"]
+    ]
+
+
 class PublicStrictActivationTests(unittest.TestCase):
     def test_cataloged_public_contexts_use_strict_exact_in_normal_builder(self) -> None:
         self.assertGreater(len(PUBLIC_STRICT_PROGRAMS), 1)
@@ -109,12 +117,31 @@ class PublicStrictActivationTests(unittest.TestCase):
             EvidenceProjectionMode.SHADOW.value,
         )
 
-    def test_motor_activation_supplies_reviewed_targeted_witnesses(self) -> None:
+    def test_motor_activation_supplies_reviewed_witnesses_and_nested_effects(self) -> None:
         path = ROOT / "examples/acceptance/motor_safety.glyph"
         views = _views(path.read_text(encoding="utf-8"), str(path))
         activation = views["rtai_public_strict_activation"]
         self.assertEqual(activation["targeted_witness_case_count"], 4)
         self.assertTrue(views["rtai_targeted_witnesses_configured"])
+
+        transitions = _transitions(views)
+        self.assertTrue(transitions)
+        exact_transitions = [
+            item
+            for item in transitions
+            if item["rtai_semantic_status"]["status"] == "exact"
+            and not item.get("synthesized_failure")
+        ]
+        self.assertTrue(exact_transitions)
+        for transition in exact_transitions:
+            operations = [
+                event["operation"]
+                for context in transition["rtai_execution_evidence_v2"]["contexts"]
+                for alternative in context["effect_trace"]["alternatives"]
+                for event in alternative["events"]
+            ]
+            self.assertEqual(operations, ["write_motor"])
+            self.assertIsNotNone(transition.get("system_action"))
 
 
 if __name__ == "__main__":
