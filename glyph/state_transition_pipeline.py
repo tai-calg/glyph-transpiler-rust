@@ -45,10 +45,15 @@ from .transition_analysis.native_projection_readiness import (
     NATIVE_EVIDENCE_READINESS_VERSION,
     attach_native_evidence_projection_readiness,
 )
+from .transition_analysis.semantic_status import (
+    RTAI_SEMANTIC_STATUS_VERSION,
+    attach_rtai_semantic_status,
+)
 from .transition_analysis.view_edge_specialization import (
     VIEW_EDGE_SPECIALIZATION_VERSION,
     attach_view_edge_specialization,
 )
+from .transition_analysis.witness_generation import TargetedWitnessRegistry
 from .transition_condition_roles import classify_machine_transition_roles
 from .transition_enabling_case_compatibility import preserve_legacy_transition_metadata
 from .transition_enabling_case_defaults import ensure_machine_enabling_cases
@@ -144,6 +149,7 @@ def enrich_state_transition_ir(
     rtai_effect_contracts: VerifiedEffectContractRegistry | None = None,
     rtai_projection_mode: EvidenceProjectionMode = EvidenceProjectionMode.SHADOW,
     rtai_witness_max_cases: int = 4096,
+    rtai_targeted_witnesses: TargetedWitnessRegistry | None = None,
 ) -> dict[str, object]:
     """Compile and publish the complete StateTransitionIR contract.
 
@@ -206,6 +212,7 @@ def enrich_state_transition_ir(
             machine,
             effect_contracts=rtai_effect_contracts,
             witness_max_cases=rtai_witness_max_cases,
+            targeted_witnesses=rtai_targeted_witnesses,
         )
         for machine in specialized
     ]
@@ -213,15 +220,19 @@ def enrich_state_transition_ir(
         attach_native_evidence_projection_readiness(machine)
         for machine in native_evidenced
     ]
+    native_status = [
+        attach_rtai_semantic_status(machine)
+        for machine in native_readiness
+    ]
     if strict_native:
-        evidence_audited = native_readiness
+        evidence_audited = native_status
     else:
         evidence_audited = [
             project_machine_from_evidence(
                 machine,
                 mode=EvidenceProjectionMode.SHADOW,
             )
-            for machine in native_readiness
+            for machine in native_status
         ]
     compatible = [
         attach_output_action_compatibility(machine) for machine in evidence_audited
@@ -291,9 +302,11 @@ def enrich_state_transition_ir(
     result["rtai_native_evidence_readiness_version"] = (
         NATIVE_EVIDENCE_READINESS_VERSION
     )
+    result["rtai_semantic_status_version"] = RTAI_SEMANTIC_STATUS_VERSION
     result["rtai_evidence_projection_version"] = EVIDENCE_PROJECTION_VERSION
     result["rtai_projection_mode"] = rtai_projection_mode.value
     result["rtai_effect_contracts_configured"] = rtai_effect_contracts is not None
+    result["rtai_targeted_witnesses_configured"] = rtai_targeted_witnesses is not None
     result["rtai_legacy_system_action_analyzer_enabled"] = not strict_native
     result["transition_action_target_independence_version"] = (
         TRANSITION_ACTION_TARGET_INDEPENDENCE_VERSION
@@ -320,6 +333,18 @@ def enrich_state_transition_ir(
     summary["rtai_strict_projection_active_machines"] = sum(
         machine.get("analysis", {}).get("evidence_projection_mode")
         == EvidenceProjectionMode.STRICT_EXACT.value
+        for machine in state["machines"]
+    )
+    summary["rtai_semantic_exact_transition_count"] = sum(
+        int(machine.get("analysis", {}).get("rtai_semantic_exact_transition_count", 0))
+        for machine in state["machines"]
+    )
+    summary["rtai_semantic_may_transition_count"] = sum(
+        int(machine.get("analysis", {}).get("rtai_semantic_may_transition_count", 0))
+        for machine in state["machines"]
+    )
+    summary["rtai_semantic_unknown_transition_count"] = sum(
+        int(machine.get("analysis", {}).get("rtai_semantic_unknown_transition_count", 0))
         for machine in state["machines"]
     )
     summary["rtai_abstract_execution_exact_projection_count"] = sum(
