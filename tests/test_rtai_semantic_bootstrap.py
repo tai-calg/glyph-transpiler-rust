@@ -66,6 +66,9 @@ class RtaiSemanticBootstrapTests(unittest.TestCase):
         call = bootstrap["transition_call_preimages"][0]
         self.assertEqual(call["function"], "control")
         self.assertEqual(call["target"], "next")
+        self.assertEqual(call["alias_resolution"], "block-local")
+        self.assertIn("NameExpr(name='input')", call["actual_arguments"][1])
+        self.assertNotIn("NameExpr(name='event')", call["actual_arguments"][1])
         self.assertEqual(len(call["preimage"]["edges"]), 2)
         self.assertFalse(machine["analysis"]["rtai_semantic_bootstrap_is_projection_source"])
         self.assertEqual(views["rtai_semantic_bootstrap_version"], 1)
