@@ -8,6 +8,11 @@ from .execution_ir import ExecutionStructureIR
 from .state_machine_analysis import analyze_machine
 from .state_machine_source_map import remap_machine_analysis_source_lines
 from .state_transition_pipeline import enrich_state_transition_ir
+from .transition_analysis.evidence_projection import EvidenceProjectionMode
+from .transition_analysis.public_strict_activation import (
+    inactive_public_strict_activation_ir,
+    select_public_strict_activation,
+)
 
 
 IO_STATE_VIEWS_SCHEMA = "glyph.io-state-views"
@@ -32,6 +37,9 @@ def empty_io_state_views() -> dict[str, object]:
             "schema": "glyph.state-transition-ir",
             "version": 2,
         },
+        "rtai_public_strict_activation": inactive_public_strict_activation_ir(
+            "no-source"
+        ),
     }
 
 
@@ -316,6 +324,11 @@ def build_io_state_views(
 
     Explicit `system` blocks describe checked boundary flow, not a call graph.
     Sources without a system declaration still receive a derived call-graph view.
+
+    The normal application selects strict-exact only when the compiled source still
+    matches one reviewed public strict v1 context. All other sources retain the
+    legacy-compatible shadow path. Strict selection disables the legacy System Action
+    analyzer and fails closed when native Evidence is incomplete.
     """
 
     external_names = _source_external_names(model)
@@ -353,11 +366,30 @@ def build_io_state_views(
         "io": {"systems": systems, "types": types},
         "state": {"machines": raw_machines},
     }
-    result = enrich_state_transition_ir(model, views)
+
+    activation = select_public_strict_activation(model, execution.source_name)
+    if activation is None:
+        result = enrich_state_transition_ir(model, views)
+        result["rtai_public_strict_activation"] = inactive_public_strict_activation_ir(
+            "source-or-contract-surface-not-reviewed"
+        )
+    else:
+        result = enrich_state_transition_ir(
+            model,
+            views,
+            rtai_effect_contracts=activation.program.registry(),
+            rtai_projection_mode=EvidenceProjectionMode.STRICT_EXACT,
+            rtai_targeted_witnesses=activation.targeted_witnesses,
+        )
+        result["rtai_public_strict_activation"] = activation.to_ir()
+
     state = dict(result["state"])
     state["machines"] = [
         remap_machine_analysis_source_lines(model, machine)
         for machine in state["machines"]
     ]
     result["state"] = state
+    summary = dict(result.get("summary", {}))
+    summary["rtai_public_strict_activation_active"] = activation is not None
+    result["summary"] = summary
     return result
