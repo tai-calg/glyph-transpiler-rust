@@ -144,7 +144,9 @@ def project_machine_from_evidence(
                     dict(item.action) if item.ready and item.action is not None else None
                 )
                 transition["evidence_projection_source"] = (
-                    evidence_field if item.ready else "unresolved-evidence"
+                    _projection_source_name(evidence_field)
+                    if item.ready
+                    else "unresolved-evidence"
                 )
             if mode is EvidenceProjectionMode.STRICT_EXACT:
                 transition["evidence_display_action"] = (
@@ -218,6 +220,12 @@ def _transition_readiness(
         "all-contexts-have-equivalent-exact-evidence",
         action,
     )
+
+
+def _projection_source_name(evidence_field: str) -> str:
+    if evidence_field == "execution_evidence_v2":
+        return "execution-evidence-v2"
+    return evidence_field.replace("_", "-")
 
 
 def _canonical_action(action: Mapping[str, object] | None) -> str:
