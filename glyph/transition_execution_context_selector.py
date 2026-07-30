@@ -79,10 +79,10 @@ function projectionFor(transition,key=currentKey){
 }
 function actionFor(transition){return projectionFor(transition).action}
 function statusSuffix(status){
-  if(status==="conditional")return tr("executionContextConditional","（条件付き）","(conditional)");
-  if(status==="unresolved")return tr("executionContextUnresolved","（解析不能）","(unresolved)");
-  if(status==="multiple-transition-calls")return tr("executionContextMultiple","（複数遷移）","(multiple transitions)");
-  if(status==="actionless")return tr("executionContextActionless","（System Actionなし）","(no System Action)");
+  if(status==="conditional")return tr("executionContextConditional","（条件付き）"," (conditional)");
+  if(status==="unresolved")return tr("executionContextUnresolved","（解析不能）"," (unresolved)");
+  if(status==="multiple-transition-calls")return tr("executionContextMultiple","（複数遷移）"," (multiple transitions)");
+  if(status==="actionless")return tr("executionContextActionless","（System Actionなし）"," (no System Action)");
   return"";
 }
 function optionLabel(context){const base=context.system&&context.entry?`${context.system} / ${context.entry}`:(context.entry||context.system||tr("executionContextImplicit","暗黙の呼出し元","implicit caller"));return`${base}${statusSuffix(context.status)}`}
