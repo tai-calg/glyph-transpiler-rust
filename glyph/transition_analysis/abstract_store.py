@@ -71,11 +71,14 @@ class AbstractStore:
                     unknown=True,
                 ),
             )
+        approximation = self.approximation
+        if isinstance(value, TopValue):
+            approximation = approximation.degrade(value.reason, unknown=True)
         updated = self.mapping
         if address.singleton_proven:
             location = next(iter(address.locations))
             updated[location] = value
-            return AbstractStore(_freeze(updated), self.approximation)
+            return AbstractStore(_freeze(updated), approximation)
         for location in address.locations:
             updated[location] = join_values(
                 updated.get(location, BottomValue()),
@@ -83,7 +86,7 @@ class AbstractStore:
             )
         return AbstractStore(
             _freeze(updated),
-            self.approximation.degrade(ApproximationCause.MUTABLE_ALIAS),
+            approximation.degrade(ApproximationCause.MUTABLE_ALIAS),
         )
 
     def havoc(
