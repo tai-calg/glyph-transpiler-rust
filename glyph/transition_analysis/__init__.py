@@ -35,6 +35,12 @@ from .effect_contract import (
     VerifiedEffectContractRegistry,
     read_only_identity_contract,
 )
+from .effect_contract_audit import (
+    EFFECT_CONTRACT_AUDIT_VERSION,
+    EffectContractCoverageReport,
+    EffectContractEntryCoverage,
+    audit_effect_contract_coverage,
+)
 from .evidence import EXECUTION_EVIDENCE_SCHEMA, EXECUTION_EVIDENCE_VERSION
 from .evidence_projection import (
     EVIDENCE_PROJECTION_VERSION,
@@ -86,6 +92,10 @@ from .preimage import (
 )
 from .projection import ExactActionDecision, check_exact_action_projection
 from .reference import ReferenceInterpreter
+from .semantic_status import (
+    RTAI_SEMANTIC_STATUS_VERSION,
+    attach_rtai_semantic_status,
+)
 from .stateful_concrete import (
     StatefulConcreteExecutionResult,
     StatefulConcreteInterpreter,
@@ -119,7 +129,10 @@ from .view_edge_specialization import (
 from .witness_generation import (
     BoundedWitnessGenerationReport,
     GeneratedWitness,
+    TargetedWitnessCase,
+    TargetedWitnessRegistry,
     WITNESS_GENERATION_VERSION,
+    WitnessEntryCoverage,
     WitnessGenerationIssue,
     generate_bounded_system_witnesses,
 )
@@ -139,10 +152,13 @@ __all__ = [
     "ConcreteInterpreter",
     "ConstructorValue",
     "ContextualEffectSummaryRegistry",
+    "EFFECT_CONTRACT_AUDIT_VERSION",
     "EFFECT_CONTRACT_REGISTRY_VERSION",
     "EVIDENCE_PROJECTION_VERSION",
     "EXECUTION_EVIDENCE_SCHEMA",
     "EXECUTION_EVIDENCE_VERSION",
+    "EffectContractCoverageReport",
+    "EffectContractEntryCoverage",
     "EvidenceProjectionMode",
     "ExactActionDecision",
     "FUNCTION_SUMMARY_VERSION",
@@ -161,6 +177,7 @@ __all__ = [
     "PureFunctionSummary",
     "RTAI_ABSTRACT_EVIDENCE_SHADOW_VERSION",
     "RTAI_SEMANTIC_BOOTSTRAP_VERSION",
+    "RTAI_SEMANTIC_STATUS_VERSION",
     "ReferenceInterpreter",
     "ResultValue",
     "STRICT_PROJECTION_CAMPAIGN_VERSION",
@@ -173,6 +190,8 @@ __all__ = [
     "SummaryApplication",
     "SummaryAwareAbstractInterpreter",
     "TYPED_SMT_ENCODING_VERSION",
+    "TargetedWitnessCase",
+    "TargetedWitnessRegistry",
     "TransitionCallPreimage",
     "TransitionProjectionReadiness",
     "TypedConstraintSolver",
@@ -186,12 +205,15 @@ __all__ = [
     "ViewEdgeBinding",
     "ViewEdgeBindingStatus",
     "WITNESS_GENERATION_VERSION",
+    "WitnessEntryCoverage",
     "WitnessGenerationIssue",
     "attach_execution_evidence_v2",
     "attach_native_evidence_projection_readiness",
     "attach_rtai_abstract_execution_evidence",
     "attach_rtai_semantic_bootstrap",
+    "attach_rtai_semantic_status",
     "attach_view_edge_specialization",
+    "audit_effect_contract_coverage",
     "audit_evidence_projection",
     "build_machine_relation",
     "build_ownership_summaries",
