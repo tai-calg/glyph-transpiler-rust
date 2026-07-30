@@ -58,6 +58,16 @@ async function waitForProjection(page, expectedById) {
   }, expectedById, { timeout: 60_000 });
 }
 
+async function compileSource(page, sourceText) {
+  await page.locator("#editor").fill(sourceText);
+  await page.click("#compile");
+  await page.waitForFunction(expected => (
+    document.querySelector("#status")?.textContent === "ready"
+    && typeof snapshot === "object"
+    && snapshot?.source === expected
+  ), sourceText, { timeout: 60_000 });
+}
+
 function expectedActions(machine, system) {
   return Object.fromEntries(machine.transitions.map(transition => {
     const binding = (transition.execution_action_bindings || []).find(item => item.system === system);
@@ -177,8 +187,7 @@ try {
   const originalSource = await page.locator("#editor").inputValue();
   const actionlessSource = originalSource.replace("  audit(next)\n", "  next\n");
   assert.notEqual(actionlessSource, originalSource, "audit action replacement did not match source");
-  await page.locator("#editor").fill(actionlessSource);
-  await page.locator("#editor").dispatchEvent("input");
+  await compileSource(page, actionlessSource);
   await page.waitForFunction(() => (
     [...document.querySelectorAll("#execution-context-select option")]
       .some(option => option.textContent === "DoorAudit / audit_control (no System Action)")
@@ -190,8 +199,7 @@ try {
 
   const renamedSource = actionlessSource.replace("system DoorAudit\n", "system DoorObserve\n");
   assert.notEqual(renamedSource, actionlessSource, "system rename did not match source");
-  await page.locator("#editor").fill(renamedSource);
-  await page.locator("#editor").dispatchEvent("input");
+  await compileSource(page, renamedSource);
   await page.waitForFunction(() => {
     const labels = [...document.querySelectorAll("#execution-context-select option")]
       .map(option => option.textContent);
