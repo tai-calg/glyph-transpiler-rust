@@ -205,6 +205,31 @@ def _deduplicate_cases(cases: Sequence[_Case]) -> tuple[_Case, ...]:
     return tuple(result)
 
 
+def _blocked_condition_cases(cases: Sequence[_Case]) -> tuple[_Case, ...]:
+    """Conservatively block guards whose evaluation performs transition flow."""
+
+    if not any(
+        case.unresolved
+        or case.transition_calls > 0
+        or bool(case.invocations)
+        or case.terminated
+        for case in cases
+    ):
+        return ()
+    return tuple(
+        _Case(
+            _ExprPair(NameExpr("_"), NameExpr("_")),
+            case.invocations,
+            True,
+            case.transition_calls,
+            case.conditions,
+            case.terminated,
+            case.termination,
+        )
+        for case in cases
+    )
+
+
 class _SystemExecutionEvaluator:
     """Path-sensitive evaluator for one system execution context.
 
@@ -693,6 +718,17 @@ class _SystemExecutionEvaluator:
 
             concrete_condition = substitute_expr(clause.condition, concrete_values)
             symbolic_condition = substitute_expr(clause.condition, symbolic_values)
+            condition_cases = self.evaluate(
+                _ExprPair(symbolic_condition, concrete_condition),
+                site,
+                visited=visited,
+                after_transition=after_transition,
+                conditions=remaining,
+            )
+            blocked_condition_cases = _blocked_condition_cases(condition_cases)
+            if blocked_condition_cases:
+                result.extend(blocked_condition_cases)
+                return _deduplicate_cases(result)
             truth = semantic_truth_value(concrete_condition, context=self._context)
             if truth is False:
                 continue
@@ -804,6 +840,15 @@ def _evaluate_conditional_binding(
                     conditions=remaining,
                 ),
             )
+        condition_cases = evaluator.evaluate(
+            _ExprPair(symbolic_condition, concrete_condition),
+            site,
+            after_transition=state.transition_calls > 0,
+            conditions=remaining,
+        )
+        blocked_condition_cases = _blocked_condition_cases(condition_cases)
+        if blocked_condition_cases:
+            return blocked_condition_cases
         truth = semantic_truth_value(concrete_condition, context=evaluator._context)
         if truth is False:
             continue
@@ -971,7 +1016,9 @@ def _binding(evaluation: _ContextEvaluation) -> dict[str, object] | None:
         else []
     )
     action = (
-        build_operation_action(representative_invocations)
+        None
+        if unresolved or multiple
+        else build_operation_action(representative_invocations)
         if common_sequence
         else _conditional_action(records)
     )

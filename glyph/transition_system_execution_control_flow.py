@@ -370,6 +370,8 @@ class _SystemExecutionEvaluator(_base._SystemExecutionEvaluator):
             if kind == "external":
                 if self.wiring.explicit and name not in self.wiring.external_inputs:
                     return False
+                if len(self.machine_input_names) > 1 and name != expected_name:
+                    return False
                 continue
             return False
         return True

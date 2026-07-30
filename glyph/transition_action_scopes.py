@@ -17,6 +17,14 @@ _DISPLAY_PROJECTION_PROVENANCE = "transition-display-action-projection"
 _BLOCKING_STATUSES = {"unresolved", "multiple-transition-calls"}
 
 
+def _context_key(context: Mapping[str, object]) -> tuple[str, str, str]:
+    return (
+        text(context.get("scope")) or "system",
+        text(context.get("system")),
+        text(context.get("entry")),
+    )
+
+
 def _invocations(value: object) -> list[dict[str, object]]:
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
         return []
@@ -153,6 +161,16 @@ def project_transition_action_scopes(
     projected_count = 0
     result_dependent_count = 0
     sequenced_count = 0
+    expected_context_keys = {
+        _context_key(context)
+        for candidate in result.get("transitions", [])
+        if not candidate.get("synthesized_failure")
+        for context in candidate.get(
+            "execution_contexts",
+            candidate.get("execution_action_bindings", []),
+        )
+        if isinstance(context, Mapping)
+    }
 
     for original in result.get("transitions", []):
         transition = dict(original)
@@ -189,13 +207,19 @@ def project_transition_action_scopes(
 
         source = transition.get("source", {})
         line = int(source.get("line", 1)) if isinstance(source, Mapping) else 1
+        present_context_keys = {_context_key(item) for item in contexts}
+        missing_context_keys = (
+            set()
+            if transition.get("synthesized_failure")
+            else expected_context_keys - present_context_keys
+        )
         statuses = [text(item.get("status")) or "resolved" for item in contexts]
         blocking = any(status in _BLOCKING_STATUSES for status in statuses)
         signatures: dict[tuple[object, ...], list[dict[str, object]]] = {}
         for context in contexts:
             signatures.setdefault(_binding_signature(context), []).append(context)
 
-        context_required = blocking or len(signatures) > 1
+        context_required = blocking or len(signatures) > 1 or bool(missing_context_keys)
         selected_contexts: list[dict[str, object]] = []
         representative: dict[str, object] | None = None
         if contexts and not context_required and len(signatures) == 1:
@@ -209,6 +233,10 @@ def project_transition_action_scopes(
                 f" ({item.get('status') or 'resolved'})"
                 for item in contexts
             ]
+            names.extend(
+                f"{system or 'implicit'} / {entry or '?'} (missing)"
+                for _, system, entry in sorted(missing_context_keys)
+            )
             _append_once(
                 diagnostics,
                 _diagnostic(
@@ -284,6 +312,7 @@ def project_transition_action_scopes(
             "entries": entries,
             "context_required": context_required,
             "context_status_counts": status_counts,
+            "missing_execution_context_count": len(missing_context_keys),
         }
         transition["action"] = deepcopy(display_action)
         transition["action_invocations"] = [dict(item) for item in display_invocations]
