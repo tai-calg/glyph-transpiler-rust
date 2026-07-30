@@ -8,6 +8,7 @@ from ._transition_branch_semantics import (
     branch_value_for_transition,
     build_machine_branch_context,
     substitute_expr,
+    unwrap_expr,
 )
 from ._transition_source_planning import planned_source_branches, semantic_truth_value
 from .artifacts import CompilationModel
@@ -27,6 +28,8 @@ from .execution_ir import render_expr
 
 
 _SUCCESS_VALUE_NAME = "__glyph_success_value__"
+_UNPROVEN_STATE_INPUT_CODE = "STIR_SYSTEM_STATE_INPUT_UNPROVEN"
+_UNPROVEN_TRANSITION_ARGUMENT_CODE = "STIR_SYSTEM_TRANSITION_ARGUMENT_UNPROVEN"
 
 
 def _conditions_expression(conditions: Sequence[str]) -> Expr | None:
@@ -104,19 +107,105 @@ def _entry_values(
     concrete = dict(symbolic)
     state_type = evaluator._context.machine.state_param.ty
     candidates = [parameter for parameter in declaration.params if parameter.ty == state_type]
-    # Source specialization is sound only when the entry has one unambiguous
-    # parameter of the machine state type. Multiple state-typed parameters require
-    # argument-level provenance and therefore remain symbolic here.
+    # Keep symbolic values as provenance witnesses. Only concrete values are
+    # specialized for source-state evaluation and rendering.
     selected = candidates[0] if len(candidates) == 1 else None
     if selected is not None:
-        value = _source_state_value(
+        concrete[selected.name] = _source_state_value(
             evaluator._context,
             evaluator.source_state,
             selected.name,
         )
-        symbolic[selected.name] = value
-        concrete[selected.name] = value
     return symbolic, concrete
+
+
+def _machine_next_arguments(context: _base.MachineBranchContext) -> tuple[Expr, ...]:
+    expression = unwrap_expr(context.machine.next_expr)
+    if (
+        isinstance(expression, CallExpr)
+        and isinstance(expression.callee, NameExpr)
+        and expression.callee.name == context.next_function
+    ):
+        return expression.args
+    return ()
+
+
+def _state_specialization_proof(
+    model: CompilationModel,
+    context: _base._ExecutionContext,
+    branch_context: _base.MachineBranchContext,
+) -> tuple[bool, str]:
+    declaration = context.function or branch_context.functions.get(context.entry)
+    if declaration is None:
+        return False, "System entry declaration is unavailable"
+
+    state_type = branch_context.machine.state_param.ty
+    state_parameters = [
+        parameter for parameter in declaration.params if parameter.ty == state_type
+    ]
+    # No state substitution occurs when there are zero or multiple candidates.
+    if len(state_parameters) != 1:
+        return True, ""
+
+    parameter = state_parameters[0]
+    expected_name = branch_context.machine.state_param.name
+    if parameter.name != expected_name:
+        return False, "entry state parameter does not match the Machine state parameter"
+    if context.system is None:
+        return False, "implicit caller has no explicit System state-input wiring"
+
+    system = next((item for item in model.systems if item.name == context.system), None)
+    if system is None or system.entry_name != context.entry:
+        return False, "System entry does not match the execution context"
+    has_input_port = any(
+        port.direction == "input"
+        and port.name == expected_name
+        and port.type_text == _base._render_type(state_type)
+        for port in system.ports
+    )
+    has_entry_edge = any(
+        edge.source_name == expected_name and edge.target_name == context.entry
+        for edge in system.edges
+    )
+    if not has_input_port or not has_entry_edge:
+        return False, "current Machine state is not proven by System input wiring"
+    return True, ""
+
+
+def _blocked_binding(
+    binding: Mapping[str, object],
+    *,
+    reason: str,
+    state_input_unproven: bool,
+) -> dict[str, object]:
+    result = deepcopy(dict(binding))
+    result["status"] = "unresolved"
+    result["action"] = None
+    result["action_invocations"] = []
+    result["effect_invocations"] = []
+    if state_input_unproven:
+        result["state_specialization"] = {
+            "status": "unproven",
+            "reason": reason,
+        }
+    cases: list[dict[str, object]] = []
+    for original in result.get("action_cases", []):
+        if not isinstance(original, Mapping):
+            continue
+        case = deepcopy(dict(original))
+        case["status"] = "unresolved"
+        case["action"] = None
+        case["action_invocations"] = []
+        case["effect_invocations"] = []
+        cases.append(case)
+    result["action_cases"] = cases
+    for key in ("execution_flow", "dataflow"):
+        value = result.get(key)
+        if isinstance(value, Mapping):
+            record = deepcopy(dict(value))
+            record["status"] = "unresolved"
+            result[key] = record
+    return result
 
 
 class _SystemExecutionEvaluator(_base._SystemExecutionEvaluator):
@@ -138,6 +227,8 @@ class _SystemExecutionEvaluator(_base._SystemExecutionEvaluator):
             branch_value=branch_value,
         )
         self.source_state = source_state
+        self.expected_transition_arguments = _machine_next_arguments(branch_context)
+        self.transition_argument_mismatch = False
 
     def evaluate(
         self,
@@ -286,6 +377,21 @@ class _SystemExecutionEvaluator(_base._SystemExecutionEvaluator):
         after_transition: bool,
         conditions: tuple[str, ...],
     ) -> tuple[_base._Case, ...]:
+        if (
+            isinstance(symbolic.callee, NameExpr)
+            and isinstance(concrete.callee, NameExpr)
+            and symbolic.callee.name == concrete.callee.name == self._context.next_function
+            and symbolic.args != self.expected_transition_arguments
+        ):
+            self.transition_argument_mismatch = True
+            return (
+                _base._Case(
+                    _base._ExprPair(symbolic, concrete),
+                    unresolved=True,
+                    transition_calls=1,
+                    conditions=conditions,
+                ),
+            )
         if _is_success_value(symbolic) and _is_success_value(concrete):
             return (
                 _base._Case(
@@ -490,7 +596,7 @@ def attach_transition_system_execution_actions(
     model: CompilationModel,
     machine_view: dict[str, object],
 ) -> dict[str, object]:
-    """Attach complete, feasible System execution contexts to each machine edge."""
+    """Attach only execution contexts proven to represent each machine edge."""
 
     result = deepcopy(machine_view)
     branch_context = build_machine_branch_context(model, str(result.get("name") or ""))
@@ -525,6 +631,13 @@ def attach_transition_system_execution_actions(
 
     for original in result.get("transitions", []):
         transition = dict(original)
+        # Failure before the machine result returns cannot execute caller-side actions.
+        if transition.get("synthesized_failure"):
+            transition["execution_action_bindings"] = []
+            transition["execution_contexts"] = []
+            transitions.append(transition)
+            continue
+
         source_state = str(transition.get("source_state") or "")
         branch_value = branch_value_for_transition(
             branch_context,
@@ -555,6 +668,54 @@ def attach_transition_system_execution_actions(
             binding = _base._binding(evaluation)
             if binding is None:
                 continue
+
+            proof_blocked = False
+            state_proven, proof_reason = _state_specialization_proof(
+                model,
+                context,
+                branch_context,
+            )
+            if not state_proven:
+                proof_blocked = True
+                binding = _blocked_binding(
+                    binding,
+                    reason=proof_reason,
+                    state_input_unproven=True,
+                )
+                _base._append_diagnostic_once(
+                    diagnostics,
+                    _diagnostic(
+                        _UNPROVEN_STATE_INPUT_CODE,
+                        (
+                            f"system `{context.system}` entry `{context.entry}` cannot prove "
+                            f"the represented machine call: {proof_reason}"
+                        ),
+                        line,
+                    ),
+                )
+            elif evaluator.transition_argument_mismatch:
+                proof_blocked = True
+                proof_reason = (
+                    f"call to `{branch_context.next_function}` does not preserve the "
+                    "Machine next-expression arguments"
+                )
+                binding = _blocked_binding(
+                    binding,
+                    reason=proof_reason,
+                    state_input_unproven=False,
+                )
+                _base._append_diagnostic_once(
+                    diagnostics,
+                    _diagnostic(
+                        _UNPROVEN_TRANSITION_ARGUMENT_CODE,
+                        (
+                            f"system `{context.system}` entry `{context.entry}` cannot prove "
+                            f"the represented machine call: {proof_reason}"
+                        ),
+                        line,
+                    ),
+                )
+
             bindings.append(binding)
             binding_count += 1
             status = binding.get("status")
@@ -564,18 +725,19 @@ def attach_transition_system_execution_actions(
                 conditional_count += 1
             elif status == "unresolved":
                 unresolved_count += 1
-                _base._append_diagnostic_once(
-                    diagnostics,
-                    _diagnostic(
-                        _base._UNRESOLVED_CODE,
-                        (
-                            f"system `{context.system}` entry `{context.entry}` has a path "
-                            f"through `{branch_context.next_function}` whose post-transition "
-                            "execution cannot be proven"
+                if not proof_blocked:
+                    _base._append_diagnostic_once(
+                        diagnostics,
+                        _diagnostic(
+                            _base._UNRESOLVED_CODE,
+                            (
+                                f"system `{context.system}` entry `{context.entry}` has a path "
+                                f"through `{branch_context.next_function}` whose post-transition "
+                                "execution cannot be proven"
+                            ),
+                            line,
                         ),
-                        line,
-                    ),
-                )
+                    )
             elif status == "multiple-transition-calls":
                 multiple_count += 1
                 _base._append_diagnostic_once(
