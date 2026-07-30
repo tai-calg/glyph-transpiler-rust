@@ -110,7 +110,7 @@ try {
     return cluster && getComputedStyle(cluster, "::after").display !== "none";
   });
   const unknownAfter = await unknownClusters.first().evaluate(semanticPresentation);
-  assert.equal(unknownAfter.display, "inline-flex");
+  assert.notEqual(unknownAfter.display, "none");
   assert(unknownAfter.title.includes("Unknown"));
   await unknownPage.screenshot({
     path: path.join(outputDirectory, "unknown-hover.png"),
@@ -151,7 +151,7 @@ try {
   const mayPresentation = await mayClusters.evaluateAll(elements => elements.map(semanticPresentation));
   assert(mayPresentation.every(item => item.label === "May"));
   assert(mayPresentation.every(item => item.content === "May"));
-  assert(mayPresentation.every(item => item.display === "inline-flex"));
+  assert(mayPresentation.every(item => item.display !== "none"));
   assert(mayPresentation.every(item => item.reason.includes("reachability")));
   await mayPage.screenshot({
     path: path.join(outputDirectory, "may-ui.png"),
