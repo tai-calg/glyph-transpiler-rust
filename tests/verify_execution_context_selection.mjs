@@ -61,11 +61,24 @@ async function waitForProjection(page, expectedById) {
 async function compileSource(page, sourceText) {
   await page.locator("#editor").fill(sourceText);
   await page.click("#compile");
-  await page.waitForFunction(expected => (
-    document.querySelector("#status")?.textContent === "ready"
-    && typeof snapshot === "object"
-    && snapshot?.source === expected
-  ), sourceText, { timeout: 60_000 });
+  await page.waitForFunction(expected => {
+    const status = document.querySelector("#status")?.textContent;
+    if (status === "error") return true;
+    return status === "ready"
+      && typeof snapshot === "object"
+      && snapshot?.source === expected;
+  }, sourceText, { timeout: 60_000 });
+  const outcome = await page.evaluate(() => ({
+    status: document.querySelector("#status")?.textContent || "",
+    source: typeof snapshot === "object" ? snapshot?.source : null,
+    diagnostics: document.querySelector("#diagnostics")?.textContent || "",
+  }));
+  assert.notEqual(
+    outcome.status,
+    "error",
+    `Glyph compilation failed instead of updating the execution context:\n${outcome.diagnostics}`,
+  );
+  assert.equal(outcome.source, sourceText, "compiled snapshot did not accept the requested source");
 }
 
 function expectedActions(machine, system) {
@@ -185,7 +198,7 @@ try {
   assert.deepEqual(blocked.effects, []);
 
   const originalSource = await page.locator("#editor").inputValue();
-  const actionlessSource = originalSource.replace("  audit(next)\n", "  next\n");
+  const actionlessSource = originalSource.replace("  audit(next)\n", "  Receipt(next)\n");
   assert.notEqual(actionlessSource, originalSource, "audit action replacement did not match source");
   await compileSource(page, actionlessSource);
   await page.waitForFunction(() => (
