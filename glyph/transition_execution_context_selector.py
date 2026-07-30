@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 
-_MARKER = "glyph-transition-execution-context-selector-v2"
+_MARKER = "glyph-transition-execution-context-selector-v3"
 
 _STYLE = r"""
-<style id="glyph-transition-execution-context-selector-v2-style">
+<style id="glyph-transition-execution-context-selector-v3-style">
 .execution-context-control{
   display:flex;
   align-items:center;
@@ -29,20 +29,27 @@ _STYLE = r"""
 """
 
 _SCRIPT = r"""
-<script id="glyph-transition-execution-context-selector-v2-script">
+<script id="glyph-transition-execution-context-selector-v3-script">
 (()=>{
-const MARKER="glyph-transition-execution-context-selector-v2",AUTO="auto",MACHINE="machine";
+const MARKER="glyph-transition-execution-context-selector-v3",AUTO="auto",MACHINE="machine";
 const BLOCKED=new Set(["unresolved","multiple-transition-calls","missing"]);
 let currentMachine=null,currentKey=AUTO,timer=null,running=false,pending=false,lastSnapshotSignature="";
 const text=value=>String(value??"").trim();
-const actionText=value=>typeof value==="string"?text(value):text(value?.display)||text(value?.expression);
+function actionText(value){
+  if(typeof value==="string")return text(value);
+  if(value?.kind==="effect-trace"&&Array.isArray(value.events)){
+    return value.events.map(event=>text(event?.expression)||text(event?.display)||text(event?.operation)).filter(Boolean).join("; ");
+  }
+  return text(value?.display)||text(value?.expression);
+}
 const english=()=>String(window.GlyphI18n?.locale||document.documentElement.lang||"ja").startsWith("en");
 const tr=(key,ja,en)=>window.GlyphI18n?.t?.(key)??(english()?en:ja);
 const selectedMachine=data=>{const machines=data?.views?.state?.machines||[],name=document.getElementById("machine-select")?.selectedOptions?.[0]?.textContent;return machines.find(machine=>machine.name===name)||machines[0]||null};
 const contextKey=binding=>`context:${text(binding?.scope)||"system"}:${text(binding?.system)}:${text(binding?.entry)}`;
-const storageKey=machine=>`glyph.transition.execution-context.v2:${text(machine?.name)||"machine"}`;
+const storageKey=machine=>`glyph.transition.execution-context.v3:${text(machine?.name)||"machine"}`;
 const statusRank=status=>({"resolved":0,"actionless":1,"conditional":2,"unresolved":3,"multiple-transition-calls":4,"missing":5}[status]??0);
 const contextRecords=transition=>transition?.execution_contexts||transition?.execution_action_bindings||[];
+const strictNative=transition=>transition?.system_action_projection_source==="rtai-execution-evidence-v2"&&transition?.legacy_system_action_fallback_allowed===false;
 function presentationStatus(binding){const status=text(binding?.status)||"resolved";return status==="resolved"&&!binding?.action?"actionless":status}
 function contextsFor(machine){
   const transitions=machine?.transitions||[],contexts=new Map();
@@ -71,12 +78,16 @@ function composedAction(machineAction,systemAction,context){
   return{display,expression:display,scope:parts.length===2?"composed":(systemAction?"system":"machine"),projection_provenance:"transition-execution-context-selection",system:context?.system||null,entry:context?.entry||null,status:context?.status||"resolved"};
 }
 function projectionFor(transition,key=currentKey){
+  const machineAction=transition?.machine_action||transition?.action||null;
   if(key===MACHINE)return{action:transition?.machine_action||null,invocations:transition?.machine_action_invocations||[],effects:transition?.machine_effect_invocations||[],status:"machine",blocked:false};
   if(key.startsWith("context:")){
     const binding=bindingFor(transition,key);
     if(!binding)return{action:null,invocations:[],effects:[],status:"missing",blocked:true,missing:true,cases:[]};
     const status=binding.status||"resolved",blocked=BLOCKED.has(status),machineInvocations=transition?.machine_action_invocations||[],machineEffects=transition?.machine_effect_invocations||[],systemAction=blocked?null:binding.action,systemInvocations=blocked?[]:(binding.action_invocations||[]),systemEffects=blocked?[]:(binding.effect_invocations||[]);
     return{action:composedAction(transition?.machine_action,systemAction,binding),invocations:[...machineInvocations,...systemInvocations],effects:[...machineEffects,...systemEffects],status,blocked,missing:false,cases:binding.action_cases||[]};
+  }
+  if(strictNative(transition)){
+    return{action:composedAction(machineAction,transition?.system_action,{status:"exact"}),invocations:transition?.machine_action_invocations||[],effects:transition?.system_action?.events||[],status:"exact",blocked:false,strictNative:true};
   }
   return{action:transition?.display_action||transition?.action||null,invocations:transition?.display_action_invocations||transition?.action_invocations||[],effects:transition?.display_effect_invocations||transition?.effect_invocations||[],status:transition?.action_scope?.context_required?"context-required":"auto",blocked:false};
 }
@@ -93,7 +104,7 @@ function optionLabel(context){const base=context.system&&context.entry?`${contex
 function publish(reason="selection"){document.dispatchEvent(new CustomEvent("glyph-execution-context-changed",{detail:{marker:MARKER,machine:currentMachine?.name||null,key:currentKey,reason}}))}
 function liveState(){return typeof snapshot==="object"&&snapshot?snapshot:null}
 async function state(){const live=liveState();if(live)return live;const response=await fetch("/api/state",{cache:"no-store"});if(!response.ok)throw Error("diagram state unavailable");return response.json()}
-function snapshotSignature(data){return`${data?.version??""}:${data?.digest??""}:${JSON.stringify((data?.views?.state?.machines||[]).map(machine=>[machine.name,(machine.transitions||[]).map(item=>item.execution_contexts||item.execution_action_bindings||[])]))}`}
+function snapshotSignature(data){return`${data?.version??""}:${data?.digest??""}:${JSON.stringify((data?.views?.state?.machines||[]).map(machine=>[machine.name,(machine.transitions||[]).map(item=>[item.execution_contexts||item.execution_action_bindings||[],item.system_action_projection_source,item.system_action,item.rtai_semantic_status])]))}`}
 function ensureControl(machine){
   const host=document.querySelector(".view-controls"),machineSelect=document.getElementById("machine-select");
   if(!host||!machineSelect)return false;
@@ -138,7 +149,7 @@ async function render(){
 }
 function schedule(delay=0){pending=true;clearTimeout(timer);timer=setTimeout(()=>render().catch(error=>console.error("execution-context selector failed",error)),delay)}
 document.addEventListener("change",event=>{if(event.target?.id==="machine-select"){currentMachine=null;currentKey=AUTO;schedule(0)}});
-for(const event of["glyph-state-transition-ir-v3-labels-ready","glyph-transition-io-clusters-ready","glyph-locale-changed","glyph-locale-applied"]){document.addEventListener(event,()=>schedule(0))}
+for(const event of["glyph-state-transition-ir-v4-labels-ready","glyph-state-transition-ir-v3-labels-ready","glyph-transition-io-clusters-ready","glyph-locale-changed","glyph-locale-applied"]){document.addEventListener(event,()=>schedule(0))}
 new MutationObserver(()=>schedule(20)).observe(document.getElementById("view")||document.body,{childList:true,subtree:true});
 window.GlyphExecutionContext={marker:MARKER,actionFor,projectionFor,contextsFor,selectedKey:()=>currentKey,signature:()=>`${currentMachine?.name||""}:${currentKey}:${lastSnapshotSignature}`,refresh:()=>schedule(0)};
 schedule(0);
@@ -148,7 +159,7 @@ schedule(0);
 
 
 def enhance_transition_execution_context_selector_html(html: str) -> str:
-    """Select Machine or one complete System execution context projection."""
+    """Select Machine, legacy context, or strict native Evidence projection."""
 
     if _MARKER in html:
         return html
