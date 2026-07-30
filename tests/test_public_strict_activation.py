@@ -1,0 +1,121 @@
+from __future__ import annotations
+
+import ast
+from pathlib import Path
+import unittest
+
+from glyph.compilation import CompilationPipeline
+from glyph.io_state_views import build_io_state_views
+from glyph.transition_analysis.evidence_projection import EvidenceProjectionMode
+from glyph.transition_analysis.public_effect_contracts import (
+    BUILTIN_DEFAULT_WORKSPACE_SOURCE_ID,
+    PUBLIC_STRICT_PROGRAMS,
+)
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def _builtin_default_source() -> str:
+    tree = ast.parse((ROOT / "glyph.py").read_text(encoding="utf-8"))
+    for node in tree.body:
+        if not isinstance(node, ast.Assign):
+            continue
+        if not any(
+            isinstance(target, ast.Name) and target.id == "DEFAULT_SOURCE"
+            for target in node.targets
+        ):
+            continue
+        value = ast.literal_eval(node.value)
+        if isinstance(value, str):
+            return value
+    raise AssertionError("glyph.py DEFAULT_SOURCE is unavailable")
+
+
+def _program_source(source_id: str, source_path: str | None) -> str:
+    if source_id == BUILTIN_DEFAULT_WORKSPACE_SOURCE_ID:
+        return _builtin_default_source()
+    if source_path is None:
+        raise AssertionError(f"source path missing for {source_id}")
+    return (ROOT / source_path).read_text(encoding="utf-8")
+
+
+def _normal_source_name(source_id: str, source_path: str | None) -> str:
+    if source_id == BUILTIN_DEFAULT_WORKSPACE_SOURCE_ID:
+        return "/tmp/project/.glyph/workspace.glyph"
+    assert source_path is not None
+    return str(ROOT / source_path)
+
+
+def _views(source: str, source_name: str) -> dict[str, object]:
+    compiled = CompilationPipeline().compile_text(source, source_name=source_name)
+    return build_io_state_views(compiled.model, compiled.diagrams.ir)
+
+
+class PublicStrictActivationTests(unittest.TestCase):
+    def test_cataloged_public_contexts_use_strict_exact_in_normal_builder(self) -> None:
+        self.assertGreater(len(PUBLIC_STRICT_PROGRAMS), 1)
+        for program in PUBLIC_STRICT_PROGRAMS:
+            with self.subTest(source=program.source_id):
+                views = _views(
+                    _program_source(program.source_id, program.source_path),
+                    _normal_source_name(program.source_id, program.source_path),
+                )
+                activation = views["rtai_public_strict_activation"]
+                self.assertTrue(activation["active"], activation)
+                self.assertEqual(activation["source_id"], program.source_id)
+                self.assertEqual(
+                    views["rtai_projection_mode"],
+                    EvidenceProjectionMode.STRICT_EXACT.value,
+                )
+                self.assertFalse(
+                    views["rtai_legacy_system_action_analyzer_enabled"]
+                )
+                self.assertTrue(
+                    views["summary"]["rtai_public_strict_activation_active"]
+                )
+
+    def test_underspecified_failure_context_remains_shadow(self) -> None:
+        source_path = ROOT / "examples/acceptance/door_controller.glyph"
+        views = _views(source_path.read_text(encoding="utf-8"), str(source_path))
+        activation = views["rtai_public_strict_activation"]
+        self.assertFalse(activation["active"], activation)
+        self.assertEqual(
+            views["rtai_projection_mode"],
+            EvidenceProjectionMode.SHADOW.value,
+        )
+        self.assertTrue(views["rtai_legacy_system_action_analyzer_enabled"])
+
+    def test_catalog_path_with_incompatible_effect_surface_remains_shadow(self) -> None:
+        source = """system MotorSafety
+  entry cycle
+
+  in state:State
+  out state_out:State
+
+  state -> cycle
+  cycle -> state_out
+
++Mode=Stopped
+*State(mode:Mode)
+
+>cycle(state:State):State=state
+"""
+        source_name = str(ROOT / "examples/acceptance/motor_safety.glyph")
+        views = _views(source, source_name)
+        self.assertFalse(views["rtai_public_strict_activation"]["active"])
+        self.assertEqual(
+            views["rtai_projection_mode"],
+            EvidenceProjectionMode.SHADOW.value,
+        )
+
+    def test_motor_activation_supplies_reviewed_targeted_witnesses(self) -> None:
+        path = ROOT / "examples/acceptance/motor_safety.glyph"
+        views = _views(path.read_text(encoding="utf-8"), str(path))
+        activation = views["rtai_public_strict_activation"]
+        self.assertEqual(activation["targeted_witness_case_count"], 4)
+        self.assertTrue(views["rtai_targeted_witnesses_configured"])
+
+
+if __name__ == "__main__":
+    unittest.main()
