@@ -25,7 +25,12 @@ from .state_transition_contract import (
 from .transition_action_projection import project_machine_transition_actions
 from .transition_action_scopes import project_transition_action_scopes
 from .transition_action_target_independence import analyze_action_target_independence
-from .transition_analysis import attach_execution_evidence_v2
+from .transition_analysis import (
+    RTAI_SEMANTIC_BOOTSTRAP_VERSION,
+    attach_execution_evidence_v2,
+    attach_rtai_semantic_bootstrap,
+    lower_compilation_model,
+)
 from .transition_condition_roles import classify_machine_transition_roles
 from .transition_enabling_case_compatibility import preserve_legacy_transition_metadata
 from .transition_enabling_case_defaults import ensure_machine_enabling_cases
@@ -142,12 +147,17 @@ def enrich_state_transition_ir(
         attach_transition_system_execution_actions(model, machine)
         for machine in projected
     ]
-    # RTAI Evidence v2 is emitted in shadow mode. Existing display projection
-    # remains unchanged until exact reachability, singleton trace, completion,
-    # and cardinality evidence are available.
+    # RTAI Evidence v2 and semantic bootstrap are emitted in shadow mode.
+    # Existing display projection remains unchanged until exact reachability,
+    # singleton trace, completion, and cardinality evidence are available.
+    rtai_functions = lower_compilation_model(model)
     evidenced = [attach_execution_evidence_v2(machine) for machine in system_executed]
+    bootstrapped = [
+        attach_rtai_semantic_bootstrap(model, machine, functions=rtai_functions)
+        for machine in evidenced
+    ]
     compatible = [
-        attach_output_action_compatibility(machine) for machine in evidenced
+        attach_output_action_compatibility(machine) for machine in bootstrapped
     ]
     classified = [
         classify_machine_transition_roles(model, machine) for machine in compatible
@@ -195,6 +205,7 @@ def enrich_state_transition_ir(
     result["transition_execution_evidence_version"] = (
         TRANSITION_EXECUTION_EVIDENCE_VERSION
     )
+    result["rtai_semantic_bootstrap_version"] = RTAI_SEMANTIC_BOOTSTRAP_VERSION
     result["transition_action_target_independence_version"] = (
         TRANSITION_ACTION_TARGET_INDEPENDENCE_VERSION
     )
