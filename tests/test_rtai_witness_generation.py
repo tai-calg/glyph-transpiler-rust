@@ -12,6 +12,7 @@ from glyph.transition_analysis import (
     read_only_identity_contract,
 )
 from glyph.transition_analysis.strict_projection_campaign import (
+    build_strict_io_state_views,
     build_strict_projection_candidate,
 )
 
@@ -60,6 +61,7 @@ class WitnessGenerationTests(unittest.TestCase):
             source_name="witness-generation.glyph",
         )
         cls.model = output.model
+        cls.execution = output.diagrams.ir
         cls.views = build_io_state_views(output.model, output.diagrams.ir)
         cls.contracts = VerifiedEffectContractRegistry(
             defaults=(
@@ -125,6 +127,28 @@ class WitnessGenerationTests(unittest.TestCase):
                 "rtai-execution-evidence-v2",
             )
             self.assertIsNotNone(transition["strict_system_action"])
+            self.assertEqual(
+                transition["system_action"],
+                transition["strict_system_action"],
+            )
+
+    def test_strict_full_view_campaign_is_ready_without_legacy_fallback(self) -> None:
+        result = build_strict_io_state_views(
+            self.model,
+            self.execution,
+            self.contracts,
+        )
+        campaign = result["strict_projection_campaign"]
+        self.assertTrue(campaign["ready"], campaign)
+        self.assertFalse(campaign["legacy_fallback_allowed"])
+        self.assertEqual(
+            result["summary"]["rtai_strict_projection_ready_machines"],
+            1,
+        )
+        for machine in result["state"]["machines"]:
+            self.assertTrue(machine["strict_projection_campaign"]["ready"])
+            for transition in machine["transitions"]:
+                self.assertFalse(transition["legacy_system_action_fallback_allowed"])
 
     def test_strict_candidate_fails_closed_without_effect_contract(self) -> None:
         machine = self.views["state"]["machines"][0]
@@ -140,6 +164,7 @@ class WitnessGenerationTests(unittest.TestCase):
         for transition in result["transitions"]:
             self.assertFalse(transition["legacy_system_action_fallback_allowed"])
             self.assertIsNone(transition["strict_system_action"])
+            self.assertIsNone(transition["system_action"])
 
     def test_empty_contract_registry_never_infers_effect_handler(self) -> None:
         report = generate_bounded_system_witnesses(
