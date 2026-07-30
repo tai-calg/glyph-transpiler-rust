@@ -34,6 +34,7 @@ from .effect_contract import (
     VerifiedEffectContract,
     VerifiedEffectContractRegistry,
     read_only_identity_contract,
+    reviewed_deterministic_contract,
 )
 from .effect_contract_audit import (
     EFFECT_CONTRACT_AUDIT_VERSION,
@@ -91,6 +92,17 @@ from .preimage import (
     compute_transition_call_preimage,
 )
 from .projection import ExactActionDecision, check_exact_action_projection
+from .public_effect_contracts import (
+    BUILTIN_DEFAULT_WORKSPACE_SOURCE_ID,
+    PUBLIC_STRICT_EFFECT_SURFACE_VERSION,
+    PUBLIC_STRICT_EXCLUSIONS,
+    PUBLIC_STRICT_PROGRAMS,
+    PublicEffectContractCase,
+    PublicStrictExclusion,
+    PublicStrictProgram,
+    public_strict_program,
+    public_strict_surface_ir,
+)
 from .reference import ReferenceInterpreter
 from .semantic_status import (
     RTAI_SEMANTIC_STATUS_VERSION,
@@ -145,6 +157,7 @@ __all__ = [
     "AbstractEvidenceContext",
     "AbstractInterpreter",
     "AnalysisBudget",
+    "BUILTIN_DEFAULT_WORKSPACE_SOURCE_ID",
     "BoundedOracleReport",
     "BoundedSoundnessReport",
     "BoundedWitnessGenerationReport",
@@ -172,8 +185,14 @@ __all__ = [
     "OWNERSHIP_SEMANTICS_VERSION",
     "OwnershipFunctionSummary",
     "OwnershipViolation",
+    "PUBLIC_STRICT_EFFECT_SURFACE_VERSION",
+    "PUBLIC_STRICT_EXCLUSIONS",
+    "PUBLIC_STRICT_PROGRAMS",
     "PreimageStatus",
     "ProjectionReadinessReport",
+    "PublicEffectContractCase",
+    "PublicStrictExclusion",
+    "PublicStrictProgram",
     "PureFunctionSummary",
     "RTAI_ABSTRACT_EVIDENCE_SHADOW_VERSION",
     "RTAI_SEMANTIC_BOOTSTRAP_VERSION",
@@ -233,7 +252,10 @@ __all__ = [
     "lower_compilation_model_report",
     "lower_function",
     "project_machine_from_evidence",
+    "public_strict_program",
+    "public_strict_surface_ir",
     "read_only_identity_contract",
+    "reviewed_deterministic_contract",
     "specialize_view_edges",
     "verified_reachability_witness",
 ]
