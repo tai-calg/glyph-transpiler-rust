@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 
-_MARKER = "glyph-state-transition-ir-v3-renderer"
+_MARKER = "glyph-state-transition-ir-v4-renderer"
 
 _STYLE = r"""
-<style id="glyph-state-transition-ir-v3-renderer-style">
+<style id="glyph-state-transition-ir-v4-renderer-style">
 .transition-label.provisional-trigger,
 .edge-label.provisional-trigger{
   border-style:dashed!important;
@@ -23,6 +23,47 @@ _STYLE = r"""
   border-style:dotted!important;
   color:var(--amber)!important;
 }
+.transition-label[data-rtai-semantic-status],
+.transition-detail-id[data-rtai-semantic-status]{
+  position:relative;
+}
+.transition-label[data-rtai-semantic-status]::after,
+.transition-detail-id[data-rtai-semantic-status]::after{
+  content:attr(data-rtai-semantic-label);
+  display:inline-flex;
+  align-items:center;
+  margin-left:6px;
+  padding:1px 5px;
+  border:1px solid currentColor;
+  border-radius:999px;
+  font-size:9px;
+  font-weight:700;
+  line-height:1.25;
+  letter-spacing:.02em;
+  vertical-align:1px;
+  white-space:nowrap;
+}
+.transition-label.rtai-semantic-exact,
+.transition-detail-id.rtai-semantic-exact{
+  --rtai-semantic-color:#15803d;
+}
+.transition-label.rtai-semantic-may,
+.transition-detail-id.rtai-semantic-may{
+  --rtai-semantic-color:#a16207;
+}
+.transition-label.rtai-semantic-unknown,
+.transition-detail-id.rtai-semantic-unknown{
+  --rtai-semantic-color:#6b7280;
+}
+.transition-label.rtai-semantic-exact::after,
+.transition-label.rtai-semantic-may::after,
+.transition-label.rtai-semantic-unknown::after,
+.transition-detail-id.rtai-semantic-exact::after,
+.transition-detail-id.rtai-semantic-may::after,
+.transition-detail-id.rtai-semantic-unknown::after{
+  color:var(--rtai-semantic-color);
+  background:color-mix(in srgb,var(--rtai-semantic-color) 8%,transparent);
+}
 .glyph-visually-hidden{
   position:absolute!important;
   width:1px!important;
@@ -38,9 +79,14 @@ _STYLE = r"""
 """
 
 _SCRIPT = r"""
-<script id="glyph-state-transition-ir-v3-renderer-script">
+<script id="glyph-state-transition-ir-v4-renderer-script">
 (() => {
-  const MARKER = "glyph-state-transition-ir-v3-renderer";
+  const MARKER = "glyph-state-transition-ir-v4-renderer";
+  const SEMANTIC_CLASSES = [
+    "rtai-semantic-exact",
+    "rtai-semantic-may",
+    "rtai-semantic-unknown",
+  ];
   let running = false;
   let timer = null;
 
@@ -90,6 +136,18 @@ _SCRIPT = r"""
     };
   }
 
+  function semanticStatusOf(transition) {
+    const raw = transition?.rtai_semantic_status;
+    const status = ["exact", "may", "unknown"].includes(text(raw?.status))
+      ? text(raw.status)
+      : "unknown";
+    return {
+      status,
+      reason: text(raw?.reason) || "native Evidence status is unavailable",
+      label: status === "exact" ? "Exact" : status === "may" ? "May" : "Unknown",
+    };
+  }
+
   function guardsOf(transition) {
     if (Array.isArray(transition?.guards)) {
       return transition.guards.map(text).filter(Boolean);
@@ -134,8 +192,20 @@ _SCRIPT = r"""
 
   function evidenceOf(transition) {
     const trigger = triggerOf(transition);
-    if (!trigger) return text(transition?.display_label);
-    const details = [];
+    const semantic = semanticStatusOf(transition);
+    const details = [
+      semantic.status === "exact"
+        ? both("意味論: Exact（確定表示条件を満たす）", "Semantics: Exact (all exact-display conditions are satisfied)")
+        : semantic.status === "may"
+          ? both("意味論: May（実行可能だが一意性を証明していない）", "Semantics: May (possible, but uniqueness is not proven)")
+          : both("意味論: Unknown（解析上の未解決要因がある）", "Semantics: Unknown (analysis has unresolved causes)"),
+      `reason: ${semantic.reason}`,
+    ];
+    if (!trigger) {
+      const legacy = text(transition?.display_label);
+      if (legacy) details.push(legacy);
+      return details.join("\n");
+    }
     if (trigger.role === "provisional-trigger") {
       details.push(both(
         "暫定入力: 出来事か継続条件かをコードだけでは確定できません",
@@ -168,6 +238,15 @@ _SCRIPT = r"""
     return true;
   }
 
+  function applySemanticStatus(element, semantic) {
+    if (!element) return;
+    SEMANTIC_CLASSES.forEach(className => element.classList.remove(className));
+    element.classList.add(`rtai-semantic-${semantic.status}`);
+    element.dataset.rtaiSemanticStatus = semantic.status;
+    element.dataset.rtaiSemanticLabel = semantic.label;
+    element.dataset.rtaiSemanticReason = semantic.reason;
+  }
+
   function signatureOf(machine) {
     return [
       machine?.name || "",
@@ -178,6 +257,7 @@ _SCRIPT = r"""
         JSON.stringify(transition.trigger ?? null),
         JSON.stringify(transition.guards ?? []),
         JSON.stringify(transition.unclassified_conditions ?? []),
+        JSON.stringify(transition.rtai_semantic_status ?? null),
         actionOf(transition),
         transition.failure_type ?? "",
         transition.display_label ?? "",
@@ -194,12 +274,13 @@ _SCRIPT = r"""
       const machine = await readMachine();
       if (!machine || Number(machine?.transition_ir?.version) < 2) return;
       const signature = signatureOf(machine);
-      let changed = stage.dataset.stateTransitionIRV3Labels !== signature;
+      let changed = stage.dataset.stateTransitionIRV4Labels !== signature;
 
       (machine.transitions || []).forEach((transition, index) => {
         const id = transition.id || `T${index + 1}`;
         const summary = summaryOf(transition);
         const trigger = triggerOf(transition);
+        const semantic = semanticStatusOf(transition);
         const provisional = trigger?.role === "provisional-trigger";
         const unknown = (transition?.unclassified_conditions || []).length > 0;
         const compact = stage.querySelector(`.transition-label[data-transition-id="${id}"]`);
@@ -214,6 +295,7 @@ _SCRIPT = r"""
           }
           compact.classList.toggle("provisional-trigger", provisional);
           compact.classList.toggle("unclassified-condition", unknown);
+          applySemanticStatus(compact, semantic);
           compact.title = `${summary}\n${evidenceOf(transition)}`.trim();
           compact.dataset.triggerRole = trigger?.role || "none";
           compact.dataset.triggerConfidence = trigger?.confidence || "unknown";
@@ -230,15 +312,20 @@ _SCRIPT = r"""
           detailId.classList.add("input-action-label");
           detailId.classList.toggle("provisional-trigger", provisional);
           detailId.classList.toggle("unclassified-condition", unknown);
+          applySemanticStatus(detailId, semantic);
           detailId.title = evidenceOf(transition);
         }
       });
 
-      stage.dataset.stateTransitionIRV3Labels = signature;
+      stage.dataset.stateTransitionIRV4Labels = signature;
+      stage.dataset.stateTransitionIRV4LabelsReady = "true";
       stage.dataset.stateTransitionIRV3LabelsReady = "true";
       stage.dataset.stateTransitionIRV2LabelsReady = "true";
       stage.dataset.failureResultNotationReady = "true";
       if (changed) {
+        document.dispatchEvent(new CustomEvent("glyph-state-transition-ir-v4-labels-ready", {
+          detail: {machine: machine.name, marker: MARKER},
+        }));
         document.dispatchEvent(new CustomEvent("glyph-state-transition-ir-v3-labels-ready", {
           detail: {machine: machine.name, marker: MARKER},
         }));
@@ -274,7 +361,7 @@ _SCRIPT = r"""
 
 
 def enhance_state_transition_ir_html(html: str) -> str:
-    """Render trigger/guard/Action roles without reclassifying compiler semantics."""
+    """Render trigger/guard/Action roles and Evidence status without reanalysis."""
 
     if _MARKER in html:
         return html
