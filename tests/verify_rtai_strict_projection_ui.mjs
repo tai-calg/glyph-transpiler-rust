@@ -86,24 +86,26 @@ try {
       && stage?.dataset.transitionIoClustersReady === "true"
       && stage?.dataset.rtaiSemanticStatusReady === "true"
       && stage?.dataset.rtaiProjectionMode === "strict-exact"
-      && document.querySelectorAll(".transition-io-cluster > .rtai-semantic-badge.exact").length === expected;
+      && document.querySelectorAll('.transition-io-cluster[data-rtai-semantic-status="exact"]').length === expected;
   }, machine.transitions.length, { timeout: 60_000 });
 
-  const badges = await page.locator(".transition-io-cluster > .rtai-semantic-badge.exact").evaluateAll(elements => (
+  const badges = await page.locator('.transition-io-cluster[data-rtai-semantic-status="exact"]').evaluateAll(elements => (
     elements.map(element => {
-      const style = getComputedStyle(element);
+      const pseudo = getComputedStyle(element, "::after");
       return {
         status: element.dataset.rtaiSemanticStatus,
-        label: element.textContent,
+        label: element.dataset.rtaiSemanticLabel,
         reason: element.dataset.rtaiSemanticReason,
-        title: element.title,
-        visible: style.display !== "none" && style.visibility !== "hidden" && Number(style.opacity) > 0,
+        title: element.dataset.rtaiSemanticTitle,
+        content: pseudo.content.replace(/^"|"$/g, ""),
+        visible: pseudo.display !== "none" && pseudo.visibility !== "hidden" && Number(pseudo.opacity) > 0,
       };
     })
   ));
   assert.equal(badges.length, machine.transitions.length);
   assert(badges.every(item => item.status === "exact"));
   assert(badges.every(item => item.label === "Exact"));
+  assert(badges.every(item => item.content === "Exact"));
   assert(badges.every(item => item.reason.length > 0));
   assert(badges.every(item => item.title.includes("Exact")));
   assert(badges.every(item => item.visible), JSON.stringify(badges));
