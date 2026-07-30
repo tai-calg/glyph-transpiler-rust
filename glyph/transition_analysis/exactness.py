@@ -44,6 +44,8 @@ class ExactnessProofScope(str, Enum):
 
     STRUCTURAL = "structural"
     LOWERING = "lowering"
+    MACHINE_RELATION = "machine-relation"
+    TEIR_EXECUTION = "teir-execution"
     REACHABILITY = "reachability"
     CARDINALITY = "cardinality"
     EFFECT_TRACE = "effect-trace"
