@@ -2,15 +2,19 @@
 
 ## Status
 
-RTAI v2 is implemented as a **shadow semantic analysis**. It publishes TEIR,
-Machine relations, structural transition preimages and Evidence-compatible safety
-metadata. Guarded abstract execution is implemented and tested as an internal
-analysis API, but its alternatives are not yet converted into public edge Evidence
-and do not replace the active System Action projection.
+RTAI v2 is implemented as a **shadow semantic analysis**. The current branch
+contains executable TEIR semantics, normalized Machine relations, typed finite
+constraint solving, guarded abstract execution, function and Effect summaries,
+Capability-IR ownership replay, bounded soundness oracles, property-scoped
+Evidence generation, and an Evidence projection readiness gate.
 
-The current implementation establishes the semantic and validation layers needed
-before the UI switch. Unsupported RTAI constructs produce explicit `unknown` or
-lowering issues and do not break ordinary Glyph compilation.
+The active System Action UI remains on the legacy projection. RTAI output is
+published in parallel and cannot change the active display action in the normal
+compiler pipeline.
+
+Unsupported constructs, unbounded theories, missing Effect contracts, unresolved
+recursion, alias uncertainty and analysis budgets become explicit `unknown` or
+lowering issues. They do not silently become unreachable or exact.
 
 ## Required correctness properties
 
@@ -24,15 +28,14 @@ ConcreteExecutions(program, context)
 Concretization(Analyze(program, context))
 ```
 
-Unsupported expressions, missing Effect contracts, alias uncertainty, resource
-limits and widening must enlarge the result or produce `unknown`. They must never
-remove a concrete execution.
+Unsupported semantics may reduce precision. They must not remove a possible
+execution.
 
 ### Exact projection safety
 
 A System Action may be displayed as exact only when all executions represented by
-the selected context and Machine edge have one identical post-transition Effect
-trace.
+the selected System context and Machine edge have one identical post-transition
+Effect trace.
 
 ```text
 DisplayedExactAction(context, edge, trace)
@@ -42,7 +45,7 @@ ConcreteEffectTraces(context, edge) == {trace}
 
 ## Implemented safety boundary
 
-### Monotonic approximation state
+### Monotonic precision
 
 `glyph/transition_analysis/exactness.py` defines:
 
@@ -50,117 +53,113 @@ ConcreteEffectTraces(context, edge) == {trace}
 - `over-approximate`
 - `unknown`
 
-An exact value requires explicit proof evidence. Precision-loss causes are retained
-and propagated by `combine` and `degrade`. An over-approximate or unknown result
-cannot become exact through normalization, join or projection.
+Exact values require explicit proof evidence. Precision-loss causes are retained
+through joins and transfer. An over-approximate or unknown result cannot become
+exact through normalization, merging or projection.
 
-Proofs are scoped to one property, including:
+Proof scopes include:
 
 - structural identity
 - lowering
 - Machine relation
 - transition preimage
 - TEIR execution
+- function summary
 - reachability
 - transition-call cardinality
 - Effect trace
 - completion
 
-A proof for one property cannot satisfy another property's exactness requirement.
-A concrete reachability witness does not prove Effect-trace completeness.
+Proof kinds distinguish structural facts, lowering equivalence, concrete replay,
+finite exhaustive oracle results and solver certificates. A proof for one property
+cannot satisfy another property's exactness requirement.
 
 ### Execution Evidence v2
 
-Each transition receives an additive `execution_evidence_v2` record containing:
+The legacy compatibility path still emits additive `execution_evidence_v2` data.
+Legacy `resolved` values are not exact proofs; they remain
+`over-approximate(legacy-adapter)`. Legacy unresolved values remain `unknown`.
 
-- edge identity
-- synthesized-failure status
-- context evidence bound to the same edge identity
-- reachability status and precondition
-- call-cardinality upper bound
-- Effect-trace alternatives
-- completion alternatives
-- approximation state and loss causes
-- exact-projection checker results
-
-Current legacy `resolved` values are not treated as exact. They are adapted as:
+RTAI now also emits a separate native abstract Evidence contract:
 
 ```text
-over-approximate(legacy-adapter)
+rtai_abstract_execution_evidence_v2
 ```
 
-Current `unresolved` values and ordinary edges without an execution context are
-adapted as `unknown`. Synthesized-failure edges are represented separately as no
-caller continuation.
+This native contract is keyed by normalized MachineRelation edges and contains
+RTAI-generated reachability, cardinality, Effect-trace and completion evidence.
+It remains `projection_source = false`.
+
+### Verified reachability witnesses
+
+`analysis_evidence.py` does not accept an arbitrary dictionary as an exact
+reachability witness. `verified_reachability_witness(...)` replays a concrete TEIR
+execution and verifies that the requested edge occurs in its transition trace.
+Exact reachability evidence uses proof kind `concrete-replay`.
+
+A concrete witness proves existence only. It does not prove Effect-trace
+completeness, cardinality or completion uniformity.
 
 ### Independent exact-action checker
 
-`glyph/transition_analysis/projection.py` operates only on Evidence IR. It has no
-access to the AST, CFG, solver, Machine relation or rendered action strings.
+`projection.py` consumes only Evidence IR. It has no access to ASTs, CFGs, solvers,
+Machine relations or rendered legacy strings.
 
-Exact projection requires all of the following:
+Exact projection requires:
 
 1. proven reachability
-2. a concrete witness whose `edge_id` equals the selected edge
+2. a same-edge verified witness
 3. reachability-scoped exactness proof
 4. exact `at-most-one` call-cardinality evidence
 5. exact singleton Effect trace
 6. exact uniformly normal completion
 7. no unknown reason
-8. structurally valid EffectTrace events
+8. structurally valid Effect events
 
-The projected action is constructed directly from the exact singleton EffectTrace.
-A separately supplied legacy action or display string is never trusted as semantic
-evidence.
+The projected action is constructed directly from the singleton Effect trace.
 
 ## Implemented semantic analysis
 
 ### TEIR
 
-`glyph/transition_analysis/teir.py` defines the Transition Execution IR:
+`teir.py` represents:
 
-- `Assign`
-- `TransitionCall`
-- `EffectCall`
-- `Jump`
-- `Branch`
-- `Return`
-- `PropagateFailure`
-- `BasicBlock`
-- `Function`
+- assignment
+- transition call
+- Effect call
+- jump
+- branch
+- return
+- propagated failure
+- basic block
+- function
 
-Function guards and `:=` blocks lower into the same CFG representation.
-Function-block pipeline and lambda syntax are not parsed twice. TEIR consumes the
-compiler-generated value/final helper ASTs, preserving the existing syntax
-lowering as the sole syntax implementation. Regression tests compile `/>` pipeline
-and lambda block syntax and verify that TEIR contains the lowered helper expression,
-not the original pipeline tokens.
+Function guards and `:=` blocks lower into one CFG representation. Pipeline and
+lambda syntax are not reparsed by RTAI. TEIR consumes compiler-generated helper
+ASTs so syntax lowering remains single-sourced.
 
-The public shadow pipeline uses non-fatal lowering. Unsupported functions are
-listed in `lowering_issues`; the existing compiler and UI continue to operate.
-The concrete oracle uses strict lowering so unsupported constructs fail tests.
+The shadow compiler uses non-fatal lowering reports. Strict concrete-oracle paths
+fail when unsupported TEIR is encountered.
 
-### Source and TEIR concrete interpreters
+### Independent concrete interpreters
 
-`glyph/transition_analysis/reference.py` interprets source function control flow and
-original function blocks. `glyph/transition_analysis/concrete.py` independently
-executes TEIR and records:
+`reference.py` executes source-level function control flow. `concrete.py`
+independently executes TEIR and records:
 
 - selected Machine edge sequence
 - transition arguments and results
 - Effect sequence
 - completion
-- return value
+- return or propagated error value
 
-The concrete TEIR interpreter does not reuse the legacy System Action evaluator or
-abstract transfer functions.
+`stateful_concrete.py` additionally allows concrete Effect handlers to return
+store writes. Its result includes `final_store`, enabling real store-inclusion
+regression tests.
 
 ### MachineRelation
 
-`glyph/transition_analysis/machine_relation.py` normalizes supported ordered
-first-match Machine branches once.
-
-For guards `g1`, `g2`, and fallback `_`, effective guards are:
+`machine_relation.py` normalizes ordered first-match Machine branches once.
+For guards `g1`, `g2` and fallback `_`, the effective guards are:
 
 ```text
 g1
@@ -168,249 +167,291 @@ g1
 !g1 & !g2
 ```
 
-System analysis consumes these effective guards and does not reinterpret the
-original guard list. When branch extraction is unsupported, the relation is
-`unknown`; an empty relation is not marked exact.
+When complete branch extraction is unsupported, the relation is not marked exact.
 
 ### Relational transition preimages
 
-`glyph/transition_analysis/preimage.py` substitutes System actual arguments into
-normalized Machine edge guards and result expressions.
+`preimage.py` computes:
 
 ```text
 caller_path_condition
 and substituted_effective_guard
 ```
 
-Constructor order, field access and alias-expanded expression structure are
-preserved. Field permutation therefore changes the preimage without a dedicated
-field-permutation detector.
+System actual arguments are structurally substituted into Machine formals.
+Constructor order, field projection and expression structure are retained.
 
-The current preimage engine performs exact structural substitution and local
-simplification. It proves only conditions that simplify directly to Boolean
-constants. It does not yet use SMT to prove general satisfiability or
-unsatisfiability.
+Each edge now publishes a separate three-valued solver result:
 
-The shadow bootstrap resolves straight-line block-local aliases before computing
-call preimages. Cross-block guarded environments are handled by the abstract
-solver, not by this bootstrap convenience projection.
+- `UnsatProven`
+- `SatModel`
+- `Unknown`
 
-### Structured abstract values
+Only `UnsatProven` authorizes edge removal. `SatModel` proves existence only.
+`Unknown` remains reachable in the abstract result.
 
-`glyph/transition_analysis/abstract_value.py` preserves:
+### Typed finite constraint backend
 
-- parameters
-- constants
-- field projections
-- constructor type and ordered arguments
-- pure applications
-- Phi alternatives
-- top and bottom
+`typed_smt.py` is the current typed solver trust boundary. Before solving, it
+checks:
 
-Constructor field projection is normalized only when the corresponding constructor
-argument is known. Same-root values with different constructor order remain
-different.
+- variable types
+- product fields
+- sum variants
+- constructors
+- Boolean and numeric operators
+- pure function calls
+- aliases
 
-### Alias-safe abstract store
+The current backend performs exhaustive solving over finite Bool/Product/Sum
+domains. It can therefore produce exact finite-domain UNSAT certificates and
+concrete SAT models. Recursive, unsupported, over-budget or unbounded numeric
+domains produce `Unknown`.
 
-`glyph/transition_analysis/abstract_store.py` separates variable environments from
-mutable locations.
+This is not yet a general SMT backend for unbounded arithmetic.
 
-- strong update requires a proven singleton abstract address
-- uncertain aliases use weak update
-- unknown write footprints use havoc
-- storing a top value degrades store exactness
-- store joins preserve all possible values
+### Structured abstract values and alias-safe store
+
+`abstract_value.py` preserves parameters, constants, field projections,
+constructors with ordered arguments, applications, Phi alternatives, top and
+bottom.
+
+`abstract_store.py` enforces:
+
+- strong update only for a proven singleton address
+- weak update for uncertain aliases
+- havoc for unknown write footprints
+- monotonic loss of store exactness
+- value-preserving store joins
 
 ### Effect summaries
 
-`glyph/transition_analysis/effect_summary.py` models:
+`effect_summary.py` models:
 
-- parameters and return relation
-- read locations
-- write operations
+- parameter substitution
+- return relation
+- reads
+- typed writes through `EffectWrite`
 - emitted Effect event
-- possible completion kinds
+- completion alternatives
 - approximation status
 
-An Effect without a verified summary uses a conservative fallback:
+Missing summaries use a conservative top result, unknown footprint, store havoc
+and normal/failure/unknown completion alternatives.
 
-- top return value
-- unknown write footprint
-- store havoc
-- normal, failure and unknown completion possibilities
+`ContextualEffectSummaryRegistry` supports entry-specific verified Effect
+summaries. A summary selected for one System entry does not leak to another entry.
 
-### Guarded abstract execution
+### Pure summaries and recursive SCC handling
 
-`glyph/transition_analysis/abstract_state.py` and
-`glyph/transition_analysis/abstract_solver.py` retain correlation between:
+`function_summary.py` builds a call graph and strongly connected components.
+It provides:
+
+- ordered guarded alternatives
+- context-sensitive actual-argument instantiation
+- exact non-recursive helper inlining
+- finite summary fixpoint iteration
+- explicit `recursive-summary-limit` degradation
+
+An unresolved recursive SCC is never reported exact. The current recursive path is
+a safe fallback rather than a complete relational recursive summary domain.
+
+`SummaryAwareAbstractInterpreter` applies pure summaries and entry-specific Effect
+summaries during abstract execution.
+
+### Guarded abstract execution and widening
+
+`abstract_solver.py` retains correlation between:
 
 - path condition
-- abstract and symbolic environments
+- symbolic and abstract environments
 - store
 - selected Machine edge
 - transition result
 - Effect trace
 - completion
 
-Machine transition calls split alternatives by relational edge preimage. Effect
-calls apply summaries and split normal/failure continuation when necessary.
-Unsupported calls become `unknown` instead of being assumed pure.
+Alternatives are not immediately collapsed into an unguarded Phi. Explicit
+budgets bound total steps, alternatives per block, block iterations and Phi width.
+Budget exhaustion widens to top traces, joined state and conservative completion
+sets rather than dropping execution paths.
 
-Alternatives are deduplicated at CFG points. They are not immediately collapsed
-into an unguarded Phi.
+### Ownership and resource replay
 
-### Fixpoint budgets and widening
+`ownership_semantics.py` consumes the compiler's existing `CapabilityModel` and
+`CapabilityOperation` IR. It does not parse capability syntax again.
 
-The worklist solver has explicit budgets for:
+The current replay models:
 
-- total transfer steps
-- alternatives per block
-- block iterations
-- Phi width
+- move availability
+- shared borrow reads
+- mutable borrow reads/writes
+- capability casts
+- move/cast operation sequences
+- resource read/write/move footprints
+- use-after-move and nonexclusive mutable-borrow violations
 
-When a limit is reached, alternatives are widened to:
+Invalid or incomplete Capability IR becomes `unknown`. This layer is not yet a
+complete lifetime, place-sensitive alias and allocation semantics for every Glyph
+resource construct.
 
-- true path condition
-- joined environment and store
-- top transition trace
-- top Effect trace
-- all relevant completion possibilities
-- explicit widening/resource-limit cause
+## Validation
 
-The solver therefore terminates without silently dropping loop executions. This is
-currently a safety fallback, not a precision-optimized recursive SCC solver.
+### AST/TEIR equivalence
 
-### Bounded oracles
-
-`glyph/transition_analysis/oracle.py` enumerates finite Bool/Product/Sum domains.
-It provides two checks:
+For finite Bool/Product/Sum domains:
 
 ```text
 AST reference result == TEIR concrete result
 ```
 
-and
+The comparison includes return/error value, Machine edges, Effects and completion.
+
+### Concrete/abstract inclusion
+
+The bounded RTAI oracle checks:
 
 ```text
-TEIR concrete trace/completion
+TEIR concrete execution
   is covered by
-RTAI abstract trace/completion
+RTAI abstract execution
 ```
 
-The second check is a bounded regression oracle, not a proof for arbitrary input
-domains. It currently checks selected edge sequences, Effect operation sequences
-and completion coverage. Return-value and final-store inclusion remain to be added.
+Coverage includes:
 
-### Shadow publication
+- transition edge sequence
+- Effect operation sequence
+- completion
+- return or propagated-error value
+- final store when a stateful concrete interpreter is supplied
 
-Each Machine receives additive `rtai_semantic_bootstrap` data containing:
+This remains a bounded regression oracle, not a formal proof for arbitrary or
+unbounded programs.
 
-- supported TEIR functions
-- TEIR lowering issues
-- normalized Machine relation
-- block-local alias-resolved transition calls
-- structural edge preimages
+## Evidence projection migration
 
-`projection_source` remains `false`. Guarded abstract-analysis results remain an
-internal API until they can be transformed into property-scoped Evidence without
-weakening the exact-action checker.
+`evidence_projection.py` defines three explicit modes:
+
+- `shadow`
+- `prefer-exact`
+- `strict-exact`
+
+The normal compiler pipeline uses only `shadow`.
+
+The readiness gate verifies that every relevant context passes the independent
+exact-action checker and that exact actions agree across contexts. `prefer-exact`
+can publish a candidate without replacing the active display. `strict-exact`
+removes legacy fallback for relevant unproven contexts, but is not enabled by the
+main pipeline.
+
+StateTransitionIR currently publishes:
+
+- legacy-compatible `execution_evidence_v2`
+- `rtai_semantic_bootstrap`
+- `rtai_abstract_execution_evidence_v2`
+- Evidence projection readiness metadata
+
+None is the active UI projection source.
 
 ## Trusted computing base
 
-Before RTAI becomes the active projection source, the following remain
+Before strict Evidence projection becomes active, the following remain
 correctness-critical:
 
 - parser and type checker
-- existing syntax-to-helper lowering
+- syntax-to-helper lowering
 - helper-AST-to-TEIR lowering
 - Machine relation normalization
-- expression-to-predicate encoding
-- SMT integration and UNSAT handling
+- typed predicate encoding
+- finite solver or future general solver backend
 - Effect summaries and write footprints
-- abstract-store alias updates
+- abstract store and ownership replay
 - widening and budget fallback
-- concrete interpreters and oracle comparison
+- concrete interpreters and bounded oracles
 - Evidence serialization
 - exact-action checker
+- MachineRelation-to-view-edge specialization
 
 ## Remaining implementation work
 
-### SMT predicate solver
+### General solver backend
 
-Add a typed encoder for the supported Glyph theory and a three-valued result:
+The finite typed backend is exact for supported finite domains. A general backend
+is still required for unbounded integers, reals and richer theories. Its public
+result must remain exactly:
 
 ```text
-UnsatProven
-SatModel
-Unknown
+UnsatProven | SatModel | Unknown
 ```
 
-A solver timeout or unsupported theory must never become `UnsatProven`. SAT on an
-over-approximation remains may-reachable unless a concrete witness is replayed
-against the same edge.
+Timeout, unsupported encoding or backend failure must remain `Unknown`.
 
-### Interprocedural summaries
+### More precise recursive summaries
 
-Add context-sensitive summaries for:
+Recursive SCCs terminate safely but unresolved recursion degrades to unknown.
+Precision-oriented recursive pure and effectful summaries remain to be built.
 
-- pure guarded helpers
-- effectful helpers
-- recursive pure SCCs
-- recursive effectful SCCs
+### Complete ownership semantics
 
-Current unsupported nested calls conservatively become `unknown`.
+Capability-IR replay covers core move/borrow/cast behavior. Remaining work includes
+place-sensitive aliases, borrow lifetimes, allocation identity, nested resource
+fields and integration of ownership state into every abstract transfer.
 
-### Source-level loop and recursive fixpoints
+### Complete Effect contracts
 
-The TEIR worklist has safe loop budgets and widening, but source-level recursive
-function summaries and precision-oriented SCC fixpoints are not implemented.
+External Effects without verified summaries remain unknown. Projection migration
+requires verified return, completion and write-footprint contracts for the
+supported production surface.
 
-### Complete resource semantics
+### Witness generation and edge specialization
 
-Extend abstract locations and Effect footprints to all Glyph ownership, borrowing,
-allocation and mutation forms. Current store primitives enforce the safety
-direction but do not yet model every language resource operation.
+The native shadow Evidence adapter currently publishes MachineRelation-edge
+Evidence without automatic concrete witnesses. The pipeline still needs:
 
-### Abstract Evidence generation
+- bounded or targeted witness generation
+- concrete replay retention
+- MachineRelation-edge to rendered view-edge specialization
+- synthesized-failure specialization
 
-Convert guarded abstract alternatives into exact/may/unknown edge Evidence. Exact
-status must be issued only when the relevant property-scoped proof exists.
+Until then, native reachable contexts remain `may-reachable` and cannot authorize
+exact display.
 
-### Evidence-based UI projection
+### Strict UI switch and legacy removal
 
-The UI may switch from legacy execution contexts only after:
+The active UI may switch only after:
 
-- bounded and targeted concrete-inclusion tests pass
-- SMT UNSAT handling is independently tested
-- Effect contracts cover supported external operations
-- recursive and loop cases safely terminate
-- exact Evidence is generated by RTAI rather than the legacy adapter
-- all exact-action checker conditions are satisfied
-- synthesized failure never carries caller-side Effects
-- unknown and over-approximate results are never labeled resolved
+- native RTAI Evidence is bound to rendered edges
+- exact contexts possess verified replay witnesses
+- every supported Effect has an adequate contract
+- targeted concrete-inclusion campaigns pass
+- unknown and over-approximate states remain visibly unresolved
+- strict mode passes snapshot and application tests without legacy fallback
+
+The legacy System Action analyzer can be deleted only after strict Evidence mode
+is the sole semantic source. Deleting it earlier would remove the active behavior
+before the replacement is proven ready.
 
 ## Current claims and non-claims
 
-The current implementation claims:
+The implementation currently claims:
 
-- structure-preserving TEIR and Machine relation foundations
-- exact structural actual-argument substitution
-- independent concrete trace collection
-- finite AST/TEIR equivalence regression tests
-- finite concrete-to-abstract trace/completion coverage tests
-- conservative alias, Effect and budget fallbacks
+- structure-preserving TEIR and MachineRelation foundations
+- typed exact finite-domain `UnsatProven / SatModel / Unknown`
+- independent concrete replay witnesses
+- context-sensitive pure and Effect summary infrastructure
+- safe recursive SCC fallback
+- Capability-IR ownership replay
+- bounded return and final-store inclusion checks
+- property-scoped native abstract Evidence
+- Evidence projection readiness auditing
 - no change to active UI semantics
 
 It does not yet claim:
 
-- general exact edge reachability
-- SMT-backed UNSAT certificates
-- complete interprocedural or recursive analysis
-- complete ownership/resource modeling
-- return-value and final-store abstract inclusion
+- general unbounded SMT completeness
+- precise analysis of every recursive program
+- complete Glyph lifetime and place semantics
+- verified contracts for every external Effect
+- automatic exact witnesses for every rendered transition
 - formal proof of concrete-execution inclusion
-- replacement of existing System Action projection
-
-These properties must not be inferred from `execution_evidence_v2` or
-`rtai_semantic_bootstrap` alone.
+- replacement or deletion of the legacy System Action analyzer
