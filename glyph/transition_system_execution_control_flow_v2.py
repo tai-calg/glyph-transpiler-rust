@@ -7,6 +7,7 @@ from . import transition_system_execution_control_flow as _base
 from ._transition_branch_semantics import (
     branch_value_for_transition,
     build_machine_branch_context,
+    _inline_unguarded,
     substitute_expr,
     unwrap_expr,
 )
@@ -30,6 +31,7 @@ from .execution_ir import render_expr
 _SUCCESS_VALUE_NAME = "__glyph_success_value__"
 _UNPROVEN_STATE_INPUT_CODE = "STIR_SYSTEM_STATE_INPUT_UNPROVEN"
 _UNPROVEN_TRANSITION_ARGUMENT_CODE = "STIR_SYSTEM_TRANSITION_ARGUMENT_UNPROVEN"
+_UNPROVEN_TRANSITION_VALUE_NAME = "__glyph_unproven_transition_result__"
 
 
 def _conditions_expression(conditions: Sequence[str]) -> Expr | None:
@@ -228,7 +230,50 @@ class _SystemExecutionEvaluator(_base._SystemExecutionEvaluator):
         )
         self.source_state = source_state
         self.expected_transition_arguments = _machine_next_arguments(branch_context)
+        self.machine_input_names = frozenset(
+            parameter.name for parameter in branch_context.machine.input_params
+        )
         self.transition_argument_mismatch = False
+
+    def _is_open_machine_input(self, expression: Expr) -> bool:
+        expression = _inline_unguarded(expression, self._context.functions)
+        if isinstance(expression, NameExpr):
+            return expression.name in self.machine_input_names
+        if isinstance(expression, FieldExpr):
+            return self._is_open_machine_input(expression.base)
+        if isinstance(expression, TryExpr):
+            return self._is_open_machine_input(expression.expr)
+        if not isinstance(expression, CallExpr) or not isinstance(
+            expression.callee, NameExpr
+        ):
+            return False
+        name = expression.callee.name
+        if name in self._externs:
+            return True
+        if name in self._context.products:
+            return bool(expression.args) and all(
+                self._is_open_machine_input(argument) for argument in expression.args
+            )
+        return False
+
+    def _transition_arguments_are_proven(self, call: CallExpr) -> bool:
+        if len(call.args) != len(self.expected_transition_arguments):
+            return False
+        state_name = self._context.machine.state_param.name
+        for actual, expected in zip(
+            call.args, self.expected_transition_arguments, strict=True
+        ):
+            if isinstance(expected, NameExpr) and expected.name == state_name:
+                if actual != expected:
+                    return False
+                continue
+            if isinstance(expected, NameExpr) and expected.name in self.machine_input_names:
+                if not self._is_open_machine_input(actual):
+                    return False
+                continue
+            if actual != expected:
+                return False
+        return True
 
     def evaluate(
         self,
@@ -381,12 +426,13 @@ class _SystemExecutionEvaluator(_base._SystemExecutionEvaluator):
             isinstance(symbolic.callee, NameExpr)
             and isinstance(concrete.callee, NameExpr)
             and symbolic.callee.name == concrete.callee.name == self._context.next_function
-            and symbolic.args != self.expected_transition_arguments
+            and not self._transition_arguments_are_proven(symbolic)
         ):
             self.transition_argument_mismatch = True
+            opaque = NameExpr(_UNPROVEN_TRANSITION_VALUE_NAME)
             return (
                 _base._Case(
-                    _base._ExprPair(symbolic, concrete),
+                    _base._ExprPair(opaque, opaque),
                     unresolved=True,
                     transition_calls=1,
                     conditions=conditions,
@@ -693,7 +739,10 @@ def attach_transition_system_execution_actions(
                         line,
                     ),
                 )
-            elif evaluator.transition_argument_mismatch:
+            elif (
+                evaluator.transition_argument_mismatch
+                and binding.get("status") != "multiple-transition-calls"
+            ):
                 proof_blocked = True
                 proof_reason = (
                     f"call to `{branch_context.next_function}` does not preserve the "
