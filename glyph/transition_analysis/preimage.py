@@ -10,19 +10,27 @@ from .._transition_branch_semantics import (
     substitute_expr,
 )
 from ..artifacts import CompilationModel
-from ..compiler import BinaryExpr, BoolExpr, Expr
+from ..compiler import BinaryExpr, BoolExpr, Expr, TypeRef
 from .exactness import (
     Approximation,
     ExactnessProof,
     ExactnessProofKind,
     ExactnessProofScope,
 )
-from .machine_relation import EdgeSpec, MachineRelation, build_machine_relation
+from .machine_relation import EdgeSpec, build_machine_relation
+from .typed_smt import (
+    SatModel,
+    SolverResult,
+    SolverUnknown,
+    TypedConstraintSolver,
+    UnsatProven,
+)
 
 
 class PreimageStatus(str, Enum):
     PROVEN_FALSE = "proven-false"
     PROVEN_TRUE = "proven-true"
+    SAT_MODEL = "sat-model"
     SYMBOLIC = "symbolic"
     UNKNOWN = "unknown"
 
@@ -34,6 +42,7 @@ class EdgePreimage:
     status: PreimageStatus
     result_expression: Expr
     approximation: Approximation
+    solver_result: SolverResult
 
     def to_ir(self) -> dict[str, object]:
         return {
@@ -42,6 +51,7 @@ class EdgePreimage:
             "status": self.status.value,
             "result_expression": repr(self.result_expression),
             "approximation": self.approximation.to_ir(),
+            "solver_result": self.solver_result.to_ir(),
         }
 
 
@@ -71,12 +81,15 @@ def compute_transition_call_preimage(
     actual_arguments: Sequence[Expr],
     *,
     caller_condition: Expr = BoolExpr(True),
+    type_environment: Mapping[str, TypeRef] | None = None,
+    solver: TypedConstraintSolver | None = None,
 ) -> TransitionCallPreimage | None:
-    """Substitute System actual arguments into normalized Machine edge guards.
+    """Substitute caller actual arguments into normalized Machine edge guards.
 
-    This is the RTAI relation operation itself.  It preserves constructor order,
-    field selection and helper-expanded expression structure; no provenance-root
-    comparison is performed.
+    The returned condition is always the structural relational preimage.  Solver
+    results are separate and three-valued: only ``UnsatProven`` authorizes edge
+    removal, ``SatModel`` supplies an existence witness, and every unsupported or
+    over-budget case remains ``Unknown``.
     """
 
     relation = build_machine_relation(model, machine_name)
@@ -99,6 +112,7 @@ def compute_transition_call_preimage(
         products=context.products,
         constants=context.constants,
     )
+    active_solver = solver or TypedConstraintSolver(model)
     edges = tuple(
         _edge_preimage(
             edge,
@@ -106,6 +120,8 @@ def compute_transition_call_preimage(
             caller,
             products=context.products,
             constants=context.constants,
+            type_environment=type_environment,
+            solver=active_solver,
         )
         for edge in relation.edges
     )
@@ -129,6 +145,8 @@ def _edge_preimage(
     *,
     products: Mapping[str, object],
     constants: frozenset[str],
+    type_environment: Mapping[str, TypeRef] | None,
+    solver: TypedConstraintSolver,
 ) -> EdgePreimage:
     substituted_guard = substitute_expr(edge.effective_guard, substitution)
     condition = simplify_expr(
@@ -141,10 +159,31 @@ def _edge_preimage(
         products=products,  # type: ignore[arg-type]
         constants=constants,
     )
+
     if isinstance(condition, BoolExpr):
-        status = PreimageStatus.PROVEN_TRUE if condition.value else PreimageStatus.PROVEN_FALSE
+        solver_result: SolverResult = (
+            SatModel(())
+            if condition.value
+            else UnsatProven("predicate simplified to literal false")
+        )
+    elif type_environment is None:
+        solver_result = SolverUnknown("solver type environment is unavailable")
     else:
+        solver_result = solver.solve(condition, type_environment)
+
+    if isinstance(solver_result, UnsatProven):
+        status = PreimageStatus.PROVEN_FALSE
+    elif isinstance(solver_result, SatModel):
+        status = (
+            PreimageStatus.PROVEN_TRUE
+            if isinstance(condition, BoolExpr) and condition.value
+            else PreimageStatus.SAT_MODEL
+        )
+    elif type_environment is None:
         status = PreimageStatus.SYMBOLIC
+    else:
+        status = PreimageStatus.UNKNOWN
+
     proof = ExactnessProof(
         ExactnessProofKind.STRUCTURAL_IDENTITY,
         ExactnessProofScope.TRANSITION_PREIMAGE,
@@ -156,6 +195,7 @@ def _edge_preimage(
         status,
         result,
         Approximation.exact(proof),
+        solver_result,
     )
 
 
