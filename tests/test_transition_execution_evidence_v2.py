@@ -131,9 +131,13 @@ class ExactActionProjectionTests(unittest.TestCase):
             ).to_ir()
 
         context = {
+            "edge_id": "Closed->Open@1",
             "reachability": {
                 "status": "proven-reachable",
-                "witness": {"input": "OpenRequest"},
+                "witness": {
+                    "edge_id": "Closed->Open@1",
+                    "input": "OpenRequest",
+                },
                 "approximation": proof(ExactnessProofScope.REACHABILITY),
             },
             "cardinality": {
@@ -161,11 +165,57 @@ class ExactActionProjectionTests(unittest.TestCase):
                 "approximation": proof(ExactnessProofScope.COMPLETION),
             },
             "unknown_reasons": [],
-            "legacy_action": {"display": "actuator(Open)"},
         }
         decision = check_exact_action_projection(context)
         self.assertTrue(decision.allowed)
-        self.assertEqual(decision.action, {"display": "actuator(Open)"})
+        self.assertEqual(
+            decision.action,
+            {
+                "kind": "effect-trace",
+                "events": [
+                    {
+                        "operation": "actuator",
+                        "expression": "actuator(Open)",
+                    }
+                ],
+            },
+        )
+
+    def test_checker_rejects_witness_for_another_edge(self) -> None:
+        def proof(scope: ExactnessProofScope) -> dict[str, object]:
+            return Approximation.exact(
+                ExactnessProof(
+                    ExactnessProofKind.EXHAUSTIVE_FINITE_ORACLE,
+                    scope,
+                    "finite oracle",
+                )
+            ).to_ir()
+
+        context = {
+            "edge_id": "Closed->Open@1",
+            "reachability": {
+                "status": "proven-reachable",
+                "witness": {"edge_id": "Open->Closed@2"},
+                "approximation": proof(ExactnessProofScope.REACHABILITY),
+            },
+            "cardinality": {
+                "upper_bound": "at-most-one",
+                "approximation": proof(ExactnessProofScope.CARDINALITY),
+            },
+            "effect_trace": {
+                "alternatives": [{"condition": None, "events": []}],
+                "is_singleton": True,
+                "approximation": proof(ExactnessProofScope.EFFECT_TRACE),
+            },
+            "completion": {
+                "kinds": ["normal"],
+                "approximation": proof(ExactnessProofScope.COMPLETION),
+            },
+            "unknown_reasons": [],
+        }
+        decision = check_exact_action_projection(context)
+        self.assertFalse(decision.allowed)
+        self.assertEqual(decision.reason, "concrete-witness-edge-mismatch")
 
     def test_synthesized_failure_has_no_caller_context(self) -> None:
         machine = {
