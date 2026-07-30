@@ -1,0 +1,35 @@
+system DoorControl
+  entry control
+
+  in state:DoorState
+  in input:Input
+  out state_out:DoorState
+
+  state -> control
+  input -> control
+  control -> state_out
+  control -> actuator
+
+machine Door(state:DoorState,input:Input)
+  select=state.mode
+  init=DoorState(Closed)
+  next=step(state,input)
+  success=Open
+  failure=Alarm
+
+*Input(open_request:B)
++DoorMode=Closed|Open|Alarm
+*DoorState(mode:DoorMode)
+
+# This acceptance Effect is intentionally paired with a reviewed read-only
+# identity contract in verify_rtai_strict_projection_snapshot.py.
+!actuator(state:DoorState):DoorState
+
+>step(state:DoorState,input:Input):DoorState
+  state.mode==Closed&input.open_request >> DoorState(Open)
+  _ >> state
+
+>control(state:DoorState,input:Input):DoorState
+  next := step(state,input)
+  observed := actuator(next)
+  observed
