@@ -7,6 +7,7 @@ from . import transition_system_execution_control_flow as _base
 from ._transition_branch_semantics import (
     branch_value_for_transition,
     build_machine_branch_context,
+    substitute_expr,
 )
 from ._transition_source_planning import planned_source_branches, semantic_truth_value
 from .artifacts import CompilationModel
@@ -66,8 +67,17 @@ def _prune_infeasible_cases(
     )
 
 
+def _is_success_value(expression: Expr) -> bool:
+    return (
+        isinstance(expression, CallExpr)
+        and isinstance(expression.callee, NameExpr)
+        and expression.callee.name == _SUCCESS_VALUE_NAME
+        and len(expression.args) == 1
+    )
+
+
 class _SystemExecutionEvaluator(_base._SystemExecutionEvaluator):
-    """Path evaluator with feasible-path pruning and explicit `?` success values."""
+    """Path evaluator with feasible-path pruning and explicit `?` continuations."""
 
     def evaluate(
         self,
@@ -149,12 +159,7 @@ class _SystemExecutionEvaluator(_base._SystemExecutionEvaluator):
         after_transition: bool,
         conditions: tuple[str, ...],
     ) -> tuple[_base._Case, ...]:
-        if (
-            isinstance(symbolic.callee, NameExpr)
-            and isinstance(concrete.callee, NameExpr)
-            and symbolic.callee.name == _SUCCESS_VALUE_NAME
-            and concrete.callee.name == _SUCCESS_VALUE_NAME
-        ):
+        if _is_success_value(symbolic) and _is_success_value(concrete):
             return (
                 _base._Case(
                     _base._ExprPair(symbolic, concrete),
@@ -169,6 +174,144 @@ class _SystemExecutionEvaluator(_base._SystemExecutionEvaluator):
             after_transition=after_transition,
             conditions=conditions,
         )
+
+
+def _merge_block_state(
+    state: _base._BlockState,
+    result: _base._Case,
+    *,
+    binding_name: str | None = None,
+) -> _base._BlockState:
+    symbolic_values = dict(state.symbolic_values)
+    concrete_values = dict(state.concrete_values)
+    if binding_name is not None and not result.terminated:
+        if _is_success_value(result.value.symbolic) and _is_success_value(
+            result.value.concrete
+        ):
+            # `?` binds the successful payload once. Keep the source-level binding
+            # name in later expressions instead of embedding or replaying the call.
+            symbolic_values[binding_name] = NameExpr(binding_name)
+            concrete_values[binding_name] = NameExpr(binding_name)
+        else:
+            symbolic_values[binding_name] = result.value.symbolic
+            concrete_values[binding_name] = result.value.concrete
+    return _base._BlockState(
+        symbolic_values,
+        concrete_values,
+        (*state.invocations, *result.invocations),
+        state.unresolved or result.unresolved,
+        state.transition_calls + result.transition_calls,
+        result.conditions,
+        state.terminated or result.terminated,
+        result.termination or state.termination,
+    )
+
+
+def _evaluate_block(
+    context: _base._ExecutionContext,
+    evaluator: _SystemExecutionEvaluator,
+) -> _base._ContextEvaluation:
+    assert context.block is not None
+    states: list[_base._BlockState] = [_base._BlockState({}, {})]
+    path = (context.entry,)
+    for binding in context.block.bindings:
+        next_states: list[_base._BlockState] = []
+        for state in states:
+            if state.terminated:
+                next_states.append(state)
+                continue
+            site = _base._TraceSite(context.system, context.entry, binding.line, path)
+            if binding.kind == "conditional":
+                cases = _base._evaluate_conditional_binding(
+                    binding.source,
+                    state,
+                    evaluator,
+                    site,
+                )
+            else:
+                try:
+                    expression = parse_expr(binding.source)
+                except Exception:
+                    next_states.append(
+                        _base._BlockState(
+                            state.symbolic_values,
+                            state.concrete_values,
+                            state.invocations,
+                            True,
+                            state.transition_calls,
+                            state.conditions,
+                            state.terminated,
+                            state.termination,
+                        )
+                    )
+                    continue
+                cases = evaluator.evaluate(
+                    _base._ExprPair(
+                        substitute_expr(expression, state.symbolic_values),
+                        substitute_expr(expression, state.concrete_values),
+                    ),
+                    site,
+                    after_transition=state.transition_calls > 0,
+                    conditions=state.conditions,
+                )
+            next_states.extend(
+                _merge_block_state(state, case, binding_name=binding.name)
+                for case in cases
+            )
+        states = next_states
+
+    final_states: list[_base._BlockState] = []
+    for state in states:
+        if state.terminated:
+            final_states.append(state)
+            continue
+        try:
+            expression = parse_expr(context.block.final_source)
+        except Exception:
+            final_states.append(
+                _base._BlockState(
+                    state.symbolic_values,
+                    state.concrete_values,
+                    state.invocations,
+                    True,
+                    state.transition_calls,
+                    state.conditions,
+                )
+            )
+            continue
+        cases = evaluator.evaluate(
+            _base._ExprPair(
+                substitute_expr(expression, state.symbolic_values),
+                substitute_expr(expression, state.concrete_values),
+            ),
+            _base._TraceSite(
+                context.system,
+                context.entry,
+                context.block.final_line,
+                path,
+            ),
+            after_transition=state.transition_calls > 0,
+            conditions=state.conditions,
+        )
+        final_states.extend(_merge_block_state(state, case) for case in cases)
+
+    return _base._ContextEvaluation(
+        context,
+        _base._deduplicate_cases(
+            [
+                _base._Case(
+                    _base._ExprPair(NameExpr("_"), NameExpr("_")),
+                    state.invocations,
+                    state.unresolved,
+                    state.transition_calls,
+                    state.conditions,
+                    state.terminated,
+                    state.termination,
+                )
+                for state in final_states
+            ]
+        ),
+    )
 
 
 def _diagnostic(code: str, message: str, line: int) -> dict[str, object]:
@@ -235,7 +378,7 @@ def attach_transition_system_execution_actions(
                 branch_value=branch_value,
             )
             evaluation = (
-                _base._evaluate_block(context, evaluator)
+                _evaluate_block(context, evaluator)
                 if context.block is not None
                 else _base._evaluate_function(context, evaluator)
             )
