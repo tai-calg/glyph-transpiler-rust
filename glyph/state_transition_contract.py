@@ -28,6 +28,9 @@ TRANSITION_ACTION_TARGET_INDEPENDENCE_VERSION = 1
 # New additive contracts. They do not reinterpret the existing v1 fields.
 TRANSITION_EXECUTION_CONTEXT_CONTROL_FLOW_VERSION = 1
 TRANSITION_EXECUTION_CONTEXT_PROJECTION_VERSION = 1
+# Evidence v2 is initially emitted as a shadow contract. It is not a display
+# projection source until exactness and witness requirements are satisfied.
+TRANSITION_EXECUTION_EVIDENCE_VERSION = 2
 
 
 def raw_transition_ir_marker() -> dict[str, object]:
