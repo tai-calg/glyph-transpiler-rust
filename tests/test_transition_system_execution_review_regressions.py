@@ -77,7 +77,8 @@ class TransitionSystemExecutionReviewRegressions(unittest.TestCase):
         self.assertIn("!(input.authorized)", conditions)
 
     def test_try_success_binding_uses_unwrapped_value_without_replaying_operation(self) -> None:
-        source = SYSTEM + "\n" + BASE + """
+        system = SYSTEM.replace("  control -> actuator\n", "  control -> apply_checked\n")
+        source = system + "\n" + BASE + """
 +AuditError=Rejected
 !audit(state:DoorState):R<B,AuditError>
 !apply_checked(checked:B,state:DoorState):R<Receipt,AuditError>
