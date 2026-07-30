@@ -42,12 +42,22 @@ function installOverrides(){
  if(typeof renderSummary==="function"&&!renderSummary.__glyphLocalized){const localized=function(){const s=snapshot?.views?.summary||{};const markup=[["systems",s.systems,""],["callables",s.callables,""],["types",s.types,""],["machines",s.machines,""],["warnings",s.state_warnings,"warn"]].map(([key,value,cls])=>`<span class="pill ${cls}">${html(t(key))}: ${value??0}</span>`).join("");const target=document.getElementById("summary");if(target&&target.innerHTML!==markup)target.innerHTML=markup};localized.__glyphLocalized=true;renderSummary=localized}
  if(typeof render==="function"&&!render.__glyphLocalized){const base=render;const localized=function(){base();queueMicrotask(apply)};localized.__glyphLocalized=true;render=localized}
 }
+function applyMachineDiagnostics(){
+ const current=document.querySelector(".analysis-panel");
+ const machine=selectedMachine();
+ if(!machine||typeof renderMachineDiagnostics!=="function"){current?.remove();return}
+ const markup=renderMachineDiagnostics(machine);
+ if(!markup){current?.remove();return}
+ const template=document.createElement("template");template.innerHTML=markup.trim();const next=template.content.firstElementChild;if(!next)return;
+ if(current){if(current.outerHTML!==next.outerHTML)current.replaceWith(next)}else{document.querySelector(".machine-meta")?.insertAdjacentElement("afterend",next)}
+ if(typeof bindJumps==="function")bindJumps();
+}
 function setText(selector,value){const element=document.querySelector(selector);if(element&&element.textContent!==value)element.textContent=value}
 function apply(){
  if(document.documentElement.lang!==locale)document.documentElement.lang=locale;
  setText("#compile",t("compile"));setText("#save",t("save"));setText(".toolbar-title",t("source"));
  document.querySelectorAll(".tab").forEach(tab=>{const value=tab.dataset.tab==="state"?t("state"):t("io");if(tab.textContent!==value)tab.textContent=value});
- const stateView=document.querySelector('.tab.active')?.dataset.tab==="state";
+ const stateView=document.querySelector(".tab.active")?.dataset.tab==="state";
  const title=document.querySelector(".view-controls h2");if(title){const value=stateView?t("stateTitle"):t("ioTitle");if(title.textContent!==value)title.textContent=value}
  const note=document.querySelector(".view-controls .note");if(note&&STANDARD_NOTES.has(note.textContent.trim())){const value=stateView?t("stateNote"):t("ioNote");if(note.textContent!==value)note.textContent=value}
  setText(".transition-index-title>span:first-child",t("transitionDetails"));setText(".transition-index-note",t("transitionNote"));setText(".type-section h3",t("typesSection"));
