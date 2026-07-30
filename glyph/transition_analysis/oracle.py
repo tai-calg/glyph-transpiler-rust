@@ -6,6 +6,8 @@ from typing import Mapping
 
 from ..artifacts import CompilationModel
 from ..compiler import FunctionDecl, ProductDecl, SumDecl, TypeRef
+from .abstract_solver import AbstractInterpreter
+from .abstract_state import AbstractAnalysisResult, GuardedAlternative
 from .concrete import (
     ConcreteExecutionResult,
     ConcreteInterpreter,
@@ -13,6 +15,7 @@ from .concrete import (
     EffectHandler,
     VariantValue,
 )
+from .effect_summary import EffectSummary
 from .reference import ReferenceInterpreter
 
 
@@ -45,15 +48,118 @@ class BoundedOracleReport:
         return not self.mismatches
 
 
+@dataclass(frozen=True)
+class AbstractCoverageCase:
+    arguments: tuple[object, ...]
+    concrete: ConcreteExecutionResult
+    covered: bool
+
+
+@dataclass(frozen=True)
+class BoundedSoundnessReport:
+    function: str
+    abstract: AbstractAnalysisResult
+    cases: tuple[AbstractCoverageCase, ...]
+
+    @property
+    def uncovered(self) -> tuple[AbstractCoverageCase, ...]:
+        return tuple(case for case in self.cases if not case.covered)
+
+    @property
+    def sound_for_bounded_domain(self) -> bool:
+        return not self.uncovered
+
+
 def compare_bounded_ast_and_teir(
     model: CompilationModel,
     function_name: str,
     *,
-    effect_handlers: Mapping[str, EffectHandler] = {},
+    effect_handlers: Mapping[str, EffectHandler] | None = None,
     max_cases: int = 4096,
 ) -> BoundedOracleReport:
     """Exhaustively compare source control flow and TEIR for finite inputs."""
 
+    argument_cases = _finite_argument_cases(model, function_name, max_cases=max_cases)
+    handlers = dict(effect_handlers or {})
+    cases: list[OracleCase] = []
+    for arguments in argument_cases:
+        reference = ReferenceInterpreter(
+            model,
+            effect_handlers=handlers,
+        ).run(function_name, arguments)
+        teir = ConcreteInterpreter(
+            model,
+            effect_handlers=handlers,
+        ).run(function_name, arguments)
+        cases.append(OracleCase(tuple(arguments), reference, teir))
+    return BoundedOracleReport(function_name, tuple(cases))
+
+
+def compare_bounded_teir_and_abstract(
+    model: CompilationModel,
+    function_name: str,
+    *,
+    effect_handlers: Mapping[str, EffectHandler] | None = None,
+    effect_summaries: Mapping[str, EffectSummary] | None = None,
+    max_cases: int = 4096,
+) -> BoundedSoundnessReport:
+    """Check concrete trace/completion inclusion over one finite input domain.
+
+    This is a bounded regression oracle, not a general proof. A concrete
+    execution is covered when at least one abstract alternative admits its
+    completion and exact transition/effect operation sequences, or explicitly
+    carries a top trace.
+    """
+
+    argument_cases = _finite_argument_cases(model, function_name, max_cases=max_cases)
+    abstract = AbstractInterpreter(
+        model,
+        effect_summaries=effect_summaries,
+    ).analyze(function_name)
+    handlers = dict(effect_handlers or {})
+    cases: list[AbstractCoverageCase] = []
+    for arguments in argument_cases:
+        concrete = ConcreteInterpreter(
+            model,
+            effect_handlers=handlers,
+        ).run(function_name, arguments)
+        cases.append(
+            AbstractCoverageCase(
+                tuple(arguments),
+                concrete,
+                any(
+                    _alternative_covers_concrete(alternative, concrete)
+                    for alternative in abstract.completed
+                ),
+            )
+        )
+    return BoundedSoundnessReport(function_name, abstract, tuple(cases))
+
+
+def _alternative_covers_concrete(
+    alternative: GuardedAlternative,
+    concrete: ConcreteExecutionResult,
+) -> bool:
+    completion = concrete.completion
+    if completion not in alternative.completion and "unknown" not in alternative.completion:
+        return False
+    concrete_edges = tuple(event.edge_id for event in concrete.transition_trace)
+    abstract_edges = tuple(event.edge_id for event in alternative.transition_trace)
+    if not alternative.transition_trace_top and concrete_edges != abstract_edges:
+        return False
+    concrete_effects = tuple(event.operation for event in concrete.effect_trace)
+    abstract_effects = tuple(event.operation for event in alternative.effect_trace)
+    if not alternative.effect_trace_top and concrete_effects != abstract_effects:
+        return False
+    return True
+
+
+def _finite_argument_cases(
+    model: CompilationModel,
+    function_name: str,
+    *,
+    max_cases: int,
+) -> tuple[tuple[object, ...], ...]:
     declaration = next(
         (
             item
@@ -72,19 +178,7 @@ def compare_bounded_ast_and_teir(
         raise FiniteDomainError(
             f"bounded oracle requires {total} cases, limit is {max_cases}"
         )
-
-    cases: list[OracleCase] = []
-    for arguments in product(*domains):
-        reference = ReferenceInterpreter(
-            model,
-            effect_handlers=effect_handlers,
-        ).run(function_name, arguments)
-        teir = ConcreteInterpreter(
-            model,
-            effect_handlers=effect_handlers,
-        ).run(function_name, arguments)
-        cases.append(OracleCase(tuple(arguments), reference, teir))
-    return BoundedOracleReport(function_name, tuple(cases))
+    return tuple(tuple(arguments) for arguments in product(*domains))
 
 
 def finite_values(
