@@ -30,6 +30,11 @@ from .transition_analysis import (
     attach_execution_evidence_v2,
     attach_rtai_semantic_bootstrap,
 )
+from .transition_analysis.evidence_projection import (
+    EVIDENCE_PROJECTION_VERSION,
+    EvidenceProjectionMode,
+    project_machine_from_evidence,
+)
 from .transition_analysis.lowering import lower_compilation_model_report
 from .transition_condition_roles import classify_machine_transition_roles
 from .transition_enabling_case_compatibility import preserve_legacy_transition_metadata
@@ -147,9 +152,9 @@ def enrich_state_transition_ir(
         attach_transition_system_execution_actions(model, machine)
         for machine in projected
     ]
-    # RTAI Evidence v2 and semantic bootstrap are emitted in shadow mode.
-    # Unsupported TEIR constructs are published as lowering issues and never
-    # break the ordinary compiler or change the active display projection.
+    # RTAI Evidence, semantic bootstrap and UI readiness are all shadow outputs.
+    # Unsupported constructs are recorded but cannot break normal compilation or
+    # change the active display projection.
     rtai_report = lower_compilation_model_report(model)
     evidenced = [attach_execution_evidence_v2(machine) for machine in system_executed]
     bootstrapped = [
@@ -161,8 +166,15 @@ def enrich_state_transition_ir(
         )
         for machine in evidenced
     ]
+    evidence_audited = [
+        project_machine_from_evidence(
+            machine,
+            mode=EvidenceProjectionMode.SHADOW,
+        )
+        for machine in bootstrapped
+    ]
     compatible = [
-        attach_output_action_compatibility(machine) for machine in bootstrapped
+        attach_output_action_compatibility(machine) for machine in evidence_audited
     ]
     classified = [
         classify_machine_transition_roles(model, machine) for machine in compatible
@@ -211,6 +223,7 @@ def enrich_state_transition_ir(
         TRANSITION_EXECUTION_EVIDENCE_VERSION
     )
     result["rtai_semantic_bootstrap_version"] = RTAI_SEMANTIC_BOOTSTRAP_VERSION
+    result["rtai_evidence_projection_version"] = EVIDENCE_PROJECTION_VERSION
     result["transition_action_target_independence_version"] = (
         TRANSITION_ACTION_TARGET_INDEPENDENCE_VERSION
     )
@@ -220,6 +233,10 @@ def enrich_state_transition_ir(
         for machine in state["machines"]
         for diagnostic in machine.get("diagnostics", [])
         if diagnostic.get("severity") == "warning"
+    )
+    summary["rtai_evidence_projection_ready_machines"] = sum(
+        bool(machine.get("analysis", {}).get("evidence_projection_ready"))
+        for machine in state["machines"]
     )
     result["summary"] = summary
     return localize_state_views(result)
