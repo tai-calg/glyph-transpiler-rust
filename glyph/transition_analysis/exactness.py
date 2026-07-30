@@ -49,6 +49,7 @@ class ExactnessProofScope(str, Enum):
     TRANSITION_PREIMAGE = "transition-preimage"
     TEIR_EXECUTION = "teir-execution"
     FUNCTION_SUMMARY = "function-summary"
+    EFFECT_CONTRACT = "effect-contract"
     REACHABILITY = "reachability"
     CARDINALITY = "cardinality"
     EFFECT_TRACE = "effect-trace"
