@@ -150,6 +150,31 @@ try {
   await page.waitForFunction(() => document.querySelector("#glyph-settings-dialog")?.open === false);
 
   const originalSource = await page.locator("#editor").inputValue();
+  const unresolvedSource = originalSource
+    .replace("  audit_control -> audit\n", "  audit_control -> loop\n")
+    .replace("  audit(next)\n", "  loop(next)\n")
+    .concat("\n>loop(value:DoorState):Receipt=loop(value)\n");
+  assert.notEqual(unresolvedSource, originalSource, "unresolved route replacement did not match source");
+  await page.locator("#editor").fill(unresolvedSource);
+  await page.locator("#editor").dispatchEvent("input");
+  await page.waitForFunction(() => (
+    [...document.querySelectorAll("#execution-context-select option")]
+      .some(option => option.textContent === "DoorAudit / audit_control (unresolved)")
+  ), null, { timeout: 60_000 });
+  await page.selectOption("#execution-context-select", {
+    label: "DoorAudit / audit_control (unresolved)",
+  });
+  await waitForProjection(page, noActions);
+  const blocked = await page.evaluate(() => {
+    const machineView = snapshot.views.state.machines.find(item => item.name === "Door");
+    return machineView.transitions.map(transition => {
+      const projection = window.GlyphExecutionContext.projectionFor(transition);
+      return { blocked: projection.blocked, action: projection.action };
+    });
+  });
+  assert(blocked.every(item => item.blocked === true));
+  assert(blocked.every(item => item.action === null));
+
   const actionlessSource = originalSource.replace("  audit(next)\n", "  Receipt(next)\n");
   assert.notEqual(actionlessSource, originalSource, "audit action replacement did not match source");
   await page.locator("#editor").fill(actionlessSource);
@@ -181,4 +206,4 @@ try {
   await stopProcess();
 }
 
-console.log("verified complete, live, localized execution-context selection and SVG projection");
+console.log("verified complete, safe, live, localized execution-context selection and SVG projection");
