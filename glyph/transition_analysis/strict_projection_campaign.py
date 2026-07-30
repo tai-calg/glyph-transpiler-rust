@@ -11,7 +11,7 @@ from .native_projection_readiness import attach_native_evidence_projection_readi
 from .view_edge_specialization import attach_view_edge_specialization
 
 
-STRICT_PROJECTION_CAMPAIGN_VERSION = 1
+STRICT_PROJECTION_CAMPAIGN_VERSION = 2
 
 
 def build_strict_projection_candidate(
@@ -23,10 +23,11 @@ def build_strict_projection_candidate(
 ) -> dict[str, object]:
     """Build a fail-closed native-Evidence projection candidate.
 
-    This API is intentionally separate from the default compiler pipeline. It
-    disables legacy System Action fallback for every rendered transition, retains
-    Machine-owned actions, and publishes an explicit campaign report. An unready
-    edge receives no System Action instead of borrowing legacy output.
+    This lower-level API accepts one already-normalized machine view. It disables
+    legacy System Action fallback, retains Machine-owned actions, and publishes an
+    explicit campaign report. The full-view builder below is the stronger campaign:
+    it constructs the view through the strict pipeline and never runs the legacy
+    System Action analyzer.
     """
 
     specialized = attach_view_edge_specialization(model, dict(machine_view))
@@ -57,36 +58,21 @@ def build_strict_projection_candidate(
         )
         transitions.append(transition)
 
-    native_report = _mapping(
-        result.get("rtai_native_evidence_projection_readiness")
-    )
-    evidence_payload = _mapping(result.get("rtai_abstract_execution_evidence_v2"))
-    witness_report = _mapping(evidence_payload.get("witness_generation"))
-    ready = bool(native_report.get("ready")) and bool(
-        witness_report.get("complete")
-    )
-    blockers = _campaign_blockers(native_report, witness_report)
-
+    report = _machine_campaign_report(result)
     analysis = dict(_mapping(result.get("analysis")))
     analysis.update(
         {
             "rtai_strict_projection_campaign_version": (
                 STRICT_PROJECTION_CAMPAIGN_VERSION
             ),
-            "rtai_strict_projection_campaign_ready": ready,
+            "rtai_strict_projection_campaign_ready": report["ready"],
             "rtai_strict_projection_legacy_fallback_enabled": False,
-            "rtai_strict_projection_blocker_count": len(blockers),
+            "rtai_strict_projection_legacy_analyzer_enabled": None,
+            "rtai_strict_projection_blocker_count": len(report["blockers"]),
         }
     )
     result["transitions"] = transitions
-    result["strict_projection_campaign"] = {
-        "version": STRICT_PROJECTION_CAMPAIGN_VERSION,
-        "ready": ready,
-        "projection_source": "rtai-execution-evidence-v2",
-        "legacy_fallback_allowed": False,
-        "witness_generation_complete": bool(witness_report.get("complete")),
-        "blockers": blockers,
-    }
+    result["strict_projection_campaign"] = report
     result["analysis"] = analysis
     return result
 
@@ -98,47 +84,111 @@ def build_strict_io_state_views(
     *,
     witness_max_cases: int = 4096,
 ) -> dict[str, object]:
-    """Build complete I/O and State views for a no-legacy-fallback campaign."""
+    """Build complete views without executing the legacy System Action analyzer."""
 
-    # Local import avoids a package initialization cycle: io_state_views imports the
-    # normal state-transition pipeline, which imports the transition_analysis API.
-    from ..io_state_views import build_io_state_views
+    # Local imports avoid a package initialization cycle. These helpers own the
+    # canonical raw I/O view projection; only the final state-transition enrichment
+    # is selected as strict native Evidence.
+    from ..compiler import AliasDecl, ExternDecl, FunctionDecl, ProductDecl, SumDecl
+    from ..io_state_views import (
+        IO_STATE_VIEWS_SCHEMA,
+        IO_STATE_VIEWS_VERSION,
+        _explicit_systems,
+        _implicit_program,
+        _signature,
+        _source_external_names,
+        _type_declaration,
+        _unconnected_system,
+    )
+    from ..state_machine_analysis import analyze_machine
+    from ..state_machine_source_map import remap_machine_analysis_source_lines
+    from ..state_transition_pipeline import enrich_state_transition_ir
 
-    base = build_io_state_views(model, execution)  # type: ignore[arg-type]
-    result = deepcopy(base)
+    external_names = _source_external_names(model)
+    signatures = {
+        declaration.name: _signature(declaration, external_names)
+        for declaration in model.program.declarations
+        if isinstance(declaration, (FunctionDecl, ExternDecl))
+    }
+    types = [
+        _type_declaration(declaration)
+        for declaration in model.program.declarations
+        if isinstance(declaration, (ProductDecl, SumDecl, AliasDecl))
+    ]
+    systems, bound = _explicit_systems(model, signatures)
+    if systems:
+        unconnected = _unconnected_system(signatures, bound)
+        if unconnected is not None:
+            systems.append(unconnected)
+    else:
+        systems = [_implicit_program(execution, signatures)]
+
+    raw_machines = [
+        analyze_machine(model, machine)
+        for machine in getattr(execution, "machines")
+    ]
+    raw_views = {
+        "schema": IO_STATE_VIEWS_SCHEMA,
+        "version": IO_STATE_VIEWS_VERSION,
+        "source_name": getattr(execution, "source_name"),
+        "summary": {
+            "systems": len(systems),
+            "callables": len(signatures),
+            "types": len(types),
+            "machines": len(raw_machines),
+            "state_warnings": 0,
+        },
+        "io": {"systems": systems, "types": types},
+        "state": {"machines": raw_machines},
+    }
+    result = enrich_state_transition_ir(
+        model,
+        raw_views,
+        rtai_effect_contracts=effect_contracts,
+        rtai_projection_mode=EvidenceProjectionMode.STRICT_EXACT,
+        rtai_witness_max_cases=witness_max_cases,
+    )
+    if result.get("rtai_legacy_system_action_analyzer_enabled") is not False:
+        raise AssertionError("strict pipeline executed the legacy System Action analyzer")
+
     state = dict(_mapping(result.get("state")))
-    machines = [
-        build_strict_projection_candidate(
-            model,
-            machine,
-            effect_contracts,
-            witness_max_cases=witness_max_cases,
+    machines: list[dict[str, object]] = []
+    machine_reports: list[dict[str, object]] = []
+    for original in _mappings(state.get("machines")):
+        machine = remap_machine_analysis_source_lines(model, dict(original))
+        report = _machine_campaign_report(machine)
+        analysis = dict(_mapping(machine.get("analysis")))
+        analysis.update(
+            {
+                "rtai_strict_projection_campaign_version": (
+                    STRICT_PROJECTION_CAMPAIGN_VERSION
+                ),
+                "rtai_strict_projection_campaign_ready": report["ready"],
+                "rtai_strict_projection_legacy_fallback_enabled": False,
+                "rtai_strict_projection_legacy_analyzer_enabled": False,
+                "rtai_strict_projection_blocker_count": len(report["blockers"]),
+            }
         )
-        for machine in _mappings(state.get("machines"))
-    ]
-    machine_reports = [
-        {
-            "machine": machine.get("name"),
-            **dict(_mapping(machine.get("strict_projection_campaign"))),
-        }
-        for machine in machines
-    ]
-    ready = bool(machines) and all(report.get("ready") is True for report in machine_reports)
+        machine["strict_projection_campaign"] = report
+        machine["analysis"] = analysis
+        machines.append(machine)
+        machine_reports.append({"machine": machine.get("name"), **report})
+
+    ready = bool(machines) and all(
+        report.get("ready") is True for report in machine_reports
+    )
     blockers = [
-        {
-            "machine": report.get("machine"),
-            **dict(blocker),
-        }
+        {"machine": report.get("machine"), **dict(blocker)}
         for report in machine_reports
         for blocker in _mappings(report.get("blockers"))
     ]
-
     state["machines"] = machines
     summary = dict(_mapping(result.get("summary")))
     summary["rtai_strict_projection_ready_machines"] = sum(
         report.get("ready") is True for report in machine_reports
     )
     summary["rtai_strict_projection_machine_count"] = len(machine_reports)
+    summary["rtai_legacy_system_action_analyzer_enabled"] = False
     result["state"] = state
     result["summary"] = summary
     result["strict_projection_campaign"] = {
@@ -146,10 +196,30 @@ def build_strict_io_state_views(
         "ready": ready,
         "projection_source": "rtai-execution-evidence-v2",
         "legacy_fallback_allowed": False,
+        "legacy_system_action_analyzer_enabled": False,
         "machines": machine_reports,
         "blockers": blockers,
     }
     return result
+
+
+def _machine_campaign_report(machine: Mapping[str, object]) -> dict[str, object]:
+    native_report = _mapping(
+        machine.get("rtai_native_evidence_projection_readiness")
+    )
+    evidence_payload = _mapping(machine.get("rtai_abstract_execution_evidence_v2"))
+    witness_report = _mapping(evidence_payload.get("witness_generation"))
+    ready = bool(native_report.get("ready")) and bool(
+        witness_report.get("complete")
+    )
+    return {
+        "version": STRICT_PROJECTION_CAMPAIGN_VERSION,
+        "ready": ready,
+        "projection_source": "rtai-execution-evidence-v2",
+        "legacy_fallback_allowed": False,
+        "witness_generation_complete": bool(witness_report.get("complete")),
+        "blockers": _campaign_blockers(native_report, witness_report),
+    }
 
 
 def _remove_legacy_system_projection(transition: dict[str, object]) -> None:
