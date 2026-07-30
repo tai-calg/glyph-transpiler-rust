@@ -139,6 +139,37 @@ class _SystemExecutionEvaluator(_base._SystemExecutionEvaluator):
             context=self._context,
         )
 
+    def _evaluate_call(
+        self,
+        symbolic: CallExpr,
+        concrete: CallExpr,
+        site: _base._TraceSite,
+        *,
+        visited: frozenset[str],
+        after_transition: bool,
+        conditions: tuple[str, ...],
+    ) -> tuple[_base._Case, ...]:
+        if (
+            isinstance(symbolic.callee, NameExpr)
+            and isinstance(concrete.callee, NameExpr)
+            and symbolic.callee.name == _SUCCESS_VALUE_NAME
+            and concrete.callee.name == _SUCCESS_VALUE_NAME
+        ):
+            return (
+                _base._Case(
+                    _base._ExprPair(symbolic, concrete),
+                    conditions=conditions,
+                ),
+            )
+        return super()._evaluate_call(
+            symbolic,
+            concrete,
+            site,
+            visited=visited,
+            after_transition=after_transition,
+            conditions=conditions,
+        )
+
 
 def _diagnostic(code: str, message: str, line: int) -> dict[str, object]:
     return {"severity": "warning", "code": code, "message": message, "line": line}
