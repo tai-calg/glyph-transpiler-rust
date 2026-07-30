@@ -95,11 +95,11 @@ blocked when:
 - a reachable function has a TEIR lowering issue
 - the contract audit is not configured
 
-Glyph currently represents `ext` inputs and `!` Effects with the same internal
-declaration class. Audit version 2 preserves the source-level distinction: top-level
-`ext` calls are inbound inputs and are not accepted as outbound Effect coverage.
-This prevents a sensor or panel input handler from being mistaken for a System
-Action contract.
+Glyph currently lowers `ext` inputs, `~` Host-pure functions and `!` Effects through
+a shared declaration representation. Audit version 3 does not infer ownership from
+that internal type. It extracts top-level `!name(...)` declarations as the positive
+outbound Effect set. Consequently neither inbound `ext sensor` calls nor
+`~layout_lane` Host-pure calls can be accepted as System Action contracts.
 
 The audit is deliberately conservative. It does not use solver reachability to omit
 an external boundary contract.
@@ -190,7 +190,7 @@ three semantic UI states.
 
 - every included public source compiles
 - reachable outbound Effects equal the catalog exactly
-- inbound `ext` inputs are not counted as Effects
+- inbound `ext` inputs and `~` Host-pure functions are not counted as Effects
 - contract parameter order matches the Glyph declaration
 - concrete replay returns the reviewed value
 - failure vocabulary and completion match the reviewed contract
