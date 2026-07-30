@@ -9,6 +9,10 @@ from .analysis_evidence import (
     AbstractEvidenceContext,
     context_evidence_from_analysis,
 )
+from .effect_contract import (
+    EFFECT_CONTRACT_REGISTRY_VERSION,
+    VerifiedEffectContractRegistry,
+)
 from .evidence import (
     CompletionEvidence,
     CompletionKind,
@@ -20,14 +24,23 @@ from .machine_relation import build_machine_relation
 from .projection import check_exact_action_projection
 from .summary_interpreter import SummaryAwareAbstractInterpreter
 from .view_edge_specialization import ViewEdgeBindingStatus
+from .witness_generation import (
+    BoundedWitnessGenerationReport,
+    WITNESS_GENERATION_VERSION,
+    disabled_witness_generation_ir,
+    generate_bounded_system_witnesses,
+)
 
 
-RTAI_ABSTRACT_EVIDENCE_SHADOW_VERSION = 1
+RTAI_ABSTRACT_EVIDENCE_SHADOW_VERSION = 2
 
 
 def attach_rtai_abstract_execution_evidence(
     model: CompilationModel,
     machine_view: dict[str, object],
+    *,
+    effect_contracts: VerifiedEffectContractRegistry | None = None,
+    witness_max_cases: int = 4096,
 ) -> dict[str, object]:
     """Attach native RTAI Evidence without replacing legacy UI projection.
 
@@ -35,6 +48,10 @@ def attach_rtai_abstract_execution_evidence(
     When a rendered transition has an exact specialization binding, an additional
     view-edge Evidence record is attached directly to that transition. Normal and
     synthesized-failure transitions use disjoint completion partitions.
+
+    Automatic concrete witnesses are generated only when an explicit verified
+    Effect-contract registry is supplied.  Missing contracts never fall back to an
+    inferred handler.
     """
 
     result = deepcopy(machine_view)
@@ -50,10 +67,34 @@ def attach_rtai_abstract_execution_evidence(
 
     analyses = {}
     systems_by_entry: dict[str, list[str]] = {}
+    witness_report: BoundedWitnessGenerationReport | None = None
     if relation is not None:
-        analyzer = SummaryAwareAbstractInterpreter(model)
+        analyzer = SummaryAwareAbstractInterpreter(
+            model,
+            contextual_effect_summaries=(
+                effect_contracts.abstract_registry()
+                if effect_contracts is not None
+                else None
+            ),
+        )
         for system in model.systems:
             systems_by_entry.setdefault(system.entry_name, []).append(system.name)
+
+        if effect_contracts is not None:
+            witness_report = generate_bounded_system_witnesses(
+                model,
+                systems_by_entry,
+                effect_contracts,
+                max_cases_per_entry=witness_max_cases,
+            )
+            issues.extend(
+                {
+                    "entry": item.entry,
+                    "reason": f"{item.code}: {item.detail}",
+                }
+                for item in witness_report.issues
+            )
+
         for entry in sorted(systems_by_entry):
             if entry not in analyzer.functions:
                 issues.append(
@@ -81,6 +122,7 @@ def attach_rtai_abstract_execution_evidence(
                 output_edge_id=edge.edge_id,
                 analysis_edge_id=edge.edge_id,
                 completion_filter=None,
+                witness_report=witness_report,
             )
             relation_context_count += len(contexts)
             evidence = _edge_evidence(
@@ -121,6 +163,7 @@ def attach_rtai_abstract_execution_evidence(
                 output_edge_id=view_edge_id,
                 analysis_edge_id=relation_edge_id,
                 completion_filter=completion_filter,
+                witness_report=witness_report,
             )
             view_context_count += len(contexts)
             evidence = _edge_evidence(
@@ -149,6 +192,21 @@ def attach_rtai_abstract_execution_evidence(
         "adapter_version": ABSTRACT_EVIDENCE_ADAPTER_VERSION,
         "projection_source": False,
         "machine_relation": relation.to_ir() if relation is not None else None,
+        "effect_contracts": (
+            effect_contracts.to_ir()
+            if effect_contracts is not None
+            else {
+                "version": EFFECT_CONTRACT_REGISTRY_VERSION,
+                "configured": False,
+                "defaults": [],
+                "by_entry": [],
+            }
+        ),
+        "witness_generation": (
+            witness_report.to_ir()
+            if witness_report is not None
+            else disabled_witness_generation_ir()
+        ),
         "edges": edges,
         "view_edges": view_edges,
         "issues": issues,
@@ -169,6 +227,18 @@ def attach_rtai_abstract_execution_evidence(
             "rtai_abstract_execution_analyzed_entry_count": analyzed_entries,
             "rtai_abstract_execution_issue_count": len(issues),
             "rtai_abstract_execution_exact_projection_count": exact_projection_count,
+            "rtai_effect_contract_registry_version": (
+                EFFECT_CONTRACT_REGISTRY_VERSION
+            ),
+            "rtai_effect_contracts_configured": effect_contracts is not None,
+            "rtai_witness_generation_version": WITNESS_GENERATION_VERSION,
+            "rtai_witness_generation_enabled": witness_report is not None,
+            "rtai_witness_generation_complete": (
+                witness_report.complete if witness_report is not None else False
+            ),
+            "rtai_generated_witness_count": (
+                len(witness_report.witnesses) if witness_report is not None else 0
+            ),
         }
     )
     result["transitions"] = transitions
@@ -184,9 +254,19 @@ def _contexts_for_edge(
     output_edge_id: str,
     analysis_edge_id: str,
     completion_filter: frozenset[str] | None,
+    witness_report: BoundedWitnessGenerationReport | None,
 ) -> tuple[ContextExecutionEvidence, ...]:
     contexts: list[ContextExecutionEvidence] = []
     for entry, raw_analysis in analyses.items():
+        witness = (
+            witness_report.witness_for(
+                entry,
+                analysis_edge_id,
+                completion_filter,
+            )
+            if witness_report is not None
+            else None
+        )
         for system_name in systems_by_entry.get(entry, ()):
             contexts.append(
                 context_evidence_from_analysis(
@@ -195,6 +275,7 @@ def _contexts_for_edge(
                         output_edge_id,
                         system_name,
                         entry,
+                        witness=witness,
                         analysis_edge_id=analysis_edge_id,
                         completion_filter=completion_filter,
                     ),
