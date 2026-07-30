@@ -60,24 +60,45 @@ async function waitForProjection(page, expectedById) {
 
 async function compileSource(page, sourceText) {
   await page.locator("#editor").fill(sourceText);
-  await page.click("#compile");
-  await page.waitForFunction(expected => {
-    const status = document.querySelector("#status")?.textContent;
-    if (status === "error") return true;
-    return status === "ready"
-      && typeof snapshot === "object"
-      && snapshot?.source === expected;
-  }, sourceText, { timeout: 60_000 });
-  const outcome = await page.evaluate(() => ({
-    status: document.querySelector("#status")?.textContent || "",
-    source: typeof snapshot === "object" ? snapshot?.source : null,
-    diagnostics: document.querySelector("#diagnostics")?.textContent || "",
-  }));
+  const outcome = await page.evaluate(async expected => {
+    clearTimeout(previewTimer);
+    previewTimer = null;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 60_000);
+    try {
+      const response = await fetch("/api/preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ source: expected }),
+        signal: controller.signal,
+      });
+      const next = await response.json();
+      if (!response.ok) {
+        return { status: "error", source: null, diagnostics: JSON.stringify(next) };
+      }
+      snapshot = next;
+      render();
+      return {
+        status: next.status || "",
+        source: next.source ?? null,
+        diagnostics: (next.diagnostics || []).map(item => item.message || String(item)).join("\n"),
+      };
+    } catch (error) {
+      return {
+        status: "error",
+        source: null,
+        diagnostics: error?.name === "AbortError" ? "Preview request timed out" : String(error),
+      };
+    } finally {
+      clearTimeout(timeout);
+    }
+  }, sourceText);
   assert.notEqual(
     outcome.status,
     "error",
     `Glyph compilation failed instead of updating the execution context:\n${outcome.diagnostics}`,
   );
+  assert.equal(outcome.status, "ready", `unexpected preview status: ${outcome.status}`);
   assert.equal(outcome.source, sourceText, "compiled snapshot did not accept the requested source");
 }
 
