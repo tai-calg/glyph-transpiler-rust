@@ -147,11 +147,13 @@ def enrich_state_transition_ir(
 ) -> dict[str, object]:
     """Compile and publish the complete StateTransitionIR contract.
 
-    The default remains legacy-compatible shadow mode.  ``STRICT_EXACT`` is an
-    explicit migration/campaign mode: native Evidence becomes the sole System
-    Action source and missing proof fails closed without legacy fallback.
+    The default remains legacy-compatible shadow mode. ``STRICT_EXACT`` is an
+    explicit migration/campaign mode: the legacy System Action analyzer and its
+    adapter are not executed, native Evidence is the sole System Action source,
+    and missing proof fails closed without fallback.
     """
 
+    strict_native = rtai_projection_mode is EvidenceProjectionMode.STRICT_EXACT
     original = deepcopy(views)
     result = compile_state_transition_ir(model, views)
     analyzed_by_name = {
@@ -170,14 +172,21 @@ def enrich_state_transition_ir(
     projected = [
         project_machine_transition_actions(model, machine) for machine in lowered
     ]
-    system_executed = [
-        attach_transition_system_execution_actions(model, machine)
-        for machine in projected
-    ]
-    # Legacy Evidence remains available for comparison. Native Evidence is active
-    # only when an explicit non-shadow projection mode is requested.
+
+    if strict_native:
+        # Strict migration mode proves that the replacement can stand alone. Do not
+        # execute the legacy System Action analyzer or create legacy Evidence.
+        system_stage = projected
+    else:
+        system_executed = [
+            attach_transition_system_execution_actions(model, machine)
+            for machine in projected
+        ]
+        system_stage = [
+            attach_execution_evidence_v2(machine) for machine in system_executed
+        ]
+
     rtai_report = lower_compilation_model_report(model)
-    evidenced = [attach_execution_evidence_v2(machine) for machine in system_executed]
     bootstrapped = [
         attach_rtai_semantic_bootstrap(
             model,
@@ -185,7 +194,7 @@ def enrich_state_transition_ir(
             functions=rtai_report.functions,
             lowering_issues=rtai_report.issues,
         )
-        for machine in evidenced
+        for machine in system_stage
     ]
     specialized = [
         attach_view_edge_specialization(model, machine)
@@ -204,13 +213,16 @@ def enrich_state_transition_ir(
         attach_native_evidence_projection_readiness(machine)
         for machine in native_evidenced
     ]
-    evidence_audited = [
-        project_machine_from_evidence(
-            machine,
-            mode=EvidenceProjectionMode.SHADOW,
-        )
-        for machine in native_readiness
-    ]
+    if strict_native:
+        evidence_audited = native_readiness
+    else:
+        evidence_audited = [
+            project_machine_from_evidence(
+                machine,
+                mode=EvidenceProjectionMode.SHADOW,
+            )
+            for machine in native_readiness
+        ]
     compatible = [
         attach_output_action_compatibility(machine) for machine in evidence_audited
     ]
@@ -282,6 +294,7 @@ def enrich_state_transition_ir(
     result["rtai_evidence_projection_version"] = EVIDENCE_PROJECTION_VERSION
     result["rtai_projection_mode"] = rtai_projection_mode.value
     result["rtai_effect_contracts_configured"] = rtai_effect_contracts is not None
+    result["rtai_legacy_system_action_analyzer_enabled"] = not strict_native
     result["transition_action_target_independence_version"] = (
         TRANSITION_ACTION_TARGET_INDEPENDENCE_VERSION
     )
@@ -327,5 +340,6 @@ def enrich_state_transition_ir(
         )
         for machine in state["machines"]
     )
+    summary["rtai_legacy_system_action_analyzer_enabled"] = not strict_native
     result["summary"] = summary
     return localize_state_views(result)
