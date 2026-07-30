@@ -42,8 +42,9 @@ def attach_execution_evidence_v2(
     for index, original in enumerate(result.get("transitions", [])):
         transition = dict(original)
         synthesized_failure = bool(transition.get("synthesized_failure"))
+        edge_id = _edge_id(transition, index)
         contexts = tuple(
-            _context_evidence(binding)
+            _context_evidence(edge_id, binding)
             for binding in _mappings(
                 transition.get("execution_action_bindings")
                 or transition.get("execution_contexts")
@@ -79,13 +80,20 @@ def attach_execution_evidence_v2(
                 Approximation.unknown(ApproximationCause.LEGACY_UNRESOLVED),
             )
 
-        edge_approximation = (
-            Approximation.combine(_context_approximations(contexts))
-            if contexts
-            else Approximation.over_approximate(ApproximationCause.LEGACY_ADAPTER)
-        )
+        if contexts:
+            edge_approximation = Approximation.combine(
+                _context_approximations(contexts)
+            )
+        elif synthesized_failure:
+            edge_approximation = Approximation.over_approximate(
+                ApproximationCause.LEGACY_ADAPTER
+            )
+        else:
+            edge_approximation = Approximation.unknown(
+                ApproximationCause.LEGACY_UNRESOLVED
+            )
         evidence = EdgeExecutionEvidence(
-            edge_id=_edge_id(transition, index),
+            edge_id=edge_id,
             synthesized_failure=synthesized_failure,
             contexts=contexts,
             completion=edge_completion,
@@ -123,7 +131,10 @@ def attach_execution_evidence_v2(
     return result
 
 
-def _context_evidence(binding: Mapping[str, object]) -> ContextExecutionEvidence:
+def _context_evidence(
+    edge_id: str,
+    binding: Mapping[str, object],
+) -> ContextExecutionEvidence:
     status = str(binding.get("status") or "unresolved")
     count = _integer(binding.get("transition_call_count"))
     approximation = (
@@ -161,6 +172,7 @@ def _context_evidence(binding: Mapping[str, object]) -> ContextExecutionEvidence
         reasons.append("multiple-transition-calls")
     action = binding.get("action")
     return ContextExecutionEvidence(
+        edge_id=edge_id,
         system=_optional_text(binding.get("system")),
         entry=str(binding.get("entry") or ""),
         scope=str(binding.get("scope") or "system"),
@@ -169,7 +181,7 @@ def _context_evidence(binding: Mapping[str, object]) -> ContextExecutionEvidence
         effect_trace=trace,
         completion=completion,
         unknown_reasons=tuple(sorted(set(reasons))),
-        legacy_action=dict(action) if isinstance(action, Mapping) else None,
+        legacy_projection=dict(action) if isinstance(action, Mapping) else None,
     )
 
 
@@ -265,8 +277,8 @@ def _edge_id(transition: Mapping[str, object], index: int) -> str:
     explicit = transition.get("id") or transition.get("edge_id")
     if explicit:
         return str(explicit)
-    source = transition.get("source_state") or transition.get("source") or "?"
-    target = transition.get("target_state") or transition.get("target") or "?"
+    source = str(transition.get("source_state") or "?")
+    target = str(transition.get("target_state") or transition.get("target") or "?")
     line = transition.get("source")
     if isinstance(line, Mapping):
         line = line.get("line")
