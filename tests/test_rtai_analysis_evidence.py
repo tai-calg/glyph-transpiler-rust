@@ -168,6 +168,44 @@ class AnalysisEvidenceTests(unittest.TestCase):
             },
         )
 
+    def test_normal_and_failure_view_partitions_do_not_mix_completions(self) -> None:
+        analysis = AbstractInterpreter(self.model).analyze("control")
+        normal = context_evidence_from_analysis(
+            analysis,
+            AbstractEvidenceContext(
+                "T-normal",
+                "DoorControl",
+                "control",
+                witness=self.witness,
+                analysis_edge_id=self.edge_id,
+                completion_filter=frozenset({"returned", "normal"}),
+            ),
+        ).to_ir()
+        failure = context_evidence_from_analysis(
+            analysis,
+            AbstractEvidenceContext(
+                "T-failure",
+                "DoorControl",
+                "control",
+                witness=self.witness,
+                analysis_edge_id=self.edge_id,
+                completion_filter=frozenset({"propagated-failure"}),
+            ),
+        ).to_ir()
+        self.assertEqual(normal["completion"]["kinds"], ["normal"])
+        self.assertEqual(
+            failure["completion"]["kinds"],
+            ["propagated-failure"],
+        )
+        self.assertEqual(
+            normal["reachability"]["status"],
+            "proven-reachable",
+        )
+        self.assertNotEqual(
+            failure["reachability"]["status"],
+            "proven-reachable",
+        )
+
     def test_witness_factory_rejects_edge_not_seen_in_execution(self) -> None:
         with self.assertRaises(ValueError):
             verified_reachability_witness(
