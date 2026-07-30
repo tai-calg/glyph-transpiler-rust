@@ -56,6 +56,10 @@ from .lowering import (
     lower_function,
 )
 from .machine_relation import MachineRelation, build_machine_relation
+from .native_projection_readiness import (
+    NATIVE_EVIDENCE_READINESS_VERSION,
+    attach_native_evidence_projection_readiness,
+)
 from .oracle import (
     AbstractCoverageCase,
     BoundedOracleReport,
@@ -94,6 +98,13 @@ from .typed_smt import (
     TypedPredicateEncoder,
     UnsatProven,
 )
+from .view_edge_specialization import (
+    VIEW_EDGE_SPECIALIZATION_VERSION,
+    ViewEdgeBinding,
+    ViewEdgeBindingStatus,
+    attach_view_edge_specialization,
+    specialize_view_edges,
+)
 
 
 __all__ = [
@@ -120,6 +131,7 @@ __all__ = [
     "LoweringIssue",
     "LoweringReport",
     "MachineRelation",
+    "NATIVE_EVIDENCE_READINESS_VERSION",
     "OWNERSHIP_SEMANTICS_VERSION",
     "OwnershipFunctionSummary",
     "OwnershipViolation",
@@ -144,11 +156,16 @@ __all__ = [
     "TypedConstraintSolver",
     "TypedPredicateEncoder",
     "UnsatProven",
+    "VIEW_EDGE_SPECIALIZATION_VERSION",
     "VariantValue",
     "VerifiedReachabilityWitness",
+    "ViewEdgeBinding",
+    "ViewEdgeBindingStatus",
     "attach_execution_evidence_v2",
+    "attach_native_evidence_projection_readiness",
     "attach_rtai_abstract_execution_evidence",
     "attach_rtai_semantic_bootstrap",
+    "attach_view_edge_specialization",
     "audit_evidence_projection",
     "build_machine_relation",
     "build_ownership_summaries",
@@ -165,5 +182,6 @@ __all__ = [
     "lower_compilation_model_report",
     "lower_function",
     "project_machine_from_evidence",
+    "specialize_view_edges",
     "verified_reachability_witness",
 ]
