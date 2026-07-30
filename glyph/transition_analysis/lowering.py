@@ -21,6 +21,26 @@ from .teir import (
 )
 
 
+@dataclass(frozen=True)
+class LoweringIssue:
+    function: str
+    line: int
+    reason: str
+
+    def to_ir(self) -> dict[str, object]:
+        return {
+            "function": self.function,
+            "line": self.line,
+            "reason": self.reason,
+        }
+
+
+@dataclass(frozen=True)
+class LoweringReport:
+    functions: Mapping[str, Function]
+    issues: tuple[LoweringIssue, ...]
+
+
 @dataclass
 class _BlockDraft:
     block_id: str
@@ -51,15 +71,30 @@ class _Builder:
         return tuple(self.blocks[block_id].freeze() for block_id in self.order)
 
 
-def lower_compilation_model(model: CompilationModel) -> dict[str, Function]:
+def lower_compilation_model(
+    model: CompilationModel,
+    *,
+    strict: bool = True,
+) -> dict[str, Function]:
     """Lower user-visible Glyph functions into one CFG representation.
 
-    Function-block source may contain pipeline and lambda syntax that the ordinary
-    expression parser intentionally does not accept.  The compiler has already
-    lowered that syntax into generated value/final helpers, so TEIR consumes those
-    parsed helper ASTs rather than parsing source text a second time.
+    ``strict=True`` is used by the concrete oracle and tests so unsupported
+    lowering cannot be hidden.  The public shadow pipeline uses ``strict=False``
+    through ``lower_compilation_model_report``; one unsupported helper then
+    becomes an explicit issue instead of breaking ordinary compilation.
     """
 
+    report = lower_compilation_model_report(model)
+    if strict and report.issues:
+        issue = report.issues[0]
+        raise ValueError(
+            f"TEIR lowering failed for {issue.function} at line {issue.line}: "
+            f"{issue.reason}"
+        )
+    return dict(report.functions)
+
+
+def lower_compilation_model_report(model: CompilationModel) -> LoweringReport:
     relations = relation_by_transition_function(model)
     transition_functions = {
         name: relation.machine_id for name, relation in relations.items()
@@ -76,17 +111,27 @@ def lower_compilation_model(model: CompilationModel) -> dict[str, Function]:
         if isinstance(declaration, FunctionDecl)
     }
     result: dict[str, Function] = {}
+    issues: list[LoweringIssue] = []
     for declaration in declarations.values():
         if declaration.name.startswith("__glyph_block_"):
             continue
-        result[declaration.name] = lower_function(
-            declaration,
-            block=blocks.get(declaration.name),
-            helper_functions=declarations,
-            transition_functions=transition_functions,
-            effect_names=effects,
-        )
-    return result
+        try:
+            result[declaration.name] = lower_function(
+                declaration,
+                block=blocks.get(declaration.name),
+                helper_functions=declarations,
+                transition_functions=transition_functions,
+                effect_names=effects,
+            )
+        except (TypeError, ValueError) as error:
+            issues.append(
+                LoweringIssue(
+                    declaration.name,
+                    declaration.line,
+                    str(error) or type(error).__name__,
+                )
+            )
+    return LoweringReport(dict(result), tuple(issues))
 
 
 def lower_function(
