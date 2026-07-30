@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from .bootstrap import (
+    RTAI_SEMANTIC_BOOTSTRAP_VERSION,
+    attach_rtai_semantic_bootstrap,
+)
 from .concrete import (
     ConcreteExecutionResult,
     ConcreteInterpreter,
@@ -31,11 +35,13 @@ __all__ = [
     "ExactActionDecision",
     "MachineRelation",
     "PreimageStatus",
+    "RTAI_SEMANTIC_BOOTSTRAP_VERSION",
     "ReferenceInterpreter",
     "ResultValue",
     "TransitionCallPreimage",
     "VariantValue",
     "attach_execution_evidence_v2",
+    "attach_rtai_semantic_bootstrap",
     "build_machine_relation",
     "check_exact_action_projection",
     "compare_bounded_ast_and_teir",
