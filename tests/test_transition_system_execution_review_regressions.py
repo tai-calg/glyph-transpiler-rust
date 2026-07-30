@@ -21,6 +21,11 @@ def opening_transition(views: Mapping[str, object]) -> Mapping[str, object]:
     )
 
 
+def action_display(context: Mapping[str, object]) -> str:
+    action = context.get("action")
+    return str(action.get("display") or "") if isinstance(action, Mapping) else ""
+
+
 BASE = """machine Door(state:DoorState,input:Input)
   select=state.mode
   init=DoorState(Closed)
@@ -75,6 +80,42 @@ class TransitionSystemExecutionReviewRegressions(unittest.TestCase):
         conditions = {case["condition"] for case in context["action_cases"]}
         self.assertIn("input.authorized", conditions)
         self.assertIn("!(input.authorized)", conditions)
+
+    def test_system_guard_is_specialized_by_transition_source_state(self) -> None:
+        source = SYSTEM + "\n" + BASE + """
+!actuator(state:DoorState):Receipt
+!audit(state:DoorState):Receipt
+
+>control(state:DoorState,input:Input):Receipt
+  state.mode==Closed >> actuator(step(state,input))
+  _ >> audit(step(state,input))
+"""
+        views = compile_source(source)
+        machine = views["state"]["machines"][0]
+        closed_open = next(
+            item
+            for item in machine["transitions"]
+            if item["source_state"] == "Closed" and item["target_state"] == "Open"
+        )
+        open_open = next(
+            item
+            for item in machine["transitions"]
+            if item["source_state"] == "Open" and item["target_state"] == "Open"
+        )
+        closed_context = closed_open["execution_contexts"][0]
+        open_context = open_open["execution_contexts"][0]
+        self.assertEqual(closed_context["status"], "resolved")
+        self.assertEqual(open_context["status"], "resolved")
+        self.assertEqual(
+            action_display(closed_context),
+            "actuator(DoorState(Open))",
+        )
+        self.assertEqual(
+            action_display(open_context),
+            "audit(DoorState(Open))",
+        )
+        self.assertEqual(len(closed_context["action_cases"]), 1)
+        self.assertEqual(len(open_context["action_cases"]), 1)
 
     def test_try_success_binding_uses_unwrapped_value_without_replaying_operation(self) -> None:
         system = SYSTEM.replace("  control -> actuator\n", "  control -> apply_checked\n")
