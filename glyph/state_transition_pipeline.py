@@ -29,8 +29,8 @@ from .transition_analysis import (
     RTAI_SEMANTIC_BOOTSTRAP_VERSION,
     attach_execution_evidence_v2,
     attach_rtai_semantic_bootstrap,
-    lower_compilation_model,
 )
+from .transition_analysis.lowering import lower_compilation_model_report
 from .transition_condition_roles import classify_machine_transition_roles
 from .transition_enabling_case_compatibility import preserve_legacy_transition_metadata
 from .transition_enabling_case_defaults import ensure_machine_enabling_cases
@@ -148,12 +148,17 @@ def enrich_state_transition_ir(
         for machine in projected
     ]
     # RTAI Evidence v2 and semantic bootstrap are emitted in shadow mode.
-    # Existing display projection remains unchanged until exact reachability,
-    # singleton trace, completion, and cardinality evidence are available.
-    rtai_functions = lower_compilation_model(model)
+    # Unsupported TEIR constructs are published as lowering issues and never
+    # break the ordinary compiler or change the active display projection.
+    rtai_report = lower_compilation_model_report(model)
     evidenced = [attach_execution_evidence_v2(machine) for machine in system_executed]
     bootstrapped = [
-        attach_rtai_semantic_bootstrap(model, machine, functions=rtai_functions)
+        attach_rtai_semantic_bootstrap(
+            model,
+            machine,
+            functions=rtai_report.functions,
+            lowering_issues=rtai_report.issues,
+        )
         for machine in evidenced
     ]
     compatible = [
