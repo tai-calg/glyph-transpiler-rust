@@ -42,7 +42,7 @@ class BoundedOracleReport:
 @dataclass(frozen=True)
 class AbstractCoverageCase:
     arguments: tuple[object, ...]
-    concrete: ConcreteExecutionResult
+    concrete: object
     covered: bool
     trace_covered: bool
     return_covered: bool
@@ -101,9 +101,10 @@ def compare_bounded_teir_and_abstract(
     *,
     effect_handlers: Mapping[str, EffectHandler] | None = None,
     effect_summaries: Mapping[str, EffectSummary] | None = None,
+    concrete_interpreter_type: type[ConcreteInterpreter] = ConcreteInterpreter,
     max_cases: int = 4096,
 ) -> BoundedSoundnessReport:
-    """Check bounded inclusion of traces, completion, return/error and final store."""
+    """Check bounded inclusion of trace, completion, return/error and final store."""
 
     declaration, argument_cases = _finite_argument_cases(
         model,
@@ -119,7 +120,7 @@ def compare_bounded_teir_and_abstract(
     cases: list[AbstractCoverageCase] = []
 
     for arguments in argument_cases:
-        concrete = ConcreteInterpreter(
+        concrete = concrete_interpreter_type(
             model,
             effect_handlers=handlers,
         ).run(function_name, arguments)
@@ -151,31 +152,33 @@ def compare_bounded_teir_and_abstract(
 
 def _alternative_coverage(
     alternative: GuardedAlternative,
-    concrete: ConcreteExecutionResult,
+    concrete: object,
     inputs: Mapping[str, object],
     *,
     input_context: str,
 ) -> tuple[bool, bool, bool]:
-    if (
-        concrete.completion not in alternative.completion
-        and "unknown" not in alternative.completion
-    ):
+    completion = str(getattr(concrete, "completion"))
+    if completion not in alternative.completion and "unknown" not in alternative.completion:
         return False, False, False
 
-    concrete_edges = tuple(event.edge_id for event in concrete.transition_trace)
+    concrete_edges = tuple(
+        event.edge_id for event in getattr(concrete, "transition_trace")
+    )
     abstract_edges = tuple(event.edge_id for event in alternative.transition_trace)
     if not alternative.transition_trace_top and concrete_edges != abstract_edges:
         return False, False, False
 
-    concrete_effects = tuple(event.operation for event in concrete.effect_trace)
+    concrete_effects = tuple(
+        event.operation for event in getattr(concrete, "effect_trace")
+    )
     abstract_effects = tuple(event.operation for event in alternative.effect_trace)
     if not alternative.effect_trace_top and concrete_effects != abstract_effects:
         return False, False, False
 
     expected = (
-        concrete.error
-        if concrete.completion == "propagated-failure"
-        else concrete.return_value
+        getattr(concrete, "error")
+        if completion == "propagated-failure"
+        else getattr(concrete, "return_value")
     )
     return_covered = abstract_value_covers(
         alternative.return_value,
