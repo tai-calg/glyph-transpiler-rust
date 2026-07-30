@@ -53,6 +53,8 @@ class RtaiSemanticBootstrapTests(unittest.TestCase):
         bootstrap = machine["rtai_semantic_bootstrap"]
         self.assertEqual(bootstrap["version"], 1)
         self.assertFalse(bootstrap["projection_source"])
+        self.assertEqual(bootstrap["lowering_issues"], [])
+        self.assertEqual(machine["analysis"]["rtai_teir_lowering_issue_count"], 0)
         self.assertEqual(
             bootstrap["machine_relation"]["transition_function"],
             "step",
