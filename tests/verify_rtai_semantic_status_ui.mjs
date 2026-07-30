@@ -57,9 +57,21 @@ async function openStatePage(browser, url, transitionCount) {
     const stage = document.querySelector(".graph-stage");
     return stage?.dataset.transitionIoClustersReady === "true"
       && stage?.dataset.rtaiSemanticStatusReady === "true"
-      && document.querySelectorAll(".transition-io-cluster > .rtai-semantic-badge").length === expected;
+      && document.querySelectorAll(".transition-io-cluster[data-rtai-semantic-status]").length === expected;
   }, transitionCount, { timeout: 60_000 });
   return page;
+}
+
+function semanticPresentation(element) {
+  const pseudo = getComputedStyle(element, "::after");
+  return {
+    status: element.dataset.rtaiSemanticStatus,
+    label: element.dataset.rtaiSemanticLabel,
+    reason: element.dataset.rtaiSemanticReason,
+    title: element.dataset.rtaiSemanticTitle,
+    content: pseudo.content.replace(/^"|"$/g, ""),
+    display: pseudo.display,
+  };
 }
 
 const browser = await chromium.launch({ headless: true });
@@ -83,23 +95,23 @@ try {
     unknownApp.url,
     unknownMachine.transitions.length,
   );
-  const unknownBadges = unknownPage.locator(
-    ".transition-io-cluster > .rtai-semantic-badge.unknown",
+  const unknownClusters = unknownPage.locator(
+    '.transition-io-cluster[data-rtai-semantic-status="unknown"]',
   );
-  assert.equal(await unknownBadges.count(), unknownMachine.transitions.length);
-  assert.equal(
-    await unknownBadges.first().evaluate(element => getComputedStyle(element).display),
-    "none",
-  );
-  await unknownPage.locator(".transition-io-cluster").first().hover();
+  assert.equal(await unknownClusters.count(), unknownMachine.transitions.length);
+  const unknownBefore = await unknownClusters.first().evaluate(semanticPresentation);
+  assert.equal(unknownBefore.display, "none");
+  assert.equal(unknownBefore.content, "Unknown");
+  await unknownClusters.first().hover();
   await unknownPage.waitForFunction(() => {
-    const badge = document.querySelector(
-      ".transition-io-cluster:hover > .rtai-semantic-badge.unknown",
+    const cluster = document.querySelector(
+      '.transition-io-cluster:hover[data-rtai-semantic-status="unknown"]',
     );
-    return badge && getComputedStyle(badge).display !== "none";
+    return cluster && getComputedStyle(cluster, "::after").display !== "none";
   });
-  assert.equal(await unknownBadges.first().textContent(), "Unknown");
-  assert((await unknownBadges.first().getAttribute("title"))?.includes("Unknown"));
+  const unknownAfter = await unknownClusters.first().evaluate(semanticPresentation);
+  assert.equal(unknownAfter.display, "inline-flex");
+  assert(unknownAfter.title.includes("Unknown"));
   await unknownPage.screenshot({
     path: path.join(outputDirectory, "unknown-hover.png"),
     fullPage: true,
@@ -132,17 +144,14 @@ try {
   assert(mayMachine.transitions.every(transition => transition.system_action == null));
 
   const mayPage = await openStatePage(browser, mayApp.url, mayMachine.transitions.length);
-  const mayBadges = mayPage.locator(
-    ".transition-io-cluster > .rtai-semantic-badge.may",
+  const mayClusters = mayPage.locator(
+    '.transition-io-cluster[data-rtai-semantic-status="may"]',
   );
-  assert.equal(await mayBadges.count(), mayMachine.transitions.length);
-  const mayPresentation = await mayBadges.evaluateAll(elements => elements.map(element => ({
-    text: element.textContent,
-    display: getComputedStyle(element).display,
-    reason: element.dataset.rtaiSemanticReason,
-  })));
-  assert(mayPresentation.every(item => item.text === "May"));
-  assert(mayPresentation.every(item => item.display !== "none"));
+  assert.equal(await mayClusters.count(), mayMachine.transitions.length);
+  const mayPresentation = await mayClusters.evaluateAll(elements => elements.map(semanticPresentation));
+  assert(mayPresentation.every(item => item.label === "May"));
+  assert(mayPresentation.every(item => item.content === "May"));
+  assert(mayPresentation.every(item => item.display === "inline-flex"));
   assert(mayPresentation.every(item => item.reason.includes("reachability")));
   await mayPage.screenshot({
     path: path.join(outputDirectory, "may-ui.png"),
