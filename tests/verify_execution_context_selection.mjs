@@ -150,9 +150,7 @@ try {
   await page.waitForFunction(() => document.querySelector("#glyph-settings-dialog")?.open === false);
 
   const originalSource = await page.locator("#editor").inputValue();
-  const unresolvedSource = originalSource.concat(`
-
-system DoorUnknown
+  const unresolvedSystem = `system DoorUnknown
   entry unknown
   in state:DoorState
   in input:Input
@@ -161,12 +159,19 @@ system DoorUnknown
   input -> unknown
   unknown -> state_out
 
+`;
+  const unresolvedFunctions = `
+
 >loop(value:DoorState):DoorState=loop(value)
 
 >unknown(state:DoorState,input:Input):DoorState
   next := step(state,input)
   loop(next)
-`);
+`;
+  const unresolvedSource = originalSource
+    .replace("system DoorControl\n", `${unresolvedSystem}system DoorControl\n`)
+    .concat(unresolvedFunctions);
+  assert.notEqual(unresolvedSource, originalSource, "unresolved context insertion failed");
   await page.locator("#editor").fill(unresolvedSource);
   await page.locator("#editor").dispatchEvent("input");
   await page.waitForFunction(() => (
