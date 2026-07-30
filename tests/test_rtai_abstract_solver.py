@@ -14,6 +14,7 @@ from glyph.transition_analysis.exactness import (
     ExactnessProofKind,
     ExactnessProofScope,
 )
+from glyph.transition_analysis.oracle import compare_bounded_teir_and_abstract
 from glyph.transition_analysis.teir import Assign, BasicBlock, Function, Jump
 
 
@@ -68,18 +69,20 @@ def exact_effect() -> Approximation:
     )
 
 
+def identity_summary():
+    return identity_effect_summary(
+        "actuator",
+        "state",
+        approximation=exact_effect(),
+    )
+
+
 class GuardedAbstractExecutionTests(unittest.TestCase):
     def test_machine_edges_keep_correlated_effect_traces(self) -> None:
         model = compile_model(SOURCE, "abstract-door.glyph")
         analyzer = AbstractInterpreter(
             model,
-            effect_summaries={
-                "actuator": identity_effect_summary(
-                    "actuator",
-                    "state",
-                    approximation=exact_effect(),
-                )
-            },
+            effect_summaries={"actuator": identity_summary()},
         )
         result = analyzer.analyze("control")
         returned = [
@@ -101,6 +104,17 @@ class GuardedAbstractExecutionTests(unittest.TestCase):
             )
             self.assertFalse(item.transition_trace_top)
             self.assertFalse(item.effect_trace_top)
+
+    def test_bounded_concrete_traces_are_covered_by_abstract_result(self) -> None:
+        model = compile_model(SOURCE, "abstract-coverage.glyph")
+        report = compare_bounded_teir_and_abstract(
+            model,
+            "control",
+            effect_handlers={"actuator": lambda arguments: arguments[0]},
+            effect_summaries={"actuator": identity_summary()},
+        )
+        self.assertEqual(len(report.cases), 12)
+        self.assertTrue(report.sound_for_bounded_domain, report.uncovered[:1])
 
     def test_unknown_effect_is_not_promoted_to_exact(self) -> None:
         model = compile_model(SOURCE, "abstract-unknown-effect.glyph")
