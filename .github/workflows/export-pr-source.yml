@@ -100,28 +100,6 @@ jobs:
           scopes_v2.unlink()
 
           (root / "glyph/transition_system_execution_critical.py").unlink()
-
-          workflow = root / ".github/workflows/io-state-snapshot.yml"
-          workflow_source = workflow.read_text(encoding="utf-8")
-          workflow_source = workflow_source.replace(
-              '      - "glyph/transition_action_scopes_v2.py"\n',
-              "",
-          )
-          workflow_source = workflow_source.replace(
-              '      - "glyph/transition_system_execution_control_flow_v2.py"\n',
-              "",
-          )
-          workflow_source = workflow_source.replace(
-              '      - "glyph/transition_system_execution_critical.py"\n',
-              "",
-          )
-          marker = '      - "glyph/transition_system_execution_control_flow.py"\n'
-          if "glyph/_transition_system_execution_core.py" not in workflow_source:
-              workflow_source = workflow_source.replace(
-                  marker,
-                  '      - "glyph/_transition_system_execution_core.py"\n' + marker,
-              )
-          workflow.write_text(workflow_source, encoding="utf-8")
           PY
 
           python -m py_compile \
@@ -135,9 +113,19 @@ jobs:
       - name: Commit consolidated implementation
         shell: bash
         run: |
+          rm -f libgenerated.rlib libhost_binding.rlib
           git rm .github/workflows/export-pr-source.yml
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add -A
+          git add \
+            glyph/_transition_system_execution_core.py \
+            glyph/state_transition_pipeline.py \
+            glyph/transition_action_scopes.py \
+            glyph/transition_system_execution_actions.py \
+            glyph/transition_system_execution_control_flow.py
+          git add -u \
+            glyph/transition_action_scopes_v2.py \
+            glyph/transition_system_execution_control_flow_v2.py \
+            glyph/transition_system_execution_critical.py
           git commit -m "Consolidate System execution analysis layers"
           git push origin HEAD:agent/system-action-control-flow-completeness-v2
