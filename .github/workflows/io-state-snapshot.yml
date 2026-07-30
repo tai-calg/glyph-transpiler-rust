@@ -53,6 +53,8 @@ on:
       - "glyph/transition_semantics.py"
       - "glyph/transition_semantics_runtime.py"
       - "glyph/transition_system_execution_actions.py"
+      - "glyph/transition_system_execution_control_flow.py"
+      - "glyph/transition_system_execution_control_flow_v2.py"
       - "glyph/uml_transition_layout.py"
       - "glyph/io_state_views.py"
       - "glyph/state_machine_analysis.py"
@@ -84,6 +86,8 @@ on:
       - "tests/test_transition_route_labels.py"
       - "tests/test_transition_semantic_role_lines.py"
       - "tests/test_transition_semantics.py"
+      - "tests/test_transition_system_execution_control_flow.py"
+      - "tests/test_transition_system_execution_review_regressions.py"
       - "tests/test_transition_system_execution_safety.py"
       - "tests/verify_code_derived_system_io.mjs"
       - "tests/verify_enabling_case_rendering.mjs"
@@ -117,6 +121,7 @@ permissions:
 jobs:
   render:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -135,41 +140,39 @@ jobs:
       - name: Compile and verify state diagrams
         shell: bash
         run: |
-          set -o pipefail
+          set -euo pipefail
           mkdir -p build/checked-system-context-io build/execution-context-selection build/state-diagram-regression build/state-diagram-stability build/uml-transition-semantics build/additional-failure-notation build/diagram-editor-exports build/diagram-canvas-viewport build/localized-semantic-canvas build/transition-label-readability build/transition-layout-transaction build/transition-semantic-readability
+
+          run_node() {
+            local script="$1"
+            local log="$2"
+            echo "::group::${script}"
+            timeout 180s node "${script}" 2>&1 | tee "${log}"
+            echo "::endgroup::"
+          }
+
           python -m unittest discover -s tests -p 'test_transition_action_target_independence.py'
           python -m unittest discover -s tests -p 'test_transition_enabling_cases.py'
           python -m unittest discover -s tests -p 'test_transition_execution_context_selector.py'
           python -m unittest discover -s tests -p 'test_transition_input_provenance.py'
+          python -m unittest discover -s tests -p 'test_transition_system_execution_control_flow.py'
+          python -m unittest discover -s tests -p 'test_transition_system_execution_review_regressions.py'
           python -m unittest discover -s tests -p 'test_transition_system_execution_safety.py'
-          node tests/verify_code_derived_system_io.mjs \
-            2>&1 | tee build/checked-system-context-io/verify.log
-          node tests/verify_execution_context_selection.mjs \
-            2>&1 | tee build/execution-context-selection/verify.log
-          node tests/verify_enabling_case_rendering.mjs \
-            2>&1 | tee build/state-diagram-regression/enabling-cases.log
-          node tests/verify_state_diagram_rendering.mjs \
-            2>&1 | tee build/state-diagram-regression/verify.log
+          run_node tests/verify_code_derived_system_io.mjs build/checked-system-context-io/verify.log
+          run_node tests/verify_execution_context_selection.mjs build/execution-context-selection/verify.log
+          run_node tests/verify_enabling_case_rendering.mjs build/state-diagram-regression/enabling-cases.log
+          run_node tests/verify_state_diagram_rendering.mjs build/state-diagram-regression/verify.log
           python tests/verify_readme_state_snapshot.py \
             2>&1 | tee -a build/state-diagram-regression/verify.log
-          node tests/verify_state_diagram_stability.mjs \
-            2>&1 | tee build/state-diagram-stability/verify.log
-          node tests/verify_uml_transition_semantics.mjs \
-            2>&1 | tee build/uml-transition-semantics/verify.log
-          node tests/verify_additional_failure_notation.mjs \
-            2>&1 | tee build/additional-failure-notation/verify.log
-          node tests/verify_transition_layout_transaction.mjs \
-            2>&1 | tee build/transition-layout-transaction/verify.log
-          node tests/verify_diagram_editor_exports.mjs \
-            2>&1 | tee build/diagram-editor-exports/verify.log
-          node tests/verify_diagram_canvas_viewport.mjs \
-            2>&1 | tee build/diagram-canvas-viewport/verify.log
-          node tests/verify_localized_semantic_canvas.mjs \
-            2>&1 | tee build/localized-semantic-canvas/verify.log
-          node tests/verify_transition_label_readability.mjs \
-            2>&1 | tee build/transition-label-readability/verify.log
-          node tests/verify_transition_semantic_readability.mjs \
-            2>&1 | tee build/transition-semantic-readability/verify.log
+          run_node tests/verify_state_diagram_stability.mjs build/state-diagram-stability/verify.log
+          run_node tests/verify_uml_transition_semantics.mjs build/uml-transition-semantics/verify.log
+          run_node tests/verify_additional_failure_notation.mjs build/additional-failure-notation/verify.log
+          run_node tests/verify_transition_layout_transaction.mjs build/transition-layout-transaction/verify.log
+          run_node tests/verify_diagram_editor_exports.mjs build/diagram-editor-exports/verify.log
+          run_node tests/verify_diagram_canvas_viewport.mjs build/diagram-canvas-viewport/verify.log
+          run_node tests/verify_localized_semantic_canvas.mjs build/localized-semantic-canvas/verify.log
+          run_node tests/verify_transition_label_readability.mjs build/transition-label-readability/verify.log
+          run_node tests/verify_transition_semantic_readability.mjs build/transition-semantic-readability/verify.log
 
       - name: Upload rendered diagrams
         if: always()
