@@ -31,7 +31,7 @@ from .transition_enabling_cases import attach_machine_enabling_cases
 from .transition_input_provenance import expand_machine_transition_inputs
 from .transition_operation_action_finalization import finalize_machine_operation_actions
 from .transition_output_action_compatibility import attach_output_action_compatibility
-from .transition_system_execution_control_flow import (
+from .transition_system_execution_control_flow_v2 import (
     attach_transition_system_execution_actions,
 )
 
