@@ -4,7 +4,7 @@
 
 RTAI v2 is implemented as a **shadow semantic analysis**. It publishes TEIR,
 Machine relations, structural transition preimages, guarded abstract-analysis
-results and Evidence-compatible safety metadata, but it does not replace the
+foundations and Evidence-compatible safety metadata, but it does not replace the
 active System Action projection.
 
 The current implementation establishes the semantic and validation layers needed
@@ -297,7 +297,7 @@ RTAI abstract trace/completion
 
 The second check is a bounded regression oracle, not a proof for arbitrary input
 domains. It currently checks selected edge sequences, Effect operation sequences
-and completion coverage.
+and completion coverage. Return-value and final-store inclusion remain to be added.
 
 ### Shadow publication
 
@@ -403,6 +403,7 @@ It does not yet claim:
 - SMT-backed UNSAT certificates
 - complete interprocedural or recursive analysis
 - complete ownership/resource modeling
+- return-value and final-store abstract inclusion
 - formal proof of concrete-execution inclusion
 - replacement of existing System Action projection
 
