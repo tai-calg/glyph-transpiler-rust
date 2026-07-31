@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from pathlib import Path
 import unittest
 
 from glyph.compilation import CompilationPipeline
+from glyph.state_machine_analysis import analyze_machine
 from glyph.transition_analysis.machine_relation import build_machine_relation
 from glyph.transition_analysis.view_edge_specialization import (
     ViewEdgeBindingStatus,
@@ -10,6 +12,8 @@ from glyph.transition_analysis.view_edge_specialization import (
     specialize_view_edges,
 )
 
+
+ROOT = Path(__file__).resolve().parents[1]
 
 SOURCE = """machine Door(state:DoorState,input:Input)
   select=state.mode
@@ -102,6 +106,25 @@ class ViewEdgeSpecializationTests(unittest.TestCase):
             result["transitions"][3]["rtai_view_edge_specialization"]["status"],
             "unmapped",
         )
+
+    def test_function_block_generated_lines_bind_to_original_machine_edges(self) -> None:
+        path = ROOT / "examples/acceptance/motor_safety.glyph"
+        compiled = CompilationPipeline().compile_text(
+            path.read_text(encoding="utf-8"),
+            source_name=str(path),
+        )
+        machine_view = analyze_machine(
+            compiled.model,
+            compiled.diagrams.ir.machines[0],
+        )
+        bindings = specialize_view_edges(compiled.model, machine_view)
+        self.assertTrue(bindings)
+        self.assertTrue(
+            all(item.status is ViewEdgeBindingStatus.EXACT for item in bindings),
+            [item.to_ir() for item in bindings],
+        )
+        self.assertTrue(all(item.relation_edge_id for item in bindings))
+        self.assertTrue(all(item.source_line > 0 for item in bindings))
 
 
 if __name__ == "__main__":
