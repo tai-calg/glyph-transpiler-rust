@@ -35,6 +35,21 @@ _SCRIPT = r"""
       bottom: element.offsetTop + element.offsetHeight + margin,
     };
   }
+  function centeredRect(element, margin = 0) {
+    const rawLeft = element.style.left;
+    const rawTop = element.style.top;
+    const centerX = Number.parseFloat(rawLeft);
+    const centerY = Number.parseFloat(rawTop);
+    if (!rawLeft || !rawTop || !Number.isFinite(centerX) || !Number.isFinite(centerY)) {
+      return stageRect(element, margin);
+    }
+    return {
+      left: centerX - element.offsetWidth / 2 - margin,
+      top: centerY - element.offsetHeight / 2 - margin,
+      right: centerX + element.offsetWidth / 2 + margin,
+      bottom: centerY + element.offsetHeight / 2 + margin,
+    };
+  }
   function nodeName(node) {
     return node.querySelector(".state-name,.node-name")?.textContent?.trim() || "";
   }
@@ -139,7 +154,7 @@ _SCRIPT = r"""
         const labelId = cluster.dataset.transitionId || "";
         if (labelId === id) return;
         tasks.push(() => {
-          if (geom.polylineHitsRect(polyline, stageRect(cluster, FOREIGN_LABEL_CLEARANCE))) {
+          if (geom.polylineHitsRect(polyline, centeredRect(cluster, FOREIGN_LABEL_CLEARANCE))) {
             violations.push({kind: "route-foreign-label", transition: id, label: labelId});
           }
         });
