@@ -18,7 +18,7 @@ class DiagramFitStabilityTests(unittest.TestCase):
             enhance_diagram_canvas_viewport_html(DIAGRAM_HTML)
         )
 
-    def test_fit_stability_observes_shell_and_certifies_visible_elements(self) -> None:
+    def test_fit_stability_is_state_only_and_certifies_visible_elements(self) -> None:
         html = self._html()
         injected = re.search(
             r'<script id="glyph-diagram-fit-stability-v1-script">(.*?)</script>',
@@ -30,14 +30,18 @@ class DiagramFitStabilityTests(unittest.TestCase):
         script = injected.group(1)
 
         self.assertIn("glyph-diagram-fit-stability-v1", html)
+        self.assertIn('dataset.tab !== "state"', script)
         self.assertIn("new ResizeObserver", script)
         self.assertIn("canvas-shell-resize", script)
         self.assertIn("diagnostics-resize", script)
         self.assertIn("transitionPublicationReady", script)
         self.assertIn("layoutCertificateState", script)
         self.assertIn("visibilityAudit", script)
+        self.assertIn("visibleShellBounds", script)
+        self.assertIn("window.innerHeight", script)
         self.assertIn(".state-node", script)
         self.assertIn(".transition-io-cluster", script)
+        self.assertNotIn(".graph-node", script)
         self.assertNotIn("glyph-diagram-viewport-change", script)
         self.assertIn('fitVisibilityState = "failed"', script)
         self.assertIn('fitVisibilityState = "ready"', script)
