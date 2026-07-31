@@ -11,6 +11,7 @@ from glyph.transition_analysis.public_effect_contracts import (
     BUILTIN_DEFAULT_WORKSPACE_SOURCE_ID,
     PUBLIC_STRICT_PROGRAMS,
 )
+from glyph.transition_analysis.semantic_event import action_event_reference_ids
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -163,6 +164,22 @@ class PublicStrictActivationTests(unittest.TestCase):
             )
             self.assertNotIn("ConstantValue", events[0]["expression"])
             self.assertIsNotNone(transition.get("system_action"))
+            machine_event_ids = action_event_reference_ids(
+                transition["machine_action"]
+            )
+            system_event_ids = action_event_reference_ids(
+                transition["system_action"]
+            )
+            self.assertEqual(len(machine_event_ids), 1)
+            self.assertEqual(machine_event_ids, system_event_ids)
+            self.assertEqual(
+                transition["semantic_action_aliasing"]["status"],
+                "proven-alias",
+            )
+            self.assertEqual(
+                transition["machine_action_invocations"][0]["alias_of_event_id"],
+                system_event_ids[0],
+            )
 
 
 if __name__ == "__main__":
