@@ -340,7 +340,6 @@ _SCRIPT = r"""
   document.addEventListener("glyph-transition-input-action-labels-ready", schedule);
   document.addEventListener("glyph-uml-transition-ready", schedule);
   document.addEventListener("glyph-transition-layout-transaction-ready", schedule);
-  document.addEventListener("glyph-diagram-viewport-change", schedule);
   document.addEventListener("change", event => {
     if (event.target?.id === "machine-select") schedule();
   });
