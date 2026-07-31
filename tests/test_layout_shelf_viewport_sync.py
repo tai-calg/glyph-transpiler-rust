@@ -30,13 +30,15 @@ class LayoutShelfViewportSyncTests(unittest.TestCase):
             )
         )
 
-    def test_sync_refits_only_fit_mode_and_waits_for_paint(self) -> None:
+    def test_sync_refits_only_fit_mode_without_viewport_change(self) -> None:
         html = self._html()
 
         self.assertIn("glyph-layout-shelf-viewport-sync-v1", html)
         self.assertIn('mode && mode !== "fit"', html)
-        self.assertIn("viewport.fit()", html)
+        self.assertIn("await silentFit(stage)", html)
         self.assertIn("await nextPaint()", html)
+        self.assertIn("glyph.diagram.viewport-mode.v1", html)
+        self.assertNotIn("glyph-diagram-viewport-change", html)
         self.assertIn("result?.shelfRerouted", html)
         self.assertIn("base.version = 6", html)
 
