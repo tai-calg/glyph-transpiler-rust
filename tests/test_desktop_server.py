@@ -144,7 +144,10 @@ class DesktopServerTests(unittest.TestCase):
             try:
                 launch = urlopen(desktop.launch_url, timeout=3)
                 html = launch.read().decode("utf-8")
-                self.assertIn("glyph-transition-semantic-status-ui-v1", html)
+                self.assertIn("glyph-transition-semantic-status-ui-v2", html)
+                self.assertIn("function liveState()", html)
+                self.assertIn("new AbortController()", html)
+                self.assertIn("window.addEventListener(\"pagehide\",dispose", html)
                 self.assertIn('const token = "strict-token"', html)
 
                 request = Request(
