@@ -35,6 +35,21 @@ class DiagramEditorClickDragBoundaryTests(unittest.TestCase):
         self.assertIn("if(!record.dragged)return", html)
         self.assertIn("manual-label-persisted", html)
 
+    def test_manual_label_is_snapped_before_canonical_persistence(self) -> None:
+        html = enhance_transition_layout_interaction_adapter_html(DIAGRAM_HTML)
+
+        self.assertIn("nearestCertifiablePoint", html)
+        self.assertIn("manualPlacementViolation", html)
+        self.assertIn("route-foreign-label", html)
+        self.assertIn("label-node-overlap", html)
+        self.assertIn("label-label-overlap", html)
+        self.assertIn("manualIoAdjusted", html)
+        self.assertIn("manual-label-rejected", html)
+        self.assertLess(
+            html.index("nearestCertifiablePoint(record,requested)"),
+            html.index("writeStored(key,saved)"),
+        )
+
     def test_enhancers_are_idempotent(self) -> None:
         editor_once = enhance_diagram_editor_exports_html(DIAGRAM_HTML)
         editor_twice = enhance_diagram_editor_exports_html(editor_once)
