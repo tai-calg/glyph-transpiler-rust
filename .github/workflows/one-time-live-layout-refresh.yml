@@ -1,0 +1,96 @@
+name: One-time Live Layout Refresh
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/one-time-live-layout-refresh.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.head_ref == 'agent/system-action-control-flow-completeness-v2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Refresh clusters from the live preview snapshot
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          transaction = Path("glyph/transition_layout_transaction.py")
+          source = transaction.read_text(encoding="utf-8")
+          old = '''let requestedGeneration=0,completedGeneration=0,running=false,timer=null,lastStage=null;\nlet resizeObserver=null,lastViewportSize="",destroyed=false;'''
+          new = '''let requestedGeneration=0,completedGeneration=0,running=false,timer=null,lastStage=null;\nlet resizeObserver=null,lastViewportSize="",destroyed=false,internalClusterRefresh=false;'''
+          if source.count(old) != 1:
+              raise SystemExit(f"transaction state block count={source.count(old)}")
+          source = source.replace(old, new)
+
+          old = '''async function diagramState(){\n  if(stateCache)return stateCache;\n  if(statePromise)return statePromise;'''
+          new = '''async function diagramState(){\n  const live=typeof snapshot==="object"&&snapshot?snapshot:null;\n  if(live)return live;\n  if(stateCache)return stateCache;\n  if(statePromise)return statePromise;'''
+          if source.count(old) != 1:
+              raise SystemExit(f"transaction diagramState block count={source.count(old)}")
+          source = source.replace(old, new)
+
+          old = '''  await nextFrame();\n  if(cancelled(token))return{status:"cancelled",stage};\n  await ensureClusters(stage,machine,token);\n  ensureCanvas(stage,machine.transitions?.length||0,{includeLabels:true});'''
+          new = '''  await nextFrame();\n  if(cancelled(token))return{status:"cancelled",stage};\n  internalClusterRefresh=true;\n  try{window.glyphTransitionIoClusters?.render()}finally{internalClusterRefresh=false}\n  await nextFrame();\n  if(cancelled(token))return{status:"cancelled",stage};\n  await ensureClusters(stage,machine,token);\n  ensureCanvas(stage,machine.transitions?.length||0,{includeLabels:true});'''
+          if source.count(old) != 1:
+              raise SystemExit(f"transaction cluster refresh insertion count={source.count(old)}")
+          source = source.replace(old, new)
+
+          old = '''  document.addEventListener(eventName,()=>{invalidateState();schedule(eventName,0)});\n}'''
+          new = '''  document.addEventListener(eventName,()=>{\n    if(internalClusterRefresh&&(eventName==="glyph-transition-io-clusters-ready"||eventName==="glyph-transition-enabling-cases-ready"))return;\n    invalidateState();schedule(eventName,0);\n  });\n}'''
+          if source.count(old) != 1:
+              raise SystemExit(f"transaction event listener block count={source.count(old)}")
+          transaction.write_text(source.replace(old, new), encoding="utf-8")
+
+          for filename in [
+              "glyph/transition_layout_interaction_adapter.py",
+              "glyph/transition_node_position_adapter.py",
+          ]:
+              path = Path(filename)
+              source = path.read_text(encoding="utf-8")
+              old = '''async function diagramState(){\n  if(stateCache)return stateCache;'''
+              if old not in source:
+                  old = '''async function diagramState(){\n  if(stateCache)return stateCache;'''
+              new = '''async function diagramState(){\n  const live=typeof snapshot==="object"&&snapshot?snapshot:null;\n  if(live)return live;\n  if(stateCache)return stateCache;'''
+              if source.count(old) != 1:
+                  raise SystemExit(f"{filename} diagramState block count={source.count(old)}")
+              path.write_text(source.replace(old, new), encoding="utf-8")
+          PY
+          python -m py_compile glyph/transition_layout_transaction.py glyph/transition_layout_interaction_adapter.py glyph/transition_node_position_adapter.py
+          python - <<'PY'
+          from pathlib import Path
+          items = [
+              ("glyph/transition_layout_transaction.py", "glyph-transition-layout-transaction-v1-script", "/tmp/transaction.js"),
+              ("glyph/transition_layout_interaction_adapter.py", "glyph-transition-layout-interaction-adapter-v1-script", "/tmp/label.js"),
+              ("glyph/transition_node_position_adapter.py", "glyph-transition-node-position-adapter-v1-script", "/tmp/node.js"),
+          ]
+          for source_path, script_id, target in items:
+              source = Path(source_path).read_text(encoding="utf-8")
+              marker = f'<script id="{script_id}">'
+              start = source.index(marker) + len(marker)
+              end = source.index('</script>', start)
+              Path(target).write_text(source[start:end], encoding='utf-8')
+          PY
+          node --check /tmp/transaction.js
+          node --check /tmp/label.js
+          node --check /tmp/node.js
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add glyph/transition_layout_transaction.py glyph/transition_layout_interaction_adapter.py glyph/transition_node_position_adapter.py
+          git commit -m "Refresh publication layout from live preview state"
+          git push origin "HEAD:${{ github.head_ref }}"
