@@ -1,0 +1,60 @@
+name: Patch Layout Transaction Wait
+
+on:
+  push:
+    branches:
+      - agent/system-action-control-flow-completeness-v2
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: >-
+      github.repository == 'tai-calg/glyph-transpiler-rust' &&
+      !contains(github.event.head_commit.message, '[skip-layout-wait-patch]')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/system-action-control-flow-completeness-v2
+          fetch-depth: 1
+
+      - name: Patch terminal publication wait
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('tests/verify_transition_layout_transaction.mjs')
+          text = path.read_text(encoding='utf-8')
+          old = '''  await page.waitForFunction(minimum => {
+              const stage = document.querySelector(".graph-stage");
+              const generation = Number(stage?.dataset.transitionLayoutGeneration || 0);
+              const state = stage?.dataset.transitionLayoutState;
+              return generation >= Number(minimum || 0) && (state === "ready" || state === "failed");
+            }, minimumGeneration, { timeout: 30000 });'''
+          new = '''  await page.waitForFunction(minimum => {
+              const stage = document.querySelector(".graph-stage");
+              const generation = Number(stage?.dataset.transitionLayoutGeneration || 0);
+              const state = stage?.dataset.transitionLayoutState;
+              const routeState = stage?.dataset.initialRouteReady;
+              const certificateState = stage?.dataset.layoutCertificateState;
+              const publicationReady = stage?.dataset.transitionPublicationReady;
+              const terminalFailure = state === "failed"
+                || routeState === "failed"
+                || certificateState === "failed";
+              return generation >= Number(minimum || 0)
+                && (terminalFailure || (state === "ready" && publicationReady === "true"));
+            }, minimumGeneration, { timeout: 30000 });'''
+          if old not in text:
+              raise SystemExit('expected waitForTransaction block not found')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tests/verify_transition_layout_transaction.mjs
+          git commit -m "Wait for final layout publication [skip-layout-wait-patch]"
+          git push origin HEAD:agent/system-action-control-flow-completeness-v2
