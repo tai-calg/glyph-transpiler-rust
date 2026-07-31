@@ -38,9 +38,13 @@ class StrictSanitizerTests(unittest.TestCase):
         )
 
         self.assertFalse(report.ready)
+        self.assertTrue(report.projection_complete)
+        self.assertFalse(report.all_edges_exact)
+        self.assertEqual(report.expected_transition_count, 1)
         self.assertEqual(report.relevant_transition_count, 1)
         self.assertEqual(report.ready_transition_count, 0)
         self.assertEqual(report.rejected_context_count, 1)
+        self.assertEqual(report.missing_evidence_count, 1)
         self.assertEqual(report.transitions[0].reason, "evidence-is-missing")
 
     def test_strict_mode_clears_stale_system_projection_before_audit(self) -> None:
@@ -65,6 +69,10 @@ class StrictSanitizerTests(unittest.TestCase):
         self.assertFalse(transition["legacy_system_action_fallback_allowed"])
         self.assertNotIn("system_action_projection_source", transition)
         self.assertFalse(result["analysis"]["evidence_projection_ready"])
+        self.assertTrue(result["analysis"]["evidence_projection_safe"])
+        self.assertTrue(result["analysis"]["evidence_projection_complete"])
+        self.assertFalse(result["analysis"]["evidence_projection_all_edges_exact"])
+        self.assertEqual(result["analysis"]["evidence_projection_missing_evidence_count"], 1)
 
     def test_strict_sanitization_is_idempotent(self) -> None:
         first = project_machine_from_evidence(
