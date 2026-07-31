@@ -63,7 +63,9 @@ def test_initial_router_is_owned_by_the_completed_transaction_generation() -> No
     assert 'if(ownerId===initialRouterScript)' in html
     assert 'window.glyphInitialTransitionRouter?.schedule?.("transaction-generation-ready",0)' in html
     assert 'initialRouteProtocolState="waiting-dom"' in html
-    assert 'initialRouteProtocolState="router-stalled"' in html
+    assert "markRouteProtocolFailure(stage,state,reason)" in html
+    assert '"router-stalled"' in html
+    assert "initial-route router completed without issuing a certificate" in html
     assert "api.completedGeneration<routerGeneration" in html
 
 
