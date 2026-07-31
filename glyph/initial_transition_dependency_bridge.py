@@ -90,6 +90,47 @@ _SCRIPT = r"""
     delete stage.dataset.initialTransitionRouting;
   }
 
+  function protocolFailureDetails(stage) {
+    const selected = document.getElementById("machine-select")?.selectedOptions?.[0]?.textContent?.trim() || "";
+    const machines = typeof snapshot === "object" && snapshot?.views?.state?.machines || [];
+    const machine = machines.find(item => item.name === selected) || machines[0] || null;
+    return {
+      selectedMachine: selected,
+      initialState: machine?.initial_state ?? null,
+      stateNames: [...(stage?.querySelectorAll(".state-name") || [])]
+        .map(node => node.textContent?.trim() || ""),
+      labelsReady: stage?.dataset.transitionInputActionLabelsReady || "",
+      layoutGeneration: layoutGeneration(stage),
+      routeLayoutGeneration: stage?.dataset.initialRouteLayoutGeneration || "",
+      routeProtocolState: stage?.dataset.initialRouteProtocolState || "",
+      routeProtocolReason: stage?.dataset.initialRouteProtocolReason || "",
+      routeProtocolSequence: stage?.dataset.initialRouteProtocolSequence || "",
+      routerGeneration: router()?.generation ?? null,
+      routerCompletedGeneration: router()?.completedGeneration ?? null,
+      routerProtocol: router()?.layoutGenerationProtocol || "",
+      routerScheduleName: router()?.schedule?.name || "",
+      routerScheduleSource: String(router()?.schedule || "").slice(0, 240),
+      hasSvg: Boolean(currentSvg()),
+      hasInitialPath: Boolean(currentSvg()?.querySelector(":scope > path:not(.state-transition-path)")),
+      hasInitialDot: Boolean(stage?.querySelector(".initial-dot")),
+    };
+  }
+
+  function markProtocolFailure(stage, state, reason) {
+    if (!stage) return;
+    const details = protocolFailureDetails(stage);
+    stage.dataset.initialRouteReady = "failed";
+    stage.dataset.initialRouteCertificate = "failed";
+    stage.dataset.initialRouteError = reason;
+    stage.dataset.initialRouteFailureDetails = JSON.stringify(details);
+    stage.dataset.initialRouteSettleState = state;
+    stage.dataset.transitionPublicationReady = "false";
+    stage.dataset.layoutCertificateState = "failed";
+    stage.dataset.layoutCertificateRequestState = "failed";
+    stage.dataset.layoutCertificateReason = "initial-route-protocol-failed";
+    stage.dataset.layoutCertificateViolations = JSON.stringify([{kind: state, reason, details}]);
+  }
+
   function scheduleRouter(reason) {
     settleGeneration += 1;
     const stage = currentStage();
@@ -236,10 +277,27 @@ _SCRIPT = r"""
   for (const eventName of [
     "glyph-diagram-geometry-kernel-ready",
     "glyph-uml-transition-ready",
-    "glyph-transition-layout-transaction-ready",
   ]) {
     document.addEventListener(eventName, scheduleBind);
   }
+  document.addEventListener("glyph-transition-layout-transaction-ready", event => {
+    scheduleBind();
+    const stage = currentStage();
+    const generation = String(event?.detail?.generation || layoutGeneration(stage));
+    setTimeout(() => {
+      const current = currentStage();
+      if (destroyed
+        || current !== stage
+        || layoutGeneration(current) !== generation
+        || current?.dataset.transitionLayoutState !== "ready"
+        || current.dataset.initialRouteCertificate === "valid") return;
+      markProtocolFailure(
+        current,
+        "generation-watchdog-timeout",
+        "initial-route certificate was not issued for the completed layout generation",
+      );
+    }, 2500);
+  });
   document.addEventListener("change", event => {
     if (event.target?.id === "machine-select") scheduleBind();
   });
