@@ -109,8 +109,19 @@ try {
   const first = await page.evaluate(() => {
     const stage = document.querySelector(".graph-stage");
     const initial = stage?.querySelector("path.initial-transition-path");
+    const routerScript = document.getElementById("glyph-initial-transition-routing-v2-script");
     return {
       routerVersion: window.glyphInitialTransitionRouter?.version,
+      routerMarker: window.glyphInitialTransitionRouter?.marker || "",
+      routerProtocol: window.glyphInitialTransitionRouter?.layoutGenerationProtocol || "",
+      routerScheduleName: window.glyphInitialTransitionRouter?.schedule?.name || "",
+      routerScriptPresent: Boolean(routerScript),
+      routerScriptLength: routerScript?.textContent?.length || 0,
+      routerProtocolState: stage?.dataset.initialRouteProtocolState || "",
+      routerProtocolReason: stage?.dataset.initialRouteProtocolReason || "",
+      routerProtocolSequence: stage?.dataset.initialRouteProtocolSequence || "",
+      routerProtocolAttempt: stage?.dataset.initialRouteProtocolAttempt || "",
+      routerProtocolGeneration: stage?.dataset.initialRouteProtocolRouterGeneration || "",
       kernelVersion: window.glyphDiagramGeometry?.version,
       renderedPathSampling: window.glyphDiagramGeometry?.renderedPathSampling,
       renderedAdapterVersion: window.glyphDiagramRenderedGeometryAdapter?.version,
@@ -140,7 +151,11 @@ try {
     };
   });
 
-  assert.equal(first.routerVersion, 2);
+  assert.equal(
+    first.routerVersion,
+    2,
+    `initial router API is unavailable: ${JSON.stringify({first, browserErrors})}`,
+  );
   assert(first.kernelVersion >= 2, `rendered geometry kernel version is ${first.kernelVersion}`);
   assert.equal(first.renderedPathSampling, true);
   assert.equal(first.renderedAdapterVersion, 1);
