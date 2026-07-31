@@ -29,6 +29,13 @@ from .machine_relation import build_machine_relation
 from .projection import check_exact_action_projection
 from .summary_interpreter import SummaryAwareAbstractInterpreter
 from .view_edge_specialization import ViewEdgeBindingStatus
+from .witness_binding import (
+    WITNESS_BINDING_VERSION,
+    BoundWitnessGenerationReport,
+    bind_witness_generation_report,
+    relation_edge_fingerprints,
+    runtime_program_fingerprint,
+)
 from .witness_generation import (
     BoundedWitnessGenerationReport,
     TargetedWitnessRegistry,
@@ -38,7 +45,9 @@ from .witness_generation import (
 )
 
 
-RTAI_ABSTRACT_EVIDENCE_SHADOW_VERSION = 3
+RTAI_ABSTRACT_EVIDENCE_SHADOW_VERSION = 4
+
+WitnessReport = BoundedWitnessGenerationReport | BoundWitnessGenerationReport
 
 
 def attach_rtai_abstract_execution_evidence(
@@ -51,20 +60,18 @@ def attach_rtai_abstract_execution_evidence(
 ) -> dict[str, object]:
     """Attach native RTAI Evidence without replacing legacy UI projection.
 
-    The machine-level contract remains keyed by normalized MachineRelation edges.
-    When a rendered transition has an exact specialization binding, an additional
-    view-edge Evidence record is attached directly to that transition. Normal and
-    synthesized-failure transitions use disjoint completion partitions.
-
-    Automatic concrete witnesses are generated only when an explicit verified
-    Effect-contract registry is supplied. Missing contracts never fall back to an
-    inferred handler. Finite domains are exhausted when possible; reviewed targeted
-    inputs may provide existence witnesses for unsupported or oversized domains.
+    Concrete witnesses are generated only from an explicit verified Effect-contract
+    registry. Before native Evidence is published, every witness is bound to the
+    current preprocessed compiler input, normalized MachineRelation edge, contract
+    registry, interpreter version and typed input digest. A missing binding cannot
+    authorize Exact projection.
     """
 
     result = deepcopy(machine_view)
     machine_name = str(result.get("name") or "")
     relation = build_machine_relation(model, machine_name)
+    program_fingerprint = runtime_program_fingerprint(model)
+    edge_fingerprints = relation_edge_fingerprints(model)
     issues: list[dict[str, str]] = []
     edges: list[dict[str, object]] = []
     view_edges: list[dict[str, object]] = []
@@ -75,7 +82,7 @@ def attach_rtai_abstract_execution_evidence(
 
     analyses = {}
     systems_by_entry: dict[str, list[str]] = {}
-    witness_report: BoundedWitnessGenerationReport | None = None
+    witness_report: WitnessReport | None = None
     contract_coverage: EffectContractCoverageReport | None = None
     if relation is not None:
         analyzer = SummaryAwareAbstractInterpreter(
@@ -114,12 +121,17 @@ def attach_rtai_abstract_execution_evidence(
                 for entry in contract_coverage.entries
                 for item in entry.lowering_issues
             )
-            witness_report = generate_bounded_system_witnesses(
+            generated_report = generate_bounded_system_witnesses(
                 model,
                 systems_by_entry,
                 effect_contracts,
                 max_cases_per_entry=witness_max_cases,
                 targeted_witnesses=targeted_witnesses,
+            )
+            witness_report = bind_witness_generation_report(
+                generated_report,
+                model,
+                effect_contracts,
             )
             issues.extend(
                 {
@@ -128,14 +140,18 @@ def attach_rtai_abstract_execution_evidence(
                 }
                 for item in witness_report.issues
             )
+            if not witness_report.complete and generated_report.complete:
+                issues.append(
+                    {
+                        "entry": "*",
+                        "reason": "witness-identity-binding-incomplete",
+                    }
+                )
 
         for entry in sorted(systems_by_entry):
             if entry not in analyzer.functions:
                 issues.append(
-                    {
-                        "entry": entry,
-                        "reason": "TEIR entry is unavailable",
-                    }
+                    {"entry": entry, "reason": "TEIR entry is unavailable"}
                 )
                 continue
             try:
@@ -163,6 +179,11 @@ def attach_rtai_abstract_execution_evidence(
                 edge.edge_id,
                 contexts,
                 synthesized_failure=False,
+            )
+            _attach_native_identity(
+                evidence,
+                program_fingerprint=program_fingerprint,
+                edge_fingerprint=edge_fingerprints.get(edge.edge_id),
             )
             checks = _projection_checks(evidence)
             exact_projection_count += sum(bool(item["allowed"]) for item in checks)
@@ -205,6 +226,11 @@ def attach_rtai_abstract_execution_evidence(
                 contexts,
                 synthesized_failure=synthesized_failure,
             )
+            _attach_native_identity(
+                evidence,
+                program_fingerprint=program_fingerprint,
+                edge_fingerprint=edge_fingerprints.get(relation_edge_id),
+            )
         else:
             evidence = _unmapped_view_evidence(
                 view_edge_id,
@@ -225,6 +251,8 @@ def attach_rtai_abstract_execution_evidence(
         "version": RTAI_ABSTRACT_EVIDENCE_SHADOW_VERSION,
         "adapter_version": ABSTRACT_EVIDENCE_ADAPTER_VERSION,
         "projection_source": False,
+        "program_fingerprint": program_fingerprint,
+        "relation_edge_fingerprints": edge_fingerprints,
         "machine_relation": relation.to_ir() if relation is not None else None,
         "effect_contracts": (
             effect_contracts.to_ir()
@@ -270,16 +298,14 @@ def attach_rtai_abstract_execution_evidence(
             "rtai_abstract_execution_evidence_is_projection_source": False,
             "rtai_abstract_execution_evidence_edge_count": len(edges),
             "rtai_abstract_execution_view_edge_count": len(view_edges),
-            "rtai_abstract_execution_evidence_context_count": (
-                relation_context_count
-            ),
+            "rtai_abstract_execution_evidence_context_count": relation_context_count,
             "rtai_abstract_execution_view_context_count": view_context_count,
             "rtai_abstract_execution_analyzed_entry_count": analyzed_entries,
             "rtai_abstract_execution_issue_count": len(issues),
             "rtai_abstract_execution_exact_projection_count": exact_projection_count,
-            "rtai_effect_contract_registry_version": (
-                EFFECT_CONTRACT_REGISTRY_VERSION
-            ),
+            "rtai_program_fingerprint": program_fingerprint,
+            "rtai_witness_binding_version": WITNESS_BINDING_VERSION,
+            "rtai_effect_contract_registry_version": EFFECT_CONTRACT_REGISTRY_VERSION,
             "rtai_effect_contracts_configured": effect_contracts is not None,
             "rtai_effect_contract_audit_version": EFFECT_CONTRACT_AUDIT_VERSION,
             "rtai_effect_contract_coverage_complete": (
@@ -321,7 +347,7 @@ def _contexts_for_edge(
     output_edge_id: str,
     analysis_edge_id: str,
     completion_filter: frozenset[str] | None,
-    witness_report: BoundedWitnessGenerationReport | None,
+    witness_report: WitnessReport | None,
 ) -> tuple[ContextExecutionEvidence, ...]:
     contexts: list[ContextExecutionEvidence] = []
     for entry, raw_analysis in analyses.items():
@@ -342,7 +368,7 @@ def _contexts_for_edge(
                         output_edge_id,
                         system_name,
                         entry,
-                        witness=witness,
+                        witness=witness,  # type: ignore[arg-type]
                         analysis_edge_id=analysis_edge_id,
                         completion_filter=completion_filter,
                     ),
@@ -394,6 +420,23 @@ def _edge_evidence(
         completion=completion,
         approximation=approximation,
     ).to_ir()
+
+
+def _attach_native_identity(
+    evidence: dict[str, object],
+    *,
+    program_fingerprint: str,
+    edge_fingerprint: str | None,
+) -> None:
+    contexts = evidence.get("contexts")
+    if not isinstance(contexts, list):
+        return
+    for context in contexts:
+        if not isinstance(context, dict):
+            continue
+        context["evidence_origin"] = "rtai-native"
+        context["program_fingerprint"] = program_fingerprint
+        context["analysis_edge_fingerprint"] = edge_fingerprint
 
 
 def _unmapped_view_evidence(
