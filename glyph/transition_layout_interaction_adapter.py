@@ -35,26 +35,28 @@ function parseStored(key){try{return JSON.parse(localStorage.getItem(key)||"{}")
 function writeStored(key,value){try{localStorage.setItem(key,JSON.stringify(value));return true}catch(error){console.warn("manual transition position persistence unavailable",error);return false}}
 function select(cluster){selected?.classList.remove("selected-io");selected=cluster;selected?.classList.add("selected-io")}
 function report(error,prefix){if(error?.name!=="AbortError"&&!destroyed)console.error(prefix,error)}
+function pointerDistance(record,event){return Math.hypot(event.clientX-record.startX,event.clientY-record.startY)}
 function requestedPoint(record,event){return feasible({x:record.left+(event.clientX-record.startX)/record.scale,y:record.top+(event.clientY-record.startY)/record.scale},record.anchor,record.cluster,record.stage)}
-async function persist(record,event){
+async function persist(record){
+  if(!record.dragged)return;
   await new Promise(resolve=>setTimeout(resolve,0));
   if(destroyed||!record.cluster.isConnected||!record.stage.isConnected)return;
-  const pointerDistance=Math.hypot(event.clientX-record.startX,event.clientY-record.startY),current={x:num(record.cluster.style.left),y:num(record.cluster.style.top)},visualDistance=Math.hypot(current.x-record.left,current.y-record.top);
-  if(pointerDistance<DRAG_THRESHOLD&&visualDistance<1)return;
+  const current={x:num(record.cluster.style.left),y:num(record.cluster.style.top)},visualDistance=Math.hypot(current.x-record.left,current.y-record.top);
+  if(visualDistance<1)return;
   const point=feasible(current,record.anchor,record.cluster,record.stage);if(!point){window.glyphTransitionLayoutTransaction?.schedule("manual-label-outside-tether",0);return}
   const data=await diagramState(),key=storageKey(data),saved=parseStored(key);saved[record.id]={x:point.x,y:point.y,dx:point.x-record.anchor.x,dy:point.y-record.anchor.y};writeStored(key,saved);
   record.cluster.style.left=`${point.x}px`;record.cluster.style.top=`${point.y}px`;record.cluster.dataset.manualIo="true";record.cluster.dataset.ioDistance=String(Math.hypot(point.x-record.anchor.x,point.y-record.anchor.y));window.glyphTransitionLayoutTransaction?.schedule("manual-label-persisted",0);
 }
 async function resetCluster(cluster){const data=await diagramState(),key=storageKey(data),saved=parseStored(key),id=cluster.dataset.transitionId||"";if(id in saved){delete saved[id];writeStored(key,saved)}cluster.dataset.manualIo="false";window.glyphTransitionLayoutTransaction?.schedule("manual-label-reset",0)}
-function finish(event){if(!active||active.pointerId!==event.pointerId)return;const record=active;active=null;record.cluster.classList.remove("dragging-io");persist(record,event).catch(error=>report(error,"manual transition position persistence failed"))}
-document.addEventListener("pointerdown",event=>{const cluster=event.target?.closest?.(".transition-io-cluster");if(!cluster||event.button!==0)return;const stage=cluster.closest(".graph-stage");if(!stage||stage.dataset.transitionLayoutState!=="ready")return;select(cluster);cluster.classList.add("dragging-io");active={cluster,stage,id:cluster.dataset.transitionId||"",pointerId:event.pointerId,startX:event.clientX,startY:event.clientY,left:num(cluster.style.left),top:num(cluster.style.top),anchor:{x:num(cluster.dataset.anchorX),y:num(cluster.dataset.anchorY)},scale:scaleFor(stage)}},true);
-document.addEventListener("pointermove",event=>{if(!active||active.pointerId!==event.pointerId)return;const point=requestedPoint(active,event);if(!point)return;active.cluster.style.left=`${point.x}px`;active.cluster.style.top=`${point.y}px`;active.cluster.dataset.ioDistance=String(Math.hypot(point.x-active.anchor.x,point.y-active.anchor.y))},true);
+function finish(event){if(!active||active.pointerId!==event.pointerId)return;const record=active;active=null;record.cluster.classList.remove("dragging-io");persist(record).catch(error=>report(error,"manual transition position persistence failed"))}
+document.addEventListener("pointerdown",event=>{const cluster=event.target?.closest?.(".transition-io-cluster");if(!cluster||event.button!==0)return;const stage=cluster.closest(".graph-stage");if(!stage||stage.dataset.transitionLayoutState!=="ready")return;select(cluster);cluster.classList.add("dragging-io");active={cluster,stage,id:cluster.dataset.transitionId||"",pointerId:event.pointerId,startX:event.clientX,startY:event.clientY,left:num(cluster.style.left),top:num(cluster.style.top),anchor:{x:num(cluster.dataset.anchorX),y:num(cluster.dataset.anchorY)},scale:scaleFor(stage),dragged:false}},true);
+document.addEventListener("pointermove",event=>{if(!active||active.pointerId!==event.pointerId)return;if(!active.dragged&&pointerDistance(active,event)<DRAG_THRESHOLD)return;active.dragged=true;const point=requestedPoint(active,event);if(!point)return;active.cluster.style.left=`${point.x}px`;active.cluster.style.top=`${point.y}px`;active.cluster.dataset.ioDistance=String(Math.hypot(point.x-active.anchor.x,point.y-active.anchor.y))},true);
 document.addEventListener("pointerup",finish,true);
 document.addEventListener("pointercancel",event=>{if(!active||active.pointerId!==event.pointerId)return;active.cluster.style.left=`${active.left}px`;active.cluster.style.top=`${active.top}px`;active.cluster.classList.remove("dragging-io");active=null},true);
 document.addEventListener("dblclick",event=>{const cluster=event.target?.closest?.(".transition-io-cluster");if(cluster)resetCluster(cluster).catch(error=>report(error,"manual transition position reset failed"))},true);
 document.addEventListener("change",event=>{if(event.target?.id==="machine-select"){selected=null;invalidateState()}});
 for(const eventName of["pagehide","beforeunload"]){window.addEventListener(eventName,()=>{destroyed=true;active=null;selected=null;invalidateState()},{once:true})}
-window.glyphTransitionLayoutInteractionAdapter={marker:MARKER,version:3};
+window.glyphTransitionLayoutInteractionAdapter={marker:MARKER,version:4};
 })();
 </script>
 """
