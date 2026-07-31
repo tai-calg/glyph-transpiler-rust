@@ -7,6 +7,7 @@ from .compiler import AliasDecl, ExternDecl, FunctionDecl, ProductDecl, SumDecl,
 from .execution_ir import ExecutionStructureIR
 from .state_machine_analysis import analyze_machine
 from .state_machine_source_map import remap_machine_analysis_source_lines
+from .state_transition_contract import raw_transition_ir_marker
 from .state_transition_pipeline import enrich_state_transition_ir
 from .transition_analysis.evidence_projection import EvidenceProjectionMode
 from .transition_analysis.public_strict_activation import (
@@ -33,10 +34,7 @@ def empty_io_state_views() -> dict[str, object]:
         },
         "io": {"systems": [], "types": []},
         "state": {"machines": []},
-        "state_transition_ir": {
-            "schema": "glyph.state-transition-ir",
-            "version": 2,
-        },
+        "state_transition_ir": raw_transition_ir_marker(),
         "rtai_public_strict_activation": inactive_public_strict_activation_ir(
             "no-source"
         ),
