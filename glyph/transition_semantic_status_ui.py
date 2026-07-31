@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 
-_MARKER = "glyph-transition-semantic-status-ui-v1"
+_MARKER = "glyph-transition-semantic-status-ui-v2"
 
 _STYLE = r"""
-<style id="glyph-transition-semantic-status-ui-v1-style">
+<style id="glyph-transition-semantic-status-ui-v2-style">
 .transition-io-cluster[data-rtai-semantic-status]{
   --rtai-semantic-color:#6b7280;
 }
@@ -48,12 +48,22 @@ _STYLE = r"""
 """
 
 _SCRIPT = r"""
-<script id="glyph-transition-semantic-status-ui-v1-script">
+<script id="glyph-transition-semantic-status-ui-v2-script">
 (()=>{
-const MARKER="glyph-transition-semantic-status-ui-v1";
-let cache=null,timer=null,running=false,lastSignature="";
+const MARKER="glyph-transition-semantic-status-ui-v2";
+let cache=null,timer=null,running=false,lastSignature="",disposed=false,controller=null;
 const text=value=>String(value??"").trim();
-async function state(){if(cache)return cache;const response=await fetch("/api/state",{cache:"no-store"});if(!response.ok)throw Error("diagram state unavailable");return cache=await response.json()}
+function liveState(){return typeof snapshot==="object"&&snapshot?snapshot:null}
+async function state(){
+  const live=liveState();
+  if(live)return live;
+  if(cache)return cache;
+  controller?.abort();
+  controller=new AbortController();
+  const response=await fetch("/api/state",{cache:"no-store",signal:controller.signal});
+  if(!response.ok)throw Error("diagram state unavailable");
+  return cache=await response.json();
+}
 function selectedMachine(data){const machines=data?.views?.state?.machines||[],name=document.getElementById("machine-select")?.selectedOptions?.[0]?.textContent;return machines.find(machine=>machine.name===name)||machines[0]||null}
 function semanticOf(transition){const raw=transition?.rtai_semantic_status||{},status=["exact","may","unknown"].includes(text(raw.status))?text(raw.status):"unknown";return{status,label:status==="exact"?"Exact":status==="may"?"May":"Unknown",reason:text(raw.reason)||"native Evidence status is unavailable"}}
 function escapeId(value){return window.CSS?.escape?CSS.escape(value):value.replace(/[^A-Za-z0-9_-]/g,"\\$&")}
@@ -74,12 +84,14 @@ function clearCluster(cluster){
 }
 function signatureOf(machine){return[window.GlyphI18n?.locale||document.documentElement.lang||"ja",machine?.name||"",machine?.analysis?.evidence_projection_mode||"shadow",...(machine?.transitions||[]).map((transition,index)=>{const semantic=semanticOf(transition);return[text(transition.id)||`T${index+1}`,semantic.status,semantic.reason].join("\u001f")})].join("\u001e")}
 async function render(){
-  if(running)return;
+  if(disposed||running)return;
   const stage=document.querySelector(".state-node")?.closest(".graph-stage");
   if(!stage||stage.dataset.transitionIoClustersReady!=="true")return;
   running=true;
   try{
-    const data=await state(),machine=selectedMachine(data);
+    const data=await state();
+    if(disposed)return;
+    const machine=selectedMachine(data);
     if(!machine)return;
     const projectionMode=text(machine?.analysis?.evidence_projection_mode)||"shadow",signature=signatureOf(machine);
     let changed=lastSignature!==signature;
@@ -97,9 +109,18 @@ async function render(){
     if(changed)document.dispatchEvent(new CustomEvent("glyph-transition-semantic-status-ready",{detail:{machine:machine.name,marker:MARKER}}));
   }finally{running=false}
 }
-function schedule(delay=0){clearTimeout(timer);timer=setTimeout(()=>render().catch(error=>console.error("transition semantic status rendering failed",error)),delay)}
-for(const event of["glyph-transition-io-clusters-ready","glyph-state-transition-ir-v4-labels-ready","glyph-execution-context-changed","glyph-locale-changed"]){document.addEventListener(event,()=>{cache=null;schedule(0)})}
+function expectedShutdown(error){return disposed||error?.name==="AbortError"||document.visibilityState==="hidden"}
+function schedule(delay=0){
+  if(disposed)return;
+  clearTimeout(timer);
+  timer=setTimeout(()=>render().catch(error=>{if(!expectedShutdown(error))console.error("transition semantic status rendering failed",error)}),delay)
+}
+function invalidate(){cache=null;schedule(0)}
+for(const event of["glyph-transition-io-clusters-ready","glyph-state-transition-ir-v4-labels-ready","glyph-execution-context-changed","glyph-locale-changed"]){document.addEventListener(event,invalidate)}
 document.addEventListener("change",event=>{if(event.target?.id==="machine-select"){cache=null;lastSignature="";schedule(0)}});
+function dispose(){disposed=true;clearTimeout(timer);controller?.abort()}
+window.addEventListener("pagehide",dispose,{once:true});
+window.addEventListener("beforeunload",dispose,{once:true});
 schedule(0);
 })();
 </script>
