@@ -1,0 +1,76 @@
+name: Patch Cluster Interaction Ownership
+
+on:
+  push:
+    branches:
+      - agent/system-action-control-flow-completeness-v2
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: >-
+      github.repository == 'tai-calg/glyph-transpiler-rust' &&
+      !contains(github.event.head_commit.message, '[skip-cluster-ownership-patch]')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/system-action-control-flow-completeness-v2
+          fetch-depth: 1
+
+      - name: Remove duplicate pointer and persistence ownership
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path('glyph/transition_io_clusters.py')
+          text = path.read_text(encoding='utf-8')
+
+          old_state = 'let cache=null,timer=null,running=false,drag=null,selected=null;'
+          if old_state not in text:
+              raise SystemExit('legacy cluster interaction state not found')
+          text = text.replace(old_state, 'let cache=null,timer=null,running=false;', 1)
+
+          old_writer = 'function writeSaved(data,value){localStorage.setItem(storageKey(data),JSON.stringify(value))}\n'
+          if old_writer not in text:
+              raise SystemExit('legacy cluster persistence writer not found')
+          text = text.replace(old_writer, '', 1)
+
+          pattern = re.compile(
+              r'function focus\(id,active\)\{.*?\}\n'
+              r'function select\(cluster\)\{.*?\}\n'
+              r'function bindCluster\(cluster,stage,index,data\)\{.*?\}\n',
+              re.DOTALL,
+          )
+          replacement = (
+              'function focus(id,active){document.querySelectorAll(`[data-transition-id="${id}"]`).forEach(item=>item.classList.toggle("transition-focus",active))}\n'
+              'function bindCluster(cluster){if(cluster.dataset.ioDragReady==="true")return;cluster.dataset.ioDragReady="true";cluster.dataset.interactionOwner="glyph-transition-layout-interaction-adapter-v4";cluster.addEventListener("mouseenter",()=>focus(cluster.dataset.transitionId,true));cluster.addEventListener("mouseleave",()=>focus(cluster.dataset.transitionId,false))}\n'
+          )
+          text, count = pattern.subn(replacement, text, count=1)
+          if count != 1:
+              raise SystemExit(f'legacy bindCluster block replacement count={count}')
+
+          forbidden = [
+              'writeSaved(data,saved)',
+              'cluster.addEventListener("pointerdown"',
+              'cluster.addEventListener("pointermove"',
+              'cluster.addEventListener("pointerup"',
+              'let cache=null,timer=null,running=false,drag=',
+          ]
+          for token in forbidden:
+              if token in text:
+                  raise SystemExit(f'legacy interaction token remains: {token}')
+
+          path.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add glyph/transition_io_clusters.py
+          git commit -m "Unify transition label interaction ownership [skip-cluster-ownership-patch]"
+          git push origin HEAD:agent/system-action-control-flow-completeness-v2
