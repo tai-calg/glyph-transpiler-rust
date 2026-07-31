@@ -76,11 +76,9 @@ function invalidateDownstream(stage,generation){
   const value=String(generation??generationOf(stage));
   stage.dataset.transitionPublicationReady="false";
   stage.dataset.initialRouteReady="pending";
-  stage.dataset.initialRouteCertificate="pending";
   stage.dataset.initialRouteLayoutGeneration=value;
   stage.dataset.layoutProtocolGeneration=value;
   stage.dataset.layoutCertificateRequestState="invalidated";
-  delete stage.dataset.initialTransitionRouting;
 }
 function initialRoutingEligible(stage=stageOf()){
   return Boolean(stage&&stage.dataset.transitionLayoutState==="ready");
