@@ -156,7 +156,7 @@ async function clickDoesNotPersistManualLayout(page) {
   await waitForNextTransaction(page, generation);
   const storedLabel = await page.evaluate(id => {
     const key = Object.keys(localStorage).find(value => value.startsWith("glyph.diagram.transition-io.v1:"));
-    return key ? JSON.parse(localStorage.getItem(key) || "{}")[id] : null;
+    return key ? (JSON.parse(localStorage.getItem(key) || "{}")[id] ?? null) : null;
   }, transitionId);
   assert.equal(storedLabel, null, "a simple label click was persisted as a manual drag");
   assert.notEqual(await cluster.getAttribute("data-manual-io"), "true");
