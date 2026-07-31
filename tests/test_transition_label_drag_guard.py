@@ -9,23 +9,26 @@ from glyph.transition_label_drag_guard import enhance_transition_label_drag_guar
 
 
 class TransitionLabelDragGuardTests(unittest.TestCase):
-    def test_enhancer_preserves_visible_manual_movement(self) -> None:
+    def test_enhancer_is_passive_and_delegates_to_the_unified_owner(self) -> None:
         html = enhance_transition_label_drag_guard_html(DIAGRAM_HTML)
-        self.assertIn("glyph-transition-label-drag-guard-v1-script", html)
-        self.assertIn("MIN_VISIBLE_MOVE=12", html)
-        self.assertIn("transitionDragConstraint", html)
-        self.assertIn("glyph.diagram.transition-io.v1:", html)
-        self.assertIn("glyph-transition-label-manual-position", html)
-        self.assertIn("glyphTransitionIoCollisionSolver?.run", html)
+        self.assertIn("glyph-transition-label-drag-guard-v2-script", html)
+        self.assertIn('interactionOwner:"glyph-transition-layout-interaction-adapter-v4"', html)
+        self.assertIn("ownsPointerEvents:false", html)
+        self.assertIn("ownsPersistence:false", html)
+        self.assertNotIn('addEventListener("pointerdown"', html)
+        self.assertNotIn('addEventListener("pointerup"', html)
+        self.assertNotIn("localStorage.setItem", html)
 
-    def test_prepared_app_installs_drag_guard_after_layout_guards(self) -> None:
+    def test_prepared_app_installs_passive_guard_after_layout_guards(self) -> None:
         prepare_diagram_app()
         html = diagram_app.DIAGRAM_HTML
-        drag_guard = html.index("glyph-transition-label-drag-guard-v1-script")
+        drag_guard = html.index("glyph-transition-label-drag-guard-v2-script")
         node_guard = html.index("glyph-transition-node-layout-guard-v1-script")
         readability = html.index("glyph-transition-label-readability-v1-script")
+        interaction = html.index("glyph-transition-layout-interaction-adapter-v1-script")
         self.assertGreater(drag_guard, node_guard)
         self.assertGreater(drag_guard, readability)
+        self.assertGreater(interaction, drag_guard)
         self.assertIn("window.glyphTransitionLabelDragGuard", html)
 
 
