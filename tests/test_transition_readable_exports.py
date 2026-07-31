@@ -23,7 +23,7 @@ class TransitionReadableExportTests(unittest.TestCase):
         prepare_diagram_app()
         html = diagram_app.DIAGRAM_HTML
         exports = html.index("glyph-transition-readable-exports-v1-script")
-        drag_guard = html.index("glyph-transition-label-drag-guard-v1-script")
+        drag_guard = html.index("glyph-transition-label-drag-guard-v2-script")
         readability = html.index("glyph-transition-label-readability-v1-script")
         self.assertGreater(exports, drag_guard)
         self.assertGreater(exports, readability)
