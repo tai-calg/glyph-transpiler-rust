@@ -36,8 +36,14 @@ on:
       - "tests/test_state_viewport_reservation.py"
       - "tests/test_transition_layout_transaction.py"
       - "tests/verify_certified_layout_performance.mjs"
+      - "tests/verify_readme_state_snapshot.py"
       - "tests/verify_state_diagram_rendering.mjs"
+      - "docs/images/glyph-studio-state-transition.png"
+      - "examples/acceptance/motor_safety.glyph"
       - "examples/state_diagrams/conveyor_control.glyph"
+      - "examples/state_diagrams/dual_machines.glyph"
+      - "examples/state_diagrams/session_protocol.glyph"
+      - "examples/state_diagrams/traffic_light.glyph"
       - "docs/design/certified-incremental-layout-v1.md"
       - ".github/workflows/certified-layout.yml"
   workflow_dispatch:
@@ -58,8 +64,9 @@ jobs:
         with:
           node-version: "22"
 
-      - name: Install browser
+      - name: Install browser and image verifier
         run: |
+          python -m pip install pillow==12.0.0
           npm install playwright@1.54.2
           npx playwright install --with-deps chromium
 
@@ -76,3 +83,8 @@ jobs:
       - name: Verify responsiveness and certificate reuse
         run: |
           timeout 180s node tests/verify_certified_layout_performance.mjs
+
+      - name: Verify publication rendering and README baseline
+        run: |
+          timeout 180s node tests/verify_state_diagram_rendering.mjs
+          python tests/verify_readme_state_snapshot.py
