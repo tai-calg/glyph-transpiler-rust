@@ -73,6 +73,8 @@ try {
     return {
       routerVersion: window.glyphInitialTransitionRouter?.version,
       kernelVersion: window.glyphDiagramGeometry?.version,
+      renderedPathSampling: window.glyphDiagramGeometry?.renderedPathSampling,
+      renderedAdapterVersion: window.glyphDiagramRenderedGeometryAdapter?.version,
       certificateVersion: window.glyphLayoutPublicationCertificate?.version,
       routeState: stage?.dataset.initialRouteReady,
       routeCertificate: stage?.dataset.initialRouteCertificate,
@@ -100,7 +102,9 @@ try {
   });
 
   assert.equal(first.routerVersion, 2);
-  assert.equal(first.kernelVersion, 1);
+  assert(first.kernelVersion >= 2, `rendered geometry kernel version is ${first.kernelVersion}`);
+  assert.equal(first.renderedPathSampling, true);
+  assert.equal(first.renderedAdapterVersion, 1);
   assert.equal(first.certificateVersion, 1);
   assert.equal(
     first.routeState,
