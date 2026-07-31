@@ -56,15 +56,32 @@ _SCRIPT = r"""
     document.dispatchEvent(new CustomEvent("glyph-diagram-render-stable",{detail:{marker:MARKER,state}}));
     return true;
   }
-  function failClosed(stage,generation){
+  function certificationFailure(stage,reason,eventDetail=null){
+    let violations=[];
+    try{violations=JSON.parse(stage?.dataset.layoutCertificateViolations||"[]")}catch{}
+    return{
+      reason,
+      layoutState:stage?.dataset.transitionLayoutState||"",
+      layoutGeneration:stage?.dataset.transitionLayoutGeneration||"",
+      layoutReason:stage?.dataset.transitionLayoutReason||"",
+      initialRouteReady:stage?.dataset.initialRouteReady||"",
+      initialRouteCertificate:stage?.dataset.initialRouteCertificate||"",
+      initialRouteFailure:stage?.dataset.initialRouteFailure||"",
+      certificateState:stage?.dataset.layoutCertificateState||"",
+      certificateReason:stage?.dataset.layoutCertificateReason||"",
+      violations,
+      eventDetail,
+    };
+  }
+  function failClosed(stage,generation,reason="certification-timeout",eventDetail=null){
     if(generation!==renderGeneration||!stage?.isConnected||fullyAdjusted(stage))return;
     clearTimer(stage);
     stage.dataset.renderStable="false";
-    stage.dataset.renderStableState="certification-timeout";
+    stage.dataset.renderStableState=reason;
     const shell=stage.closest(".canvas-shell");
     shell?.classList.add("diagram-render-pending","diagram-render-failed");
-    console.error("state diagram publication certification timed out; diagram remains hidden");
-    document.dispatchEvent(new CustomEvent("glyph-diagram-render-failed",{detail:{marker:MARKER,state:"certification-timeout"}}));
+    console.error(`state diagram publication ${reason}; diagram remains hidden: ${JSON.stringify(certificationFailure(stage,reason,eventDetail))}`);
+    document.dispatchEvent(new CustomEvent("glyph-diagram-render-failed",{detail:{marker:MARKER,state:reason}}));
   }
   function settle(stage=stateStage(),generation=renderGeneration){
     if(!stage?.querySelector(".state-node")||!fullyAdjusted(stage))return;
@@ -113,7 +130,7 @@ _SCRIPT = r"""
   document.getElementById("save").onclick=()=>save();
 
   for(const eventName of ["glyph-transition-layout-ready","glyph-uml-transition-ready","glyph-transition-input-action-labels-ready","glyph-state-transition-ir-v2-labels-ready","glyph-initial-transition-route-ready","glyph-layout-publication-certificate-ready"]){document.addEventListener(eventName,()=>settle())}
-  document.addEventListener("glyph-layout-publication-certificate-failed",()=>failClosed(stateStage(),renderGeneration));
+  document.addEventListener("glyph-layout-publication-certificate-failed",event=>failClosed(stateStage(),renderGeneration,"certificate-failed",event.detail||null));
   const root=document.getElementById("view")||document.body;
   new MutationObserver(()=>settle()).observe(root,{subtree:true,attributes:true,attributeFilter:["data-label-layout-ready","data-uml-transition-ready","data-transition-input-action-labels-ready","data-state-transition-ir-v2-labels-ready","data-initial-route-ready","data-transition-publication-ready","data-layout-certificate-state"]});
   selectDefaultStateTab();
