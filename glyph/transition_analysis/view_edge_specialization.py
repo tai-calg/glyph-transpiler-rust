@@ -6,10 +6,11 @@ from enum import Enum
 from typing import Mapping, Sequence
 
 from ..artifacts import CompilationModel
+from ..state_machine_source_map import canonical_machine_source_line
 from .machine_relation import EdgeSpec, MachineRelation, build_machine_relation
 
 
-VIEW_EDGE_SPECIALIZATION_VERSION = 1
+VIEW_EDGE_SPECIALIZATION_VERSION = 2
 
 
 class ViewEdgeBindingStatus(str, Enum):
@@ -54,11 +55,11 @@ def specialize_view_edges(
     transitions = _mappings(machine_view.get("transitions"))
     if relation is None:
         return tuple(
-            _unmapped(index, transition)
+            _unmapped(model, index, transition)
             for index, transition in enumerate(transitions)
         )
     return tuple(
-        _bind_transition(relation, index, transition)
+        _bind_transition(model, relation, index, transition)
         for index, transition in enumerate(transitions)
     )
 
@@ -112,6 +113,7 @@ def attach_view_edge_specialization(
 
 
 def _bind_transition(
+    model: CompilationModel,
     relation: MachineRelation,
     index: int,
     transition: Mapping[str, object],
@@ -119,12 +121,12 @@ def _bind_transition(
     view_id = _view_edge_id(index, transition)
     source_state = str(transition.get("source_state") or "")
     target_state = str(transition.get("target_state") or "")
-    source_line = _source_line(transition)
+    source_line = canonical_machine_source_line(model, _source_line(transition))
     synthesized_failure = bool(transition.get("synthesized_failure"))
     candidates = tuple(
         edge
         for edge in relation.edges
-        if edge.source_line == source_line
+        if canonical_machine_source_line(model, edge.source_line) == source_line
         and (
             synthesized_failure
             or _target_matches(edge, source_state, target_state)
@@ -179,6 +181,7 @@ def _target_matches(
 
 
 def _unmapped(
+    model: CompilationModel,
     index: int,
     transition: Mapping[str, object],
 ) -> ViewEdgeBinding:
@@ -188,7 +191,7 @@ def _unmapped(
         ViewEdgeBindingStatus.UNMAPPED,
         str(transition.get("source_state") or ""),
         str(transition.get("target_state") or ""),
-        _source_line(transition),
+        canonical_machine_source_line(model, _source_line(transition)),
         (),
     )
 
