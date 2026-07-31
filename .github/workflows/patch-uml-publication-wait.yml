@@ -1,0 +1,48 @@
+name: Patch UML Publication Wait
+
+on:
+  push:
+    branches:
+      - agent/system-action-control-flow-completeness-v2
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: >-
+      github.repository == 'tai-calg/glyph-transpiler-rust' &&
+      !contains(github.event.head_commit.message, '[skip-uml-publication-wait]')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/system-action-control-flow-completeness-v2
+          fetch-depth: 1
+
+      - name: Wait for the final publication certificate
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('tests/verify_uml_transition_semantics.mjs')
+          text = path.read_text(encoding='utf-8')
+          old = '''            && stage?.dataset.failureResultNotationReady === "true"
+            && stage?.dataset.initialRouteReady === "true";'''
+          new = '''            && stage?.dataset.failureResultNotationReady === "true"
+            && stage?.dataset.initialRouteReady === "true"
+            && stage?.dataset.initialRouteCertificate === "valid"
+            && stage?.dataset.layoutCertificateState === "valid"
+            && stage?.dataset.transitionPublicationReady === "true";'''
+          if old not in text:
+              raise SystemExit('expected UML readiness condition not found')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tests/verify_uml_transition_semantics.mjs
+          git commit -m "Wait for certified UML geometry [skip-uml-publication-wait]"
+          git push origin HEAD:agent/system-action-control-flow-completeness-v2
