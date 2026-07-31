@@ -44,14 +44,25 @@ async function layoutState(page) {
       routeSettleState: stage?.dataset.initialRouteSettleState,
       routeSettleDetails: stage?.dataset.initialRouteSettleDetails,
       routeReason: stage?.dataset.initialRouteReason,
+      routeCacheHit: stage?.dataset.initialRouteCacheHit,
       routeGeneration: window.glyphInitialTransitionRouter?.generation,
       routeCompletedGeneration: window.glyphInitialTransitionRouter?.completedGeneration,
+      routeProtocol: window.glyphInitialTransitionRouter?.layoutGenerationProtocol,
+      routeProtocolState: stage?.dataset.initialRouteProtocolState,
+      routeProtocolReason: stage?.dataset.initialRouteProtocolReason,
+      routeProtocolSequence: stage?.dataset.initialRouteProtocolSequence,
+      routeProtocolAttempt: stage?.dataset.initialRouteProtocolAttempt,
+      routeProtocolRouterGeneration: stage?.dataset.initialRouteProtocolRouterGeneration,
       certificateState: stage?.dataset.layoutCertificateState,
       certificateRequestState: stage?.dataset.layoutCertificateRequestState,
       certificateReason: stage?.dataset.layoutCertificateReason,
       certificateViolations: stage?.dataset.layoutCertificateViolations,
+      certificateCacheHit: stage?.dataset.layoutCertificateCacheHit,
       certificateGeneration: window.glyphLayoutPublicationCertificate?.generation,
       certificateCompletedGeneration: window.glyphLayoutPublicationCertificate?.completedGeneration,
+      certificateProtocol: window.glyphLayoutPublicationCertificate?.layoutGenerationProtocol,
+      publicationRequest: stage?.dataset.layoutProtocolPublicationRequest,
+      publishedGeneration: stage?.dataset.layoutProtocolPublishedGeneration,
       publicationReady: stage?.dataset.transitionPublicationReady,
       dependencyGeneration: window.glyphInitialTransitionDependencyBridge?.settleGeneration,
       dependencySignature: window.glyphInitialTransitionDependencyBridge?.signature,
@@ -188,12 +199,20 @@ try {
       detail: {reason: "unchanged-performance-probe"},
     }));
   });
-  await page.waitForFunction(previous => {
-    const stage = document.querySelector(".graph-stage");
-    return window.glyphInitialTransitionRouter?.completedGeneration > previous
-      && stage?.dataset.initialRouteReady === "true"
-      && stage?.dataset.initialRouteCacheHit === "true";
-  }, first.generation);
+  try {
+    await page.waitForFunction(previous => {
+      const stage = document.querySelector(".graph-stage");
+      return window.glyphInitialTransitionRouter?.completedGeneration > previous
+        && stage?.dataset.initialRouteReady === "true"
+        && stage?.dataset.initialRouteCacheHit === "true";
+    }, first.generation, {timeout: 5000});
+  } catch (error) {
+    const state = await layoutState(page);
+    throw new Error(
+      `same-generation route reuse did not complete: ${JSON.stringify(state)}\n`
+      + `browser errors: ${JSON.stringify(browserErrors)}\n${error.message}`,
+    );
+  }
   await page.waitForFunction(() => (
     document.querySelector(".graph-stage")?.dataset.layoutCertificateState === "valid"
   ));
