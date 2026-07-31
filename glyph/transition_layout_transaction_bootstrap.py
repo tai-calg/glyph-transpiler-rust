@@ -26,6 +26,11 @@ const transactionDownstreamEvents=new Set([
   "glyph-transition-enabling-cases-ready",
   "glyph-transition-io-clusters-ready",
 ]);
+const transactionReadinessEvents=new Set([
+  "glyph-state-transition-ir-v3-labels-ready",
+  "glyph-state-transition-ir-v4-labels-ready",
+  "glyph-uml-transition-ready",
+]);
 const publicationIndependentEvents=new Set([
   "glyph-transition-layout-transaction-ready",
   "glyph-execution-context-changed",
@@ -41,6 +46,8 @@ const control={
 const nativeAdd=EventTarget.prototype.addEventListener;
 const nativeSetTimeout=window.setTimeout.bind(window);
 const NativeMutationObserver=window.MutationObserver;
+let routeRequestSequence=0;
+let routeRetryTimer=null;
 
 function owner(){return document.currentScript?.id||""}
 function stageOf(){return document.querySelector(".state-node")?.closest(".graph-stage")||null}
@@ -115,21 +122,21 @@ EventTarget.prototype.addEventListener=function(type,listener,options){
     if(["pagehide","beforeunload"].includes(type)){
       return nativeAdd.call(this,type,listener,options);
     }
-    if(type!=="glyph-transition-layout-transaction-ready")return;
-    const wrapped=function(event){
-      const stage=stageOf();
-      const generation=String(event?.detail?.generation??generationOf(stage));
-      invalidateDownstream(stage,generation);
-      return listener.call(this,event);
-    };
-    return nativeAdd.call(this,type,wrapped,options);
+    return;
   }
 
   if(ownerId===transactionScript&&!(["pagehide","beforeunload"].includes(type))){
     const wrapped=function(event){
-      ensureTransactionPrerequisite();
+      const stage=stageOf();
+      const api=window.glyphTransitionLayoutTransaction;
+      const inFlight=Boolean(api&&api.completedGeneration<api.generation);
+      if(transactionReadinessEvents.has(type)
+        &&(inFlight||["pending","ready"].includes(stage?.dataset.transitionLayoutState))){
+        return;
+      }
+      ensureTransactionPrerequisite(stage);
       const result=listener.call(this,event);
-      invalidateDownstream(stageOf(),window.glyphTransitionLayoutTransaction?.generation);
+      invalidateDownstream(stage,api?.generation);
       return result;
     };
     return nativeAdd.call(this,type,wrapped,options);
@@ -203,16 +210,67 @@ function wrapTransactionApi(){
   api.layoutGenerationProtocol=MARKER;
   return true;
 }
+function initialRouteDomReady(stage){
+  const svg=stage?.querySelector(":scope > svg.edge-svg");
+  return Boolean(stage
+    &&stage.dataset.transitionInputActionLabelsReady==="true"
+    &&stage.dataset.transitionLayoutState==="ready"
+    &&svg?.querySelector(":scope > path:not(.state-transition-path)")
+    &&stage.querySelector(".initial-dot")
+    &&stage.querySelector(".state-node"));
+}
 function wrapInitialRouterApi(){
   const api=window.glyphInitialTransitionRouter;
   if(!api||api.layoutGenerationProtocol===MARKER)return Boolean(api);
   const original=api.schedule.bind(api);
-  api.schedule=(reason="scheduled",delay=0)=>{
+  function request(reason="scheduled",delay=0){
     const stage=stageOf();
     if(!initialRoutingEligible(stage))return api.generation;
-    invalidateDownstream(stage,generationOf(stage));
-    return original(reason,delay);
-  };
+    const generation=generationOf(stage);
+    const requestToken=++routeRequestSequence;
+    invalidateDownstream(stage,generation);
+    clearTimeout(routeRetryTimer);
+    stage.dataset.initialRouteProtocolState="waiting-dom";
+    const run=attempt=>{
+      const current=stageOf();
+      if(requestToken!==routeRequestSequence
+        ||current!==stage
+        ||generationOf(current)!==generation
+        ||!initialRoutingEligible(current))return;
+      if(!initialRouteDomReady(current)){
+        if(attempt>=120){
+          current.dataset.initialRouteProtocolState="dom-timeout";
+          return;
+        }
+        routeRetryTimer=nativeSetTimeout(()=>run(attempt+1),16);
+        return;
+      }
+      current.dataset.initialRouteProtocolState=attempt?"retrying":"running";
+      const routerGeneration=original(reason,0);
+      const inspect=poll=>{
+        if(requestToken!==routeRequestSequence
+          ||generationOf(stageOf())!==generation
+          ||stage.dataset.initialRouteCertificate==="valid")return;
+        if(api.completedGeneration<routerGeneration){
+          if(poll>=120){
+            stage.dataset.initialRouteProtocolState="router-timeout";
+            return;
+          }
+          routeRetryTimer=nativeSetTimeout(()=>inspect(poll+1),16);
+          return;
+        }
+        if(attempt>=8){
+          stage.dataset.initialRouteProtocolState="router-stalled";
+          return;
+        }
+        run(attempt+1);
+      };
+      routeRetryTimer=nativeSetTimeout(()=>inspect(0),32);
+    };
+    routeRetryTimer=nativeSetTimeout(()=>run(0),Math.max(0,delay));
+    return api.generation;
+  }
+  api.schedule=request;
   api.layoutGenerationProtocol=MARKER;
   return true;
 }
@@ -254,6 +312,7 @@ document.addEventListener("glyph-transition-layout-transaction-ready",event=>{
   invalidateDownstream(stage,generation);
   releaseTransactionPrerequisite(stage);
   installProtocolApis();
+  window.glyphInitialTransitionRouter?.schedule?.("transaction-generation-ready",0);
 },{capture:true});
 
 document.addEventListener("glyph-initial-transition-route-ready",event=>{
