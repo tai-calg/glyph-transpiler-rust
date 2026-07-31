@@ -1,0 +1,69 @@
+name: Preserve Layout Semantics Once
+
+on:
+  push:
+    branches:
+      - agent/system-action-control-flow-completeness-v2
+    paths:
+      - ".github/workflows/preserve-layout-semantics-once.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/system-action-control-flow-completeness-v2
+
+      - name: Preserve semantic DOM during manual layout runs
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("glyph/transition_layout_transaction.py")
+          source = path.read_text(encoding="utf-8")
+          old = '''  internalClusterRefresh=true;
+          try{
+            await window.glyphTransitionIoClusters?.render?.();
+            await window.glyphTransitionEnablingCases?.apply?.();
+          }finally{internalClusterRefresh=false}
+          await nextFrame();'''
+          new = '''  const refreshSemantics=reason!=="manual-run";
+          stage.dataset.transitionSemanticRefresh=refreshSemantics?"performed":"preserved";
+          if(refreshSemantics){
+            internalClusterRefresh=true;
+            try{
+              await window.glyphTransitionIoClusters?.render?.();
+              await window.glyphTransitionEnablingCases?.apply?.();
+            }finally{internalClusterRefresh=false}
+          }
+          await nextFrame();'''
+          if old not in source:
+              raise SystemExit("semantic refresh block not found")
+          path.write_text(source.replace(old, new, 1), encoding="utf-8")
+
+          test = Path("tests/test_transition_layout_transaction.py")
+          source = test.read_text(encoding="utf-8")
+          anchor = '    assert "await window.glyphTransitionEnablingCases?.apply?.()" in html\n'
+          addition = (
+              '    assert \'const refreshSemantics=reason!=="manual-run"\' in html\n'
+              '    assert \'transitionSemanticRefresh=refreshSemantics?"performed":"preserved"\' in html\n'
+          )
+          if anchor not in source:
+              raise SystemExit("transaction test anchor not found")
+          test.write_text(source.replace(anchor, anchor + addition, 1), encoding="utf-8")
+          PY
+
+      - name: Commit patch and remove one-time workflow
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/preserve-layout-semantics-once.yml
+          git add glyph/transition_layout_transaction.py tests/test_transition_layout_transaction.py
+          git diff --cached --check
+          git commit -m "Preserve semantics during manual layout"
+          git push origin HEAD:agent/system-action-control-flow-completeness-v2
