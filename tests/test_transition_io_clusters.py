@@ -38,6 +38,7 @@ class TransitionIoClusterTests(unittest.TestCase):
         self.assertNotIn('cluster.addEventListener("pointermove"', html)
         self.assertNotIn('cluster.addEventListener("pointerup"', html)
         self.assertNotIn("writeSaved(data,saved)", html)
+        self.assertNotIn("select(null)", html)
 
     def test_prepared_diagram_app_contains_transition_io_layer(self) -> None:
         prepare_diagram_app()
