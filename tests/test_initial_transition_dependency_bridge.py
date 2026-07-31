@@ -28,7 +28,10 @@ class InitialTransitionDependencyBridgeTests(unittest.TestCase):
         self.assertNotIn('stage.dataset.initialRouteReady = "true"', html)
         self.assertIn("geom.verifyPathElement(initial, normals", html)
         self.assertIn("stable: true", html)
-        self.assertIn(
+        self.assertIn("layoutGeneration: generation", html)
+        self.assertIn('stage.dataset.initialRouteCertificate = "pending"', html)
+        self.assertIn('stage.dataset.layoutCertificateRequestState = "invalidated"', html)
+        self.assertNotIn(
             'glyphLayoutPublicationCertificate?.schedule?.("stable-initial-route", 0)',
             html,
         )
