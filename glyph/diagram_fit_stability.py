@@ -22,16 +22,21 @@ _SCRIPT = r"""
   const FIT_MARGIN = 32;
   const VISIBILITY_TOLERANCE = 2;
   const SETTLE_DELAY_MS = 80;
+  const FAILURE_CONFIRMATIONS = 4;
+  const FAILURE_RETRY_MS = 180;
   let generation = 0;
   let timer = null;
   let shellObserver = null;
   let diagnosticsObserver = null;
   let observedShell = null;
   let observedDiagnostics = null;
+  let failureSignature = "";
+  let failureCount = 0;
   let destroyed = false;
 
   const clamp = (value, minimum, maximum) => Math.max(minimum, Math.min(maximum, value));
   const roundScale = value => Math.round(clamp(value, MIN_SCALE, MAX_SCALE) * 100) / 100;
+  const round = value => Math.round(Number(value || 0) * 10) / 10;
   const nextPaint = () => new Promise(resolve => (
     requestAnimationFrame(() => requestAnimationFrame(resolve))
   ));
@@ -158,6 +163,38 @@ _SCRIPT = r"""
     };
   }
 
+  function auditSignature(audit) {
+    return JSON.stringify({
+      outside: (audit.outside || []).map(item => ({
+        id: item.id,
+        rect: item.rect ? {
+          left: round(item.rect.left),
+          top: round(item.rect.top),
+          right: round(item.rect.right),
+          bottom: round(item.rect.bottom),
+        } : null,
+        reason: item.reason || "",
+      })),
+      bounds: audit.bounds ? {
+        left: round(audit.bounds.left),
+        top: round(audit.bounds.top),
+        right: round(audit.bounds.right),
+        bottom: round(audit.bounds.bottom),
+        width: round(audit.bounds.width),
+        height: round(audit.bounds.height),
+      } : null,
+      count: Number(audit.count || 0),
+      scale: round(audit.scale),
+    });
+  }
+
+  function resetFailure(stage) {
+    failureSignature = "";
+    failureCount = 0;
+    delete stage.dataset.fitVisibilityFailureCount;
+    delete stage.dataset.fitVisibilityFailureSignature;
+  }
+
   async function silentFit(shell, stage, token) {
     const size = stageSize(stage);
     const bounds = visibleShellBounds(shell);
@@ -213,12 +250,14 @@ _SCRIPT = r"""
     const shell = stage?.closest(".canvas-shell");
     if (!stage || !shell || token !== generation || destroyed) return;
     if (!publicationReady(stage)) {
+      resetFailure(stage);
       stage.dataset.fitVisibilityState = "deferred";
       stage.dataset.fitVisibilityReason = reason;
       return;
     }
     const mode = fitMode();
     if (mode && mode !== "fit") {
+      resetFailure(stage);
       stage.dataset.fitVisibilityState = `preserved:${mode}`;
       stage.dataset.fitVisibilityReason = reason;
       return;
@@ -239,17 +278,33 @@ _SCRIPT = r"""
     stage.dataset.fitVisibilityDetails = JSON.stringify(audit.outside);
     stage.dataset.fitVisibilityBounds = JSON.stringify(audit.bounds);
     if (!audit.ok) {
+      const signature = auditSignature(audit);
+      if (signature === failureSignature) failureCount += 1;
+      else {
+        failureSignature = signature;
+        failureCount = 1;
+      }
+      stage.dataset.fitVisibilityFailureCount = String(failureCount);
+      stage.dataset.fitVisibilityFailureSignature = signature;
+      if (failureCount < FAILURE_CONFIRMATIONS) {
+        stage.dataset.fitVisibilityState = "deferred";
+        schedule("visibility-retry", FAILURE_RETRY_MS);
+        return;
+      }
       stage.dataset.fitVisibilityState = "failed";
-      console.error("diagram fit visibility certification failed", {
+      const details = {
         marker: MARKER,
         reason,
+        confirmations: failureCount,
         audit,
-      });
+      };
+      console.error(`diagram fit visibility certification failed ${JSON.stringify(details)}`);
       document.dispatchEvent(new CustomEvent("glyph-diagram-fit-visibility-failed", {
-        detail: {marker: MARKER, reason, audit},
+        detail: details,
       }));
       return;
     }
+    resetFailure(stage);
     stage.dataset.fitVisibilityState = "ready";
     delete stage.dataset.fitVisibilityDetails;
     document.dispatchEvent(new CustomEvent("glyph-diagram-fit-visibility-ready", {
