@@ -2,9 +2,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .._transition_branch_semantics import build_machine_branch_context, simplify_expr
+from .. import _transition_branch_semantics as branch_semantics
+from .._transition_branch_semantics import (
+    MachineBranchContext,
+    TransitionBranch,
+    build_machine_branch_context,
+    simplify_expr,
+)
 from ..artifacts import CompilationModel
-from ..compiler import BinaryExpr, BoolExpr, Expr, TryExpr, UnaryExpr
+from ..compiler import BinaryExpr, BoolExpr, Expr, FunctionDecl, NameExpr, TryExpr, UnaryExpr
 from .exactness import (
     Approximation,
     ApproximationCause,
@@ -66,6 +72,11 @@ def build_machine_relation(
     guards ``g1, g2, ...`` this constructs ``g1``, ``!g1 & g2``, ... and the
     final fallback ``!g1 & !g2 ...``. System analysis consumes these effective
     guards and must not reinterpret the original guard list.
+
+    Function blocks lower local bindings through unguarded continuation helpers.
+    The final guarded value helper must be resolved through those continuations;
+    otherwise a valid block-local decision would incorrectly produce an empty
+    Machine relation.
     """
 
     context = build_machine_branch_context(model, machine_name)
@@ -75,9 +86,10 @@ def build_machine_relation(
     if declaration is None:
         return None
 
+    branches = _resolved_relation_branches(context, declaration)
     remaining: Expr = BoolExpr(True)
     edges: list[EdgeSpec] = []
-    for ordinal, branch in enumerate(context.branches):
+    for ordinal, branch in enumerate(branches):
         raw_guard = branch.condition
         effective = remaining if raw_guard is None else _and(remaining, raw_guard)
         effective = simplify_expr(
@@ -127,6 +139,43 @@ def build_machine_relation(
         formals=tuple(parameter.name for parameter in declaration.params),
         edges=tuple(edges),
         approximation=Approximation.exact(proof),
+    )
+
+
+def _resolved_relation_branches(
+    context: MachineBranchContext,
+    declaration: FunctionDecl,
+) -> tuple[TransitionBranch, ...]:
+    if context.branches:
+        return context.branches
+    if declaration.expression is None:
+        return ()
+
+    inlined = branch_semantics._inline_unguarded(  # noqa: SLF001 - shared semantic core
+        declaration.expression,
+        context.functions,
+    )
+    call = branch_semantics._unwrap_call(inlined)  # noqa: SLF001
+    if call is None or not isinstance(call.callee, NameExpr):
+        return ()
+    nested = context.functions.get(call.callee.name)
+    if nested is None or not nested.guards:
+        return ()
+    bindings = branch_semantics._call_bindings(nested, call)  # noqa: SLF001
+    if bindings is None:
+        return ()
+    return tuple(
+        branch_semantics._trace_function(  # noqa: SLF001
+            nested.name,
+            functions=context.functions,
+            state_decl=context.state_decl,
+            selector_index=context.selector_index,
+            variants=context.selector_variants,
+            root_state_param=context.machine.state_param.name,
+            bindings=bindings,
+            inherited_condition=None,
+            visited=(context.next_function,),
+        )
     )
 
 
