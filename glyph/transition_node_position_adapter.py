@@ -10,7 +10,9 @@ const MARKER="glyph-transition-node-position-adapter-v1",DRAG_THRESHOLD=3;
 const POSITION_KEY_PREFIX="glyph.diagram.positions.v1:";
 let active=null,stateCache=null,statePromise=null,stateAbort=null,stateVersion=0,lastStage=null,restoreGeneration=0,destroyed=false;
 const num=value=>Number.parseFloat(value||"0")||0;
+const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
 const nodeName=node=>node.querySelector(".state-name,.node-name")?.textContent?.trim()||"node";
+const scaleFor=stage=>window.glyphDiagramViewport?.scaleFor(stage)||num(stage?.dataset.viewportScale)||1;
 
 function invalidateState(){
   stateVersion+=1;
@@ -89,6 +91,26 @@ function apply(stage,value){
   });
   return count;
 }
+function select(node){
+  document.querySelector(".state-node.selected-node")?.classList.remove("selected-node");
+  node?.classList.add("selected-node");
+}
+function pointerDistance(record,event){return Math.hypot(event.clientX-record.startX,event.clientY-record.startY)}
+function moveActive(event){
+  if(!active||active.pointerId!==event.pointerId)return false;
+  if(!active.moved&&pointerDistance(active,event)<DRAG_THRESHOLD)return false;
+  active.moved=true;
+  const scale=Math.max(.01,active.scale),grid=event.shiftKey?1:8;
+  const width=Number.parseFloat(active.stage.style.width||"")||active.stage.scrollWidth;
+  const height=Number.parseFloat(active.stage.style.height||"")||active.stage.scrollHeight;
+  const left=active.startLeft+(event.clientX-active.startX)/scale;
+  const top=active.startTop+(event.clientY-active.startY)/scale;
+  const boundedLeft=clamp(left,8,Math.max(8,width-active.node.offsetWidth-8));
+  const boundedTop=clamp(top,8,Math.max(8,height-active.node.offsetHeight-8));
+  active.node.style.left=`${Math.round(boundedLeft/grid)*grid}px`;
+  active.node.style.top=`${Math.round(boundedTop/grid)*grid}px`;
+  return true;
+}
 async function persist(record){
   if(destroyed||!record.stage.isConnected)return;
   const data=await diagramState(),key=canonicalKey(data);
@@ -132,7 +154,12 @@ document.addEventListener("pointerdown",event=>{
   const node=event.target?.closest?.(".state-node");
   if(!node||event.button!==0)return;
   const stage=node.closest(".graph-stage");
-  if(!stage)return;
+  if(!stage||stage.dataset.transitionLayoutState!=="ready")return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  select(node);
+  node.classList.add("dragging");
+  node.setPointerCapture?.(event.pointerId);
   active={
     node,
     stage,
@@ -141,15 +168,25 @@ document.addEventListener("pointerdown",event=>{
     startY:event.clientY,
     startLeft:num(node.style.left),
     startTop:num(node.style.top),
+    scale:scaleFor(stage),
+    moved:false,
     storageBefore:positionStorageState(),
   };
 },true);
+document.addEventListener("pointermove",event=>{
+  if(!active||active.pointerId!==event.pointerId)return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  moveActive(event);
+},true);
 document.addEventListener("pointerup",event=>{
   if(!active||active.pointerId!==event.pointerId)return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
   const record=active;active=null;
-  const pointerDistance=Math.hypot(event.clientX-record.startX,event.clientY-record.startY);
-  const visualDistance=Math.hypot(num(record.node.style.left)-record.startLeft,num(record.node.style.top)-record.startTop);
-  if(pointerDistance<DRAG_THRESHOLD&&visualDistance<1){
+  record.node.releasePointerCapture?.(event.pointerId);
+  record.node.classList.remove("dragging");
+  if(!record.moved){
     setTimeout(()=>restorePositionStorageState(record.storageBefore),0);
     return;
   }
@@ -157,7 +194,29 @@ document.addEventListener("pointerup",event=>{
   queueMicrotask(()=>persist(record).catch(error=>report(error,"transition node position persistence failed")));
 },true);
 document.addEventListener("pointercancel",event=>{
-  if(active?.pointerId===event.pointerId)active=null;
+  if(!active||active.pointerId!==event.pointerId)return;
+  event.stopImmediatePropagation();
+  active.node.style.left=`${active.startLeft}px`;
+  active.node.style.top=`${active.startTop}px`;
+  active.node.classList.remove("dragging");
+  active=null;
+},true);
+document.addEventListener("keydown",event=>{
+  if(!event.key.startsWith("Arrow"))return;
+  const node=document.querySelector(".state-node.selected-node");
+  const stage=node?.closest(".graph-stage");
+  if(!node||!stage||stage.dataset.transitionLayoutState!=="ready")return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  const step=event.shiftKey?1:8;
+  const dx=event.key==="ArrowLeft"?-step:event.key==="ArrowRight"?step:0;
+  const dy=event.key==="ArrowUp"?-step:event.key==="ArrowDown"?step:0;
+  const width=Number.parseFloat(stage.style.width||"")||stage.scrollWidth;
+  const height=Number.parseFloat(stage.style.height||"")||stage.scrollHeight;
+  node.style.left=`${clamp(num(node.style.left)+dx,8,Math.max(8,width-node.offsetWidth-8))}px`;
+  node.style.top=`${clamp(num(node.style.top)+dy,8,Math.max(8,height-node.offsetHeight-8))}px`;
+  const record={node,stage,positions:snapshot(stage)};
+  queueMicrotask(()=>persist(record).catch(error=>report(error,"transition node keyboard persistence failed")));
 },true);
 document.addEventListener("change",event=>{
   if(event.target?.id==="machine-select"){
@@ -180,14 +239,14 @@ for(const eventName of["pagehide","beforeunload"]){
 }
 lastStage=document.querySelector(".state-node")?.closest(".graph-stage")||null;
 scheduleRestore(lastStage,0);
-window.glyphTransitionNodePositionAdapter={marker:MARKER,version:3,restore:()=>scheduleRestore(null,0)};
+window.glyphTransitionNodePositionAdapter={marker:MARKER,version:4,restore:()=>scheduleRestore(null,0)};
 })();
 </script>
 """
 
 
 def enhance_transition_node_position_adapter_html(html: str) -> str:
-    """Persist and restore actual node drags in the canonical diagram key space."""
+    """Own, persist, and restore state-node interaction in canonical key space."""
 
     if _MARKER in html:
         return html
