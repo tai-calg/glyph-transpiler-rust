@@ -32,15 +32,23 @@ class LayoutShelfViewportSyncTests(unittest.TestCase):
 
     def test_sync_refits_only_fit_mode_without_viewport_change(self) -> None:
         html = self._html()
+        injected = re.search(
+            r'<script id="glyph-layout-shelf-viewport-sync-v1-script">(.*?)</script>',
+            html,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(injected)
+        assert injected is not None
+        script = injected.group(1)
 
         self.assertIn("glyph-layout-shelf-viewport-sync-v1", html)
-        self.assertIn('mode && mode !== "fit"', html)
-        self.assertIn("await silentFit(stage)", html)
-        self.assertIn("await nextPaint()", html)
-        self.assertIn("glyph.diagram.viewport-mode.v1", html)
-        self.assertNotIn("glyph-diagram-viewport-change", html)
-        self.assertIn("result?.shelfRerouted", html)
-        self.assertIn("base.version = 6", html)
+        self.assertIn('mode && mode !== "fit"', script)
+        self.assertIn("await silentFit(stage)", script)
+        self.assertIn("await nextPaint()", script)
+        self.assertIn("glyph.diagram.viewport-mode.v1", script)
+        self.assertNotIn("glyph-diagram-viewport-change", script)
+        self.assertIn("result?.shelfRerouted", script)
+        self.assertIn("base.version = 6", script)
 
     def test_enhancer_is_idempotent(self) -> None:
         once = self._html()
