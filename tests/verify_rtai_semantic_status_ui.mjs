@@ -6,6 +6,8 @@ import { chromium } from "playwright";
 
 const outputDirectory = path.resolve("build/rtai-semantic-status");
 await fs.mkdir(outputDirectory, { recursive: true });
+const unreviewedMotorPath = path.join(outputDirectory, "unreviewed-motor-safety.glyph");
+await fs.copyFile("examples/acceptance/motor_safety.glyph", unreviewedMotorPath);
 
 async function start(command, args, port) {
   const logs = [];
@@ -77,12 +79,19 @@ function semanticPresentation(element) {
 const browser = await chromium.launch({ headless: true });
 const processes = [];
 try {
+  // The reviewed Motor Safety path now activates strict-exact by design. Open an
+  // identical copy through an unreviewed path to exercise the shadow/Unknown UI.
   const unknownApp = await start(
     "python3",
-    ["glyph.py", "examples/acceptance/motor_safety.glyph"],
+    ["glyph.py", unreviewedMotorPath],
     8897,
   );
   processes.push(unknownApp.child);
+  assert.equal(unknownApp.state.views.rtai_projection_mode, "shadow");
+  assert.equal(
+    unknownApp.state.views.rtai_public_strict_activation?.reason,
+    "no-reviewed-catalog-candidate",
+  );
   const unknownMachine = unknownApp.state.views.state.machines[0];
   const unknownStatuses = unknownMachine.transitions.map(
     transition => transition.rtai_semantic_status?.status,
