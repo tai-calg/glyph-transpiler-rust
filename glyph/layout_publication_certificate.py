@@ -81,11 +81,15 @@ _SCRIPT = r"""
     }
     return values.join("\u001f");
   }
+  function completeRequest(stage) {
+    stage.dataset.layoutCertificateRequestState = "completed";
+  }
   function fail(stage, violations, metrics) {
     stage.dataset.layoutCertificateState = "failed";
     stage.dataset.layoutCertificateViolations = JSON.stringify(violations);
     stage.dataset.layoutCertificateMetrics = JSON.stringify(metrics);
     stage.dataset.transitionPublicationReady = "false";
+    completeRequest(stage);
     document.dispatchEvent(new CustomEvent("glyph-layout-publication-certificate-failed", {
       detail: {marker: MARKER, violations, metrics},
     }));
@@ -100,11 +104,18 @@ _SCRIPT = r"""
     if (stage.dataset.layoutCertificateFingerprint === fingerprint
       && stage.dataset.layoutCertificateState === "valid") {
       stage.dataset.layoutCertificateCacheHit = "true";
+      stage.dataset.layoutCertificateDurationMs = "0.00";
+      stage.dataset.transitionPublicationReady = "true";
+      completeRequest(stage);
       completedGeneration = token;
+      document.dispatchEvent(new CustomEvent("glyph-layout-publication-certificate-ready", {
+        detail: {marker: MARKER, version: 1, fingerprint, cacheHit: true, metrics: {durationMs: 0}},
+      }));
       return;
     }
     stage.dataset.layoutCertificateCacheHit = "false";
     stage.dataset.layoutCertificateState = "pending";
+    stage.dataset.layoutCertificateRequestState = "running";
     const started = performance.now();
     const geom = geometry();
     const violations = [];
@@ -216,9 +227,11 @@ _SCRIPT = r"""
     stage.dataset.layoutCertificateConstraints = "labels,nodes,tether,initial-route,foreign-route-obstacles";
     stage.dataset.layoutCertificateViolations = "[]";
     stage.dataset.layoutCertificateMetrics = JSON.stringify(metrics);
+    stage.dataset.transitionPublicationReady = "true";
+    completeRequest(stage);
     completedGeneration = token;
     document.dispatchEvent(new CustomEvent("glyph-layout-publication-certificate-ready", {
-      detail: {marker: MARKER, version: 1, fingerprint, metrics},
+      detail: {marker: MARKER, version: 1, fingerprint, cacheHit: false, metrics},
     }));
   }
 
@@ -249,8 +262,9 @@ _SCRIPT = r"""
     requestedGeneration += 1;
     const stage = stageOf();
     if (stage) {
-      stage.dataset.layoutCertificateState = "pending";
+      stage.dataset.layoutCertificateRequestState = "queued";
       stage.dataset.layoutCertificateReason = reason;
+      stage.dataset.transitionPublicationReady = "false";
     }
     clearTimeout(timer);
     timer = setTimeout(drain, delay);
