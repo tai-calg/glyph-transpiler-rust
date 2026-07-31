@@ -25,6 +25,19 @@ def test_guard_invalidates_stale_publication_only_after_real_movement() -> None:
     assert 'stage.dataset.layoutCertificateRequestState = "invalidated"' in html
     assert 'invalidate(active.stage, "manual-node-drag")' in html
     assert 'invalidate(stage, "manual-node-keyboard")' in html
+    assert 'stage.dataset.initialRouteReady = "pending"' not in html
+    assert 'stage.dataset.transitionSemanticLinesReady = "pending"' not in html
+
+
+def test_guard_directly_schedules_every_completed_movement() -> None:
+    html = enhance_node_drag_publication_guard_html(
+        "<html><head></head><body></body></html>"
+    )
+
+    assert 'schedule("manual-node-dragged")' in html
+    assert 'schedule("manual-node-cancelled")' in html
+    assert 'schedule("manual-node-keyboard")' in html
+    assert 'window.glyphTransitionLayoutTransaction?.schedule?.(reason, 0)' in html
 
 
 def test_guard_precedes_node_position_owner() -> None:
