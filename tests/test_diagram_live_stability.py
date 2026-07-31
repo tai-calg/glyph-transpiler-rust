@@ -36,13 +36,20 @@ SOURCE = """machine Counter(state:State,input:Input)
 
 
 class DiagramLiveStabilityTests(unittest.TestCase):
-    def test_frontend_defaults_to_state_and_does_not_reset_pending_on_child_mutation(self) -> None:
+    def test_frontend_defaults_to_state_and_waits_for_publication_certificate(self) -> None:
         html = enhance_diagram_live_stability_html(DIAGRAM_HTML)
         self.assertIn("glyph-diagram-live-stability-v2", html)
         self.assertIn('activeTab="state"', html)
         self.assertIn("requestGeneration", html)
         self.assertIn("previewController.abort()", html)
         self.assertIn("POLL_INTERVAL_MS = 3000", html)
+        self.assertIn("RENDER_TIMEOUT_MS = 12000", html)
+        self.assertIn("glyph-layout-publication-certificate-ready", html)
+        self.assertIn("data-transition-publication-ready", html)
+        self.assertIn("data-layout-certificate-state", html)
+        self.assertIn("publicationReady(stage)", html)
+        self.assertIn("diagram remains hidden", html)
+        self.assertNotIn("showing latest DOM", html)
         script = re.search(
             r'<script id="glyph-diagram-live-stability-v2-script">(.*?)</script>',
             html,
