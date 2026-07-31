@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 
-_MARKER = "glyph-initial-transition-dependency-bridge-v1"
+_MARKER = "glyph-initial-transition-dependency-bridge-v2"
 
 
 _SCRIPT = r"""
-<script id="glyph-initial-transition-dependency-bridge-v1-script">
+<script id="glyph-initial-transition-dependency-bridge-v2-script">
 (() => {
-  const MARKER = "glyph-initial-transition-dependency-bridge-v1";
+  const MARKER = "glyph-initial-transition-dependency-bridge-v2";
   if (window.glyphInitialTransitionDependencyBridge?.marker === MARKER) return;
 
   let observedSvg = null;
@@ -16,9 +16,14 @@ _SCRIPT = r"""
   let bindTimer = null;
   let destroyed = false;
   let lastSignature = "";
+  let settleGeneration = 0;
+
+  function currentStage() {
+    return document.querySelector(".state-node")?.closest(".graph-stage") || null;
+  }
 
   function currentSvg() {
-    return document.querySelector(".graph-stage > svg.edge-svg");
+    return currentStage()?.querySelector(":scope > svg.edge-svg") || null;
   }
 
   function normalPaths(svg) {
@@ -60,6 +65,23 @@ _SCRIPT = r"""
     return false;
   }
 
+  function nextFrame() {
+    return new Promise(resolve => requestAnimationFrame(() => resolve()));
+  }
+
+  function router() {
+    const value = window.glyphInitialTransitionRouter;
+    return value?.version >= 2 ? value : null;
+  }
+
+  function scheduleRouter(reason) {
+    settleGeneration += 1;
+    const value = router();
+    if (!value) return false;
+    value.schedule(reason, 0);
+    return true;
+  }
+
   function invalidateIfChanged(reason) {
     if (destroyed) return false;
     const svg = currentSvg();
@@ -71,10 +93,73 @@ _SCRIPT = r"""
     const next = geometrySignature(svg);
     if (next === lastSignature) return false;
     lastSignature = next;
-    const router = window.glyphInitialTransitionRouter;
-    if (!router || router.version < 2) return false;
-    router.schedule(reason, 0);
-    return true;
+    return scheduleRouter(reason);
+  }
+
+  async function settleCertifiedRoute(event) {
+    if (destroyed || event?.detail?.stable === true) return;
+    const stage = currentStage();
+    const svg = currentSvg();
+    const initial = svg?.querySelector(":scope > path.initial-transition-path");
+    if (!stage || !svg || !initial || stage.dataset.initialRouteCertificate !== "valid") return;
+
+    const token = ++settleGeneration;
+    const before = geometrySignature(svg);
+    stage.dataset.initialRouteReady = "settling";
+    stage.dataset.initialRouteSettleState = "waiting";
+    stage.dataset.transitionPublicationReady = "false";
+
+    await nextFrame();
+    await nextFrame();
+    if (destroyed || token !== settleGeneration) return;
+
+    const finalStage = currentStage();
+    const finalSvg = currentSvg();
+    const after = geometrySignature(finalSvg);
+    if (finalStage !== stage || finalSvg !== svg || before !== after) {
+      stage.dataset.initialRouteSettleState = "geometry-changed";
+      scheduleRouter("normal-route-not-quiescent");
+      return;
+    }
+
+    const geom = window.glyphDiagramGeometry;
+    const normals = normalPaths(finalSvg);
+    if (!geom?.verifyPathElement) {
+      stage.dataset.initialRouteSettleState = "geometry-kernel-missing";
+      scheduleRouter("route-stability-kernel-missing");
+      return;
+    }
+    const certificate = geom.verifyPathElement(initial, normals, {
+      tolerance: .35,
+      maxSegmentLength: 3,
+      minimumClearance: 5,
+    });
+    if (!certificate.valid) {
+      stage.dataset.initialRouteSettleState = "certificate-invalid";
+      stage.dataset.initialRouteSettleDetails = JSON.stringify(certificate);
+      scheduleRouter("post-route-stability-failed");
+      return;
+    }
+
+    initial.dataset.routeCrossings = String(certificate.crossings);
+    initial.dataset.routeClearance = Number(certificate.clearance).toFixed(2);
+    initial.dataset.routeCertificate = "valid";
+    stage.dataset.initialRouteCrossings = String(certificate.crossings);
+    stage.dataset.initialRouteClearance = Number(certificate.clearance).toFixed(2);
+    stage.dataset.initialRouteCertificate = "valid";
+    stage.dataset.initialRouteSettleState = "stable";
+    stage.dataset.initialRouteReady = "true";
+    lastSignature = after;
+
+    document.dispatchEvent(new CustomEvent("glyph-initial-transition-route-ready", {
+      detail: {
+        ...(event?.detail || {}),
+        marker: MARKER,
+        stable: true,
+        crossings: certificate.crossings,
+        clearance: certificate.clearance,
+      },
+    }));
   }
 
   function bind() {
@@ -83,6 +168,7 @@ _SCRIPT = r"""
     bindTimer = null;
     const svg = currentSvg();
     if (svg === observedSvg) return;
+    settleGeneration += 1;
     routeObserver?.disconnect();
     routeObserver = null;
     observedSvg = svg;
@@ -106,6 +192,18 @@ _SCRIPT = r"""
     clearTimeout(bindTimer);
     bindTimer = setTimeout(bind, 0);
   }
+
+  document.addEventListener("glyph-initial-transition-route-ready", event => {
+    settleCertifiedRoute(event).catch(error => {
+      if (destroyed || error?.name === "AbortError") return;
+      const stage = currentStage();
+      if (stage) {
+        stage.dataset.initialRouteSettleState = "failed";
+        stage.dataset.initialRouteSettleDetails = String(error?.message || error);
+      }
+      scheduleRouter("route-stability-error");
+    });
+  });
 
   for (const eventName of [
     "glyph-diagram-geometry-kernel-ready",
@@ -132,6 +230,7 @@ _SCRIPT = r"""
   for (const eventName of ["pagehide", "beforeunload"]) {
     window.addEventListener(eventName, () => {
       destroyed = true;
+      settleGeneration += 1;
       clearTimeout(bindTimer);
       routeObserver?.disconnect();
       viewObserver?.disconnect();
@@ -140,10 +239,12 @@ _SCRIPT = r"""
 
   window.glyphInitialTransitionDependencyBridge = Object.freeze({
     marker: MARKER,
-    version: 1,
+    version: 2,
     bind,
     invalidateIfChanged,
+    settleCertifiedRoute,
     get signature() { return lastSignature; },
+    get settleGeneration() { return settleGeneration; },
   });
   scheduleBind();
 })();
@@ -152,7 +253,7 @@ _SCRIPT = r"""
 
 
 def enhance_initial_transition_dependency_bridge_html(html: str) -> str:
-    """Invalidate an initial-route certificate when normal route geometry changes."""
+    """Invalidate and settle initial-route certificates against final route geometry."""
 
     if _MARKER in html:
         return html
