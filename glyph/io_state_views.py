@@ -10,8 +10,8 @@ from .state_machine_source_map import remap_machine_analysis_source_lines
 from .state_transition_pipeline import enrich_state_transition_ir
 from .transition_analysis.evidence_projection import EvidenceProjectionMode
 from .transition_analysis.public_strict_activation import (
+    evaluate_public_strict_activation,
     inactive_public_strict_activation_ir,
-    select_public_strict_activation,
 )
 
 
@@ -328,7 +328,8 @@ def build_io_state_views(
     The normal application selects strict-exact only when the compiled source still
     matches one reviewed public strict v1 context. All other sources retain the
     legacy-compatible shadow path. Strict selection disables the legacy System Action
-    analyzer and fails closed when native Evidence is incomplete.
+    analyzer and fails closed when native Evidence is incomplete. Rejection blockers
+    remain in the public view instead of being collapsed into a generic reason.
     """
 
     external_names = _source_external_names(model)
@@ -367,12 +368,11 @@ def build_io_state_views(
         "state": {"machines": raw_machines},
     }
 
-    activation = select_public_strict_activation(model, execution.source_name)
+    decision = evaluate_public_strict_activation(model, execution.source_name)
+    activation = decision.activation
     if activation is None:
         result = enrich_state_transition_ir(model, views)
-        result["rtai_public_strict_activation"] = inactive_public_strict_activation_ir(
-            "source-or-contract-surface-not-reviewed"
-        )
+        result["rtai_public_strict_activation"] = decision.to_ir()
     else:
         result = enrich_state_transition_ir(
             model,
@@ -381,7 +381,7 @@ def build_io_state_views(
             rtai_projection_mode=EvidenceProjectionMode.STRICT_EXACT,
             rtai_targeted_witnesses=activation.targeted_witnesses,
         )
-        result["rtai_public_strict_activation"] = activation.to_ir()
+        result["rtai_public_strict_activation"] = decision.to_ir()
 
     state = dict(result["state"])
     state["machines"] = [
@@ -390,6 +390,7 @@ def build_io_state_views(
     ]
     result["state"] = state
     summary = dict(result.get("summary", {}))
-    summary["rtai_public_strict_activation_active"] = activation is not None
+    summary["rtai_public_strict_activation_active"] = decision.active
+    summary["rtai_public_strict_activation_blocker_count"] = len(decision.blockers)
     result["summary"] = summary
     return result
