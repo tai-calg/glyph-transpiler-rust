@@ -148,8 +148,6 @@ EventTarget.prototype.addEventListener=function(type,listener,options){
     const wrapped=function(event){
       const stage=stageOf();
       if(!publicationEligible(event,stage))return;
-      const generation=generationOf(stage);
-      stage.dataset.layoutProtocolPublicationRequest=`${generation}:stable-initial-route`;
       return listener.call(this,event);
     };
     return nativeAdd.call(this,type,wrapped,options);
@@ -333,9 +331,9 @@ function wrapPublicationApi(){
   const original=api.schedule.bind(api);
   api.schedule=(reason="scheduled",delay=0)=>{
     const stage=stageOf();
-    if(reason!=="stable-initial-route")return api.generation;
     const generation=generationOf(stage);
-    const request=`${generation}:stable-initial-route`;
+    const routeEpoch=String(window.glyphInitialTransitionRouter?.completedGeneration??0);
+    const request=`${generation}:${routeEpoch}:${reason}`;
     if(!stage
       ||stage.dataset.transitionLayoutState!=="ready"
       ||stage.dataset.initialRouteCertificate!=="valid"
@@ -343,10 +341,12 @@ function wrapPublicationApi(){
       ||String(stage.dataset.initialRouteLayoutGeneration||"")!==generation){
       return api.generation;
     }
+    const state=stage.dataset.layoutCertificateRequestState||"";
     if(stage.dataset.layoutProtocolPublicationRequest===request
-      &&["queued","running","completed"].includes(
-        stage.dataset.layoutCertificateRequestState||""
-      ))return api.generation;
+      &&["queued","running"].includes(state))return api.generation;
+    if(reason==="stable-initial-route"
+      &&stage.dataset.layoutProtocolPublicationRequest===request
+      &&state==="completed")return api.generation;
     stage.dataset.layoutProtocolPublicationRequest=request;
     return original(reason,delay);
   };
