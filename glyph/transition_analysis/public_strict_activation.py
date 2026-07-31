@@ -18,21 +18,21 @@ from .witness_generation import TargetedWitnessCase, TargetedWitnessRegistry
 
 PUBLIC_STRICT_ACTIVATION_VERSION = 2
 
-# These digests identify the exact compiler inputs reviewed for the public strict v1
-# surface. A same-name file with any edit is not permitted to reuse the reviewed
-# Effect contracts or targeted witnesses.
+# These digests identify the exact preprocessed compiler inputs reviewed for the
+# public strict v1 surface. A same-name file with any semantic compiler-input edit is
+# not permitted to reuse the reviewed Effect contracts or targeted witnesses.
 _REVIEWED_ARTIFACT_SHA256 = {
     BUILTIN_DEFAULT_WORKSPACE_SOURCE_ID: (
         "c9b1b541841a7ac50356a30de90331763f0b06379a0ebd3189cd5354c9943a58"
     ),
     "examples/acceptance/motor_safety.glyph": (
-        "25b9c00f53ec00e271dc502098ea08b424e1083fcbdd7db7dcdff8558d8d8149"
+        "51ecd7e333aa5abb14bc5e27fc7fec825587f4b66e1d703009aaecabf03a4c72"
     ),
     "examples/acceptance/job_scheduler.glyph": (
         "11e43c4d3cafbed8389b91b3f391aa466c021a40842ae6f5e7615082b0c64828"
     ),
     "examples/door_sketch.glyph": (
-        "644427bb0395ec5c15453d58bb04ecef6ffd3287b98f5e56687a2036a807fbad"
+        "d9aba74fb19f34b3ff98f04be25c6d2ff2aaefe7dca69f4f07379bf670e0c027"
     ),
     "examples/acceptance/rtai_strict_projection.glyph": (
         "466a2efca1d0f3d6e30060837cbf828cd807042357c0be296c0aac901786692f"
@@ -132,9 +132,10 @@ def evaluate_public_strict_activation(
 ) -> StrictActivationDecision:
     """Evaluate strict activation without collapsing rejection into ``None``.
 
-    Paths select a catalog candidate only. Exact source identity, compiled System
-    shape, reachable outbound Effect coverage and declaration parameter order are all
-    authorization conditions. Any mismatch remains observable and fails closed.
+    Paths select a catalog candidate only. Exact compiler-input identity, compiled
+    System shape, reachable outbound Effect coverage and declaration parameter order
+    are all authorization conditions. Any mismatch remains observable and fails
+    closed.
     """
 
     candidates = tuple(
@@ -176,7 +177,7 @@ def evaluate_public_strict_activation(
             blockers.append(
                 StrictActivationBlocker(
                     "source-content-mismatch",
-                    "compiler input does not match the exact reviewed public artifact",
+                    "preprocessed compiler input does not match the reviewed artifact",
                 )
             )
 
