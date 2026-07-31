@@ -19,9 +19,10 @@ def test_protocol_enforces_one_way_generation_order() -> None:
 
     assert 'protocol:"layout-generation-v1"' in html
     assert "transactionDownstreamEvents" in html
+    assert "transactionReadinessEvents" in html
     assert '"glyph-transition-enabling-cases-ready"' in html
     assert '"glyph-transition-io-clusters-ready"' in html
-    assert 'type!=="glyph-transition-layout-transaction-ready"' in html
+    assert '"glyph-uml-transition-ready"' in html
     assert "publicationIndependentEvents" in html
     assert 'event?.detail?.stable!==true' in html
     assert "initialRouteLayoutGeneration" in html
@@ -29,6 +30,18 @@ def test_protocol_enforces_one_way_generation_order() -> None:
     assert 'layoutCertificateRequestState="invalidated"' in html
     assert 'reason==="state-tab-activated"' in html
     assert '["pending","ready"].includes(stage.dataset.transitionLayoutState)' in html
+
+
+def test_initial_router_is_owned_by_the_completed_transaction_generation() -> None:
+    html = enhance_transition_layout_transaction_bootstrap_html(
+        "<html><head></head><body></body></html>"
+    )
+
+    assert 'if(ownerId===initialRouterScript)' in html
+    assert 'window.glyphInitialTransitionRouter?.schedule?.("transaction-generation-ready",0)' in html
+    assert 'initialRouteProtocolState="waiting-dom"' in html
+    assert 'initialRouteProtocolState="router-stalled"' in html
+    assert "api.completedGeneration<routerGeneration" in html
 
 
 def test_synthetic_editor_prerequisite_is_released_before_publication() -> None:
