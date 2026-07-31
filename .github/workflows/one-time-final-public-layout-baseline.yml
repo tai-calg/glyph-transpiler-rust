@@ -1,0 +1,55 @@
+name: One-time Final Public Layout Baseline
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/one-time-final-public-layout-baseline.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.head_ref == 'agent/system-action-control-flow-completeness-v2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install renderer dependencies
+        run: |
+          python -m pip install pillow==12.0.0
+          npm install playwright@1.54.2
+          npx playwright install --with-deps chromium
+      - name: Generate and verify final public baseline
+        run: |
+          set -euo pipefail
+          mkdir -p build/state-diagram-regression
+          node tests/verify_state_diagram_rendering.mjs
+          test -f build/state-diagram-regression/motor-safety-motor.png
+          cp build/state-diagram-regression/motor-safety-motor.png docs/images/glyph-studio-state-transition.png
+          UPDATE_README_STATE_DIAGRAM=1 python tests/verify_readme_state_snapshot.py
+          node tests/verify_state_diagram_rendering.mjs
+          python tests/verify_readme_state_snapshot.py
+      - name: Commit final baseline to PR branch
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- docs/images/glyph-studio-state-transition.png; then
+            echo "README state baseline is already current"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/images/glyph-studio-state-transition.png
+          git commit -m "Update final publication layout baseline"
+          git push origin "HEAD:${{ github.head_ref }}"
