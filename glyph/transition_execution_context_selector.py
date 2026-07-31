@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 
-_MARKER = "glyph-transition-execution-context-selector-v4"
+_MARKER = "glyph-transition-execution-context-selector-v5"
 
 _STYLE = r"""
-<style id="glyph-transition-execution-context-selector-v4-style">
+<style id="glyph-transition-execution-context-selector-v5-style">
 .execution-context-control{
   display:flex;
   align-items:center;
@@ -29,9 +29,9 @@ _STYLE = r"""
 """
 
 _SCRIPT = r"""
-<script id="glyph-transition-execution-context-selector-v4-script">
+<script id="glyph-transition-execution-context-selector-v5-script">
 (()=>{
-const MARKER="glyph-transition-execution-context-selector-v4",AUTO="auto",MACHINE="machine";
+const MARKER="glyph-transition-execution-context-selector-v5",AUTO="auto",MACHINE="machine";
 const BLOCKED=new Set(["unresolved","multiple-transition-calls","missing"]);
 let currentMachine=null,currentKey=AUTO,timer=null,running=false,pending=false,lastSnapshotSignature="";
 const text=value=>String(value??"").trim();
@@ -42,11 +42,20 @@ function actionText(value){
   }
   return text(value?.display)||text(value?.expression);
 }
+function eventRefIds(value){
+  if(value?.kind==="effect-trace"&&Array.isArray(value.events))return value.events.map(event=>text(event?.semantic_event_ref?.id)).filter(Boolean);
+  if(Array.isArray(value?.semantic_event_refs))return value.semantic_event_refs.map(reference=>text(reference?.id)).filter(Boolean);
+  return[];
+}
+function sameSemanticEvents(machineAction,systemAction){
+  const machineIds=eventRefIds(machineAction),systemIds=eventRefIds(systemAction);
+  return machineIds.length>0&&machineIds.length===systemIds.length&&machineIds.every((value,index)=>value===systemIds[index]);
+}
 const english=()=>String(window.GlyphI18n?.locale||document.documentElement.lang||"ja").startsWith("en");
 const tr=(key,ja,en)=>window.GlyphI18n?.t?.(key)??(english()?en:ja);
 const selectedMachine=data=>{const machines=data?.views?.state?.machines||[],name=document.getElementById("machine-select")?.selectedOptions?.[0]?.textContent;return machines.find(machine=>machine.name===name)||machines[0]||null};
 const contextKey=binding=>`context:${text(binding?.scope)||"system"}:${text(binding?.system)}:${text(binding?.entry)}`;
-const storageKey=machine=>`glyph.transition.execution-context.v4:${text(machine?.name)||"machine"}`;
+const storageKey=machine=>`glyph.transition.execution-context.v5:${text(machine?.name)||"machine"}`;
 const statusRank=status=>({"resolved":0,"actionless":1,"conditional":2,"unresolved":3,"multiple-transition-calls":4,"missing":5}[status]??0);
 const contextRecords=transition=>transition?.execution_contexts||transition?.execution_action_bindings||[];
 const strictNative=transition=>transition?.system_action_projection_source==="rtai-execution-evidence-v2"&&transition?.legacy_system_action_fallback_allowed===false;
@@ -72,11 +81,12 @@ function selectionFor(machine){
 }
 function bindingFor(transition,key){return contextRecords(transition).find(binding=>contextKey(binding)===key)||null}
 function composedAction(machineAction,systemAction,context){
-  const machineText=actionText(machineAction),systemText=actionText(systemAction),parts=[];
-  for(const value of[machineText,systemText]){if(value&&!parts.includes(value))parts.push(value)}
+  const machineText=actionText(machineAction),systemText=actionText(systemAction),semanticAlias=sameSemanticEvents(machineAction,systemAction),parts=[];
+  if(semanticAlias){const value=systemText||machineText;if(value)parts.push(value)}
+  else{for(const value of[machineText,systemText]){if(value)parts.push(value)}}
   if(!parts.length)return null;
   const display=parts.join("; "),hasMachine=Boolean(machineText),hasSystem=Boolean(systemText);
-  return{display,expression:display,scope:hasMachine&&hasSystem?"composed":hasSystem?"system":"machine",projection_provenance:"transition-execution-context-selection",system:context?.system||null,entry:context?.entry||null,status:context?.status||"resolved",deduplicated_equivalent_action:hasMachine&&hasSystem&&machineText===systemText};
+  return{display,expression:display,scope:hasMachine&&hasSystem?"composed":hasSystem?"system":"machine",projection_provenance:"transition-execution-context-selection",system:context?.system||null,entry:context?.entry||null,status:context?.status||"resolved",deduplicated_equivalent_action:semanticAlias,deduplication_basis:semanticAlias?"semantic-event-reference":null};
 }
 function projectionFor(transition,key=currentKey){
   const machineAction=transition?.machine_action||transition?.action||null;
@@ -105,7 +115,7 @@ function optionLabel(context){const base=context.system&&context.entry?`${contex
 function publish(reason="selection"){document.dispatchEvent(new CustomEvent("glyph-execution-context-changed",{detail:{marker:MARKER,machine:currentMachine?.name||null,key:currentKey,reason}}))}
 function liveState(){return typeof snapshot==="object"&&snapshot?snapshot:null}
 async function state(){const live=liveState();if(live)return live;const response=await fetch("/api/state",{cache:"no-store"});if(!response.ok)throw Error("diagram state unavailable");return response.json()}
-function snapshotSignature(data){return`${data?.version??""}:${data?.digest??""}:${JSON.stringify((data?.views?.state?.machines||[]).map(machine=>[machine.name,(machine.transitions||[]).map(item=>[item.execution_contexts||item.execution_action_bindings||[],item.system_action_projection_source,item.system_action,item.rtai_semantic_status])]))}`}
+function snapshotSignature(data){return`${data?.version??""}:${data?.digest??""}:${JSON.stringify((data?.views?.state?.machines||[]).map(machine=>[machine.name,(machine.transitions||[]).map(item=>[item.execution_contexts||item.execution_action_bindings||[],item.system_action_projection_source,item.system_action,item.machine_action?.semantic_event_refs,item.rtai_semantic_status])]))}`}
 function ensureControl(machine){
   const host=document.querySelector(".view-controls"),machineSelect=document.getElementById("machine-select");
   if(!host||!machineSelect)return false;
