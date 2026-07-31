@@ -9,7 +9,7 @@ from typing import Mapping, Sequence
 from .projection import ExactActionDecision, check_exact_action_projection
 
 
-EVIDENCE_PROJECTION_VERSION = 2
+EVIDENCE_PROJECTION_VERSION = 3
 
 
 class EvidenceProjectionMode(str, Enum):
@@ -70,15 +70,40 @@ def audit_evidence_projection(
     evidence_field: str = "execution_evidence_v2",
     include_empty_evidence: bool = False,
 ) -> ProjectionReadinessReport:
+    """Audit every expected transition when completeness is requested.
+
+    ``include_empty_evidence`` means that a transition without the Evidence field is
+    a rejected transition, not an invisible transition. This prevents a partial
+    Evidence set from reporting ready by shrinking the denominator.
+    """
+
     transitions: list[TransitionProjectionReadiness] = []
     rejected = 0
     relevant = 0
     ready = 0
 
     for index, transition in enumerate(_mappings(machine_view.get("transitions"))):
+        fallback_edge_id = str(
+            transition.get("id") or transition.get("edge_id") or index
+        )
         evidence = _mapping(transition.get(evidence_field))
         if not evidence:
+            if not include_empty_evidence:
+                continue
+            relevant += 1
+            rejected += 1
+            transitions.append(
+                TransitionProjectionReadiness(
+                    fallback_edge_id,
+                    0,
+                    0,
+                    False,
+                    "evidence-is-missing",
+                    None,
+                )
+            )
             continue
+
         contexts = _mappings(evidence.get("contexts"))
         if not contexts and not include_empty_evidence:
             continue
@@ -86,16 +111,13 @@ def audit_evidence_projection(
         decisions = tuple(check_exact_action_projection(context) for context in contexts)
         rejected += sum(not decision.allowed for decision in decisions)
         item = _transition_readiness(
-            str(
-                evidence.get("edge_id")
-                or transition.get("id")
-                or transition.get("edge_id")
-                or index
-            ),
+            str(evidence.get("edge_id") or fallback_edge_id),
             decisions,
         )
         transitions.append(item)
         ready += int(item.ready)
+        if not contexts:
+            rejected += 1
 
     return ProjectionReadinessReport(
         tuple(transitions),
@@ -113,9 +135,10 @@ def project_machine_from_evidence(
 ) -> dict[str, object]:
     """Publish or apply exact Evidence actions without AST or legacy strings.
 
-    ``STRICT_EXACT`` with native ``rtai_execution_evidence_v2`` is fail closed:
-    legacy System execution bindings are removed and ``system_action`` is supplied
-    only by exact native Evidence. Machine-owned ``action`` data is not modified.
+    ``STRICT_EXACT`` first removes every System-owned compatibility projection from
+    every transition. It then restores a System Action only when native Evidence is
+    exact. Missing or rejected Evidence therefore cannot leave a stale legacy Action.
+    Machine-owned ``action`` data is not modified.
     """
 
     result = deepcopy(dict(machine_view))
@@ -137,6 +160,12 @@ def project_machine_from_evidence(
             or transition.get("edge_id")
             or index
         )
+        if mode is EvidenceProjectionMode.STRICT_EXACT:
+            transition = _strict_sanitize_transition(
+                transition,
+                remove_legacy_evidence=native_evidence,
+            )
+
         item = readiness.get(edge_id)
         if item is not None:
             transition["evidence_projection"] = item.to_ir()
@@ -154,18 +183,15 @@ def project_machine_from_evidence(
                     dict(item.action) if item.ready and item.action is not None else None
                 )
                 transition["evidence_display_action"] = strict_action
-                transition["legacy_system_action_fallback_allowed"] = False
                 transition["system_action"] = strict_action
-                transition["system_action_projection_source"] = (
-                    "rtai-execution-evidence-v2"
-                    if native_evidence
-                    else _projection_source_name(evidence_field)
-                )
-                if native_evidence:
-                    transition["execution_action_bindings"] = []
-                    transition["execution_contexts"] = []
-                    transition["system_execution_actions"] = []
-                    transition["system_actions"] = []
+                if strict_action is not None:
+                    transition["system_action_projection_source"] = (
+                        "rtai-execution-evidence-v2"
+                        if native_evidence
+                        else _projection_source_name(evidence_field)
+                    )
+                else:
+                    transition.pop("system_action_projection_source", None)
         projected.append(transition)
 
     analysis = dict(_mapping(result.get("analysis")))
@@ -184,11 +210,34 @@ def project_machine_from_evidence(
                 mode is not EvidenceProjectionMode.STRICT_EXACT
             ),
             "evidence_projection_native_source": native_evidence,
+            "evidence_projection_expected_transition_count": len(
+                _mappings(result.get("transitions"))
+            ),
         }
     )
     result["transitions"] = projected
     result["evidence_projection_readiness"] = report.to_ir()
     result["analysis"] = analysis
+    return result
+
+
+def _strict_sanitize_transition(
+    transition: Mapping[str, object],
+    *,
+    remove_legacy_evidence: bool,
+) -> dict[str, object]:
+    result = dict(transition)
+    result["legacy_system_action_fallback_allowed"] = False
+    result["system_action"] = None
+    result["execution_action_bindings"] = []
+    result["execution_contexts"] = []
+    result["system_execution_actions"] = []
+    result["system_actions"] = []
+    result["evidence_projected_system_action"] = None
+    result["evidence_display_action"] = None
+    result.pop("system_action_projection_source", None)
+    if remove_legacy_evidence:
+        result.pop("execution_evidence_v2", None)
     return result
 
 
