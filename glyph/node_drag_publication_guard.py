@@ -18,12 +18,15 @@ _SCRIPT = r"""
     stage.dataset.transitionPublicationReady = "false";
     stage.dataset.transitionIoCollisionSolved = "transaction-pending";
     stage.dataset.transitionIoCollisionCount = "-1";
-    stage.dataset.transitionSemanticLinesReady = "pending";
-    stage.dataset.transitionSemanticRoleLinesReady = "pending";
-    stage.dataset.initialRouteReady = "pending";
     stage.dataset.layoutCertificateRequestState = "invalidated";
     stage.dataset.transitionLayoutReason = reason;
     return true;
+  }
+
+  function schedule(reason) {
+    setTimeout(() => {
+      window.glyphTransitionLayoutTransaction?.schedule?.(reason, 0);
+    }, 0);
   }
 
   function pointerDistance(record, event) {
@@ -58,21 +61,17 @@ _SCRIPT = r"""
   }, true);
 
   document.addEventListener("pointerup", event => {
-    if (active?.pointerId === event.pointerId) active = null;
+    if (!active || active.pointerId !== event.pointerId) return;
+    const record = active;
+    active = null;
+    if (record.invalidated) schedule("manual-node-dragged");
   }, true);
 
   document.addEventListener("pointercancel", event => {
     if (!active || active.pointerId !== event.pointerId) return;
     const record = active;
     active = null;
-    if (record.invalidated) {
-      setTimeout(() => {
-        window.glyphTransitionLayoutTransaction?.schedule?.(
-          "manual-node-cancelled",
-          0,
-        );
-      }, 0);
-    }
+    if (record.invalidated) schedule("manual-node-cancelled");
   }, true);
 
   document.addEventListener("keydown", event => {
@@ -80,7 +79,9 @@ _SCRIPT = r"""
     const node = document.querySelector(".state-node.selected-node");
     const stage = node?.closest(".graph-stage");
     if (!node || !stage || stage.dataset.transitionLayoutState !== "ready") return;
-    invalidate(stage, "manual-node-keyboard");
+    if (invalidate(stage, "manual-node-keyboard")) {
+      schedule("manual-node-keyboard");
+    }
   }, true);
 
   for (const eventName of ["pagehide", "beforeunload"]) {
@@ -92,8 +93,9 @@ _SCRIPT = r"""
 
   window.glyphNodeDragPublicationGuard = {
     marker: MARKER,
-    version: 1,
+    version: 2,
     invalidate,
+    schedule,
     get active() { return Boolean(active) && !destroyed; },
   };
 })();
