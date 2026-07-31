@@ -11,8 +11,14 @@ def _indent_width(line: str) -> int:
     return len(line) - len(line.lstrip(" \t"))
 
 
-def _generated_guard_line_map(model: CompilationModel) -> dict[int, int]:
-    """Map generated function-block guard lines to original Glyph source lines."""
+def generated_guard_line_map(model: CompilationModel) -> dict[int, int]:
+    """Map generated function-block guard lines to original Glyph source lines.
+
+    Function-block conditional bindings are lowered through generated helper
+    functions. State-machine views and MachineRelation can therefore carry the same
+    source clause in different line-coordinate spaces. Consumers that correlate the
+    two must canonicalize both lines through this map before comparing them.
+    """
 
     functions: Mapping[str, FunctionDecl] = {
         declaration.name: declaration
@@ -46,13 +52,22 @@ def _generated_guard_line_map(model: CompilationModel) -> dict[int, int]:
     return mapped
 
 
+def canonical_machine_source_line(
+    model: CompilationModel,
+    line: int,
+) -> int:
+    """Return the original Glyph line for either generated or original input."""
+
+    return generated_guard_line_map(model).get(line, line)
+
+
 def remap_machine_analysis_source_lines(
     model: CompilationModel,
     machine: dict[str, object],
 ) -> dict[str, object]:
     """Return a copy whose generated helper locations point to user source lines."""
 
-    line_map = _generated_guard_line_map(model)
+    line_map = generated_guard_line_map(model)
     if not line_map:
         return machine
     result = deepcopy(machine)
@@ -74,3 +89,10 @@ def remap_machine_analysis_source_lines(
         ):
             diagnostic["line"] = line_map.get(diagnostic["line"], diagnostic["line"])
     return result
+
+
+__all__ = [
+    "canonical_machine_source_line",
+    "generated_guard_line_map",
+    "remap_machine_analysis_source_lines",
+]
