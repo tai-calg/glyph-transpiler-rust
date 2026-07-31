@@ -28,6 +28,7 @@ from .layout_corridor_repair import enhance_layout_corridor_repair_html
 from .layout_dependency_bridge import enhance_layout_dependency_bridge_html
 from .layout_local_repair import enhance_layout_local_repair_html
 from .layout_publication_certificate import enhance_layout_publication_certificate_html
+from .layout_shelf_repair import enhance_layout_shelf_repair_html
 from .state_transition_ir_renderer import enhance_state_transition_ir_html
 from .transition_dense_canvas_dimensions import (
     enhance_transition_dense_canvas_dimensions_html,
@@ -119,6 +120,7 @@ def _presentation_pipeline():
         enhance_layout_local_repair_html,
         enhance_layout_corridor_repair_html,
         enhance_layout_corridor_fast_repair_html,
+        enhance_layout_shelf_repair_html,
         enhance_layout_dependency_bridge_html,
         enhance_layout_publication_certificate_html,
     )
