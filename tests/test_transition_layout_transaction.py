@@ -84,7 +84,7 @@ def test_interaction_adapters_persist_only_real_drags() -> None:
     assert "pointerDistance(active,event)<DRAG_THRESHOLD" in label_html
     assert "if(visualDistance<1)return" in label_html
     assert "nearestCertifiablePoint(record,requested)" in label_html
-    assert "Math.hypot(next.x-anchor.x,next.y-anchor.y)>MAX_DISTANCE+.25" in label_html
+    assert "Math.hypot(next.x-anchor.x,next.y-anchor.y)<=MAX_DISTANCE+.25?next:null" in label_html
     assert "pointerDistance(active,event)<DRAG_THRESHOLD" in node_html
     assert "if(!record.moved)" in node_html
     assert "restorePositionStorageState(record.storageBefore)" in node_html
