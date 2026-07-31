@@ -15,6 +15,9 @@ _SCRIPT = r"""
   const NODE_GAP = 2;
   const RINGS = [0, 10, 20, 30, 40, 52, 64, 76, 88, 96];
   const ANGLES = 72;
+  const ROUTE_FRACTIONS = [.18, .28, .38, .5, .62, .72, .82];
+  const ALTERNATE_RINGS = [0, 18, 36, 54, 72, 90, 96];
+  const ALTERNATE_ANGLES = 24;
   let generation = 0;
 
   const number = value => Number.parseFloat(value || "0") || 0;
@@ -74,46 +77,6 @@ _SCRIPT = r"""
     return Number.isFinite(x) && Number.isFinite(y) ? {x, y} : currentCenter(cluster);
   }
 
-  function candidateCenters(entry, stage) {
-    const values = [];
-    const seen = new Set();
-    const maxDistance = Math.max(0, number(entry.cluster.dataset.maxIoDistance) || 96);
-    const add = raw => {
-      const dx = raw.x - entry.anchor.x;
-      const dy = raw.y - entry.anchor.y;
-      const length = Math.hypot(dx, dy);
-      const ratio = length > maxDistance && length > 0 ? maxDistance / length : 1;
-      const projected = {
-        x: entry.anchor.x + dx * ratio,
-        y: entry.anchor.y + dy * ratio,
-      };
-      const halfWidth = entry.cluster.offsetWidth / 2 + 8;
-      const halfHeight = entry.cluster.offsetHeight / 2 + 8;
-      const center = {
-        x: clamp(projected.x, halfWidth, stage.clientWidth - halfWidth),
-        y: clamp(projected.y, halfHeight, stage.clientHeight - halfHeight),
-      };
-      if (distance(center, entry.anchor) > maxDistance + .25) return;
-      const key = `${Math.round(center.x * 10)}:${Math.round(center.y * 10)}`;
-      if (!seen.has(key)) {
-        seen.add(key);
-        values.push(center);
-      }
-    };
-    add(entry.current);
-    for (const radius of RINGS) {
-      if (radius > maxDistance + .25) continue;
-      for (let index = 0; index < ANGLES; index += 1) {
-        const angle = index * 2 * Math.PI / ANGLES;
-        add({
-          x: entry.anchor.x + Math.cos(angle) * radius,
-          y: entry.anchor.y + Math.sin(angle) * radius,
-        });
-      }
-    }
-    return values;
-  }
-
   function pathGeometry(stage) {
     const geom = geometry();
     const paths = [...stage.querySelectorAll(":scope > svg.edge-svg > path")];
@@ -121,27 +84,115 @@ _SCRIPT = r"""
       id: path.classList.contains("initial-transition-path")
         ? "__initial__"
         : path.dataset.transitionId || "",
+      element: path,
       points: geom.flattenPathElement(path, {tolerance: .35, maxSegmentLength: 3}),
     }));
   }
 
+  function routeAnchors(entry, context) {
+    const values = [];
+    const seen = new Set();
+    const add = (point, fraction, primary = false) => {
+      const key = `${Math.round(point.x * 10)}:${Math.round(point.y * 10)}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      values.push({point, fraction, primary});
+    };
+    add(entry.anchor, number(entry.cluster.dataset.anchorFraction) || .5, true);
+    const ownPath = context.paths.find(path => path.id === entry.id)?.element;
+    if (!ownPath || typeof ownPath.getTotalLength !== "function") return values;
+    try {
+      const length = ownPath.getTotalLength();
+      for (const fraction of ROUTE_FRACTIONS) {
+        const point = ownPath.getPointAtLength(length * fraction);
+        add({x: point.x, y: point.y}, fraction, Math.abs(fraction - .5) < .001);
+      }
+    } catch {}
+    return values;
+  }
+
+  function candidateCenters(entry, context) {
+    const byCenter = new Map();
+    const maxDistance = Math.max(0, number(entry.cluster.dataset.maxIoDistance) || 96);
+    const add = (raw, routeAnchor) => {
+      const dx = raw.x - routeAnchor.point.x;
+      const dy = raw.y - routeAnchor.point.y;
+      const length = Math.hypot(dx, dy);
+      const ratio = length > maxDistance && length > 0 ? maxDistance / length : 1;
+      const projected = {
+        x: routeAnchor.point.x + dx * ratio,
+        y: routeAnchor.point.y + dy * ratio,
+      };
+      const halfWidth = entry.cluster.offsetWidth / 2 + 8;
+      const halfHeight = entry.cluster.offsetHeight / 2 + 8;
+      let center = {
+        x: clamp(projected.x, halfWidth, context.stage.clientWidth - halfWidth),
+        y: clamp(projected.y, halfHeight, context.stage.clientHeight - halfHeight),
+      };
+      const boundedDx = center.x - routeAnchor.point.x;
+      const boundedDy = center.y - routeAnchor.point.y;
+      const boundedLength = Math.hypot(boundedDx, boundedDy);
+      if (boundedLength > maxDistance && boundedLength > 0) {
+        const boundedRatio = maxDistance / boundedLength;
+        center = {
+          x: routeAnchor.point.x + boundedDx * boundedRatio,
+          y: routeAnchor.point.y + boundedDy * boundedRatio,
+        };
+      }
+      if (distance(center, routeAnchor.point) > maxDistance + .25) return;
+      const key = `${Math.round(center.x * 10)}:${Math.round(center.y * 10)}`;
+      const candidate = {
+        center,
+        anchor: routeAnchor.point,
+        anchorFraction: routeAnchor.fraction,
+        anchorShift: distance(routeAnchor.point, entry.anchor),
+      };
+      const existing = byCenter.get(key);
+      if (!existing || distance(center, candidate.anchor) < distance(existing.center, existing.anchor)) {
+        byCenter.set(key, candidate);
+      }
+    };
+    const anchors = routeAnchors(entry, context);
+    for (const routeAnchor of anchors) {
+      add(entry.current, routeAnchor);
+      const rings = routeAnchor.primary ? RINGS : ALTERNATE_RINGS;
+      const angles = routeAnchor.primary ? ANGLES : ALTERNATE_ANGLES;
+      for (const radius of rings) {
+        if (radius > maxDistance + .25) continue;
+        for (let index = 0; index < angles; index += 1) {
+          const angle = index * 2 * Math.PI / angles;
+          add({
+            x: routeAnchor.point.x + Math.cos(angle) * radius,
+            y: routeAnchor.point.y + Math.sin(angle) * radius,
+          }, routeAnchor);
+        }
+      }
+    }
+    return [...byCenter.values()];
+  }
+
   async function buildOptions(entry, context, token) {
     const geom = geometry();
-    const candidates = candidateCenters(entry, context.stage);
+    const candidates = candidateCenters(entry, context);
     const values = [];
-    const metrics = await geom.runBudgeted(candidates, center => {
+    const metrics = await geom.runBudgeted(candidates, candidate => {
+      const center = candidate.center;
       const rect = centeredRect(entry.cluster, center, LABEL_GAP);
       if (!insideStage(rect, context.stage)) return;
       if (context.nodes.some(node => rectsIntersect(rect, node))) return;
       if (context.fixedLabels.some(label => rectsIntersect(rect, label.rect))) return;
       if (context.paths.some(path => path.id !== entry.id && geom.polylineHitsRect(path.points, rect))) return;
       const displacement = distance(center, entry.current);
-      const anchorDistance = distance(center, entry.anchor);
+      const anchorDistance = distance(center, candidate.anchor);
       const displacementWeight = entry.dirty ? 1 : 12;
       values.push({
         center,
+        anchor: candidate.anchor,
+        anchorFraction: candidate.anchorFraction,
         rect,
-        score: displacement * displacementWeight + anchorDistance * .03,
+        score: displacement * displacementWeight
+          + anchorDistance * .03
+          + candidate.anchorShift * .04,
       });
     }, {
       budgetMs: FRAME_BUDGET_MS,
@@ -340,9 +391,12 @@ _SCRIPT = r"""
       if (distance(option.center, entry.current) > .25) moved.push(entry.id);
       entry.cluster.style.left = `${option.center.x}px`;
       entry.cluster.style.top = `${option.center.y}px`;
-      entry.cluster.dataset.ioDistance = String(distance(option.center, entry.anchor));
+      entry.cluster.dataset.anchorX = String(option.anchor.x);
+      entry.cluster.dataset.anchorY = String(option.anchor.y);
+      entry.cluster.dataset.anchorFraction = String(option.anchorFraction);
+      entry.cluster.dataset.ioDistance = String(distance(option.center, option.anchor));
       entry.cluster.dataset.layoutLocalRepair = "true";
-      entry.cluster.dataset.layoutLocalRepairVersion = "1";
+      entry.cluster.dataset.layoutLocalRepairVersion = "2";
       entry.cluster.dataset.layoutLocalRepairScope = plan.scope;
     }
     const metrics = {
@@ -370,7 +424,7 @@ _SCRIPT = r"""
 
   window.glyphLayoutLocalRepair = {
     marker: MARKER,
-    version: 1,
+    version: 2,
     repair,
     get generation() { return generation; },
   };
@@ -380,7 +434,7 @@ _SCRIPT = r"""
 
 
 def enhance_layout_local_repair_html(html: str) -> str:
-    """Install a frame-budgeted adaptive repair solver for label geometry."""
+    """Install route-relative frame-budgeted repair for label geometry."""
 
     if _MARKER in html:
         return html
