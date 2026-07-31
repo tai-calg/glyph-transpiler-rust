@@ -13,7 +13,7 @@ from glyph.transition_execution_context_selector import (
 class TransitionExecutionContextSelectorTests(unittest.TestCase):
     def test_selector_projects_resolved_and_strict_native_actions(self) -> None:
         html = enhance_transition_execution_context_selector_html(DIAGRAM_HTML)
-        self.assertIn("glyph-transition-execution-context-selector-v4-script", html)
+        self.assertIn("glyph-transition-execution-context-selector-v5-script", html)
         self.assertIn('id="execution-context-select"', html)
         self.assertIn('const BLOCKED=new Set(["unresolved","multiple-transition-calls","missing"])', html)
         self.assertIn("systemAction=blocked?null:binding.action", html)
@@ -30,7 +30,10 @@ class TransitionExecutionContextSelectorTests(unittest.TestCase):
         self.assertIn('system_action_projection_source==="rtai-execution-evidence-v2"', html)
         self.assertIn('value?.kind==="effect-trace"', html)
         self.assertIn("transition?.system_action", html)
-        self.assertIn("deduplicated_equivalent_action", html)
+        self.assertIn("sameSemanticEvents", html)
+        self.assertIn("semantic-event-reference", html)
+        self.assertIn("deduplicated_equivalent_action:semanticAlias", html)
+        self.assertNotIn("!parts.includes(value)", html)
 
     def test_selector_queues_updates_that_arrive_during_render(self) -> None:
         html = enhance_transition_execution_context_selector_html(DIAGRAM_HTML)
@@ -43,7 +46,7 @@ class TransitionExecutionContextSelectorTests(unittest.TestCase):
     def test_prepared_app_installs_context_projection_after_compiler_ui(self) -> None:
         prepare_diagram_app()
         self.assertIn(
-            "glyph-transition-execution-context-selector-v4-script",
+            "glyph-transition-execution-context-selector-v5-script",
             diagram_app.DIAGRAM_HTML,
         )
         self.assertIn("window.GlyphExecutionContext", diagram_app.DIAGRAM_HTML)
