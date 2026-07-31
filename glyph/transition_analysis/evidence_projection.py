@@ -13,7 +13,7 @@ from .semantic_event import (
 )
 
 
-EVIDENCE_PROJECTION_VERSION = 4
+EVIDENCE_PROJECTION_VERSION = 5
 
 
 class EvidenceProjectionMode(str, Enum):
@@ -45,25 +45,46 @@ class TransitionProjectionReadiness:
 @dataclass(frozen=True)
 class ProjectionReadinessReport:
     transitions: tuple[TransitionProjectionReadiness, ...]
+    expected_transition_count: int
     relevant_transition_count: int
     ready_transition_count: int
     rejected_context_count: int
+    missing_evidence_count: int
+
+    @property
+    def projection_complete(self) -> bool:
+        return (
+            len(self.transitions) == self.expected_transition_count
+            and self.relevant_transition_count == self.expected_transition_count
+        )
+
+    @property
+    def all_edges_exact(self) -> bool:
+        return (
+            self.projection_complete
+            and self.expected_transition_count > 0
+            and self.ready_transition_count == self.expected_transition_count
+            and self.rejected_context_count == 0
+            and self.missing_evidence_count == 0
+        )
 
     @property
     def ready(self) -> bool:
-        return (
-            self.relevant_transition_count > 0
-            and self.ready_transition_count == self.relevant_transition_count
-            and self.rejected_context_count == 0
-        )
+        """Compatibility alias for the historical all-edges-Exact gate."""
+
+        return self.all_edges_exact
 
     def to_ir(self) -> dict[str, object]:
         return {
             "version": EVIDENCE_PROJECTION_VERSION,
             "ready": self.ready,
+            "projection_complete": self.projection_complete,
+            "all_edges_exact": self.all_edges_exact,
+            "expected_transition_count": self.expected_transition_count,
             "relevant_transition_count": self.relevant_transition_count,
             "ready_transition_count": self.ready_transition_count,
             "rejected_context_count": self.rejected_context_count,
+            "missing_evidence_count": self.missing_evidence_count,
             "transitions": [item.to_ir() for item in self.transitions],
         }
 
@@ -81,12 +102,15 @@ def audit_evidence_projection(
     Evidence set from reporting ready by shrinking the denominator.
     """
 
+    machine_transitions = _mappings(machine_view.get("transitions"))
+    expected = len(machine_transitions)
     transitions: list[TransitionProjectionReadiness] = []
     rejected = 0
     relevant = 0
     ready = 0
+    missing = 0
 
-    for index, transition in enumerate(_mappings(machine_view.get("transitions"))):
+    for index, transition in enumerate(machine_transitions):
         fallback_edge_id = str(
             transition.get("id") or transition.get("edge_id") or index
         )
@@ -96,6 +120,7 @@ def audit_evidence_projection(
                 continue
             relevant += 1
             rejected += 1
+            missing += 1
             transitions.append(
                 TransitionProjectionReadiness(
                     fallback_edge_id,
@@ -125,9 +150,11 @@ def audit_evidence_projection(
 
     return ProjectionReadinessReport(
         tuple(transitions),
+        expected,
         relevant,
         ready,
         rejected,
+        missing,
     )
 
 
@@ -208,6 +235,11 @@ def project_machine_from_evidence(
                     transition.pop("system_action_projection_source", None)
         projected.append(transition)
 
+    projection_safe = _projection_is_fail_closed(
+        projected,
+        mode=mode,
+        native_evidence=native_evidence,
+    )
     analysis = dict(_mapping(result.get("analysis")))
     analysis.update(
         {
@@ -215,25 +247,69 @@ def project_machine_from_evidence(
             "evidence_projection_mode": mode.value,
             "evidence_projection_field": evidence_field,
             "evidence_projection_ready": report.ready,
+            "evidence_projection_safe": projection_safe,
+            "evidence_projection_complete": report.projection_complete,
+            "evidence_projection_all_edges_exact": report.all_edges_exact,
+            "evidence_projection_expected_transition_count": (
+                report.expected_transition_count
+            ),
             "evidence_projection_relevant_transition_count": (
                 report.relevant_transition_count
             ),
             "evidence_projection_ready_transition_count": report.ready_transition_count,
             "evidence_projection_rejected_context_count": report.rejected_context_count,
+            "evidence_projection_missing_evidence_count": report.missing_evidence_count,
             "evidence_projection_legacy_fallback_allowed": (
                 mode is not EvidenceProjectionMode.STRICT_EXACT
             ),
             "evidence_projection_native_source": native_evidence,
-            "evidence_projection_expected_transition_count": len(
-                _mappings(result.get("transitions"))
-            ),
             "evidence_projection_semantic_event_identity": native_evidence,
         }
     )
     result["transitions"] = projected
-    result["evidence_projection_readiness"] = report.to_ir()
+    readiness_ir = report.to_ir()
+    readiness_ir["projection_safe"] = projection_safe
+    result["evidence_projection_readiness"] = readiness_ir
     result["analysis"] = analysis
     return result
+
+
+def _projection_is_fail_closed(
+    transitions: Sequence[Mapping[str, object]],
+    *,
+    mode: EvidenceProjectionMode,
+    native_evidence: bool,
+) -> bool:
+    if mode is not EvidenceProjectionMode.STRICT_EXACT:
+        return False
+    for transition in transitions:
+        if transition.get("legacy_system_action_fallback_allowed") is not False:
+            return False
+        if transition.get("execution_action_bindings") != []:
+            return False
+        if transition.get("execution_contexts") != []:
+            return False
+        if transition.get("system_execution_actions") != []:
+            return False
+        if transition.get("system_actions") != []:
+            return False
+        action = transition.get("system_action")
+        source = transition.get("system_action_projection_source")
+        readiness = _mapping(transition.get("evidence_projection"))
+        if action is None:
+            if source is not None:
+                return False
+            continue
+        if readiness.get("ready") is not True:
+            return False
+        expected_source = (
+            "rtai-execution-evidence-v2"
+            if native_evidence
+            else _projection_source_name("execution_evidence_v2")
+        )
+        if native_evidence and source != expected_source:
+            return False
+    return True
 
 
 def _attach_native_semantic_event_refs(
