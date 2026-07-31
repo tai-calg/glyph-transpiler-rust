@@ -23,6 +23,18 @@ class LayoutDependencyBridgeTests(unittest.TestCase):
         self.assertIn("glyph-layout-local-repair-ready", html)
         self.assertIn('window.glyphInitialTransitionRouter?.schedule?.("layout-local-repair", 0)', html)
 
+    def test_last_certified_layout_remains_hit_testable_during_recompute(self) -> None:
+        html = enhance_layout_dependency_bridge_html(DIAGRAM_HTML)
+
+        self.assertIn('data-transition-layout-published-once="true"', html)
+        self.assertIn('data-transition-layout-state="pending"', html)
+        self.assertIn('data-transition-publication-ready="false"', html)
+        self.assertIn("visibility:visible!important", html)
+        self.assertIn("pointer-events:auto!important", html)
+        self.assertIn("markPublishedLayout", html)
+        self.assertIn("glyph-layout-publication-certificate-ready", html)
+        self.assertIn('stage.dataset.transitionLayoutPublishedOnce = "true"', html)
+
     def test_enhancer_is_idempotent(self) -> None:
         once = enhance_layout_dependency_bridge_html(DIAGRAM_HTML)
         twice = enhance_layout_dependency_bridge_html(once)
