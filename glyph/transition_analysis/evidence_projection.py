@@ -7,9 +7,13 @@ import json
 from typing import Mapping, Sequence
 
 from .projection import ExactActionDecision, check_exact_action_projection
+from .semantic_event import (
+    attach_context_semantic_event_refs,
+    attach_machine_action_aliases,
+)
 
 
-EVIDENCE_PROJECTION_VERSION = 3
+EVIDENCE_PROJECTION_VERSION = 4
 
 
 class EvidenceProjectionMode(str, Enum):
@@ -138,10 +142,16 @@ def project_machine_from_evidence(
     ``STRICT_EXACT`` first removes every System-owned compatibility projection from
     every transition. It then restores a System Action only when native Evidence is
     exact. Missing or rejected Evidence therefore cannot leave a stale legacy Action.
-    Machine-owned ``action`` data is not modified.
+    Native Effect events receive ordered semantic identities before projection;
+    Machine display aliases are marked only when their complete invocation sequence
+    matches those exact events. Machine-owned ``action`` data is not removed.
     """
 
     result = deepcopy(dict(machine_view))
+    native_evidence = evidence_field == "rtai_execution_evidence_v2"
+    if native_evidence:
+        result = _attach_native_semantic_event_refs(result, evidence_field)
+
     report = audit_evidence_projection(
         result,
         evidence_field=evidence_field,
@@ -149,7 +159,6 @@ def project_machine_from_evidence(
     )
     readiness = {item.edge_id: item for item in report.transitions}
     projected: list[dict[str, object]] = []
-    native_evidence = evidence_field == "rtai_execution_evidence_v2"
 
     for index, original in enumerate(_mappings(result.get("transitions"))):
         transition = dict(original)
@@ -182,6 +191,11 @@ def project_machine_from_evidence(
                 strict_action = (
                     dict(item.action) if item.ready and item.action is not None else None
                 )
+                if native_evidence and strict_action is not None:
+                    transition = attach_machine_action_aliases(
+                        transition,
+                        strict_action,
+                    )
                 transition["evidence_display_action"] = strict_action
                 transition["system_action"] = strict_action
                 if strict_action is not None:
@@ -213,11 +227,45 @@ def project_machine_from_evidence(
             "evidence_projection_expected_transition_count": len(
                 _mappings(result.get("transitions"))
             ),
+            "evidence_projection_semantic_event_identity": native_evidence,
         }
     )
     result["transitions"] = projected
     result["evidence_projection_readiness"] = report.to_ir()
     result["analysis"] = analysis
+    return result
+
+
+def _attach_native_semantic_event_refs(
+    machine_view: Mapping[str, object],
+    evidence_field: str,
+) -> dict[str, object]:
+    result = deepcopy(dict(machine_view))
+    transitions: list[dict[str, object]] = []
+    for original in _mappings(result.get("transitions")):
+        transition = dict(original)
+        evidence = dict(_mapping(transition.get(evidence_field)))
+        contexts: list[dict[str, object]] = []
+        for raw_context in _mappings(evidence.get("contexts")):
+            context = deepcopy(dict(raw_context))
+            program_fingerprint = context.get("program_fingerprint")
+            edge_fingerprint = context.get("analysis_edge_fingerprint")
+            if isinstance(program_fingerprint, str) and program_fingerprint:
+                attach_context_semantic_event_refs(
+                    context,
+                    program_fingerprint=program_fingerprint,
+                    edge_fingerprint=(
+                        edge_fingerprint
+                        if isinstance(edge_fingerprint, str)
+                        else None
+                    ),
+                )
+            contexts.append(context)
+        if evidence:
+            evidence["contexts"] = contexts
+            transition[evidence_field] = evidence
+        transitions.append(transition)
+    result["transitions"] = transitions
     return result
 
 
