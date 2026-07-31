@@ -51,7 +51,7 @@ def test_transaction_contains_publication_grade_layout_phases() -> None:
     ):
         assert required in html
 
-    assert "SEARCH_BUDGET_MS=180" in html
+    assert "SEARCH_BUDGET_MS=450" in html
     assert "SEARCH_STEPS=220000" in html
     assert "splitByWidth" in html
     assert "renderedCanonical" in html
