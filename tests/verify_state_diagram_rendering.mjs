@@ -127,6 +127,51 @@ async function assertDiagramGeometry(page) {
   assert(geometry.distances.every(value => value <= 96.5), `I/O escaped tether: ${geometry.distances.join(", ")}`);
 }
 
+async function assertFitVisibility(page, machineName) {
+  const audit = await page.evaluate(() => {
+    const stage = document.querySelector(".graph-stage");
+    const shell = stage?.closest(".canvas-shell");
+    if (!stage || !shell) return { ok: false, error: "stage-or-shell-missing" };
+    const shellRect = shell.getBoundingClientRect();
+    const bounds = {
+      left: shellRect.left,
+      top: shellRect.top,
+      right: shellRect.left + shell.clientWidth,
+      bottom: shellRect.top + shell.clientHeight,
+    };
+    const elements = [
+      ...stage.querySelectorAll(".state-node"),
+      ...stage.querySelectorAll(".transition-io-cluster"),
+    ];
+    const outside = elements.map((element, index) => {
+      const rect = element.getBoundingClientRect();
+      const id = element.dataset.transitionId
+        || element.querySelector(".state-name")?.textContent?.trim()
+        || `element-${index}`;
+      const visible = rect.left >= bounds.left - 2
+        && rect.top >= bounds.top - 2
+        && rect.right <= bounds.right + 2
+        && rect.bottom <= bounds.bottom + 2;
+      return visible ? null : {
+        id,
+        rect: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom },
+      };
+    }).filter(Boolean);
+    return {
+      ok: elements.length > 0 && outside.length === 0,
+      outside,
+      count: elements.length,
+      bounds,
+      scale: Number.parseFloat(stage.dataset.viewportScale || "1"),
+      state: stage.dataset.fitVisibilityState || "",
+      details: stage.dataset.fitVisibilityDetails || "",
+    };
+  });
+  assert.equal(audit.error, undefined, `${machineName}: ${audit.error}`);
+  assert.equal(audit.state, "ready", `${machineName}: fit visibility did not become ready: ${JSON.stringify(audit)}`);
+  assert.equal(audit.ok, true, `${machineName}: diagram escaped the canvas viewport: ${JSON.stringify(audit)}`);
+}
+
 async function waitForStableLayout(page, machineName, transitionCount) {
   const ready = async () => page.waitForFunction(({name, count}) => {
     const stage = document.querySelector(".graph-stage");
@@ -139,6 +184,7 @@ async function waitForStableLayout(page, machineName, transitionCount) {
       && stage?.dataset.renderStable === "true"
       && stage?.dataset.transitionIoCollisionSolved === "true"
       && stage?.dataset.transitionIoCollisionCount === "0"
+      && stage?.dataset.fitVisibilityState === "ready"
       && stage.querySelectorAll(".transition-io-cluster").length === count;
   }, { name: machineName, count: transitionCount }, { timeout: 60_000 });
 
@@ -152,6 +198,8 @@ async function waitForStableLayout(page, machineName, transitionCount) {
     paths: [...document.querySelectorAll(".state-transition-path")].map(pathElement => (
       pathElement.getAttribute("d") || ""
     )),
+    viewport: document.querySelector(".graph-stage")?.dataset.viewportScale || "",
+    visibility: document.querySelector(".graph-stage")?.dataset.fitVisibilityState || "",
   }));
 
   for (let attempt = 0; attempt < 4; attempt += 1) {
@@ -350,6 +398,7 @@ try {
         }).length);
         assert.equal(visibleLegacyLabels, 0);
         await assertDiagramGeometry(page);
+        await assertFitVisibility(page, expected.name);
 
         await page.screenshot({
           path: path.join(outputDirectory, `${testCase.slug}-${expected.name.toLowerCase()}.png`),
@@ -366,4 +415,4 @@ try {
   await browser.close();
 }
 
-console.log("verified compiler-derived state diagrams with operation-derived Actions and publication-certified stable layout");
+console.log("verified compiler-derived state diagrams with operation-derived Actions and publication-certified fully visible layout");
