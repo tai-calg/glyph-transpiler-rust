@@ -21,6 +21,18 @@ class StateViewportReservationTests(unittest.TestCase):
             enhanced,
         )
 
+    def test_reservation_is_state_only_and_fail_closed(self) -> None:
+        source = "<html><head></head><body><div id='view'></div></body></html>"
+        enhanced = enhance_state_viewport_reservation_html(source)
+
+        self.assertIn(
+            'document.querySelector(".tab.active")?.dataset.tab !== "state"',
+            enhanced,
+        )
+        self.assertIn('document.querySelector(".state-node")', enhanced)
+        self.assertIn("MIN_VISIBLE_HEIGHT = 240", enhanced)
+        self.assertIn('reason: "inactive-state-view"', enhanced)
+
     def test_reservation_precedes_viewport_and_fit_certification(self) -> None:
         names = [enhancer.__name__ for enhancer in _presentation_pipeline()]
 
