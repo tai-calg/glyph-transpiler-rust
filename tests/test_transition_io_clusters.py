@@ -29,6 +29,16 @@ class TransitionIoClusterTests(unittest.TestCase):
         self.assertIn("glyph-transition-io-clusters-ready", html)
         self.assertNotIn("label.textContent=id", html)
 
+    def test_cluster_layer_reads_positions_but_does_not_own_interaction_or_persistence(self) -> None:
+        html = enhance_transition_io_clusters_html(DIAGRAM_HTML)
+        self.assertIn("localStorage.getItem(storageKey(data))", html)
+        self.assertIn('cluster.dataset.interactionOwner="glyph-transition-layout-interaction-adapter-v4"', html)
+        self.assertNotIn("localStorage.setItem(storageKey(data)", html)
+        self.assertNotIn('cluster.addEventListener("pointerdown"', html)
+        self.assertNotIn('cluster.addEventListener("pointermove"', html)
+        self.assertNotIn('cluster.addEventListener("pointerup"', html)
+        self.assertNotIn("writeSaved(data,saved)", html)
+
     def test_prepared_diagram_app_contains_transition_io_layer(self) -> None:
         prepare_diagram_app()
         self.assertIn(
