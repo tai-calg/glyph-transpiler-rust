@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 
-_MARKER = "glyph-transition-execution-context-selector-v3"
+_MARKER = "glyph-transition-execution-context-selector-v4"
 
 _STYLE = r"""
-<style id="glyph-transition-execution-context-selector-v3-style">
+<style id="glyph-transition-execution-context-selector-v4-style">
 .execution-context-control{
   display:flex;
   align-items:center;
@@ -29,9 +29,9 @@ _STYLE = r"""
 """
 
 _SCRIPT = r"""
-<script id="glyph-transition-execution-context-selector-v3-script">
+<script id="glyph-transition-execution-context-selector-v4-script">
 (()=>{
-const MARKER="glyph-transition-execution-context-selector-v3",AUTO="auto",MACHINE="machine";
+const MARKER="glyph-transition-execution-context-selector-v4",AUTO="auto",MACHINE="machine";
 const BLOCKED=new Set(["unresolved","multiple-transition-calls","missing"]);
 let currentMachine=null,currentKey=AUTO,timer=null,running=false,pending=false,lastSnapshotSignature="";
 const text=value=>String(value??"").trim();
@@ -46,7 +46,7 @@ const english=()=>String(window.GlyphI18n?.locale||document.documentElement.lang
 const tr=(key,ja,en)=>window.GlyphI18n?.t?.(key)??(english()?en:ja);
 const selectedMachine=data=>{const machines=data?.views?.state?.machines||[],name=document.getElementById("machine-select")?.selectedOptions?.[0]?.textContent;return machines.find(machine=>machine.name===name)||machines[0]||null};
 const contextKey=binding=>`context:${text(binding?.scope)||"system"}:${text(binding?.system)}:${text(binding?.entry)}`;
-const storageKey=machine=>`glyph.transition.execution-context.v3:${text(machine?.name)||"machine"}`;
+const storageKey=machine=>`glyph.transition.execution-context.v4:${text(machine?.name)||"machine"}`;
 const statusRank=status=>({"resolved":0,"actionless":1,"conditional":2,"unresolved":3,"multiple-transition-calls":4,"missing":5}[status]??0);
 const contextRecords=transition=>transition?.execution_contexts||transition?.execution_action_bindings||[];
 const strictNative=transition=>transition?.system_action_projection_source==="rtai-execution-evidence-v2"&&transition?.legacy_system_action_fallback_allowed===false;
@@ -72,10 +72,11 @@ function selectionFor(machine){
 }
 function bindingFor(transition,key){return contextRecords(transition).find(binding=>contextKey(binding)===key)||null}
 function composedAction(machineAction,systemAction,context){
-  const parts=[actionText(machineAction),actionText(systemAction)].filter(Boolean);
+  const machineText=actionText(machineAction),systemText=actionText(systemAction),parts=[];
+  for(const value of[machineText,systemText]){if(value&&!parts.includes(value))parts.push(value)}
   if(!parts.length)return null;
-  const display=parts.join("; ");
-  return{display,expression:display,scope:parts.length===2?"composed":(systemAction?"system":"machine"),projection_provenance:"transition-execution-context-selection",system:context?.system||null,entry:context?.entry||null,status:context?.status||"resolved"};
+  const display=parts.join("; "),hasMachine=Boolean(machineText),hasSystem=Boolean(systemText);
+  return{display,expression:display,scope:hasMachine&&hasSystem?"composed":hasSystem?"system":"machine",projection_provenance:"transition-execution-context-selection",system:context?.system||null,entry:context?.entry||null,status:context?.status||"resolved",deduplicated_equivalent_action:hasMachine&&hasSystem&&machineText===systemText};
 }
 function projectionFor(transition,key=currentKey){
   const machineAction=transition?.machine_action||transition?.action||null;
