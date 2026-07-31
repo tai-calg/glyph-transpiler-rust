@@ -160,6 +160,7 @@ _SCRIPT = r"""
         clearance: certificate.clearance,
       },
     }));
+    window.glyphLayoutPublicationCertificate?.schedule?.("stable-initial-route", 0);
   }
 
   function bind() {
