@@ -4,6 +4,7 @@ from pathlib import Path
 import unittest
 
 from glyph.compilation import CompilationPipeline
+from glyph.compiler import FunctionDecl
 from glyph.state_machine_analysis import analyze_machine
 from glyph.transition_analysis.machine_relation import build_machine_relation
 from glyph.transition_analysis.view_edge_specialization import (
@@ -121,11 +122,19 @@ class ViewEdgeSpecializationTests(unittest.TestCase):
         assert relation is not None
         bindings = specialize_view_edges(compiled.model, machine_view)
         self.assertTrue(bindings)
+        functions = {
+            item.name: repr(item)
+            for item in compiled.model.program.declarations
+            if isinstance(item, FunctionDecl)
+            and (item.name == "step" or item.name.startswith("__glyph_block_"))
+        }
         self.assertTrue(
             all(item.status is ViewEdgeBindingStatus.EXACT for item in bindings),
             {
                 "bindings": [item.to_ir() for item in bindings],
                 "relation": relation.to_ir(),
+                "blocks": [item.to_dict() for item in compiled.model.blocks],
+                "functions": functions,
                 "transition_lines": [
                     item.get("source") for item in machine_view["transitions"]
                 ],
