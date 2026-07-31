@@ -137,10 +137,11 @@ _SCRIPT = r"""
       if (context.paths.some(path => path.id !== entry.id && geom.polylineHitsRect(path.points, rect))) return;
       const displacement = distance(center, entry.current);
       const anchorDistance = distance(center, entry.anchor);
+      const displacementWeight = entry.dirty ? 1 : 12;
       values.push({
         center,
         rect,
-        score: displacement * (entry.manual ? 20 : 1) + anchorDistance * .03,
+        score: displacement * displacementWeight + anchorDistance * .03,
       });
     }, {
       budgetMs: FRAME_BUDGET_MS,
@@ -215,6 +216,83 @@ _SCRIPT = r"""
     return {assignment: solved ? assignment : null, steps, yields, maxSliceMs};
   }
 
+  function makeEntry(id, cluster, dirtySet) {
+    return {
+      id,
+      cluster,
+      current: currentCenter(cluster),
+      anchor: anchorOf(cluster),
+      manual: cluster.dataset.manualIo === "true",
+      dirty: dirtySet.has(id),
+      options: [],
+    };
+  }
+
+  function fixedLabelRects(clusters, movableIds) {
+    return [...clusters.entries()]
+      .filter(([id]) => !movableIds.has(id))
+      .map(([id, cluster]) => ({
+        id,
+        rect: centeredRect(cluster, currentCenter(cluster), LABEL_GAP),
+      }));
+  }
+
+  async function buildPlan(stage, clusters, ids, dirtySet, token, scope) {
+    const movableIds = new Set(ids);
+    const entries = ids.map(id => {
+      const cluster = clusters.get(id);
+      if (!cluster) throw terminalFailure("dirty transition label is missing", {id, scope});
+      return makeEntry(id, cluster, dirtySet);
+    });
+    const context = {
+      stage,
+      nodes: [...stage.querySelectorAll(".state-node")].map(node => nodeRect(node, NODE_GAP)),
+      fixedLabels: fixedLabelRects(clusters, movableIds),
+      paths: pathGeometry(stage),
+    };
+    let optionYields = 0;
+    let optionMaxSliceMs = 0;
+    const emptyEntries = [];
+    for (const entry of entries) {
+      const built = await buildOptions(entry, context, token);
+      if (token !== generation) throw new DOMException("stale layout repair", "AbortError");
+      entry.options = built.options;
+      optionYields += built.metrics.yields;
+      optionMaxSliceMs = Math.max(optionMaxSliceMs, built.metrics.maxSliceMs);
+      if (!entry.options.length) emptyEntries.push(entry.id);
+    }
+    if (emptyEntries.length) {
+      return {
+        scope,
+        entries,
+        assignment: null,
+        reason: "empty-options",
+        details: {emptyEntries},
+        optionYields,
+        optionMaxSliceMs,
+        searchYields: 0,
+        searchMaxSliceMs: 0,
+        steps: 0,
+      };
+    }
+    const solved = await solve(entries, token);
+    return {
+      scope,
+      entries,
+      assignment: solved.assignment,
+      reason: solved.assignment ? "solved" : "no-joint-solution",
+      details: solved.assignment ? {} : {
+        entries: entries.map(entry => ({id: entry.id, options: entry.options.length})),
+        steps: solved.steps,
+      },
+      optionYields,
+      optionMaxSliceMs,
+      searchYields: solved.yields,
+      searchMaxSliceMs: solved.maxSliceMs,
+      steps: solved.steps,
+    };
+  }
+
   async function repair(stage, violations, options = {}) {
     generation += 1;
     const token = generation;
@@ -227,84 +305,67 @@ _SCRIPT = r"""
 
     const clusters = new Map([...stage.querySelectorAll(".transition-io-cluster")]
       .map(cluster => [cluster.dataset.transitionId || "", cluster]));
-    const entries = dirtyIds.map(id => {
-      const cluster = clusters.get(id);
-      if (!cluster) throw terminalFailure("dirty transition label is missing", {id});
-      return {
-        id,
-        cluster,
-        current: currentCenter(cluster),
-        anchor: anchorOf(cluster),
-        manual: cluster.dataset.manualIo === "true",
-        options: [],
-      };
-    });
-    const manualConflicts = entries.filter(entry => entry.manual).map(entry => entry.id);
+    const dirtySet = new Set(dirtyIds);
+    const manualConflicts = dirtyIds.filter(id => clusters.get(id)?.dataset.manualIo === "true");
     if (manualConflicts.length) {
       throw terminalFailure("manual label positions violate publication geometry", {manualConflicts});
     }
 
-    const dirtySet = new Set(dirtyIds);
-    const fixedLabels = [...clusters.entries()]
-      .filter(([id]) => !dirtySet.has(id))
-      .map(([id, cluster]) => ({
-        id,
-        rect: centeredRect(cluster, currentCenter(cluster), LABEL_GAP),
-      }));
-    const context = {
-      stage,
-      nodes: [...stage.querySelectorAll(".state-node")].map(node => nodeRect(node, NODE_GAP)),
-      fixedLabels,
-      paths: pathGeometry(stage),
-    };
-
-    let optionYields = 0;
-    let optionMaxSliceMs = 0;
-    for (const entry of entries) {
-      const built = await buildOptions(entry, context, token);
-      if (token !== generation) throw new DOMException("stale layout repair", "AbortError");
-      entry.options = built.options;
-      optionYields += built.metrics.yields;
-      optionMaxSliceMs = Math.max(optionMaxSliceMs, built.metrics.maxSliceMs);
-      if (!entry.options.length) {
-        throw terminalFailure("dirty label has no feasible local repair", {
-          id: entry.id,
-          current: entry.current,
-          anchor: entry.anchor,
-        });
-      }
+    let plan = await buildPlan(stage, clusters, dirtyIds, dirtySet, token, "dirty-only");
+    let fallback = null;
+    if (!plan.assignment) {
+      const globalIds = [...clusters.entries()]
+        .filter(([, cluster]) => cluster.dataset.manualIo !== "true")
+        .map(([id]) => id);
+      fallback = {
+        from: plan.scope,
+        reason: plan.reason,
+        details: plan.details,
+      };
+      plan = await buildPlan(stage, clusters, globalIds, dirtySet, token, "global-movable");
     }
-
-    const solved = await solve(entries, token);
-    if (!solved.assignment) {
-      throw terminalFailure("no joint local repair satisfies all dirty labels", {
-        entries: entries.map(entry => ({id: entry.id, options: entry.options.length})),
-        steps: solved.steps,
+    if (!plan.assignment) {
+      throw terminalFailure("no adaptive local repair satisfies publication geometry", {
+        scope: plan.scope,
+        reason: plan.reason,
+        details: plan.details,
+        fallback,
       });
     }
-    for (const entry of entries) {
-      const option = solved.assignment.get(entry.id);
+
+    const moved = [];
+    for (const entry of plan.entries) {
+      const option = plan.assignment.get(entry.id);
+      if (!option) continue;
+      if (distance(option.center, entry.current) > .25) moved.push(entry.id);
       entry.cluster.style.left = `${option.center.x}px`;
       entry.cluster.style.top = `${option.center.y}px`;
       entry.cluster.dataset.ioDistance = String(distance(option.center, entry.anchor));
       entry.cluster.dataset.layoutLocalRepair = "true";
       entry.cluster.dataset.layoutLocalRepairVersion = "1";
+      entry.cluster.dataset.layoutLocalRepairScope = plan.scope;
     }
     const metrics = {
       durationMs: performance.now() - started,
-      optionYields,
-      searchYields: solved.yields,
-      maxSliceMs: Math.max(optionMaxSliceMs, solved.maxSliceMs),
-      steps: solved.steps,
-      labels: entries.length,
+      optionYields: plan.optionYields,
+      searchYields: plan.searchYields,
+      maxSliceMs: Math.max(plan.optionMaxSliceMs, plan.searchMaxSliceMs),
+      steps: plan.steps,
+      labels: plan.entries.length,
+      dirtyLabels: dirtyIds.length,
+      movedLabels: moved.length,
+      scope: plan.scope,
+      fallback,
     };
     stage.dataset.layoutLocalRepairState = "repaired";
-    stage.dataset.layoutLocalRepairLabels = dirtyIds.join(",");
+    stage.dataset.layoutLocalRepairScope = plan.scope;
+    stage.dataset.layoutLocalRepairLabels = moved.join(",");
+    stage.dataset.layoutLocalRepairDirtyLabels = dirtyIds.join(",");
     stage.dataset.layoutLocalRepairMetrics = JSON.stringify(metrics);
     document.dispatchEvent(new CustomEvent("glyph-layout-local-repair-ready", {
-      detail: {marker: MARKER, labels: dirtyIds, metrics},
+      detail: {marker: MARKER, labels: moved, dirtyLabels: dirtyIds, scope: plan.scope, metrics},
     }));
-    return {repaired: true, labels: dirtyIds, metrics};
+    return {repaired: true, labels: moved, dirtyLabels: dirtyIds, scope: plan.scope, metrics};
   }
 
   window.glyphLayoutLocalRepair = {
@@ -319,7 +380,7 @@ _SCRIPT = r"""
 
 
 def enhance_layout_local_repair_html(html: str) -> str:
-    """Install a frame-budgeted local repair solver for dirty label geometry."""
+    """Install a frame-budgeted adaptive repair solver for label geometry."""
 
     if _MARKER in html:
         return html
