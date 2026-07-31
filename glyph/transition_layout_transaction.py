@@ -128,6 +128,8 @@ function markPending(stage,token,reason){
   clearFailure(stage);
   stage.dataset.transitionLayoutState="pending";
   stage.dataset.transitionPublicationReady="false";
+  stage.dataset.initialRouteReady="pending";
+  delete stage.dataset.initialTransitionRouting;
   stage.dataset.transitionLayoutGeneration=String(token);
   stage.dataset.transitionLayoutReason=reason;
   stage.dataset.transitionIoCollisionSolved="transaction-pending";

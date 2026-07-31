@@ -256,7 +256,14 @@ _SCRIPT = r"""
     try {
       const machine = await readMachine();
       if (!machine) return;
-      const signature = [machine.name, machine.initial_state, stage.clientWidth, stage.clientHeight].join("\u001f");
+      const geometrySignature = [
+        ...[...stage.querySelectorAll(".state-node")].map(node => [
+          node.querySelector(".state-name")?.textContent?.trim() || "",
+          node.offsetLeft, node.offsetTop, node.offsetWidth, node.offsetHeight,
+        ].join(":")),
+        ...[...stage.querySelectorAll(":scope > svg.edge-svg > path.state-transition-path")].map(path => path.getAttribute("d") || ""),
+      ].join("\u001e");
+      const signature = [machine.name, machine.initial_state, stage.clientWidth, stage.clientHeight, geometrySignature].join("\u001f");
       if (stage.dataset.initialTransitionRouting === signature) return;
 
       const svg = stage.querySelector(":scope > svg.edge-svg");
@@ -319,6 +326,11 @@ _SCRIPT = r"""
   }
 
   function schedule() {
+    const stage = document.querySelector(".state-node")?.closest(".graph-stage");
+    if (stage) {
+      stage.dataset.initialRouteReady = "pending";
+      delete stage.dataset.initialTransitionRouting;
+    }
     clearTimeout(timer);
     timer = setTimeout(() => applyRouting().catch(error => {
       console.error("initial transition routing failed", error);
@@ -327,6 +339,8 @@ _SCRIPT = r"""
 
   document.addEventListener("glyph-transition-input-action-labels-ready", schedule);
   document.addEventListener("glyph-uml-transition-ready", schedule);
+  document.addEventListener("glyph-transition-layout-transaction-ready", schedule);
+  document.addEventListener("glyph-diagram-viewport-change", schedule);
   document.addEventListener("change", event => {
     if (event.target?.id === "machine-select") schedule();
   });
