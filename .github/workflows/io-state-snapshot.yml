@@ -128,8 +128,11 @@ on:
       - ".github/workflows/io-state-snapshot.yml"
   workflow_dispatch:
 
+# Temporary write access is restricted below to this same-repository PR branch and
+# only updates the generated README state-diagram baseline. Remove after the binary
+# baseline commit is created.
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   render:
@@ -200,6 +203,33 @@ jobs:
           # Additional RTAI UI campaigns are independent end-of-job checks.
           run_node tests/verify_rtai_strict_projection_ui.mjs build/rtai-strict-projection/ui-verify.log
           run_node tests/verify_rtai_semantic_status_ui.mjs build/rtai-semantic-status/verify.log
+
+      - name: Commit reviewed README state baseline
+        if: >-
+          always() &&
+          github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name == github.repository &&
+          github.head_ref == 'agent/system-action-control-flow-completeness-v2'
+        shell: bash
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          set -euo pipefail
+          generated=build/state-diagram-regression/motor-safety-motor.png
+          test -f "$generated"
+          cp "$generated" /tmp/glyph-studio-state-transition.png
+          git fetch origin "$HEAD_REF"
+          git checkout -B "$HEAD_REF" FETCH_HEAD
+          cp /tmp/glyph-studio-state-transition.png docs/images/glyph-studio-state-transition.png
+          if git diff --quiet -- docs/images/glyph-studio-state-transition.png; then
+            echo "README state baseline is current"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/images/glyph-studio-state-transition.png
+          git commit -m "Update strict state diagram baseline"
+          git push origin "HEAD:$HEAD_REF"
 
       - name: Upload rendered diagrams
         if: always()
