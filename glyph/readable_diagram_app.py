@@ -17,6 +17,7 @@ from .diagram_live_stability import (
     install_serial_compilation,
 )
 from .diagram_locale import enhance_diagram_locale_html
+from .diagram_rendered_geometry_adapter import enhance_diagram_rendered_geometry_html
 from .diagram_workspace_layout import enhance_workspace_layout_html
 from .initial_transition_dependency_bridge import (
     enhance_initial_transition_dependency_bridge_html,
@@ -79,6 +80,7 @@ def _presentation_pipeline():
 
     return (
         enhance_diagram_geometry_kernel_html,
+        enhance_diagram_rendered_geometry_html,
         enhance_diagram_html,
         enhance_transition_layout_transaction_bootstrap_html,
         enhance_uml_transition_html,
