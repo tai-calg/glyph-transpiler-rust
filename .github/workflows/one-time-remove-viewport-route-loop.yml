@@ -1,0 +1,53 @@
+name: One-time Remove Viewport Route Loop
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/one-time-remove-viewport-route-loop.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.head_ref == 'agent/system-action-control-flow-completeness-v2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Remove zoom-to-route feedback loop
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("glyph/initial_transition_layout.py")
+          source = path.read_text(encoding="utf-8")
+          line = '  document.addEventListener("glyph-diagram-viewport-change", schedule);\n'
+          if source.count(line) != 1:
+              raise SystemExit(f"viewport route listener count={source.count(line)}")
+          path.write_text(source.replace(line, ""), encoding="utf-8")
+          PY
+          python -m py_compile glyph/initial_transition_layout.py
+          python - <<'PY'
+          from pathlib import Path
+          source = Path("glyph/initial_transition_layout.py").read_text(encoding="utf-8")
+          start = source.index('<script id="glyph-initial-transition-routing-v1-script">') + len('<script id="glyph-initial-transition-routing-v1-script">')
+          end = source.index('</script>', start)
+          Path('/tmp/initial.js').write_text(source[start:end], encoding='utf-8')
+          PY
+          node --check /tmp/initial.js
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add glyph/initial_transition_layout.py
+          git commit -m "Avoid viewport and initial-route feedback loop"
+          git push origin "HEAD:${{ github.head_ref }}"
