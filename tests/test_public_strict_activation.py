@@ -150,13 +150,18 @@ class PublicStrictActivationTests(unittest.TestCase):
         ]
         self.assertTrue(exact_transitions, _transition_diagnostics(transitions))
         for transition in exact_transitions:
-            operations = [
-                event["operation"]
+            events = [
+                event
                 for context in transition["rtai_execution_evidence_v2"]["contexts"]
                 for alternative in context["effect_trace"]["alternatives"]
                 for event in alternative["events"]
             ]
-            self.assertEqual(operations, ["write_motor"])
+            self.assertEqual([event["operation"] for event in events], ["write_motor"])
+            self.assertEqual(
+                [event["expression"] for event in events],
+                [transition["machine_action"]["display"]],
+            )
+            self.assertNotIn("ConstantValue", events[0]["expression"])
             self.assertIsNotNone(transition.get("system_action"))
 
 
