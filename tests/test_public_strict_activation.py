@@ -64,11 +64,13 @@ def _transition_diagnostics(transitions: list[dict[str, object]]) -> list[dict[s
     return [
         {
             "edge_id": transition.get("edge_id") or transition.get("id"),
+            "source_state": transition.get("source_state"),
+            "target_state": transition.get("target_state"),
             "source": transition.get("source"),
-            "target": transition.get("target"),
+            "condition": transition.get("condition"),
+            "binding": transition.get("rtai_view_edge_specialization"),
             "status": transition.get("rtai_semantic_status"),
             "projection": transition.get("evidence_projection"),
-            "native_evidence": transition.get("rtai_execution_evidence_v2"),
         }
         for transition in transitions
     ]
@@ -146,10 +148,7 @@ class PublicStrictActivationTests(unittest.TestCase):
             if item["rtai_semantic_status"]["status"] == "exact"
             and not item.get("synthesized_failure")
         ]
-        self.assertTrue(
-            exact_transitions,
-            _transition_diagnostics(transitions),
-        )
+        self.assertTrue(exact_transitions, _transition_diagnostics(transitions))
         for transition in exact_transitions:
             operations = [
                 event["operation"]
