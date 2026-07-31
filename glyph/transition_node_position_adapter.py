@@ -7,6 +7,7 @@ _SCRIPT = r"""
 <script id="glyph-transition-node-position-adapter-v1-script">
 (()=>{
 const MARKER="glyph-transition-node-position-adapter-v1",DRAG_THRESHOLD=3;
+const POSITION_KEY_PREFIX="glyph.diagram.positions.v1:";
 let active=null,stateCache=null,statePromise=null,stateAbort=null,stateVersion=0,lastStage=null,restoreGeneration=0,destroyed=false;
 const num=value=>Number.parseFloat(value||"0")||0;
 const nodeName=node=>node.querySelector(".state-name,.node-name")?.textContent?.trim()||"node";
@@ -39,12 +40,36 @@ async function diagramState(){
   return statePromise;
 }
 function machineIndex(){return document.getElementById("machine-select")?.value||0}
-function canonicalKey(data){return`glyph.diagram.positions.v1:${data?.digest||"source"}:state:${machineIndex()}`}
-function legacyKeys(){return[`glyph.diagram.positions.v1:source:state:${machineIndex()}`]}
+function canonicalKey(data){return`${POSITION_KEY_PREFIX}${data?.digest||"source"}:state:${machineIndex()}`}
+function legacyKeys(){return[`${POSITION_KEY_PREFIX}source:state:${machineIndex()}`]}
 function parse(key){try{return JSON.parse(localStorage.getItem(key)||"{}")||{}}catch{return{}}}
 function write(key,value){
   try{localStorage.setItem(key,JSON.stringify(value));return true}
   catch(error){console.warn("transition node position persistence unavailable",error);return false}
+}
+function positionStorageState(){
+  const values=new Map();
+  try{
+    for(let index=0;index<localStorage.length;index+=1){
+      const key=localStorage.key(index);
+      if(key?.startsWith(POSITION_KEY_PREFIX))values.set(key,localStorage.getItem(key));
+    }
+  }catch(error){console.warn("transition node position snapshot unavailable",error)}
+  return values;
+}
+function restorePositionStorageState(values){
+  try{
+    const current=[];
+    for(let index=0;index<localStorage.length;index+=1){
+      const key=localStorage.key(index);
+      if(key?.startsWith(POSITION_KEY_PREFIX))current.push(key);
+    }
+    for(const key of current){if(!values.has(key))localStorage.removeItem(key)}
+    for(const[key,value]of values){
+      if(value===null)localStorage.removeItem(key);
+      else localStorage.setItem(key,value);
+    }
+  }catch(error){console.warn("transition node click persistence rollback unavailable",error)}
 }
 function snapshot(stage){
   const value={};
@@ -116,6 +141,7 @@ document.addEventListener("pointerdown",event=>{
     startY:event.clientY,
     startLeft:num(node.style.left),
     startTop:num(node.style.top),
+    storageBefore:positionStorageState(),
   };
 },true);
 document.addEventListener("pointerup",event=>{
@@ -123,7 +149,10 @@ document.addEventListener("pointerup",event=>{
   const record=active;active=null;
   const pointerDistance=Math.hypot(event.clientX-record.startX,event.clientY-record.startY);
   const visualDistance=Math.hypot(num(record.node.style.left)-record.startLeft,num(record.node.style.top)-record.startTop);
-  if(pointerDistance<DRAG_THRESHOLD&&visualDistance<1)return;
+  if(pointerDistance<DRAG_THRESHOLD&&visualDistance<1){
+    queueMicrotask(()=>restorePositionStorageState(record.storageBefore));
+    return;
+  }
   record.positions=snapshot(record.stage);
   queueMicrotask(()=>persist(record).catch(error=>report(error,"transition node position persistence failed")));
 },true);
@@ -151,7 +180,7 @@ for(const eventName of["pagehide","beforeunload"]){
 }
 lastStage=document.querySelector(".state-node")?.closest(".graph-stage")||null;
 scheduleRestore(lastStage,0);
-window.glyphTransitionNodePositionAdapter={marker:MARKER,version:2,restore:()=>scheduleRestore(null,0)};
+window.glyphTransitionNodePositionAdapter={marker:MARKER,version:3,restore:()=>scheduleRestore(null,0)};
 })();
 </script>
 """
