@@ -5,6 +5,17 @@ from typing import Sequence
 
 from ..compiler import BoolExpr
 from .abstract_state import AbstractAnalysisResult, GuardedAlternative
+from .abstract_value import (
+    AbstractValue,
+    ApplicationValue,
+    BottomValue,
+    ConstantValue,
+    ConstructorValue,
+    FieldValue,
+    ParameterValue,
+    PhiValue,
+    TopValue,
+)
 from .concrete import ConcreteExecutionResult
 from .evidence import (
     CallCardinalityEvidence,
@@ -27,7 +38,7 @@ from .exactness import (
 )
 
 
-ABSTRACT_EVIDENCE_ADAPTER_VERSION = 1
+ABSTRACT_EVIDENCE_ADAPTER_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -357,13 +368,45 @@ def _trace_alternative(alternative: GuardedAlternative) -> TraceAlternative:
                 operation=event.operation,
                 expression=(
                     f"{event.operation}("
-                    + ", ".join(repr(argument) for argument in event.arguments)
+                    + ", ".join(_render_abstract_value(argument) for argument in event.arguments)
                     + ")"
                 ),
             )
             for event in alternative.effect_trace
         ),
     )
+
+
+def _render_abstract_value(value: AbstractValue) -> str:
+    """Render exact abstract values with Glyph surface syntax, never dataclass repr."""
+
+    if isinstance(value, ParameterValue):
+        return value.name
+    if isinstance(value, ConstantValue):
+        if isinstance(value.value, bool):
+            return "true" if value.value else "false"
+        return str(value.value)
+    if isinstance(value, FieldValue):
+        return f"{_render_abstract_value(value.base)}.{value.field}"
+    if isinstance(value, ConstructorValue):
+        arguments = ", ".join(_render_abstract_value(item) for item in value.arguments)
+        return f"{value.type_name}({arguments})"
+    if isinstance(value, ApplicationValue):
+        arguments = tuple(_render_abstract_value(item) for item in value.arguments)
+        if len(arguments) == 1 and value.operation in {"!", "-"}:
+            return f"{value.operation}{arguments[0]}"
+        if len(arguments) == 2 and value.operation in {
+            "==", "!=", "+", "-", "*", "/", "<", "<=", ">", ">=", "&", "|"
+        }:
+            return f"{arguments[0]}{value.operation}{arguments[1]}"
+        return f"{value.operation}({', '.join(arguments)})"
+    if isinstance(value, PhiValue):
+        return "phi(" + ", ".join(_render_abstract_value(item) for item in value.values) + ")"
+    if isinstance(value, BottomValue):
+        return "bottom"
+    if isinstance(value, TopValue):
+        return "unknown"
+    return "unknown"
 
 
 def _deduplicate_trace_alternatives(
@@ -403,3 +446,13 @@ def _exact(
     kind: ExactnessProofKind = ExactnessProofKind.STRUCTURAL_IDENTITY,
 ) -> Approximation:
     return Approximation.exact(ExactnessProof(kind, scope, detail))
+
+
+__all__ = [
+    "ABSTRACT_EVIDENCE_ADAPTER_VERSION",
+    "AbstractEvidenceContext",
+    "VerifiedReachabilityWitness",
+    "context_evidence_from_analysis",
+    "edge_evidence_from_analysis",
+    "verified_reachability_witness",
+]
