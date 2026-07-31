@@ -17,6 +17,7 @@ _STYLE = r"""
 .canvas-shell.diagram-render-pending>.graph-stage{visibility:hidden!important}
 .canvas-shell.diagram-render-pending::after{content:"Rendering state diagram…";position:absolute;inset:0;display:grid;place-items:center;color:var(--muted);background:var(--panel);font-size:12px;pointer-events:none}
 .canvas-shell.diagram-render-pending+.transition-index{visibility:hidden!important}
+.canvas-shell.diagram-render-failed::after{content:"State diagram certification failed";color:var(--red)}
 </style>
 """
 
@@ -25,7 +26,7 @@ _SCRIPT = r"""
 <script id="glyph-diagram-live-stability-v2-script">
 (() => {
   const MARKER = "glyph-diagram-live-stability-v2";
-  const RENDER_TIMEOUT_MS = 1600;
+  const RENDER_TIMEOUT_MS = 12000;
   const REQUEST_TIMEOUT_MS = 30000;
   const POLL_INTERVAL_MS = 3000;
   const REQUIRED_FLAGS = ["labelLayoutReady", "umlTransitionReady", "transitionInputActionLabelsReady", "stateTransitionIRV2LabelsReady"];
@@ -38,10 +39,52 @@ _SCRIPT = r"""
   function stateStage(){return document.querySelector(".state-node")?.closest(".graph-stage")||null}
   function renderKey(){try{return JSON.stringify([snapshot?.version??null,snapshot?.digest??"",snapshot?.status??"",activeTab,systemIndex,machineIndex])}catch{return ""}}
   function initialRouteReady(stage){const raw=stage?.querySelector(":scope > svg.edge-svg > path:not(.state-transition-path)");if(!raw)return true;return stage.dataset.initialRouteReady==="true"&&raw.classList.contains("initial-transition-path")}
-  function fullyAdjusted(stage){if(!stage?.querySelector(".state-node"))return true;return REQUIRED_FLAGS.every(name=>stage.dataset[name]==="true")&&initialRouteReady(stage)}
-  function reveal(stage,state="ready"){if(!stage?.isConnected)return;const timer=fallbackTimers.get(stage);if(timer)clearTimeout(timer);fallbackTimers.delete(stage);stage.dataset.renderStable="true";stage.dataset.renderStableState=state;stage.closest(".canvas-shell")?.classList.remove("diagram-render-pending");document.dispatchEvent(new CustomEvent("glyph-diagram-render-stable",{detail:{marker:MARKER,state}}))}
-  function settle(stage=stateStage(),generation=renderGeneration){if(!stage?.querySelector(".state-node")||!fullyAdjusted(stage))return;requestAnimationFrame(()=>requestAnimationFrame(()=>{if(generation!==renderGeneration||stage!==stateStage())return;if(fullyAdjusted(stage))reveal(stage)}))}
-  function markPending(stage=stateStage()){if(!stage?.querySelector(".state-node"))return;const generation=++renderGeneration;delete stage.dataset.renderStable;stage.dataset.renderStableState="pending";stage.closest(".canvas-shell")?.classList.add("diagram-render-pending");const previous=fallbackTimers.get(stage);if(previous)clearTimeout(previous);fallbackTimers.set(stage,setTimeout(()=>{if(generation!==renderGeneration||!stage.isConnected)return;console.warn("state diagram adjustment timed out; showing latest DOM");reveal(stage,"fallback")},RENDER_TIMEOUT_MS));settle(stage,generation)}
+  function publicationReady(stage){return stage?.dataset.transitionPublicationReady==="true"&&stage.dataset.layoutCertificateState==="valid"}
+  function fullyAdjusted(stage){
+    if(!stage?.querySelector(".state-node"))return true;
+    if(window.glyphLayoutPublicationCertificate)return publicationReady(stage)&&initialRouteReady(stage);
+    return REQUIRED_FLAGS.every(name=>stage.dataset[name]==="true")&&initialRouteReady(stage);
+  }
+  function clearTimer(stage){const timer=fallbackTimers.get(stage);if(timer)clearTimeout(timer);fallbackTimers.delete(stage)}
+  function reveal(stage,state="ready"){
+    if(!stage?.isConnected||!fullyAdjusted(stage))return false;
+    clearTimer(stage);
+    stage.dataset.renderStable="true";
+    stage.dataset.renderStableState=state;
+    const shell=stage.closest(".canvas-shell");
+    shell?.classList.remove("diagram-render-pending","diagram-render-failed");
+    document.dispatchEvent(new CustomEvent("glyph-diagram-render-stable",{detail:{marker:MARKER,state}}));
+    return true;
+  }
+  function failClosed(stage,generation){
+    if(generation!==renderGeneration||!stage?.isConnected||fullyAdjusted(stage))return;
+    clearTimer(stage);
+    stage.dataset.renderStable="false";
+    stage.dataset.renderStableState="certification-timeout";
+    const shell=stage.closest(".canvas-shell");
+    shell?.classList.add("diagram-render-pending","diagram-render-failed");
+    console.error("state diagram publication certification timed out; diagram remains hidden");
+    document.dispatchEvent(new CustomEvent("glyph-diagram-render-failed",{detail:{marker:MARKER,state:"certification-timeout"}}));
+  }
+  function settle(stage=stateStage(),generation=renderGeneration){
+    if(!stage?.querySelector(".state-node")||!fullyAdjusted(stage))return;
+    requestAnimationFrame(()=>requestAnimationFrame(()=>{
+      if(generation!==renderGeneration||stage!==stateStage())return;
+      reveal(stage,"certified");
+    }));
+  }
+  function markPending(stage=stateStage()){
+    if(!stage?.querySelector(".state-node"))return;
+    const generation=++renderGeneration;
+    clearTimer(stage);
+    delete stage.dataset.renderStable;
+    stage.dataset.renderStableState="pending";
+    const shell=stage.closest(".canvas-shell");
+    shell?.classList.remove("diagram-render-failed");
+    shell?.classList.add("diagram-render-pending");
+    fallbackTimers.set(stage,setTimeout(()=>failClosed(stage,generation),RENDER_TIMEOUT_MS));
+    settle(stage,generation);
+  }
   function selectDefaultStateTab(){activeTab="state";document.querySelectorAll(".tab").forEach(button=>button.classList.toggle("active",button.dataset.tab==="state"))}
   function applySnapshot(next,{initial=false,updateEditor=false}={}){const currentVersion=Number(snapshot?.version??-1),nextVersion=Number(next?.version??-1);if(!initial&&nextVersion<currentVersion)return false;snapshot=next;if((initial||updateEditor)&&!dirty){editor.value=next.source||"";dirty=false;syncLines()}render();window.GlyphExecutionContext?.refresh?.();return true}
   function abortPreview(){requestGeneration+=1;if(previewController)previewController.abort();previewController=null}
@@ -69,9 +112,10 @@ _SCRIPT = r"""
   document.getElementById("compile").onclick=()=>compile();
   document.getElementById("save").onclick=()=>save();
 
-  for(const eventName of ["glyph-transition-layout-ready","glyph-uml-transition-ready","glyph-transition-input-action-labels-ready","glyph-state-transition-ir-v2-labels-ready","glyph-initial-transition-route-ready"]){document.addEventListener(eventName,()=>settle())}
+  for(const eventName of ["glyph-transition-layout-ready","glyph-uml-transition-ready","glyph-transition-input-action-labels-ready","glyph-state-transition-ir-v2-labels-ready","glyph-initial-transition-route-ready","glyph-layout-publication-certificate-ready"]){document.addEventListener(eventName,()=>settle())}
+  document.addEventListener("glyph-layout-publication-certificate-failed",()=>failClosed(stateStage(),renderGeneration));
   const root=document.getElementById("view")||document.body;
-  new MutationObserver(()=>settle()).observe(root,{subtree:true,attributes:true,attributeFilter:["data-label-layout-ready","data-uml-transition-ready","data-transition-input-action-labels-ready","data-state-transition-ir-v2-labels-ready","data-initial-route-ready"]});
+  new MutationObserver(()=>settle()).observe(root,{subtree:true,attributes:true,attributeFilter:["data-label-layout-ready","data-uml-transition-ready","data-transition-input-action-labels-ready","data-state-transition-ir-v2-labels-ready","data-initial-route-ready","data-transition-publication-ready","data-layout-certificate-state"]});
   selectDefaultStateTab();
   if(snapshot)render();
 })();
@@ -128,7 +172,7 @@ def install_serial_compilation() -> None:
 
 
 def enhance_diagram_live_stability_html(html: str) -> str:
-    """Use state-first, stale-safe rendering without mutation feedback loops."""
+    """Use state-first, stale-safe, publication-certified rendering."""
 
     if _MARKER in html:
         return html
