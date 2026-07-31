@@ -9,6 +9,9 @@ from pathlib import Path
 
 from glyph.diagram_editor_exports import enhance_diagram_editor_exports_html
 from glyph.diagram_ui import DIAGRAM_HTML
+from glyph.transition_layout_interaction_adapter import (
+    enhance_transition_layout_interaction_adapter_html,
+)
 
 
 class DiagramEditorClickDragBoundaryTests(unittest.TestCase):
@@ -22,21 +25,32 @@ class DiagramEditorClickDragBoundaryTests(unittest.TestCase):
         self.assertIn("const moved=drag.moved", html)
         self.assertIn("if(!moved)return;\n      save(stage);", html)
 
-    def test_transition_label_uses_the_same_click_drag_boundary(self) -> None:
-        html = enhance_diagram_editor_exports_html(DIAGRAM_HTML)
+    def test_transition_label_boundary_belongs_to_interaction_adapter(self) -> None:
+        html = enhance_transition_layout_interaction_adapter_html(DIAGRAM_HTML)
 
-        self.assertIn("ioDrag.moved=true", html)
-        self.assertIn("const moved=ioDrag.moved", html)
-        self.assertIn("if(!moved)return;\n      cluster.dataset.manualIo", html)
+        self.assertIn("DRAG_THRESHOLD=3", html)
+        self.assertIn("dragged:false", html)
+        self.assertIn("pointerDistance(active,event)<DRAG_THRESHOLD", html)
+        self.assertIn("active.dragged=true", html)
+        self.assertIn("if(!record.dragged)return", html)
+        self.assertIn("manual-label-persisted", html)
 
-    def test_enhancer_is_idempotent(self) -> None:
-        once = enhance_diagram_editor_exports_html(DIAGRAM_HTML)
-        twice = enhance_diagram_editor_exports_html(once)
-        self.assertEqual(once, twice)
+    def test_enhancers_are_idempotent(self) -> None:
+        editor_once = enhance_diagram_editor_exports_html(DIAGRAM_HTML)
+        editor_twice = enhance_diagram_editor_exports_html(editor_once)
+        self.assertEqual(editor_once, editor_twice)
+
+        interaction_once = enhance_transition_layout_interaction_adapter_html(DIAGRAM_HTML)
+        interaction_twice = enhance_transition_layout_interaction_adapter_html(
+            interaction_once
+        )
+        self.assertEqual(interaction_once, interaction_twice)
 
     @unittest.skipUnless(shutil.which("node"), "Node.js is not installed")
     def test_injected_javascript_is_syntactically_valid(self) -> None:
-        html = enhance_diagram_editor_exports_html(DIAGRAM_HTML)
+        html = enhance_transition_layout_interaction_adapter_html(
+            enhance_diagram_editor_exports_html(DIAGRAM_HTML)
+        )
         scripts = re.findall(r"<script[^>]*>(.*?)</script>", html, re.DOTALL)
         with tempfile.TemporaryDirectory() as directory:
             script = Path(directory) / "diagram-editor-click-drag-boundary.js"
