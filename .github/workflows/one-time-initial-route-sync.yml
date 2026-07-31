@@ -1,0 +1,75 @@
+name: One-time Initial Route Sync
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/one-time-initial-route-sync.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.head_ref == 'agent/system-action-control-flow-completeness-v2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Synchronize initial route with publication transaction
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          transaction = Path("glyph/transition_layout_transaction.py")
+          source = transaction.read_text(encoding="utf-8")
+          old = '''  stage.dataset.transitionLayoutState="pending";\n  stage.dataset.transitionPublicationReady="false";\n  stage.dataset.transitionLayoutGeneration=String(token);'''
+          new = '''  stage.dataset.transitionLayoutState="pending";\n  stage.dataset.transitionPublicationReady="false";\n  stage.dataset.initialRouteReady="pending";\n  delete stage.dataset.initialTransitionRouting;\n  stage.dataset.transitionLayoutGeneration=String(token);'''
+          if source.count(old) != 1:
+              raise SystemExit(f"transaction pending block count={source.count(old)}")
+          transaction.write_text(source.replace(old, new), encoding="utf-8")
+
+          router = Path("glyph/initial_transition_layout.py")
+          source = router.read_text(encoding="utf-8")
+          old = '''      const signature = [machine.name, machine.initial_state, stage.clientWidth, stage.clientHeight].join("\\u001f");\n      if (stage.dataset.initialTransitionRouting === signature) return;\n\n      const svg = stage.querySelector(":scope > svg.edge-svg");'''
+          new = '''      const geometrySignature = [\n        ...[...stage.querySelectorAll(".state-node")].map(node => [\n          node.querySelector(".state-name")?.textContent?.trim() || "",\n          node.offsetLeft, node.offsetTop, node.offsetWidth, node.offsetHeight,\n        ].join(":")),\n        ...[...stage.querySelectorAll(":scope > svg.edge-svg > path.state-transition-path")].map(path => path.getAttribute("d") || ""),\n      ].join("\\u001e");\n      const signature = [machine.name, machine.initial_state, stage.clientWidth, stage.clientHeight, geometrySignature].join("\\u001f");\n      if (stage.dataset.initialTransitionRouting === signature) return;\n\n      const svg = stage.querySelector(":scope > svg.edge-svg");'''
+          if source.count(old) != 1:
+              raise SystemExit(f"initial signature block count={source.count(old)}")
+          source = source.replace(old, new)
+
+          old = '''  function schedule() {\n    clearTimeout(timer);\n    timer = setTimeout(() => applyRouting().catch(error => {\n      console.error("initial transition routing failed", error);\n    }), 0);\n  }\n\n  document.addEventListener("glyph-transition-input-action-labels-ready", schedule);\n  document.addEventListener("glyph-uml-transition-ready", schedule);'''
+          new = '''  function schedule() {\n    const stage = document.querySelector(".state-node")?.closest(".graph-stage");\n    if (stage) {\n      stage.dataset.initialRouteReady = "pending";\n      delete stage.dataset.initialTransitionRouting;\n    }\n    clearTimeout(timer);\n    timer = setTimeout(() => applyRouting().catch(error => {\n      console.error("initial transition routing failed", error);\n    }), 0);\n  }\n\n  document.addEventListener("glyph-transition-input-action-labels-ready", schedule);\n  document.addEventListener("glyph-uml-transition-ready", schedule);\n  document.addEventListener("glyph-transition-layout-transaction-ready", schedule);\n  document.addEventListener("glyph-diagram-viewport-change", schedule);'''
+          if source.count(old) != 1:
+              raise SystemExit(f"initial schedule block count={source.count(old)}")
+          router.write_text(source.replace(old, new), encoding="utf-8")
+          PY
+          python -m py_compile glyph/transition_layout_transaction.py glyph/initial_transition_layout.py
+          python - <<'PY'
+          from pathlib import Path
+          for source_path, target in [
+              ("glyph/transition_layout_transaction.py", "/tmp/transaction.js"),
+              ("glyph/initial_transition_layout.py", "/tmp/initial.js"),
+          ]:
+              source = Path(source_path).read_text(encoding="utf-8")
+              start = source.index("<script id=")
+              start = source.index(">", start) + 1
+              end = source.index("</script>", start)
+              Path(target).write_text(source[start:end], encoding="utf-8")
+          PY
+          node --check /tmp/transaction.js
+          node --check /tmp/initial.js
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add glyph/transition_layout_transaction.py glyph/initial_transition_layout.py
+          git commit -m "Reroute initial transition after layout publication"
+          git push origin "HEAD:${{ github.head_ref }}"
