@@ -23,6 +23,10 @@ class TransitionNodePositionAdapterTests(unittest.TestCase):
         self.assertIn("storageBefore:positionStorageState()", html)
         self.assertIn("pointerDistance<DRAG_THRESHOLD&&visualDistance<1", html)
         self.assertIn(
+            "setTimeout(()=>restorePositionStorageState(record.storageBefore),0)",
+            html,
+        )
+        self.assertNotIn(
             "queueMicrotask(()=>restorePositionStorageState(record.storageBefore))",
             html,
         )
