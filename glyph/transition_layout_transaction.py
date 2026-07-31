@@ -66,7 +66,7 @@ if(control)control.ownsScheduling=true;
 
 let stateCache=null,statePromise=null,stateAbort=null,stateRequestVersion=0;
 let requestedGeneration=0,completedGeneration=0,running=false,timer=null,lastStage=null;
-let resizeObserver=null,lastViewportSize="",destroyed=false;
+let resizeObserver=null,lastViewportSize="",destroyed=false,internalClusterRefresh=false;
 const generationReasons=new Map();
 const num=value=>Number.parseFloat(value||"0")||0;
 const finite=value=>Number.isFinite(value);
@@ -85,6 +85,8 @@ function invalidateState(){
   stateAbort=null;
 }
 async function diagramState(){
+  const live=typeof snapshot==="object"&&snapshot?snapshot:null;
+  if(live)return live;
   if(stateCache)return stateCache;
   if(statePromise)return statePromise;
   const version=stateRequestVersion,controller=new AbortController();
@@ -701,6 +703,10 @@ async function transaction(token,reason){
   reroute(stage,machine);
   await nextFrame();
   if(cancelled(token))return{status:"cancelled",stage};
+  internalClusterRefresh=true;
+  try{window.glyphTransitionIoClusters?.render()}finally{internalClusterRefresh=false}
+  await nextFrame();
+  if(cancelled(token))return{status:"cancelled",stage};
   await ensureClusters(stage,machine,token);
   ensureCanvas(stage,machine.transitions?.length||0,{includeLabels:true});
   reroute(stage,machine);
@@ -796,7 +802,10 @@ for(const eventName of[
   "glyph-execution-context-changed",
   "glyph-locale-changed",
 ]){
-  document.addEventListener(eventName,()=>{invalidateState();schedule(eventName,0)});
+  document.addEventListener(eventName,()=>{
+    if(internalClusterRefresh&&(eventName==="glyph-transition-io-clusters-ready"||eventName==="glyph-transition-enabling-cases-ready"))return;
+    invalidateState();schedule(eventName,0);
+  });
 }
 document.addEventListener("change",event=>{
   if(event.target?.id==="machine-select"){invalidateState();schedule("machine-change",0)}

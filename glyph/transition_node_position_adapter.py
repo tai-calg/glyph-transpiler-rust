@@ -19,6 +19,8 @@ function invalidateState(){
   stateAbort=null;
 }
 async function diagramState(){
+  const live=typeof snapshot==="object"&&snapshot?snapshot:null;
+  if(live)return live;
   if(stateCache)return stateCache;
   if(statePromise)return statePromise;
   const version=stateVersion,controller=new AbortController();

@@ -13,6 +13,8 @@ const scaleFor=stage=>window.glyphDiagramViewport?.scaleFor(stage)||num(stage?.d
 const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
 function invalidateState(){stateVersion+=1;stateCache=null;statePromise=null;stateAbort?.abort();stateAbort=null}
 async function diagramState(){
+  const live=typeof snapshot==="object"&&snapshot?snapshot:null;
+  if(live)return live;
   if(stateCache)return stateCache;
   if(statePromise)return statePromise;
   const version=stateVersion,controller=new AbortController();stateAbort=controller;
