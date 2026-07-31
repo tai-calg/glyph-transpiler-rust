@@ -1,0 +1,56 @@
+name: Centralize Empty IR Marker Once
+
+on:
+  push:
+    branches:
+      - agent/system-action-control-flow-completeness-v2
+    paths:
+      - ".github/workflows/centralize-empty-ir-marker-once.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/system-action-control-flow-completeness-v2
+
+      - name: Centralize raw StateTransitionIR marker
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("glyph/io_state_views.py")
+          source = path.read_text(encoding="utf-8")
+          import_anchor = (
+              "from .state_machine_source_map import remap_machine_analysis_source_lines\n"
+          )
+          import_line = (
+              "from .state_transition_contract import raw_transition_ir_marker\n"
+          )
+          if import_line not in source:
+              source = source.replace(import_anchor, import_anchor + import_line)
+          old = '''        "state_transition_ir": {
+              "schema": "glyph.state-transition-ir",
+              "version": 2,
+          },'''
+          new = '        "state_transition_ir": raw_transition_ir_marker(),'
+          if old not in source:
+              raise SystemExit("hard-coded empty StateTransitionIR marker not found")
+          source = source.replace(old, new, 1)
+          path.write_text(source, encoding="utf-8")
+          PY
+
+      - name: Commit source update and remove one-time workflow
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/centralize-empty-ir-marker-once.yml
+          git add glyph/io_state_views.py
+          git diff --cached --check
+          git commit -m "Centralize empty StateTransitionIR marker"
+          git push origin HEAD:agent/system-action-control-flow-completeness-v2
