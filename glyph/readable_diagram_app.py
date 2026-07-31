@@ -23,6 +23,7 @@ from .initial_transition_dependency_bridge import (
     enhance_initial_transition_dependency_bridge_html,
 )
 from .initial_transition_layout import enhance_initial_transition_html
+from .layout_corridor_fast_repair import enhance_layout_corridor_fast_repair_html
 from .layout_corridor_repair import enhance_layout_corridor_repair_html
 from .layout_dependency_bridge import enhance_layout_dependency_bridge_html
 from .layout_local_repair import enhance_layout_local_repair_html
@@ -117,6 +118,7 @@ def _presentation_pipeline():
         enhance_transition_semantic_status_ui_html,
         enhance_layout_local_repair_html,
         enhance_layout_corridor_repair_html,
+        enhance_layout_corridor_fast_repair_html,
         enhance_layout_dependency_bridge_html,
         enhance_layout_publication_certificate_html,
     )
