@@ -13,7 +13,7 @@ from glyph.layout_local_repair import enhance_layout_local_repair_html
 
 
 class LayoutLocalRepairTests(unittest.TestCase):
-    def test_repair_is_dirty_set_bounded_and_frame_budgeted(self) -> None:
+    def test_repair_is_adaptive_and_frame_budgeted(self) -> None:
         html = enhance_layout_local_repair_html(
             enhance_diagram_geometry_kernel_html(DIAGRAM_HTML)
         )
@@ -21,12 +21,17 @@ class LayoutLocalRepairTests(unittest.TestCase):
         self.assertIn("glyph-layout-local-repair-v1", html)
         self.assertIn("route-foreign-label", html)
         self.assertIn("dirtyIds", html)
+        self.assertIn('"dirty-only"', html)
+        self.assertIn('"global-movable"', html)
+        self.assertIn("fixedLabelRects", html)
         self.assertIn("FRAME_BUDGET_MS = 8", html)
         self.assertIn("runBudgeted(candidates", html)
         self.assertIn("MAX_STEPS = 80000", html)
         self.assertIn("manual label positions violate publication geometry", html)
         self.assertIn("path.id !== entry.id", html)
+        self.assertIn("displacementWeight = entry.dirty ? 1 : 12", html)
         self.assertIn('stage.dataset.layoutLocalRepairState = "repaired"', html)
+        self.assertIn("no adaptive local repair satisfies publication geometry", html)
 
     def test_enhancer_is_idempotent(self) -> None:
         once = enhance_layout_local_repair_html(DIAGRAM_HTML)
