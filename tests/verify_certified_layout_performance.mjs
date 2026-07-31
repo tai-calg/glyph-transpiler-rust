@@ -62,10 +62,9 @@ try {
   await page.click('button[data-tab="state"]');
   await page.waitForFunction(() => {
     const stage = document.querySelector(".graph-stage");
-    return stage?.dataset.transitionLayoutState === "ready"
-      && stage?.dataset.initialRouteReady === "true"
-      && stage?.dataset.initialRouteCertificate === "valid"
-      && stage?.dataset.layoutCertificateState === "valid";
+    const routeTerminal = ["true", "failed"].includes(stage?.dataset.initialRouteReady);
+    const certificateTerminal = ["valid", "failed"].includes(stage?.dataset.layoutCertificateState);
+    return stage?.dataset.transitionLayoutState === "ready" && routeTerminal && certificateTerminal;
   });
 
   const first = await page.evaluate(() => {
@@ -75,6 +74,15 @@ try {
       routerVersion: window.glyphInitialTransitionRouter?.version,
       kernelVersion: window.glyphDiagramGeometry?.version,
       certificateVersion: window.glyphLayoutPublicationCertificate?.version,
+      routeState: stage?.dataset.initialRouteReady,
+      routeCertificate: stage?.dataset.initialRouteCertificate,
+      routeError: stage?.dataset.initialRouteError || "",
+      routeFailureDetails: stage?.dataset.initialRouteFailureDetails || "",
+      publicationState: stage?.dataset.layoutCertificateState,
+      publicationViolations: stage?.dataset.layoutCertificateViolations || "[]",
+      publicationMetrics: stage?.dataset.layoutCertificateMetrics || "{}",
+      layoutState: stage?.dataset.transitionLayoutState,
+      layoutError: stage?.dataset.transitionLayoutError || "",
       candidates: Number(stage?.dataset.initialRouteCandidateCount),
       audited: Number(stage?.dataset.initialRouteAuditedCandidates),
       yields: Number(stage?.dataset.initialRouteYieldCount),
@@ -94,6 +102,17 @@ try {
   assert.equal(first.routerVersion, 2);
   assert.equal(first.kernelVersion, 1);
   assert.equal(first.certificateVersion, 1);
+  assert.equal(
+    first.routeState,
+    "true",
+    `initial route failed: ${first.routeError} ${first.routeFailureDetails}`,
+  );
+  assert.equal(first.routeCertificate, "valid");
+  assert.equal(
+    first.publicationState,
+    "valid",
+    `publication certificate failed: ${first.publicationViolations} ${first.publicationMetrics}`,
+  );
   assert(first.candidates > 0, "candidate bank is empty");
   assert(first.audited > 0, "no quantized candidate was audited");
   assert(first.audited <= first.candidates, "audited candidates exceed the candidate bank");
