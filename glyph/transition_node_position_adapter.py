@@ -150,7 +150,7 @@ document.addEventListener("pointerup",event=>{
   const pointerDistance=Math.hypot(event.clientX-record.startX,event.clientY-record.startY);
   const visualDistance=Math.hypot(num(record.node.style.left)-record.startLeft,num(record.node.style.top)-record.startTop);
   if(pointerDistance<DRAG_THRESHOLD&&visualDistance<1){
-    queueMicrotask(()=>restorePositionStorageState(record.storageBefore));
+    setTimeout(()=>restorePositionStorageState(record.storageBefore),0);
     return;
   }
   record.positions=snapshot(record.stage);
