@@ -24,6 +24,8 @@ class InitialTransitionDependencyBridgeTests(unittest.TestCase):
         self.assertIn("await nextFrame();\n    await nextFrame();", html)
         self.assertIn('stage.dataset.initialRouteReady = "settling"', html)
         self.assertIn('stage.dataset.initialRouteSettleState = "stable"', html)
+        self.assertIn('stage.dataset.initialRouteReady = "certified"', html)
+        self.assertNotIn('stage.dataset.initialRouteReady = "true"', html)
         self.assertIn("geom.verifyPathElement(initial, normals", html)
         self.assertIn("stable: true", html)
 
