@@ -21,20 +21,25 @@ _SCRIPT = r"""
 <script id="glyph-diagram-canvas-viewport-v1-script">
 (()=>{
 const MIN_SCALE=.25,MAX_SCALE=3,STEP=.1,FIT_MARGIN=32,PINCH_SPEED=.0025;
-let activeShell=null,resizeTimer=null,gesture=null,viewportGeneration=0;
+let activeShell=null,resizeTimer=null,gesture=null,viewportGeneration=0,destroyed=false;
 const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
 const roundScale=value=>Math.round(clamp(value,MIN_SCALE,MAX_SCALE)*100)/100;
 function locale(){return localStorage.getItem("glyph.ui.locale")==="en"?"en":"ja"}
+function activeStage(){return(activeShell||document.querySelector(".canvas-shell"))?.querySelector(".graph-stage")||document.querySelector(".graph-stage")}
 function diagramIdentity(){
   const tab=document.querySelector(".tab.active")?.dataset.tab||"state";
   const index=tab==="state"?document.getElementById("machine-select")?.value||0:document.getElementById("system-select")?.value||0;
-  return `${tab}:${index}`;
+  const digest=activeStage()?.dataset.diagramDigest||"source";
+  return `${digest}:${tab}:${index}`;
 }
 function scaleKey(){return `glyph.diagram.viewport-scale.v1:${diagramIdentity()}`}
 function modeKey(){return `glyph.diagram.viewport-mode.v1:${diagramIdentity()}`}
 function panKey(){return `glyph.diagram.canvas-pan.v1:${diagramIdentity()}`}
 function scaleFor(stage){return Number.parseFloat(stage?.dataset.viewportScale||"1")||1}
-function stageSize(stage){return{width:Math.max(1,stage.scrollWidth),height:Math.max(1,stage.scrollHeight)}}
+function stageSize(stage){
+  const styledWidth=Number.parseFloat(stage.style.width||"0")||0,styledHeight=Number.parseFloat(stage.style.height||"0")||0;
+  return{width:Math.max(1,styledWidth,stage.scrollWidth),height:Math.max(1,styledHeight,stage.scrollHeight)};
+}
 function surfaceFor(shell,stage){
   if(stage.parentElement?.classList.contains("glyph-zoom-surface"))return stage.parentElement;
   const surface=document.createElement("div");surface.className="glyph-zoom-surface";
@@ -49,6 +54,7 @@ function setRaw(shell,stage,scale){
 function saveScale(scale,mode="manual"){
   sessionStorage.setItem(scaleKey(),String(scale));sessionStorage.setItem(modeKey(),mode);
 }
+function savedMode(){return sessionStorage.getItem(modeKey())||""}
 function centerCoordinate(shell,surface,scale,clientX=shell.clientWidth/2,clientY=shell.clientHeight/2){
   return{
     x:(shell.scrollLeft+clientX-surface.offsetLeft)/scale,
@@ -62,11 +68,11 @@ function localPoint(shell,event){
   return{clientX:clamp(rawX,0,shell.clientWidth),clientY:clamp(rawY,0,shell.clientHeight)};
 }
 function applyScale(shell,requested,{mode="manual",clientX=shell.clientWidth/2,clientY=shell.clientHeight/2,centerDiagram=false}={}){
-  const stage=shell.querySelector(".graph-stage");if(!stage)return;
+  const stage=shell.querySelector(".graph-stage");if(!stage||destroyed)return;
   const token=++viewportGeneration,oldScale=scaleFor(stage),oldSurface=surfaceFor(shell,stage),anchor=centerCoordinate(shell,oldSurface,oldScale,clientX,clientY);
   const {surface,size,scale}=setRaw(shell,stage,requested);saveScale(scale,mode);
   const position=()=>{
-    if(token!==viewportGeneration||!shell.isConnected||!stage.isConnected)return;
+    if(token!==viewportGeneration||!shell.isConnected||!stage.isConnected||destroyed)return;
     if(centerDiagram){
       shell.scrollLeft=Math.max(0,surface.offsetLeft+size.width*scale/2-shell.clientWidth/2);
       shell.scrollTop=Math.max(0,surface.offsetTop+size.height*scale/2-shell.clientHeight/2);
@@ -77,22 +83,30 @@ function applyScale(shell,requested,{mode="manual",clientX=shell.clientWidth/2,c
   };
   requestAnimationFrame(()=>{
     position();shell.dispatchEvent(new Event("scroll"));
-    document.dispatchEvent(new CustomEvent("glyph-diagram-viewport-change",{detail:{scale,mode}}));
+    document.dispatchEvent(new CustomEvent("glyph-diagram-viewport-change",{detail:{scale,mode,identity:diagramIdentity()}}));
     requestAnimationFrame(position);setTimeout(()=>requestAnimationFrame(position),0);
   });
 }
-function fit(shell,{persist=true}={}){
-  const stage=shell?.querySelector(".graph-stage");if(!stage)return;
+function fit(shell,{persist=true,mode="fit"}={}){
+  const stage=shell?.querySelector(".graph-stage");if(!stage||destroyed)return;
   const size=stageSize(stage),availableWidth=Math.max(80,shell.clientWidth-FIT_MARGIN*2),availableHeight=Math.max(80,shell.clientHeight-FIT_MARGIN*2);
   const scale=roundScale(Math.min(availableWidth/size.width,availableHeight/size.height));
-  applyScale(shell,scale,{mode:persist?"fit":"manual",centerDiagram:true});
+  applyScale(shell,scale,{mode:persist?mode:savedMode()||mode,centerDiagram:true});
+}
+function fitInitial(shell=activeShell||document.querySelector(".canvas-shell")){
+  const stage=shell?.querySelector(".graph-stage");if(!stage||stage.dataset.transitionLayoutState!=="ready")return false;
+  const mode=savedMode();
+  if(!mode){fit(shell,{persist:true,mode:"fit"});return true}
+  if(mode==="fit"){fit(shell,{persist:true,mode:"fit"});return true}
+  setRaw(shell,stage,scaleFor(stage));
+  return false;
 }
 function reset(shell){
   const stage=shell?.querySelector(".graph-stage");if(!stage)return;
-  viewportGeneration+=1;const {surface}=setRaw(shell,stage,1);sessionStorage.removeItem(scaleKey());sessionStorage.removeItem(modeKey());sessionStorage.removeItem(panKey());
+  viewportGeneration+=1;const {surface}=setRaw(shell,stage,1);saveScale(1,"reset");sessionStorage.removeItem(panKey());
   requestAnimationFrame(()=>{
     shell.scrollLeft=Math.max(0,surface.offsetLeft-24);shell.scrollTop=Math.max(0,surface.offsetTop-24);shell.dispatchEvent(new Event("scroll"));
-    document.dispatchEvent(new CustomEvent("glyph-diagram-viewport-change",{detail:{scale:1,mode:"reset"}}));
+    document.dispatchEvent(new CustomEvent("glyph-diagram-viewport-change",{detail:{scale:1,mode:"reset",identity:diagramIdentity()}}));
   });
 }
 function updateControls(scale){
@@ -101,8 +115,8 @@ function updateControls(scale){
   if(out)out.disabled=scale<=MIN_SCALE+.001;if(inside)inside.disabled=scale>=MAX_SCALE-.001;
 }
 function localizeControls(){
-  const ja=locale()==="ja",text=(id,japanese,english)=>{const element=document.getElementById(id);if(element){element.textContent=ja?japanese:english;element.title=element.textContent;element.setAttribute("aria-label",element.textContent)}};
-  text("diagram-fit", "全体表示", "Fit");text("diagram-view-reset", "表示を戻す", "Reset view");
+  const ja=locale()==="ja",set=(id,japanese,english)=>{const element=document.getElementById(id);if(element){element.textContent=ja?japanese:english;element.title=element.textContent;element.setAttribute("aria-label",element.textContent)}};
+  set("diagram-fit", "全体表示", "Fit");set("diagram-view-reset", "表示を戻す", "Reset view");
   const out=document.getElementById("diagram-zoom-out"),inside=document.getElementById("diagram-zoom-in");
   if(out){out.title=ja?"縮小":"Zoom out";out.setAttribute("aria-label",out.title)}
   if(inside){inside.title=ja?"拡大":"Zoom in";inside.setAttribute("aria-label",inside.title)}
@@ -156,10 +170,14 @@ function bind(shell){
   bindPinch(shell);
   const saved=Number.parseFloat(sessionStorage.getItem(scaleKey())||"1"),scale=Number.isFinite(saved)?saved:1;
   setRaw(shell,stage,scale);updateControls(scale);
-  if(sessionStorage.getItem(modeKey())==="fit")setTimeout(()=>fit(shell),0);
+  if(savedMode()==="fit")setTimeout(()=>fit(shell),0);
 }
 function enhance(){ensureTools();document.querySelectorAll(".canvas-shell").forEach(bind);localizeControls()}
 document.addEventListener("glyph-locale-change",localizeControls);
+document.addEventListener("glyph-transition-layout-transaction-ready",()=>{
+  enhance();
+  requestAnimationFrame(()=>fitInitial(activeShell||document.querySelector(".canvas-shell")));
+});
 document.addEventListener("change",event=>{if(event.target?.matches?.("#machine-select,#system-select"))setTimeout(enhance,0)});
 document.addEventListener("keydown",event=>{
   if(!(event.ctrlKey||event.metaKey)||event.altKey)return;
@@ -169,9 +187,27 @@ document.addEventListener("keydown",event=>{
   else if(event.key==="-"){event.preventDefault();applyScale(shell,scaleFor(stage)-STEP)}
   else if(event.key==="0"){event.preventDefault();reset(shell)}
 });
-window.addEventListener("resize",()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(()=>{const shell=activeShell||document.querySelector(".canvas-shell");if(shell&&sessionStorage.getItem(modeKey())==="fit")fit(shell)},100)});
+window.addEventListener("resize",()=>{
+  clearTimeout(resizeTimer);
+  resizeTimer=setTimeout(()=>{
+    const shell=activeShell||document.querySelector(".canvas-shell");
+    if(!shell)return;
+    const mode=savedMode();
+    if(mode==="fit")fit(shell);
+    else if(!mode)fitInitial(shell);
+  },100);
+});
 new MutationObserver(enhance).observe(document.getElementById("view")||document.body,{childList:true,subtree:true});
-window.glyphDiagramViewport={scaleFor,fit:()=>fit(activeShell||document.querySelector(".canvas-shell")),reset:()=>reset(activeShell||document.querySelector(".canvas-shell")),setScale:value=>{const shell=activeShell||document.querySelector(".canvas-shell");if(shell)applyScale(shell,value)}};
+for(const eventName of["pagehide","beforeunload"]){window.addEventListener(eventName,()=>{destroyed=true;clearTimeout(resizeTimer);gesture=null},{once:true})}
+window.glyphDiagramViewport={
+  version:2,
+  scaleFor,
+  fit:()=>fit(activeShell||document.querySelector(".canvas-shell")),
+  fitInitial:()=>fitInitial(activeShell||document.querySelector(".canvas-shell")),
+  reset:()=>reset(activeShell||document.querySelector(".canvas-shell")),
+  mode:()=>savedMode(),
+  setScale:value=>{const shell=activeShell||document.querySelector(".canvas-shell");if(shell)applyScale(shell,value)},
+};
 enhance();
 })();
 </script>
@@ -179,7 +215,7 @@ enhance();
 
 
 def enhance_diagram_canvas_viewport_html(html: str) -> str:
-    """Add zoom, fit-to-screen, reset-view, and touchpad pinch controls."""
+    """Add identity-scoped zoom, automatic initial fit, reset, and pinch controls."""
 
     if _MARKER in html:
         return html
