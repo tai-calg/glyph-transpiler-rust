@@ -33,6 +33,7 @@ from .layout_publication_certificate import enhance_layout_publication_certifica
 from .layout_shelf_repair import enhance_layout_shelf_repair_html
 from .layout_shelf_viewport_sync import enhance_layout_shelf_viewport_sync_html
 from .state_transition_ir_renderer import enhance_state_transition_ir_html
+from .state_viewport_reservation import enhance_state_viewport_reservation_html
 from .transition_dense_canvas_dimensions import (
     enhance_transition_dense_canvas_dimensions_html,
 )
@@ -101,6 +102,7 @@ def _presentation_pipeline():
         enhance_diagram_live_stability_html,
         enhance_diagram_label_editor_html,
         enhance_workspace_layout_html,
+        enhance_state_viewport_reservation_html,
         enhance_diagram_canvas_navigation_html,
         enhance_diagram_canvas_viewport_html,
         enhance_transition_io_clusters_html,
