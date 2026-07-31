@@ -24,7 +24,7 @@ def test_bootstrap_precedes_transaction_owner() -> None:
     assert html.index("glyph-transition-layout-transaction-bootstrap-v1-script") < html.index(
         "glyph-transition-layout-transaction-v1-script"
     )
-    assert "ownsScheduling=false" in html
+    assert "ownsScheduling:false" in html
     assert "control.ownsScheduling=true" in html
 
 
@@ -81,9 +81,13 @@ def test_interaction_adapters_persist_only_real_drags() -> None:
         assert "AbortController" in html
         assert 'eventName of["pagehide","beforeunload"]' in html
 
-    assert "pointerDistance<DRAG_THRESHOLD&&visualDistance<1" in label_html
+    assert "pointerDistance(active,event)<DRAG_THRESHOLD" in label_html
+    assert "if(visualDistance<1)return" in label_html
+    assert "nearestCertifiablePoint(record,requested)" in label_html
     assert "Math.hypot(next.x-anchor.x,next.y-anchor.y)>MAX_DISTANCE+.25" in label_html
-    assert "pointerDistance<DRAG_THRESHOLD&&visualDistance<1" in node_html
+    assert "pointerDistance(active,event)<DRAG_THRESHOLD" in node_html
+    assert "if(!record.moved)" in node_html
+    assert "restorePositionStorageState(record.storageBefore)" in node_html
 
 
 def test_viewport_is_source_scoped_and_initially_fits_completed_layout() -> None:
