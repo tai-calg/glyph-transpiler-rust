@@ -30,6 +30,20 @@ class LayoutPublicationCertificateTests(unittest.TestCase):
         self.assertIn("route-foreign-label", html)
         self.assertIn("route-node", html)
 
+    def test_route_ready_is_published_only_after_full_certificate(self) -> None:
+        html = enhance_layout_publication_certificate_html(
+            enhance_diagram_geometry_kernel_html(DIAGRAM_HTML)
+        )
+
+        self.assertIn('stage.dataset.initialRouteCertificate !== "valid"', html)
+        self.assertIn('stage.dataset.initialRouteReady = "publishing"', html)
+        self.assertGreaterEqual(
+            html.count('stage.dataset.initialRouteReady = "true"'),
+            2,
+        )
+        self.assertIn('stage.dataset.initialRouteReady = "failed"', html)
+        self.assertIn('stage.dataset.transitionPublicationReady = "true"', html)
+
     def test_revalidation_preserves_last_valid_certificate_until_fingerprint_check(self) -> None:
         html = enhance_layout_publication_certificate_html(
             enhance_diagram_geometry_kernel_html(DIAGRAM_HTML)
