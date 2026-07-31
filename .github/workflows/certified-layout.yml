@@ -18,9 +18,11 @@ on:
       - "glyph/layout_shelf_repair.py"
       - "glyph/layout_shelf_viewport_sync.py"
       - "glyph/manual_layout_semantic_guard.py"
+      - "glyph/node_drag_publication_guard.py"
       - "glyph/readable_diagram_app.py"
       - "glyph/state_viewport_reservation.py"
       - "glyph/transition_layout_transaction.py"
+      - "glyph/transition_node_position_adapter.py"
       - "tests/test_diagram_fit_stability.py"
       - "tests/test_diagram_geometry_kernel.py"
       - "tests/test_initial_transition_dependency_bridge.py"
@@ -35,9 +37,11 @@ on:
       - "tests/test_layout_shelf_repair.py"
       - "tests/test_layout_shelf_viewport_sync.py"
       - "tests/test_manual_layout_semantic_guard.py"
+      - "tests/test_node_drag_publication_guard.py"
       - "tests/test_state_viewport_reservation.py"
       - "tests/test_transition_layout_transaction.py"
       - "tests/verify_certified_layout_performance.mjs"
+      - "tests/verify_diagram_editor_exports.mjs"
       - "tests/verify_readme_state_snapshot.py"
       - "tests/verify_state_diagram_rendering.mjs"
       - "tests/verify_transition_layout_transaction.mjs"
@@ -82,6 +86,7 @@ jobs:
             tests/test_initial_transition_layout.py \
             tests/test_layout_*.py \
             tests/test_manual_layout_semantic_guard.py \
+            tests/test_node_drag_publication_guard.py \
             tests/test_state_viewport_reservation.py \
             tests/test_transition_layout_transaction.py
 
@@ -89,8 +94,9 @@ jobs:
         run: |
           timeout 180s node tests/verify_certified_layout_performance.mjs
 
-      - name: Verify publication rendering and README baseline
+      - name: Verify publication rendering, editing, and README baseline
         run: |
           timeout 180s node tests/verify_state_diagram_rendering.mjs
           python tests/verify_readme_state_snapshot.py
           timeout 180s node tests/verify_transition_layout_transaction.mjs
+          timeout 180s node tests/verify_diagram_editor_exports.mjs
