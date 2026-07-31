@@ -33,6 +33,7 @@ from .layout_publication_certificate import enhance_layout_publication_certifica
 from .layout_shelf_repair import enhance_layout_shelf_repair_html
 from .layout_shelf_viewport_sync import enhance_layout_shelf_viewport_sync_html
 from .manual_layout_semantic_guard import enhance_manual_layout_semantic_guard_html
+from .node_drag_publication_guard import enhance_node_drag_publication_guard_html
 from .state_transition_ir_renderer import enhance_state_transition_ir_html
 from .state_viewport_reservation import enhance_state_viewport_reservation_html
 from .transition_dense_canvas_dimensions import (
@@ -120,6 +121,7 @@ def _presentation_pipeline():
         enhance_transition_layout_transaction_html,
         enhance_manual_layout_semantic_guard_html,
         enhance_transition_layout_interaction_adapter_html,
+        enhance_node_drag_publication_guard_html,
         enhance_transition_node_position_adapter_html,
         enhance_transition_layout_tab_guard_html,
         enhance_transition_execution_context_selector_html,
