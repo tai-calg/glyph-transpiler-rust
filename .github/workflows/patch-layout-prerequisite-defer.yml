@@ -69,3 +69,5 @@ jobs:
           git add glyph/transition_layout_transaction.py
           git commit -m "Defer transient layout prerequisites [skip-layout-prerequisite-patch]"
           git push origin HEAD:agent/system-action-control-flow-completeness-v2
+
+# Triggered once; remove after the bot commit is present.
