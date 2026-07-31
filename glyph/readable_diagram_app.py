@@ -19,6 +19,7 @@ from .diagram_live_stability import (
 from .diagram_locale import enhance_diagram_locale_html
 from .diagram_workspace_layout import enhance_workspace_layout_html
 from .initial_transition_layout import enhance_initial_transition_html
+from .layout_local_repair import enhance_layout_local_repair_html
 from .layout_publication_certificate import enhance_layout_publication_certificate_html
 from .state_transition_ir_renderer import enhance_state_transition_ir_html
 from .transition_dense_canvas_dimensions import (
@@ -106,6 +107,7 @@ def _presentation_pipeline():
         enhance_transition_layout_tab_guard_html,
         enhance_transition_execution_context_selector_html,
         enhance_transition_semantic_status_ui_html,
+        enhance_layout_local_repair_html,
         enhance_layout_publication_certificate_html,
     )
 
