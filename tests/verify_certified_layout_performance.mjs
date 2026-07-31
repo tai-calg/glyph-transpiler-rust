@@ -32,6 +32,50 @@ async function stopProcess(child) {
   if (child.exitCode === null) child.kill("SIGKILL");
 }
 
+async function layoutState(page) {
+  return page.evaluate(() => {
+    const stage = document.querySelector(".graph-stage");
+    return {
+      layoutState: stage?.dataset.transitionLayoutState,
+      layoutGeneration: stage?.dataset.transitionLayoutGeneration,
+      layoutReason: stage?.dataset.transitionLayoutReason,
+      routeState: stage?.dataset.initialRouteReady,
+      routeCertificate: stage?.dataset.initialRouteCertificate,
+      routeSettleState: stage?.dataset.initialRouteSettleState,
+      routeSettleDetails: stage?.dataset.initialRouteSettleDetails,
+      routeReason: stage?.dataset.initialRouteReason,
+      routeGeneration: window.glyphInitialTransitionRouter?.generation,
+      routeCompletedGeneration: window.glyphInitialTransitionRouter?.completedGeneration,
+      certificateState: stage?.dataset.layoutCertificateState,
+      certificateRequestState: stage?.dataset.layoutCertificateRequestState,
+      certificateReason: stage?.dataset.layoutCertificateReason,
+      certificateViolations: stage?.dataset.layoutCertificateViolations,
+      certificateGeneration: window.glyphLayoutPublicationCertificate?.generation,
+      certificateCompletedGeneration: window.glyphLayoutPublicationCertificate?.completedGeneration,
+      publicationReady: stage?.dataset.transitionPublicationReady,
+      dependencyGeneration: window.glyphInitialTransitionDependencyBridge?.settleGeneration,
+      dependencySignature: window.glyphInitialTransitionDependencyBridge?.signature,
+    };
+  });
+}
+
+async function waitForCertifiedLayout(page, browserErrors) {
+  try {
+    await page.waitForFunction(() => {
+      const stage = document.querySelector(".graph-stage");
+      const routeTerminal = ["true", "failed"].includes(stage?.dataset.initialRouteReady);
+      const certificateTerminal = ["valid", "failed"].includes(stage?.dataset.layoutCertificateState);
+      return stage?.dataset.transitionLayoutState === "ready" && routeTerminal && certificateTerminal;
+    }, undefined, {timeout: 30000});
+  } catch (error) {
+    const state = await layoutState(page);
+    throw new Error(
+      `certified layout did not reach a terminal state: ${JSON.stringify(state)}\n`
+      + `browser errors: ${JSON.stringify(browserErrors)}\n${error.message}`,
+    );
+  }
+}
+
 const child = spawn("python3", ["glyph.py", source], {
   env: {
     ...process.env,
@@ -60,12 +104,7 @@ try {
   await page.goto(url, {waitUntil: "domcontentloaded"});
   await page.waitForFunction(() => document.querySelector("#status")?.textContent === "ready");
   await page.click('button[data-tab="state"]');
-  await page.waitForFunction(() => {
-    const stage = document.querySelector(".graph-stage");
-    const routeTerminal = ["true", "failed"].includes(stage?.dataset.initialRouteReady);
-    const certificateTerminal = ["valid", "failed"].includes(stage?.dataset.layoutCertificateState);
-    return stage?.dataset.transitionLayoutState === "ready" && routeTerminal && certificateTerminal;
-  });
+  await waitForCertifiedLayout(page, browserErrors);
 
   const first = await page.evaluate(() => {
     const stage = document.querySelector(".graph-stage");
