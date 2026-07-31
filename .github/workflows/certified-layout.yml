@@ -6,11 +6,13 @@ on:
     paths:
       - "glyph/diagram_geometry_kernel.py"
       - "glyph/initial_transition_layout.py"
+      - "glyph/layout_local_repair.py"
       - "glyph/layout_publication_certificate.py"
       - "glyph/readable_diagram_app.py"
       - "glyph/transition_layout_transaction.py"
       - "tests/test_diagram_geometry_kernel.py"
       - "tests/test_initial_transition_layout.py"
+      - "tests/test_layout_local_repair.py"
       - "tests/test_layout_publication_certificate.py"
       - "tests/verify_certified_layout_performance.mjs"
       - "examples/state_diagrams/conveyor_control.glyph"
@@ -43,6 +45,7 @@ jobs:
         run: |
           python -m unittest tests.test_diagram_geometry_kernel
           python -m unittest tests.test_initial_transition_layout
+          python -m unittest tests.test_layout_local_repair
           python -m unittest tests.test_layout_publication_certificate
 
       - name: Verify responsiveness and certificate reuse
