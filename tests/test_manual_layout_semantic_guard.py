@@ -32,6 +32,18 @@ def test_guard_snapshots_and_restores_semantic_dataset_fields() -> None:
     assert 'stage.dataset.manualLayoutSemanticGuard = `restored:${restored}`' in html
 
 
+def test_guard_recertifies_initial_route_after_semantic_resize() -> None:
+    html = enhance_manual_layout_semantic_guard_html(
+        "<html><head></head><body></body></html>"
+    )
+
+    assert "requestPublicationRecertification()" in html
+    assert 'stage.dataset.transitionPublicationReady === "true"' in html
+    assert 'stage.dataset.manualLayoutSemanticGuard = `publication-requested:${restoration}`' in html
+    assert 'stage.dataset.initialRouteReady = "pending"' in html
+    assert 'router.schedule("manual-layout-semantics-restored", 0)' in html
+
+
 def test_guard_is_installed_after_transaction_and_before_interaction() -> None:
     names = [enhancer.__name__ for enhancer in _presentation_pipeline()]
 
