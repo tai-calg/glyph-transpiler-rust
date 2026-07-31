@@ -134,6 +134,9 @@ async function waitForStableLayout(page, machineName, transitionCount) {
       && stage?.dataset.transitionIoClustersReady === "true"
       && stage?.dataset.transitionEnablingCasesReady === "true"
       && stage?.dataset.transitionLayoutState === "ready"
+      && stage?.dataset.transitionPublicationReady === "true"
+      && stage?.dataset.layoutCertificateState === "valid"
+      && stage?.dataset.renderStable === "true"
       && stage?.dataset.transitionIoCollisionSolved === "true"
       && stage?.dataset.transitionIoCollisionCount === "0"
       && stage.querySelectorAll(".transition-io-cluster").length === count;
@@ -363,4 +366,4 @@ try {
   await browser.close();
 }
 
-console.log("verified compiler-derived state diagrams with operation-derived Actions and stable enabling-case layout");
+console.log("verified compiler-derived state diagrams with operation-derived Actions and publication-certified stable layout");
