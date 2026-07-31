@@ -6,27 +6,44 @@ _MARKER = "glyph-transition-node-position-adapter-v1"
 _SCRIPT = r"""
 <script id="glyph-transition-node-position-adapter-v1-script">
 (()=>{
-const MARKER="glyph-transition-node-position-adapter-v1";
-let active=null,stateCache=null,lastStage=null,restoreGeneration=0;
+const MARKER="glyph-transition-node-position-adapter-v1",DRAG_THRESHOLD=3;
+let active=null,stateCache=null,statePromise=null,stateAbort=null,stateVersion=0,lastStage=null,restoreGeneration=0,destroyed=false;
 const num=value=>Number.parseFloat(value||"0")||0;
 const nodeName=node=>node.querySelector(".state-name,.node-name")?.textContent?.trim()||"node";
 
+function invalidateState(){
+  stateVersion+=1;
+  stateCache=null;
+  statePromise=null;
+  stateAbort?.abort();
+  stateAbort=null;
+}
 async function diagramState(){
   if(stateCache)return stateCache;
-  const response=await fetch("/api/state",{cache:"no-store"});
-  if(!response.ok)throw Error("diagram state unavailable");
-  return stateCache=await response.json();
+  if(statePromise)return statePromise;
+  const version=stateVersion,controller=new AbortController();
+  stateAbort=controller;
+  statePromise=(async()=>{
+    const response=await fetch("/api/state",{cache:"no-store",signal:controller.signal});
+    if(!response.ok)throw Error(`diagram state unavailable: HTTP ${response.status}`);
+    const data=await response.json();
+    if(version!==stateVersion||destroyed)throw new DOMException("stale diagram state","AbortError");
+    stateCache=data;
+    return data;
+  })().finally(()=>{
+    if(stateAbort===controller)stateAbort=null;
+    statePromise=null;
+  });
+  return statePromise;
 }
 function machineIndex(){return document.getElementById("machine-select")?.value||0}
 function canonicalKey(data){return`glyph.diagram.positions.v1:${data?.digest||"source"}:state:${machineIndex()}`}
-function legacyKeys(data){
-  const index=machineIndex(),digest=data?.digest||"source";
-  return[
-    `glyph.diagram.positions.v1:source:state:${index}`,
-    `glyph.diagram.positions.v1:${digest}:state:${index}`,
-  ];
-}
+function legacyKeys(){return[`glyph.diagram.positions.v1:source:state:${machineIndex()}`]}
 function parse(key){try{return JSON.parse(localStorage.getItem(key)||"{}")||{}}catch{return{}}}
+function write(key,value){
+  try{localStorage.setItem(key,JSON.stringify(value));return true}
+  catch(error){console.warn("transition node position persistence unavailable",error);return false}
+}
 function snapshot(stage){
   const value={};
   stage.querySelectorAll(".state-node").forEach(node=>{
@@ -46,20 +63,21 @@ function apply(stage,value){
   return count;
 }
 async function persist(record){
+  if(destroyed||!record.stage.isConnected)return;
   const data=await diagramState(),key=canonicalKey(data);
-  localStorage.setItem(key,JSON.stringify(record.positions));
+  write(key,record.positions);
   if(record.stage.isConnected)apply(record.stage,record.positions);
   record.stage.dataset.transitionNodePositions=`saved:${Object.keys(record.positions).length}`;
   window.glyphTransitionLayoutTransaction?.schedule("manual-node-persisted",0);
 }
 async function restore(stage,token){
-  if(!stage||!stage.isConnected)return false;
+  if(!stage||!stage.isConnected||destroyed)return false;
   const data=await diagramState();
-  if(token!==restoreGeneration||!stage.isConnected)return false;
+  if(token!==restoreGeneration||!stage.isConnected||destroyed)return false;
   const key=canonicalKey(data);
   let value=parse(key),source=key;
   if(!Object.keys(value).length){
-    for(const candidate of legacyKeys(data)){
+    for(const candidate of legacyKeys()){
       const found=parse(candidate);
       if(Object.keys(found).length){value=found;source=candidate;break}
     }
@@ -70,32 +88,49 @@ async function restore(stage,token){
     return false;
   }
   const count=apply(stage,value);
-  localStorage.setItem(key,JSON.stringify(value));
+  write(key,value);
   stage.dataset.transitionNodePositions=`restored:${count}`;
   stage.dataset.transitionNodePositionSource=source;
   window.glyphTransitionLayoutTransaction?.schedule("node-positions-restored",0);
   return count>0;
 }
+function report(error,prefix){if(error?.name!=="AbortError"&&!destroyed)console.error(prefix,error)}
 function scheduleRestore(stage=null,delay=0){
   const target=stage||document.querySelector(".state-node")?.closest(".graph-stage");
   const token=++restoreGeneration;
-  setTimeout(()=>restore(target,token).catch(error=>console.error("transition node position restore failed",error)),delay);
+  setTimeout(()=>restore(target,token).catch(error=>report(error,"transition node position restore failed")),delay);
 }
 
 document.addEventListener("pointerdown",event=>{
   const node=event.target?.closest?.(".state-node");
   if(!node||event.button!==0)return;
-  active={node,stage:node.closest(".graph-stage"),pointerId:event.pointerId};
+  const stage=node.closest(".graph-stage");
+  if(!stage)return;
+  active={
+    node,
+    stage,
+    pointerId:event.pointerId,
+    startX:event.clientX,
+    startY:event.clientY,
+    startLeft:num(node.style.left),
+    startTop:num(node.style.top),
+  };
 },true);
 document.addEventListener("pointerup",event=>{
   if(!active||active.pointerId!==event.pointerId)return;
-  const record={...active,positions:snapshot(active.stage)};
-  active=null;
-  queueMicrotask(()=>persist(record).catch(error=>console.error("transition node position persistence failed",error)));
+  const record=active;active=null;
+  const pointerDistance=Math.hypot(event.clientX-record.startX,event.clientY-record.startY);
+  const visualDistance=Math.hypot(num(record.node.style.left)-record.startLeft,num(record.node.style.top)-record.startTop);
+  if(pointerDistance<DRAG_THRESHOLD&&visualDistance<1)return;
+  record.positions=snapshot(record.stage);
+  queueMicrotask(()=>persist(record).catch(error=>report(error,"transition node position persistence failed")));
+},true);
+document.addEventListener("pointercancel",event=>{
+  if(active?.pointerId===event.pointerId)active=null;
 },true);
 document.addEventListener("change",event=>{
   if(event.target?.id==="machine-select"){
-    stateCache=null;
+    invalidateState();
     scheduleRestore(null,20);
   }
 });
@@ -104,16 +139,24 @@ new MutationObserver(()=>{
   const stage=document.querySelector(".state-node")?.closest(".graph-stage")||null;
   if(stage&&stage!==lastStage){lastStage=stage;scheduleRestore(stage,0)}
 }).observe(view,{childList:true,subtree:true});
+for(const eventName of["pagehide","beforeunload"]){
+  window.addEventListener(eventName,()=>{
+    destroyed=true;
+    active=null;
+    restoreGeneration+=1;
+    invalidateState();
+  },{once:true});
+}
 lastStage=document.querySelector(".state-node")?.closest(".graph-stage")||null;
 scheduleRestore(lastStage,0);
-window.glyphTransitionNodePositionAdapter={marker:MARKER,restore:()=>scheduleRestore(null,0)};
+window.glyphTransitionNodePositionAdapter={marker:MARKER,version:2,restore:()=>scheduleRestore(null,0)};
 })();
 </script>
 """
 
 
 def enhance_transition_node_position_adapter_html(html: str) -> str:
-    """Persist and restore node coordinates in the transaction's canonical key space."""
+    """Persist and restore actual node drags in the canonical diagram key space."""
 
     if _MARKER in html:
         return html
