@@ -148,7 +148,7 @@ _SCRIPT = r"""
     stage.dataset.initialRouteClearance = Number(certificate.clearance).toFixed(2);
     stage.dataset.initialRouteCertificate = "valid";
     stage.dataset.initialRouteSettleState = "stable";
-    stage.dataset.initialRouteReady = "true";
+    stage.dataset.initialRouteReady = "certified";
     lastSignature = after;
 
     document.dispatchEvent(new CustomEvent("glyph-initial-transition-route-ready", {
