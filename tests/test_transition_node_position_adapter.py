@@ -14,14 +14,25 @@ from glyph.transition_node_position_adapter import (
 
 
 class TransitionNodePositionAdapterTests(unittest.TestCase):
-    def test_only_actual_node_drags_are_persisted(self) -> None:
+    def test_adapter_exclusively_owns_actual_node_drags(self) -> None:
         html = enhance_transition_node_position_adapter_html(DIAGRAM_HTML)
 
         self.assertIn("DRAG_THRESHOLD=3", html)
+        self.assertIn("moved:false", html)
+        self.assertIn("pointerDistance(active,event)<DRAG_THRESHOLD", html)
+        self.assertIn("active.moved=true", html)
+        self.assertIn("event.stopImmediatePropagation()", html)
+        self.assertIn("record.positions=snapshot(record.stage)", html)
+        self.assertIn("manual-node-persisted", html)
+        self.assertIn("version:4", html)
+
+    def test_simple_click_neither_moves_nor_persists(self) -> None:
+        html = enhance_transition_node_position_adapter_html(DIAGRAM_HTML)
+
         self.assertIn("positionStorageState", html)
         self.assertIn("restorePositionStorageState", html)
         self.assertIn("storageBefore:positionStorageState()", html)
-        self.assertIn("pointerDistance<DRAG_THRESHOLD&&visualDistance<1", html)
+        self.assertIn("if(!record.moved)", html)
         self.assertIn(
             "setTimeout(()=>restorePositionStorageState(record.storageBefore),0)",
             html,
@@ -30,8 +41,14 @@ class TransitionNodePositionAdapterTests(unittest.TestCase):
             "queueMicrotask(()=>restorePositionStorageState(record.storageBefore))",
             html,
         )
-        self.assertIn("record.positions=snapshot(record.stage)", html)
-        self.assertIn("manual-node-persisted", html)
+
+    def test_keyboard_move_uses_the_same_transaction_boundary(self) -> None:
+        html = enhance_transition_node_position_adapter_html(DIAGRAM_HTML)
+
+        self.assertIn('document.addEventListener("keydown"', html)
+        self.assertIn('document.querySelector(".state-node.selected-node")', html)
+        self.assertIn("transition node keyboard persistence failed", html)
+        self.assertIn("persist(record)", html)
 
     def test_enhancer_is_idempotent(self) -> None:
         once = enhance_transition_node_position_adapter_html(DIAGRAM_HTML)
