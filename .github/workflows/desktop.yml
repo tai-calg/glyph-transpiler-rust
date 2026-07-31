@@ -5,8 +5,10 @@ on:
     paths:
       - "desktop/**"
       - "glyph/desktop_server.py"
+      - "glyph/manual_layout_semantic_guard.py"
       - "glyph/readable_diagram_app.py"
       - "tests/test_desktop_server.py"
+      - "tests/test_manual_layout_semantic_guard.py"
       - "tests/test_tauri_desktop.py"
       - "pyproject.toml"
       - ".github/workflows/desktop.yml"
@@ -15,8 +17,10 @@ on:
     paths:
       - "desktop/**"
       - "glyph/desktop_server.py"
+      - "glyph/manual_layout_semantic_guard.py"
       - "glyph/readable_diagram_app.py"
       - "tests/test_desktop_server.py"
+      - "tests/test_manual_layout_semantic_guard.py"
       - "tests/test_tauri_desktop.py"
       - "pyproject.toml"
       - ".github/workflows/desktop.yml"
