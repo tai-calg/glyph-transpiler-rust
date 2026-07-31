@@ -62,7 +62,14 @@ async function waitForTransaction(page, minimumGeneration = 0) {
     const stage = document.querySelector(".graph-stage");
     const generation = Number(stage?.dataset.transitionLayoutGeneration || 0);
     const state = stage?.dataset.transitionLayoutState;
-    return generation >= Number(minimum || 0) && (state === "ready" || state === "failed");
+    const routeState = stage?.dataset.initialRouteReady;
+    const certificateState = stage?.dataset.layoutCertificateState;
+    const publicationReady = stage?.dataset.transitionPublicationReady;
+    const terminalFailure = state === "failed"
+      || routeState === "failed"
+      || certificateState === "failed";
+    return generation >= Number(minimum || 0)
+      && (terminalFailure || (state === "ready" && publicationReady === "true"));
   }, minimumGeneration, { timeout: 30000 });
   const result = await transactionState(page);
   assert.equal(result.state, "ready", JSON.stringify(result));
