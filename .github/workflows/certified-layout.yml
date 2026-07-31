@@ -4,17 +4,39 @@ on:
   pull_request:
     branches: [main]
     paths:
+      - "glyph/diagram_fit_stability.py"
       - "glyph/diagram_geometry_kernel.py"
+      - "glyph/diagram_rendered_geometry_adapter.py"
+      - "glyph/initial_transition_dependency_bridge.py"
       - "glyph/initial_transition_layout.py"
+      - "glyph/layout_compact_shelf_repair.py"
+      - "glyph/layout_corridor_fast_repair.py"
+      - "glyph/layout_corridor_repair.py"
+      - "glyph/layout_dependency_bridge.py"
       - "glyph/layout_local_repair.py"
       - "glyph/layout_publication_certificate.py"
+      - "glyph/layout_shelf_repair.py"
+      - "glyph/layout_shelf_viewport_sync.py"
       - "glyph/readable_diagram_app.py"
+      - "glyph/state_viewport_reservation.py"
       - "glyph/transition_layout_transaction.py"
+      - "tests/test_diagram_fit_stability.py"
       - "tests/test_diagram_geometry_kernel.py"
+      - "tests/test_initial_transition_dependency_bridge.py"
       - "tests/test_initial_transition_layout.py"
+      - "tests/test_layout_compact_shelf_repair.py"
+      - "tests/test_layout_corridor_fast_repair.py"
+      - "tests/test_layout_corridor_repair.py"
+      - "tests/test_layout_dependency_bridge.py"
+      - "tests/test_layout_generation_protocol.py"
       - "tests/test_layout_local_repair.py"
       - "tests/test_layout_publication_certificate.py"
+      - "tests/test_layout_shelf_repair.py"
+      - "tests/test_layout_shelf_viewport_sync.py"
+      - "tests/test_state_viewport_reservation.py"
+      - "tests/test_transition_layout_transaction.py"
       - "tests/verify_certified_layout_performance.mjs"
+      - "tests/verify_state_diagram_rendering.mjs"
       - "examples/state_diagrams/conveyor_control.glyph"
       - "docs/design/certified-incremental-layout-v1.md"
       - ".github/workflows/certified-layout.yml"
@@ -43,10 +65,13 @@ jobs:
 
       - name: Verify geometry contracts
         run: |
+          python -m unittest tests.test_diagram_fit_stability
           python -m unittest tests.test_diagram_geometry_kernel
+          python -m unittest tests.test_initial_transition_dependency_bridge
           python -m unittest tests.test_initial_transition_layout
-          python -m unittest tests.test_layout_local_repair
-          python -m unittest tests.test_layout_publication_certificate
+          python -m unittest discover -s tests -p 'test_layout_*.py'
+          python -m unittest tests.test_state_viewport_reservation
+          python -m unittest tests.test_transition_layout_transaction
 
       - name: Verify responsiveness and certificate reuse
         run: |
