@@ -50,10 +50,10 @@ _SCRIPT = r"""
     };
   }
 
-  function insideStage(point, stage) {
+  function insideStage(point, width, height) {
     return point.x >= STAGE_MARGIN && point.y >= STAGE_MARGIN
-      && point.x <= stage.clientWidth - STAGE_MARGIN
-      && point.y <= stage.clientHeight - STAGE_MARGIN;
+      && point.x <= width - STAGE_MARGIN
+      && point.y <= height - STAGE_MARGIN;
   }
 
   function routePath(points) {
@@ -148,9 +148,7 @@ _SCRIPT = r"""
     const shelfTop = oldHeight + 40;
     const width = shelfLeft + columns * bayWidth + (columns - 1) * SHELF_GAP + 40;
     const height = shelfTop + rows * rowGap + 40;
-    stage.style.width = `${Math.ceil(width)}px`;
-    stage.style.height = `${Math.ceil(height)}px`;
-    return clusters.map((cluster, index) => {
+    const bays = clusters.map((cluster, index) => {
       const column = index % columns;
       const row = Math.floor(index / columns);
       const left = shelfLeft + column * (bayWidth + SHELF_GAP);
@@ -166,6 +164,7 @@ _SCRIPT = r"""
         center: {x: (left + right) / 2, y},
       };
     });
+    return {width: Math.ceil(width), height: Math.ceil(height), bays};
   }
 
   function nodePorts(node) {
@@ -190,7 +189,8 @@ _SCRIPT = r"""
 
   function segmentAllowed(left, right, context) {
     if (left.x !== right.x && left.y !== right.y) return false;
-    if (!insideStage(left, context.stage) || !insideStage(right, context.stage)) return false;
+    if (!insideStage(left, context.width, context.height)
+      || !insideStage(right, context.width, context.height)) return false;
     const geom = geometry();
     const points = [left, right];
     if (context.nodeObstacles.some(obstacle => geom.polylineHitsRect(points, obstacle))) return false;
@@ -207,20 +207,20 @@ _SCRIPT = r"""
   async function shortestGridPath(starts, goal, context, checkpoint) {
     const xValues = uniqueSorted([
       STAGE_MARGIN,
-      context.stage.clientWidth - STAGE_MARGIN,
+      context.width - STAGE_MARGIN,
       goal.x,
       ...starts.map(point => point.x),
       ...context.nodeObstacles.flatMap(item => [item.left - GRID_CLEARANCE, item.right + GRID_CLEARANCE]),
       ...context.labelObstacles.flatMap(item => [item.left - GRID_CLEARANCE, item.right + GRID_CLEARANCE]),
-    ], STAGE_MARGIN, context.stage.clientWidth - STAGE_MARGIN);
+    ], STAGE_MARGIN, context.width - STAGE_MARGIN);
     const yValues = uniqueSorted([
       STAGE_MARGIN,
-      context.stage.clientHeight - STAGE_MARGIN,
+      context.height - STAGE_MARGIN,
       goal.y,
       ...starts.map(point => point.y),
       ...context.nodeObstacles.flatMap(item => [item.top - GRID_CLEARANCE, item.bottom + GRID_CLEARANCE]),
       ...context.labelObstacles.flatMap(item => [item.top - GRID_CLEARANCE, item.bottom + GRID_CLEARANCE]),
-    ], STAGE_MARGIN, context.stage.clientHeight - STAGE_MARGIN);
+    ], STAGE_MARGIN, context.height - STAGE_MARGIN);
     const byKey = new Map();
     for (const x of xValues) {
       for (const y of yValues) {
@@ -314,7 +314,7 @@ _SCRIPT = r"""
     return result;
   }
 
-  async function routeTransition(stage, path, sourceNode, targetNode, bay, allBays, nodes, initialPolyline, checkpoint) {
+  async function routeTransition(path, sourceNode, targetNode, bay, allBays, nodes, initialPolyline, dimensions, checkpoint) {
     const id = path.dataset.transitionId || bay.id;
     const labelObstacles = allBays
       .filter(item => item.id !== id)
@@ -322,7 +322,13 @@ _SCRIPT = r"""
     const nodeObstacles = nodes
       .filter(item => item.node !== sourceNode && item.node !== targetNode)
       .map(item => rect(item.node, NODE_CLEARANCE));
-    const context = {stage, nodeObstacles, labelObstacles, initialPolyline};
+    const context = {
+      width: dimensions.width,
+      height: dimensions.height,
+      nodeObstacles,
+      labelObstacles,
+      initialPolyline,
+    };
     const sourcePath = await shortestGridPath(nodePorts(sourceNode), bay.entry, context, checkpoint);
     const targetPath = await shortestGridPath(nodePorts(targetNode), bay.exit, context, checkpoint);
     if (!sourcePath || !targetPath) {
@@ -339,20 +345,28 @@ _SCRIPT = r"""
       bay.exit,
       ...[...targetPath].reverse().slice(1),
     ]);
-    path.setAttribute("d", routePath(points));
-    path.dataset.layoutShelfRoute = "true";
-    path.dataset.layoutShelfRouteVersion = String(VERSION);
-    path.dataset.layoutShelfRow = String(bay.row);
-    path.dataset.layoutShelfColumn = String(bay.column);
-    bay.cluster.style.left = `${bay.center.x}px`;
-    bay.cluster.style.top = `${bay.center.y}px`;
-    bay.cluster.dataset.anchorX = String(bay.center.x);
-    bay.cluster.dataset.anchorY = String(bay.center.y);
-    bay.cluster.dataset.anchorFraction = ".5";
-    bay.cluster.dataset.ioDistance = "0";
-    bay.cluster.dataset.layoutLocalRepair = "true";
-    bay.cluster.dataset.layoutLocalRepairVersion = "5";
-    bay.cluster.dataset.layoutLocalRepairScope = "shelf-reroute";
+    return {path, bay, data: routePath(points)};
+  }
+
+  function commitPlan(stage, dimensions, plans) {
+    stage.style.width = `${dimensions.width}px`;
+    stage.style.height = `${dimensions.height}px`;
+    for (const plan of plans) {
+      plan.path.setAttribute("d", plan.data);
+      plan.path.dataset.layoutShelfRoute = "true";
+      plan.path.dataset.layoutShelfRouteVersion = String(VERSION);
+      plan.path.dataset.layoutShelfRow = String(plan.bay.row);
+      plan.path.dataset.layoutShelfColumn = String(plan.bay.column);
+      plan.bay.cluster.style.left = `${plan.bay.center.x}px`;
+      plan.bay.cluster.style.top = `${plan.bay.center.y}px`;
+      plan.bay.cluster.dataset.anchorX = String(plan.bay.center.x);
+      plan.bay.cluster.dataset.anchorY = String(plan.bay.center.y);
+      plan.bay.cluster.dataset.anchorFraction = ".5";
+      plan.bay.cluster.dataset.ioDistance = "0";
+      plan.bay.cluster.dataset.layoutLocalRepair = "true";
+      plan.bay.cluster.dataset.layoutLocalRepairVersion = "5";
+      plan.bay.cluster.dataset.layoutLocalRepairScope = "shelf-reroute";
+    }
   }
 
   async function repair(stage, violations, options = {}) {
@@ -382,7 +396,8 @@ _SCRIPT = r"""
       }
     };
     try {
-      const bays = shelfLayout(stage, clusters);
+      const dimensions = shelfLayout(stage, clusters);
+      const bays = dimensions.bays;
       const bayById = new Map(bays.map(bay => [bay.id, bay]));
       const nodes = [...stage.querySelectorAll(".state-node")].map(node => ({
         name: nodeName(node),
@@ -395,6 +410,7 @@ _SCRIPT = r"""
       const initialPolyline = initial
         ? geometry().flattenPathElement(initial, {tolerance: .35, maxSegmentLength: 3})
         : [];
+      const plans = [];
       for (const path of paths) {
         if (options.cancelled?.()) throw new DOMException("stale shelf repair", "AbortError");
         const id = path.dataset.transitionId || "";
@@ -409,9 +425,20 @@ _SCRIPT = r"""
             bay: Boolean(bay),
           });
         }
-        await routeTransition(stage, path, sourceNode, targetNode, bay, bays, nodes, initialPolyline, checkpoint);
+        plans.push(await routeTransition(
+          path,
+          sourceNode,
+          targetNode,
+          bay,
+          bays,
+          nodes,
+          initialPolyline,
+          dimensions,
+          checkpoint,
+        ));
         await checkpoint();
       }
+      commitPlan(stage, dimensions, plans);
       const audit = window.glyphTransitionLayoutTransaction?.audit?.();
       if (audit && !audit.ok) {
         throw terminalFailure("shelf placement failed transaction audit", {
