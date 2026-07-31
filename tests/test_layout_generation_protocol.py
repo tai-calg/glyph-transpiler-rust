@@ -1,0 +1,75 @@
+from __future__ import annotations
+
+import re
+import shutil
+import subprocess
+import tempfile
+from pathlib import Path
+
+from glyph.readable_diagram_app import prepare_diagram_app
+from glyph.transition_layout_transaction_bootstrap import (
+    enhance_transition_layout_transaction_bootstrap_html,
+)
+
+
+def test_protocol_enforces_one_way_generation_order() -> None:
+    html = enhance_transition_layout_transaction_bootstrap_html(
+        "<html><head></head><body></body></html>"
+    )
+
+    assert 'protocol:"layout-generation-v1"' in html
+    assert "transactionDownstreamEvents" in html
+    assert '"glyph-transition-enabling-cases-ready"' in html
+    assert '"glyph-transition-io-clusters-ready"' in html
+    assert 'type!=="glyph-transition-layout-transaction-ready"' in html
+    assert "publicationIndependentEvents" in html
+    assert 'event?.detail?.stable!==true' in html
+    assert "initialRouteLayoutGeneration" in html
+    assert 'initialRouteCertificate="pending"' in html
+    assert 'layoutCertificateRequestState="invalidated"' in html
+    assert 'reason==="state-tab-activated"' in html
+    assert '["pending","ready"].includes(stage.dataset.transitionLayoutState)' in html
+
+
+def test_synthetic_editor_prerequisite_is_released_before_publication() -> None:
+    html = enhance_transition_layout_transaction_bootstrap_html(
+        "<html><head></head><body></body></html>"
+    )
+
+    assert 'transitionEditorPrerequisite="synthetic"' in html
+    assert "releaseTransactionPrerequisite(stage)" in html
+    assert '"glyph-layout-publication-certificate-ready"' in html
+    assert '"glyph-initial-transition-ready"' in html
+
+
+def test_protocol_bootstrap_precedes_all_generation_consumers() -> None:
+    prepare_diagram_app()
+
+    from glyph import diagram_app
+
+    html = diagram_app.DIAGRAM_HTML
+    bootstrap = html.index("glyph-transition-layout-transaction-bootstrap-v1-script")
+    initial_router = html.index("glyph-initial-transition-routing-v2-script")
+    transaction = html.index("glyph-transition-layout-transaction-v1-script")
+    publication = html.index("glyph-layout-publication-certificate-v1-script")
+
+    assert bootstrap < initial_router < transaction < publication
+
+
+def test_injected_protocol_javascript_is_syntactically_valid() -> None:
+    if not shutil.which("node"):
+        return
+    html = enhance_transition_layout_transaction_bootstrap_html(
+        "<html><head></head><body></body></html>"
+    )
+    scripts = re.findall(r"<script[^>]*>(.*?)</script>", html, re.DOTALL)
+    with tempfile.TemporaryDirectory() as directory:
+        script = Path(directory) / "layout-generation-protocol.js"
+        script.write_text("\n".join(scripts), encoding="utf-8")
+        result = subprocess.run(
+            ["node", "--check", str(script)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    assert result.returncode == 0, result.stderr
