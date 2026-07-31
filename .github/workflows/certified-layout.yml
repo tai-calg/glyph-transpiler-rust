@@ -42,6 +42,7 @@ on:
       - "tests/test_transition_layout_transaction.py"
       - "tests/verify_certified_layout_performance.mjs"
       - "tests/verify_diagram_editor_exports.mjs"
+      - "tests/verify_node_drag_layout.mjs"
       - "tests/verify_readme_state_snapshot.py"
       - "tests/verify_state_diagram_rendering.mjs"
       - "tests/verify_transition_layout_transaction.mjs"
@@ -99,4 +100,5 @@ jobs:
           timeout 180s node tests/verify_state_diagram_rendering.mjs
           python tests/verify_readme_state_snapshot.py
           timeout 180s node tests/verify_transition_layout_transaction.mjs
+          timeout 180s node tests/verify_node_drag_layout.mjs
           timeout 180s node tests/verify_diagram_editor_exports.mjs
