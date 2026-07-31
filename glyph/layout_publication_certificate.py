@@ -91,7 +91,7 @@ _SCRIPT = r"""
     }));
   }
 
-  async function audit(token) {
+  async function audit(token, allowRepair = true) {
     const stage = stageOf();
     if (!stage) return;
     if (stage.dataset.transitionLayoutState !== "ready"
@@ -165,6 +165,33 @@ _SCRIPT = r"""
       cancelled: () => token !== requestedGeneration || destroyed,
     });
     if (token !== requestedGeneration || destroyed) return;
+
+    const repairable = violations.length > 0
+      && violations.every(item => item.kind === "route-foreign-label")
+      && window.glyphLayoutLocalRepair?.version >= 1;
+    if (allowRepair && repairable) {
+      try {
+        const repair = await window.glyphLayoutLocalRepair.repair(stage, violations, {
+          cancelled: () => token !== requestedGeneration || destroyed,
+        });
+        if (token !== requestedGeneration || destroyed) return;
+        if (repair?.repaired) {
+          stage.dataset.layoutCertificateRepairState = "repaired";
+          stage.dataset.layoutCertificateRepairMetrics = JSON.stringify(repair.metrics || {});
+          stage.dataset.layoutCertificateState = "pending";
+          return audit(token, false);
+        }
+      } catch (error) {
+        if (error?.name === "AbortError" || token !== requestedGeneration || destroyed) return;
+        violations.push({
+          kind: "local-repair",
+          reason: String(error?.code || "repair-failed"),
+          message: String(error?.message || error),
+          details: String(error?.details || ""),
+        });
+      }
+    }
+
     const metrics = {
       durationMs: performance.now() - started,
       maxSliceMs: budget.maxSliceMs,
@@ -205,7 +232,7 @@ _SCRIPT = r"""
           await audit(token);
           if (token === requestedGeneration) completedGeneration = token;
         } catch (error) {
-          if (token !== requestedGeneration || destroyed) continue;
+          if (error?.name === "AbortError" || destroyed || token !== requestedGeneration) continue;
           const stage = stageOf();
           if (stage) fail(stage, [{kind: "certificate-error", message: String(error?.message || error)}], {});
           console.error("layout publication certification failed", error);
