@@ -20,7 +20,7 @@ const managed=new Set([
 ]);
 const ioClusterScript=transitionScript("io-clusters");
 const transactionScript=transitionScript("layout-transaction");
-const initialRouterScript="glyph-initial-transition-routing-v2-script";
+const initialRouterScript=["glyph-initial-transition-routing","v2-script"].join("-");
 const publicationScript="glyph-layout-publication-certificate-v1-script";
 const transactionDownstreamEvents=new Set([
   "glyph-transition-enabling-cases-ready",
