@@ -28,10 +28,19 @@ def test_protocol_enforces_one_way_generation_order() -> None:
     assert "publicationIndependentEvents" in html
     assert 'event?.detail?.stable!==true' in html
     assert "initialRouteLayoutGeneration" in html
-    assert 'initialRouteCertificate="pending"' in html
     assert 'layoutCertificateRequestState="invalidated"' in html
     assert 'reason==="state-tab-activated"' in html
     assert '["pending","ready"].includes(stage.dataset.transitionLayoutState)' in html
+
+
+def test_generation_start_preserves_route_cache_until_signature_check() -> None:
+    html = enhance_transition_layout_transaction_bootstrap_html(
+        "<html><head></head><body></body></html>"
+    )
+
+    assert 'stage.dataset.initialRouteReady="pending"' in html
+    assert 'stage.dataset.initialRouteCertificate="pending"' not in html
+    assert "delete stage.dataset.initialTransitionRouting" not in html
 
 
 def test_bootstrap_does_not_mask_generation_consumer_enhancements() -> None:
