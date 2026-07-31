@@ -61,6 +61,32 @@ _SCRIPT = r"""
     };
   }
 
+  function visibleShellBounds(shell) {
+    const rect = shell.getBoundingClientRect();
+    const left = Math.max(0, rect.left);
+    const top = Math.max(0, rect.top);
+    const right = Math.min(window.innerWidth, rect.left + shell.clientWidth);
+    const bottom = Math.min(window.innerHeight, rect.top + shell.clientHeight);
+    return {
+      left,
+      top,
+      right,
+      bottom,
+      width: Math.max(0, right - left),
+      height: Math.max(0, bottom - top),
+      shellRect: {
+        left: rect.left,
+        top: rect.top,
+        right: rect.left + shell.clientWidth,
+        bottom: rect.top + shell.clientHeight,
+      },
+      viewport: {
+        width: window.innerWidth,
+        height: window.innerHeight,
+      },
+    };
+  }
+
   function surfaceFor(shell, stage) {
     if (stage.parentElement?.classList.contains("glyph-zoom-surface")) {
       return stage.parentElement;
@@ -104,15 +130,10 @@ _SCRIPT = r"""
   }
 
   function visibilityAudit(shell, stage) {
-    const shellRect = shell.getBoundingClientRect();
-    const bounds = {
-      left: shellRect.left,
-      top: shellRect.top,
-      right: shellRect.left + shell.clientWidth,
-      bottom: shellRect.top + shell.clientHeight,
-    };
+    const bounds = visibleShellBounds(shell);
     const outside = [];
-    for (const [index, element] of visibleElements(stage).entries()) {
+    const elements = visibleElements(stage);
+    for (const [index, element] of elements.entries()) {
       const rect = element.getBoundingClientRect();
       const id = element.dataset.transitionId
         || element.querySelector(".state-name,.node-name")?.textContent?.trim()
@@ -133,18 +154,31 @@ _SCRIPT = r"""
       }
     }
     return {
-      ok: outside.length === 0,
+      ok: bounds.width >= 80
+        && bounds.height >= 80
+        && elements.length > 0
+        && outside.length === 0,
       outside,
-      shell: bounds,
-      count: visibleElements(stage).length,
+      bounds,
+      count: elements.length,
       scale: Number.parseFloat(stage.dataset.viewportScale || "1") || 1,
     };
   }
 
   async function silentFit(shell, stage, token) {
     const size = stageSize(stage);
-    const availableWidth = Math.max(80, shell.clientWidth - FIT_MARGIN * 2);
-    const availableHeight = Math.max(80, shell.clientHeight - FIT_MARGIN * 2);
+    const bounds = visibleShellBounds(shell);
+    if (bounds.width < 80 || bounds.height < 80) {
+      return {
+        ok: false,
+        outside: [{id: "canvas-shell", reason: "visible-intersection-too-small"}],
+        bounds,
+        count: visibleElements(stage).length,
+        scale: Number.parseFloat(stage.dataset.viewportScale || "1") || 1,
+      };
+    }
+    const availableWidth = Math.max(80, bounds.width - FIT_MARGIN * 2);
+    const availableHeight = Math.max(80, bounds.height - FIT_MARGIN * 2);
     const scale = roundScale(Math.min(
       availableWidth / size.width,
       availableHeight / size.height,
@@ -163,13 +197,17 @@ _SCRIPT = r"""
 
     await nextPaint();
     if (token !== generation || destroyed) return null;
+    const refreshedBounds = visibleShellBounds(shell);
+    const shellRect = shell.getBoundingClientRect();
+    const visibleCenterX = (refreshedBounds.left + refreshedBounds.right) / 2 - shellRect.left;
+    const visibleCenterY = (refreshedBounds.top + refreshedBounds.bottom) / 2 - shellRect.top;
     shell.scrollLeft = Math.max(
       0,
-      surface.offsetLeft + size.width * scale / 2 - shell.clientWidth / 2,
+      surface.offsetLeft + size.width * scale / 2 - visibleCenterX,
     );
     shell.scrollTop = Math.max(
       0,
-      surface.offsetTop + size.height * scale / 2 - shell.clientHeight / 2,
+      surface.offsetTop + size.height * scale / 2 - visibleCenterY,
     );
     shell.dispatchEvent(new Event("scroll"));
     await nextPaint();
@@ -206,6 +244,7 @@ _SCRIPT = r"""
     stage.dataset.fitVisibilityScale = String(audit.scale);
     stage.dataset.fitVisibilityCount = String(audit.count);
     stage.dataset.fitVisibilityDetails = JSON.stringify(audit.outside);
+    stage.dataset.fitVisibilityBounds = JSON.stringify(audit.bounds);
     if (!audit.ok) {
       stage.dataset.fitVisibilityState = "failed";
       console.error("diagram fit visibility certification failed", {
@@ -296,7 +335,7 @@ _SCRIPT = r"""
 
   window.glyphDiagramFitStability = {
     marker: MARKER,
-    version: 1,
+    version: 2,
     schedule,
     audit: () => {
       const stage = activeStage();
@@ -315,7 +354,7 @@ _SCRIPT = r"""
 
 
 def enhance_diagram_fit_stability_html(html: str) -> str:
-    """Keep fit-mode publication geometry fully visible after shell resizing."""
+    """Keep fit-mode geometry inside the browser-visible shell intersection."""
 
     if _MARKER in html:
         return html
