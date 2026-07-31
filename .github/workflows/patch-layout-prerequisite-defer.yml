@@ -1,0 +1,71 @@
+name: Patch Layout Prerequisite Defer
+
+on:
+  push:
+    branches:
+      - agent/system-action-control-flow-completeness-v2
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: >-
+      github.repository == 'tai-calg/glyph-transpiler-rust' &&
+      !contains(github.event.head_commit.message, '[skip-layout-prerequisite-patch]')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/system-action-control-flow-completeness-v2
+          fetch-depth: 1
+
+      - name: Preserve valid layouts across transient prerequisite timeouts
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('glyph/transition_layout_transaction.py')
+          text = path.read_text(encoding='utf-8')
+          old = '''      }catch(error){
+        if(error?.name==="AbortError"||destroyed||token!==requestedGeneration)continue;
+        const stage=stageOf();
+        if(stage)markFailure(stage,token,reason,error);
+        console.error("transition layout transaction failed",error);
+        completedGeneration=token;
+      }finally{'''
+          new = '''      }catch(error){
+        if(error?.name==="AbortError"||destroyed||token!==requestedGeneration)continue;
+        const stage=stageOf();
+        if(error?.code==="layout-prerequisite-timeout"){
+          const existing=stage?.dataset.transitionLayoutState==="ready"&&audit(stage).ok;
+          if(existing){
+            stage.dataset.transitionLayoutDeferredReason=reason;
+            stage.dataset.transitionLayoutDeferredDetails=String(error?.details||"");
+            stage.dataset.transitionPublicationReady="false";
+            window.glyphLayoutPublicationCertificate?.schedule?.("layout-prerequisite-deferred",0);
+          }else if(stage){
+            markDeferred(stage,token,reason);
+            stage.dataset.transitionLayoutDeferredDetails=String(error?.details||"");
+          }
+          completedGeneration=token;
+          continue;
+        }
+        if(stage)markFailure(stage,token,reason,error);
+        console.error("transition layout transaction failed",error);
+        completedGeneration=token;
+      }finally{'''
+          if old not in text:
+              raise SystemExit('layout transaction catch block not found')
+          text = text.replace(old, new, 1)
+          path.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add glyph/transition_layout_transaction.py
+          git commit -m "Defer transient layout prerequisites [skip-layout-prerequisite-patch]"
+          git push origin HEAD:agent/system-action-control-flow-completeness-v2
