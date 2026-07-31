@@ -79,7 +79,7 @@ async function waitForTransaction(page, minimumGeneration = 0) {
   assert.equal(result.semantic, "true", JSON.stringify(result));
   assert.equal(result.roles, "true", JSON.stringify(result));
   assert.equal(result.transactionVersion, 2, JSON.stringify(result));
-  assert.equal(result.interactionVersion, 3, JSON.stringify(result));
+  assert.equal(result.interactionVersion, 4, JSON.stringify(result));
   assert.equal(result.viewportVersion, 2, JSON.stringify(result));
   assert.equal(result.audit?.ok, true, JSON.stringify(result.audit));
   assert(result.digest.length > 0, "layout did not publish the source digest");
