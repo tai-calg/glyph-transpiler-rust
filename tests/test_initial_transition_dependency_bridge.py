@@ -28,6 +28,10 @@ class InitialTransitionDependencyBridgeTests(unittest.TestCase):
         self.assertNotIn('stage.dataset.initialRouteReady = "true"', html)
         self.assertIn("geom.verifyPathElement(initial, normals", html)
         self.assertIn("stable: true", html)
+        self.assertIn(
+            'glyphLayoutPublicationCertificate?.schedule?.("stable-initial-route", 0)',
+            html,
+        )
 
     def test_enhancer_is_idempotent(self) -> None:
         once = enhance_initial_transition_dependency_bridge_html(DIAGRAM_HTML)
