@@ -30,6 +30,25 @@ class LayoutPublicationCertificateTests(unittest.TestCase):
         self.assertIn("route-foreign-label", html)
         self.assertIn("route-node", html)
 
+    def test_revalidation_preserves_last_valid_certificate_until_fingerprint_check(self) -> None:
+        html = enhance_layout_publication_certificate_html(
+            enhance_diagram_geometry_kernel_html(DIAGRAM_HTML)
+        )
+        schedule = re.search(
+            r"function schedule\(reason = \"scheduled\", delay = 0\) \{(.*?)\n  \}\n\n  for \(const eventName",
+            html,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(schedule)
+        body = schedule.group(1)
+        self.assertNotIn('layoutCertificateState = "pending"', body)
+        self.assertIn('layoutCertificateRequestState = "queued"', body)
+        self.assertIn('transitionPublicationReady = "false"', body)
+        self.assertIn('layoutCertificateRequestState = "running"', html)
+        self.assertIn('layoutCertificateRequestState = "completed"', html)
+        self.assertIn('layoutCertificateCacheHit = "true"', html)
+        self.assertIn('transitionPublicationReady = "true"', html)
+
     def test_enhancer_is_idempotent(self) -> None:
         once = enhance_layout_publication_certificate_html(DIAGRAM_HTML)
         twice = enhance_layout_publication_certificate_html(once)
