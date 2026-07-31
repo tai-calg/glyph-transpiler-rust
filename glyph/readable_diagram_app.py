@@ -10,6 +10,7 @@ from .diagram_canvas_viewport import enhance_diagram_canvas_viewport_html
 from .diagram_editor_exports import enhance_diagram_editor_exports_html
 from .diagram_editor_render_guard import enhance_diagram_editor_render_guard_html
 from .diagram_editor_route_guard import enhance_diagram_editor_route_guard_html
+from .diagram_fit_stability import enhance_diagram_fit_stability_html
 from .diagram_geometry_kernel import enhance_diagram_geometry_kernel_html
 from .diagram_label_editor import enhance_diagram_label_editor_html
 from .diagram_live_stability import (
@@ -125,6 +126,7 @@ def _presentation_pipeline():
         enhance_layout_shelf_repair_html,
         enhance_layout_compact_shelf_repair_html,
         enhance_layout_shelf_viewport_sync_html,
+        enhance_diagram_fit_stability_html,
         enhance_layout_dependency_bridge_html,
         enhance_layout_publication_certificate_html,
     )
