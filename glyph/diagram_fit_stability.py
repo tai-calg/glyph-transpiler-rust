@@ -37,19 +37,13 @@ _SCRIPT = r"""
   ));
 
   function activeStage() {
-    const active = document.querySelector(".tab.active")?.dataset.tab;
-    const view = active === "state"
-      ? document.querySelector(".state-node")
-      : document.querySelector(".graph-node,.state-node");
-    return view?.closest(".graph-stage") || document.querySelector(".graph-stage");
+    if (document.querySelector(".tab.active")?.dataset.tab !== "state") return null;
+    return document.querySelector(".state-node")?.closest(".graph-stage") || null;
   }
 
   function diagramIdentity(stage) {
-    const tab = document.querySelector(".tab.active")?.dataset.tab || "state";
-    const index = tab === "state"
-      ? document.getElementById("machine-select")?.value || 0
-      : document.getElementById("system-select")?.value || 0;
-    return `${stage.dataset.diagramDigest || "source"}:${tab}:${index}`;
+    const index = document.getElementById("machine-select")?.value || 0;
+    return `${stage.dataset.diagramDigest || "source"}:state:${index}`;
   }
 
   function stageSize(stage) {
@@ -125,7 +119,6 @@ _SCRIPT = r"""
     return [
       ...stage.querySelectorAll(".state-node"),
       ...stage.querySelectorAll(".transition-io-cluster"),
-      ...stage.querySelectorAll(".graph-node"),
     ].filter((element, index, values) => values.indexOf(element) === index);
   }
 
@@ -136,7 +129,7 @@ _SCRIPT = r"""
     for (const [index, element] of elements.entries()) {
       const rect = element.getBoundingClientRect();
       const id = element.dataset.transitionId
-        || element.querySelector(".state-name,.node-name")?.textContent?.trim()
+        || element.querySelector(".state-name")?.textContent?.trim()
         || `element-${index}`;
       if (rect.left < bounds.left - VISIBILITY_TOLERANCE
         || rect.top < bounds.top - VISIBILITY_TOLERANCE
@@ -276,7 +269,7 @@ _SCRIPT = r"""
   function bindObservers() {
     const stage = activeStage();
     const shell = stage?.closest(".canvas-shell") || null;
-    const diagnostics = document.getElementById("diagnostics");
+    const diagnostics = stage ? document.getElementById("diagnostics") : null;
     if (shell !== observedShell) {
       shellObserver?.disconnect();
       observedShell = shell;
@@ -335,14 +328,14 @@ _SCRIPT = r"""
 
   window.glyphDiagramFitStability = {
     marker: MARKER,
-    version: 2,
+    version: 1,
     schedule,
     audit: () => {
       const stage = activeStage();
       const shell = stage?.closest(".canvas-shell");
       return stage && shell
         ? visibilityAudit(shell, stage)
-        : {ok: false, outside: [{id: "stage", reason: "missing"}], count: 0};
+        : {ok: false, outside: [{id: "stage", reason: "inactive-state-view"}], count: 0};
     },
     get generation() { return generation; },
   };
@@ -354,7 +347,7 @@ _SCRIPT = r"""
 
 
 def enhance_diagram_fit_stability_html(html: str) -> str:
-    """Keep fit-mode geometry inside the browser-visible shell intersection."""
+    """Keep State fit-mode geometry inside the browser-visible shell intersection."""
 
     if _MARKER in html:
         return html
