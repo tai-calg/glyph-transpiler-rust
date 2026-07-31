@@ -117,11 +117,19 @@ class ViewEdgeSpecializationTests(unittest.TestCase):
             compiled.model,
             compiled.diagrams.ir.machines[0],
         )
+        relation = build_machine_relation(compiled.model, "Motor")
+        assert relation is not None
         bindings = specialize_view_edges(compiled.model, machine_view)
         self.assertTrue(bindings)
         self.assertTrue(
             all(item.status is ViewEdgeBindingStatus.EXACT for item in bindings),
-            [item.to_ir() for item in bindings],
+            {
+                "bindings": [item.to_ir() for item in bindings],
+                "relation": relation.to_ir(),
+                "transition_lines": [
+                    item.get("source") for item in machine_view["transitions"]
+                ],
+            },
         )
         self.assertTrue(all(item.relation_edge_id for item in bindings))
         self.assertTrue(all(item.source_line > 0 for item in bindings))
