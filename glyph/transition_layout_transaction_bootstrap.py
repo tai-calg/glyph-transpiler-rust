@@ -85,6 +85,43 @@ function invalidateDownstream(stage,generation){
 function initialRoutingEligible(stage=stageOf()){
   return Boolean(stage&&stage.dataset.transitionLayoutState==="ready");
 }
+function routeProtocolDetails(stage=stageOf()){
+  const selected=document.getElementById("machine-select")?.selectedOptions?.[0]?.textContent?.trim()||"";
+  const machine=(typeof snapshot==="object"&&snapshot?.views?.state?.machines||[])
+    .find(item=>item.name===selected)
+    ||(typeof snapshot==="object"&&snapshot?.views?.state?.machines||[])[0]
+    ||null;
+  const stateNames=[...(stage?.querySelectorAll(".state-name")||[])]
+    .map(node=>node.textContent?.trim()||"");
+  return {
+    selectedMachine:selected,
+    initialState:machine?.initial_state??null,
+    stateNames,
+    labelsReady:stage?.dataset.transitionInputActionLabelsReady||"",
+    layoutState:stage?.dataset.transitionLayoutState||"",
+    layoutGeneration:generationOf(stage),
+    hasSvg:Boolean(stage?.querySelector(":scope > svg.edge-svg")),
+    hasInitialPath:Boolean(stage?.querySelector(":scope > svg.edge-svg > path:not(.state-transition-path)")),
+    hasInitialDot:Boolean(stage?.querySelector(".initial-dot")),
+    routerGeneration:window.glyphInitialTransitionRouter?.generation??null,
+    routerCompletedGeneration:window.glyphInitialTransitionRouter?.completedGeneration??null,
+    requestSequence:routeRequestSequence,
+  };
+}
+function markRouteProtocolFailure(stage,state,reason){
+  if(!stage)return;
+  const details=routeProtocolDetails(stage);
+  stage.dataset.initialRouteProtocolState=state;
+  stage.dataset.initialRouteReady="failed";
+  stage.dataset.initialRouteCertificate="failed";
+  stage.dataset.initialRouteError=reason;
+  stage.dataset.initialRouteFailureDetails=JSON.stringify(details);
+  stage.dataset.transitionPublicationReady="false";
+  stage.dataset.layoutCertificateState="failed";
+  stage.dataset.layoutCertificateRequestState="failed";
+  stage.dataset.layoutCertificateReason="initial-route-protocol-failed";
+  stage.dataset.layoutCertificateViolations=JSON.stringify([{kind:state,reason,details}]);
+}
 function publicationEligible(event,stage=stageOf()){
   if(!stage||stage.dataset.transitionLayoutState!=="ready")return false;
   if(event?.detail?.stable!==true)return false;
@@ -230,6 +267,8 @@ function wrapInitialRouterApi(){
     const requestToken=++routeRequestSequence;
     invalidateDownstream(stage,generation);
     clearTimeout(routeRetryTimer);
+    stage.dataset.initialRouteProtocolSequence=String(requestToken);
+    stage.dataset.initialRouteProtocolReason=reason;
     stage.dataset.initialRouteProtocolState="waiting-dom";
     const run=attempt=>{
       const current=stageOf();
@@ -239,28 +278,42 @@ function wrapInitialRouterApi(){
         ||!initialRoutingEligible(current))return;
       if(!initialRouteDomReady(current)){
         if(attempt>=120){
-          current.dataset.initialRouteProtocolState="dom-timeout";
+          markRouteProtocolFailure(
+            current,
+            "dom-timeout",
+            "initial-route DOM prerequisites did not become ready",
+          );
           return;
         }
         routeRetryTimer=nativeSetTimeout(()=>run(attempt+1),16);
         return;
       }
+      current.dataset.initialRouteProtocolAttempt=String(attempt);
       current.dataset.initialRouteProtocolState=attempt?"retrying":"running";
       const routerGeneration=original(reason,0);
+      current.dataset.initialRouteProtocolRouterGeneration=String(routerGeneration);
       const inspect=poll=>{
         if(requestToken!==routeRequestSequence
           ||generationOf(stageOf())!==generation
           ||stage.dataset.initialRouteCertificate==="valid")return;
         if(api.completedGeneration<routerGeneration){
           if(poll>=120){
-            stage.dataset.initialRouteProtocolState="router-timeout";
+            markRouteProtocolFailure(
+              stage,
+              "router-timeout",
+              "initial-route router generation did not complete",
+            );
             return;
           }
           routeRetryTimer=nativeSetTimeout(()=>inspect(poll+1),16);
           return;
         }
         if(attempt>=8){
-          stage.dataset.initialRouteProtocolState="router-stalled";
+          markRouteProtocolFailure(
+            stage,
+            "router-stalled",
+            "initial-route router completed without issuing a certificate",
+          );
           return;
         }
         run(attempt+1);
