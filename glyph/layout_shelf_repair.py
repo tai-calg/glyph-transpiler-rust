@@ -16,6 +16,7 @@ _SCRIPT = r"""
   const GRID_CLEARANCE = 14;
   const SHELF_GAP = 30;
   const PORT_OFFSETS = [-.3, -.15, 0, .15, .3];
+  const FRAME_BUDGET_MS = 6;
 
   const clamp = (value, minimum, maximum) => Math.max(minimum, Math.min(maximum, value));
   const pointKey = point => `${point.x.toFixed(1)}:${point.y.toFixed(1)}`;
@@ -203,7 +204,7 @@ _SCRIPT = r"""
     return true;
   }
 
-  function shortestGridPath(starts, goal, context) {
+  async function shortestGridPath(starts, goal, context, checkpoint) {
     const xValues = uniqueSorted([
       STAGE_MARGIN,
       context.stage.clientWidth - STAGE_MARGIN,
@@ -226,6 +227,7 @@ _SCRIPT = r"""
         const point = {x, y};
         byKey.set(pointKey(point), point);
       }
+      await checkpoint();
     }
     for (const start of starts) byKey.set(pointKey(start), start);
     byKey.set(pointKey(goal), goal);
@@ -242,8 +244,14 @@ _SCRIPT = r"""
         adjacent.get(pointKey(right)).push({point: left, weight});
       }
     };
-    for (const y of yValues) connectLine(all.filter(point => point.y === y));
-    for (const x of xValues) connectLine(all.filter(point => point.x === x));
+    for (const y of yValues) {
+      connectLine(all.filter(point => point.y === y));
+      await checkpoint();
+    }
+    for (const x of xValues) {
+      connectLine(all.filter(point => point.x === x));
+      await checkpoint();
+    }
 
     const distances = new Map(all.map(point => [pointKey(point), Number.POSITIVE_INFINITY]));
     const previous = new Map();
@@ -267,6 +275,7 @@ _SCRIPT = r"""
       if (currentKey === null || !Number.isFinite(currentDistance)) break;
       unvisited.delete(currentKey);
       if (currentKey === goalKey) break;
+      await checkpoint();
       for (const edge of adjacent.get(currentKey) || []) {
         const nextKey = pointKey(edge.point);
         if (!unvisited.has(nextKey)) continue;
@@ -305,7 +314,7 @@ _SCRIPT = r"""
     return result;
   }
 
-  function routeTransition(stage, path, sourceNode, targetNode, bay, allBays, nodes, initialPolyline) {
+  async function routeTransition(stage, path, sourceNode, targetNode, bay, allBays, nodes, initialPolyline, checkpoint) {
     const id = path.dataset.transitionId || bay.id;
     const labelObstacles = allBays
       .filter(item => item.id !== id)
@@ -314,8 +323,8 @@ _SCRIPT = r"""
       .filter(item => item.node !== sourceNode && item.node !== targetNode)
       .map(item => rect(item.node, NODE_CLEARANCE));
     const context = {stage, nodeObstacles, labelObstacles, initialPolyline};
-    const sourcePath = shortestGridPath(nodePorts(sourceNode), bay.entry, context);
-    const targetPath = shortestGridPath(nodePorts(targetNode), bay.exit, context);
+    const sourcePath = await shortestGridPath(nodePorts(sourceNode), bay.entry, context, checkpoint);
+    const targetPath = await shortestGridPath(nodePorts(targetNode), bay.exit, context, checkpoint);
     if (!sourcePath || !targetPath) {
       throw terminalFailure("no obstacle-free shelf route exists", {
         id,
@@ -359,6 +368,19 @@ _SCRIPT = r"""
     const pathSnapshots = new Map(paths.map(path => [path, pathSnapshot(path)]));
     const clusterSnapshots = new Map(clusters.map(cluster => [cluster, clusterSnapshot(cluster)]));
     const started = performance.now();
+    let sliceStarted = started;
+    let yields = 0;
+    let maxSliceMs = 0;
+    const checkpoint = async () => {
+      if (options.cancelled?.()) throw new DOMException("stale shelf repair", "AbortError");
+      const elapsed = performance.now() - sliceStarted;
+      maxSliceMs = Math.max(maxSliceMs, elapsed);
+      if (elapsed >= FRAME_BUDGET_MS) {
+        yields += 1;
+        await new Promise(resolve => requestAnimationFrame(resolve));
+        sliceStarted = performance.now();
+      }
+    };
     try {
       const bays = shelfLayout(stage, clusters);
       const bayById = new Map(bays.map(bay => [bay.id, bay]));
@@ -387,7 +409,8 @@ _SCRIPT = r"""
             bay: Boolean(bay),
           });
         }
-        routeTransition(stage, path, sourceNode, targetNode, bay, bays, nodes, initialPolyline);
+        await routeTransition(stage, path, sourceNode, targetNode, bay, bays, nodes, initialPolyline, checkpoint);
+        await checkpoint();
       }
       const audit = window.glyphTransitionLayoutTransaction?.audit?.();
       if (audit && !audit.ok) {
@@ -401,6 +424,8 @@ _SCRIPT = r"""
         labels: clusters.length,
         width: stage.clientWidth,
         height: stage.clientHeight,
+        yields,
+        maxSliceMs: Math.max(maxSliceMs, performance.now() - sliceStarted),
       };
       stage.dataset.layoutShelfRepairState = "repaired";
       stage.dataset.layoutShelfRepairVersion = String(VERSION);
