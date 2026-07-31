@@ -26,6 +26,10 @@ _SCRIPT = r"""
     return currentStage()?.querySelector(":scope > svg.edge-svg") || null;
   }
 
+  function layoutGeneration(stage = currentStage()) {
+    return String(stage?.dataset.transitionLayoutGeneration || "0");
+  }
+
   function normalPaths(svg) {
     return [...(svg?.querySelectorAll(":scope > path.state-transition-path") || [])];
   }
@@ -74,8 +78,22 @@ _SCRIPT = r"""
     return value?.version >= 2 ? value : null;
   }
 
+  function invalidateCurrentGeneration(stage, reason) {
+    if (!stage) return;
+    const generation = layoutGeneration(stage);
+    stage.dataset.initialRouteLayoutGeneration = generation;
+    stage.dataset.initialRouteCertificate = "pending";
+    stage.dataset.initialRouteReady = "pending";
+    stage.dataset.initialRouteReason = reason;
+    stage.dataset.transitionPublicationReady = "false";
+    stage.dataset.layoutCertificateRequestState = "invalidated";
+    delete stage.dataset.initialTransitionRouting;
+  }
+
   function scheduleRouter(reason) {
     settleGeneration += 1;
+    const stage = currentStage();
+    invalidateCurrentGeneration(stage, reason);
     const value = router();
     if (!value) return false;
     value.schedule(reason, 0);
@@ -103,6 +121,11 @@ _SCRIPT = r"""
     const initial = svg?.querySelector(":scope > path.initial-transition-path");
     if (!stage || !svg || !initial || stage.dataset.initialRouteCertificate !== "valid") return;
 
+    const generation = layoutGeneration(stage);
+    const eventGeneration = String(event?.detail?.layoutGeneration || generation);
+    if (eventGeneration !== generation) return;
+    stage.dataset.initialRouteLayoutGeneration = generation;
+
     const token = ++settleGeneration;
     const before = geometrySignature(svg);
     stage.dataset.initialRouteReady = "settling";
@@ -116,7 +139,10 @@ _SCRIPT = r"""
     const finalStage = currentStage();
     const finalSvg = currentSvg();
     const after = geometrySignature(finalSvg);
-    if (finalStage !== stage || finalSvg !== svg || before !== after) {
+    if (finalStage !== stage
+      || finalSvg !== svg
+      || layoutGeneration(finalStage) !== generation
+      || before !== after) {
       stage.dataset.initialRouteSettleState = "geometry-changed";
       scheduleRouter("normal-route-not-quiescent");
       return;
@@ -149,6 +175,7 @@ _SCRIPT = r"""
     stage.dataset.initialRouteCertificate = "valid";
     stage.dataset.initialRouteSettleState = "stable";
     stage.dataset.initialRouteReady = "certified";
+    stage.dataset.initialRouteLayoutGeneration = generation;
     lastSignature = after;
 
     document.dispatchEvent(new CustomEvent("glyph-initial-transition-route-ready", {
@@ -156,11 +183,11 @@ _SCRIPT = r"""
         ...(event?.detail || {}),
         marker: MARKER,
         stable: true,
+        layoutGeneration: generation,
         crossings: certificate.crossings,
         clearance: certificate.clearance,
       },
     }));
-    window.glyphLayoutPublicationCertificate?.schedule?.("stable-initial-route", 0);
   }
 
   function bind() {
@@ -240,7 +267,7 @@ _SCRIPT = r"""
 
   window.glyphInitialTransitionDependencyBridge = Object.freeze({
     marker: MARKER,
-    version: 2,
+    version: 3,
     bind,
     invalidateIfChanged,
     settleCertifiedRoute,
@@ -254,7 +281,7 @@ _SCRIPT = r"""
 
 
 def enhance_initial_transition_dependency_bridge_html(html: str) -> str:
-    """Invalidate and settle initial-route certificates against final route geometry."""
+    """Bind initial-route certificates to the completed transition generation."""
 
     if _MARKER in html:
         return html
