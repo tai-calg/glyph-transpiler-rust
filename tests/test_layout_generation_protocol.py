@@ -6,6 +6,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from glyph.initial_transition_layout import enhance_initial_transition_html
 from glyph.readable_diagram_app import prepare_diagram_app
 from glyph.transition_layout_transaction_bootstrap import (
     enhance_transition_layout_transaction_bootstrap_html,
@@ -30,6 +31,15 @@ def test_protocol_enforces_one_way_generation_order() -> None:
     assert 'layoutCertificateRequestState="invalidated"' in html
     assert 'reason==="state-tab-activated"' in html
     assert '["pending","ready"].includes(stage.dataset.transitionLayoutState)' in html
+
+
+def test_bootstrap_does_not_mask_initial_router_enhancement() -> None:
+    base = "<html><head></head><body></body></html>"
+    bootstrapped = enhance_transition_layout_transaction_bootstrap_html(base)
+    enhanced = enhance_initial_transition_html(bootstrapped)
+
+    assert "glyph-initial-transition-routing-v2" not in bootstrapped
+    assert '<script id="glyph-initial-transition-routing-v2-script">' in enhanced
 
 
 def test_initial_router_is_owned_by_the_completed_transaction_generation() -> None:
