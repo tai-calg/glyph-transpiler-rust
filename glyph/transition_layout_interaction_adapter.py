@@ -8,6 +8,7 @@ _SCRIPT = r"""
 (()=>{
 const MARKER="glyph-transition-layout-interaction-adapter-v1",MAX_DISTANCE=96,DRAG_THRESHOLD=3;
 const FOREIGN_ROUTE_CLEARANCE=1,NODE_CLEARANCE=2,LABEL_CLEARANCE=2;
+const SNAP_RADII=[0,8,16,24,32,48,64,80,96],SNAP_DIRECTIONS=16;
 let active=null,selected=null,stateCache=null,statePromise=null,stateAbort=null,stateVersion=0,destroyed=false;
 const num=value=>Number.parseFloat(value||"0")||0;
 const scaleFor=stage=>window.glyphDiagramViewport?.scaleFor(stage)||num(stage?.dataset.viewportScale)||1;
@@ -62,10 +63,28 @@ function manualPlacementViolation(record,point){
   }
   return"";
 }
+function nearestCertifiablePoint(record,requested){
+  const seen=new Set(),candidates=[];
+  for(const radius of SNAP_RADII){
+    const count=radius===0?1:SNAP_DIRECTIONS;
+    for(let index=0;index<count;index+=1){
+      const angle=count===1?0:index*Math.PI*2/count;
+      const raw={x:requested.x+Math.cos(angle)*radius,y:requested.y+Math.sin(angle)*radius};
+      const point=feasible(raw,record.anchor,record.cluster,record.stage);
+      if(!point)continue;
+      const key=`${Math.round(point.x*4)}:${Math.round(point.y*4)}`;
+      if(seen.has(key))continue;
+      seen.add(key);candidates.push(point);
+    }
+  }
+  candidates.sort((a,b)=>Math.hypot(a.x-requested.x,a.y-requested.y)-Math.hypot(b.x-requested.x,b.y-requested.y));
+  return candidates.find(point=>!manualPlacementViolation(record,point))||null;
+}
 function reject(record,reason){
   record.cluster.style.left=`${record.left}px`;
   record.cluster.style.top=`${record.top}px`;
   record.cluster.dataset.ioDistance=String(Math.hypot(record.left-record.anchor.x,record.top-record.anchor.y));
+  record.cluster.dataset.manualIo="false";
   record.cluster.dataset.manualIoRejected=reason;
   window.glyphTransitionLayoutTransaction?.schedule("manual-label-rejected",0);
 }
@@ -75,15 +94,16 @@ async function persist(record){
   if(destroyed||!record.cluster.isConnected||!record.stage.isConnected)return;
   const current={x:num(record.cluster.style.left),y:num(record.cluster.style.top)},visualDistance=Math.hypot(current.x-record.left,current.y-record.top);
   if(visualDistance<1)return;
-  const point=feasible(current,record.anchor,record.cluster,record.stage);
-  if(!point){reject(record,"outside-tether");return}
-  const violation=manualPlacementViolation(record,point);
-  if(violation){reject(record,violation);return}
+  const requested=feasible(current,record.anchor,record.cluster,record.stage);
+  if(!requested){reject(record,"outside-tether");return}
+  const point=nearestCertifiablePoint(record,requested);
+  if(!point){reject(record,manualPlacementViolation(record,requested)||"no-certifiable-position");return}
   delete record.cluster.dataset.manualIoRejected;
+  record.cluster.dataset.manualIoAdjusted=String(Math.hypot(point.x-requested.x,point.y-requested.y)>0.5);
   const data=await diagramState(),key=storageKey(data),saved=parseStored(key);saved[record.id]={x:point.x,y:point.y,dx:point.x-record.anchor.x,dy:point.y-record.anchor.y};writeStored(key,saved);
   record.cluster.style.left=`${point.x}px`;record.cluster.style.top=`${point.y}px`;record.cluster.dataset.manualIo="true";record.cluster.dataset.ioDistance=String(Math.hypot(point.x-record.anchor.x,point.y-record.anchor.y));window.glyphTransitionLayoutTransaction?.schedule("manual-label-persisted",0);
 }
-async function resetCluster(cluster){const data=await diagramState(),key=storageKey(data),saved=parseStored(key),id=cluster.dataset.transitionId||"";if(id in saved){delete saved[id];writeStored(key,saved)}cluster.dataset.manualIo="false";delete cluster.dataset.manualIoRejected;window.glyphTransitionLayoutTransaction?.schedule("manual-label-reset",0)}
+async function resetCluster(cluster){const data=await diagramState(),key=storageKey(data),saved=parseStored(key),id=cluster.dataset.transitionId||"";if(id in saved){delete saved[id];writeStored(key,saved)}cluster.dataset.manualIo="false";delete cluster.dataset.manualIoRejected;delete cluster.dataset.manualIoAdjusted;window.glyphTransitionLayoutTransaction?.schedule("manual-label-reset",0)}
 function finish(event){if(!active||active.pointerId!==event.pointerId)return;const record=active;active=null;record.cluster.classList.remove("dragging-io");persist(record).catch(error=>report(error,"manual transition position persistence failed"))}
 document.addEventListener("pointerdown",event=>{const cluster=event.target?.closest?.(".transition-io-cluster");if(!cluster||event.button!==0)return;const stage=cluster.closest(".graph-stage");if(!stage||stage.dataset.transitionLayoutState!=="ready")return;select(cluster);cluster.classList.add("dragging-io");active={cluster,stage,id:cluster.dataset.transitionId||"",pointerId:event.pointerId,startX:event.clientX,startY:event.clientY,left:num(cluster.style.left),top:num(cluster.style.top),anchor:{x:num(cluster.dataset.anchorX),y:num(cluster.dataset.anchorY)},scale:scaleFor(stage),dragged:false}},true);
 document.addEventListener("pointermove",event=>{if(!active||active.pointerId!==event.pointerId)return;if(!active.dragged&&pointerDistance(active,event)<DRAG_THRESHOLD)return;active.dragged=true;const point=requestedPoint(active,event);if(!point)return;active.cluster.style.left=`${point.x}px`;active.cluster.style.top=`${point.y}px`;active.cluster.dataset.ioDistance=String(Math.hypot(point.x-active.anchor.x,point.y-active.anchor.y))},true);
@@ -92,14 +112,14 @@ document.addEventListener("pointercancel",event=>{if(!active||active.pointerId!=
 document.addEventListener("dblclick",event=>{const cluster=event.target?.closest?.(".transition-io-cluster");if(cluster)resetCluster(cluster).catch(error=>report(error,"manual transition position reset failed"))},true);
 document.addEventListener("change",event=>{if(event.target?.id==="machine-select"){selected=null;invalidateState()}});
 for(const eventName of["pagehide","beforeunload"]){window.addEventListener(eventName,()=>{destroyed=true;active=null;selected=null;invalidateState()},{once:true})}
-window.glyphTransitionLayoutInteractionAdapter={marker:MARKER,version:4,validateManualPlacement:manualPlacementViolation};
+window.glyphTransitionLayoutInteractionAdapter={marker:MARKER,version:4,validateManualPlacement:manualPlacementViolation,nearestCertifiablePoint};
 })();
 </script>
 """
 
 
 def enhance_transition_layout_interaction_adapter_html(html: str) -> str:
-    """Own label drag, certification-safe persistence, reset, and selection."""
+    """Own label drag and snap persisted placements to certified geometry."""
 
     if _MARKER in html:
         return html
