@@ -42,6 +42,8 @@ _SCRIPT = r"""
   }
 
   async function readMachine() {
+    const live = typeof snapshot === "object" && snapshot ? snapshot : null;
+    if (live) return selectedMachine(live);
     const response = await fetch("/api/state", {cache: "no-store"});
     if (!response.ok) return null;
     return selectedMachine(await response.json());
@@ -180,8 +182,9 @@ _SCRIPT = r"""
   }
 
   function candidateRoutes(target) {
-    const tangentOffsets = [-48, 0, 48];
-    const fractions = [.28, .72];
+    const tangentOffsets = [-84, -56, -28, 0, 28, 56, 84];
+    const fractions = [.12, .25, .38, .5, .62, .75, .88];
+    const laneDistances = [24, 40, 56];
     const sides = [
       {name: "top", outward: point(0, -1), tangent: point(1, 0)},
       {name: "right", outward: point(1, 0), tangent: point(0, 1)},
@@ -196,22 +199,25 @@ _SCRIPT = r"""
             side.name === "top" ? target.top - 1 : target.bottom + 1)
           : point(side.name === "left" ? target.left - 1 : target.right + 1,
             target.top + (target.bottom - target.top) * fraction);
-        for (const tangentOffset of tangentOffsets) {
-          const lane = point(
-            port.x + side.outward.x * 28,
-            port.y + side.outward.y * 28,
-          );
-          const dot = point(
-            port.x + side.outward.x * 76 + side.tangent.x * tangentOffset,
-            port.y + side.outward.y * 76 + side.tangent.y * tangentOffset,
-          );
-          const elbow = side.name === "top" || side.name === "bottom"
-            ? point(dot.x, lane.y)
-            : point(lane.x, dot.y);
-          const raw = [dot, elbow, lane, port].filter((item, index, values) => (
-            index === 0 || distance(item, values[index - 1]) > .5
-          ));
-          candidates.push({side: side.name, dot, port, points: shortenFromDot(raw)});
+        for (const laneDistance of laneDistances) {
+          for (const tangentOffset of tangentOffsets) {
+            const lane = point(
+              port.x + side.outward.x * laneDistance,
+              port.y + side.outward.y * laneDistance,
+            );
+            const dotDistance = Math.max(88, laneDistance + 48);
+            const dot = point(
+              port.x + side.outward.x * dotDistance + side.tangent.x * tangentOffset,
+              port.y + side.outward.y * dotDistance + side.tangent.y * tangentOffset,
+            );
+            const elbow = side.name === "top" || side.name === "bottom"
+              ? point(dot.x, lane.y)
+              : point(lane.x, dot.y);
+            const raw = [dot, elbow, lane, port].filter((item, index, values) => (
+              index === 0 || distance(item, values[index - 1]) > .5
+            ));
+            candidates.push({side: side.name, dot, port, points: shortenFromDot(raw)});
+          }
         }
       }
     }
@@ -282,8 +288,10 @@ _SCRIPT = r"""
       const nodeObstacles = [...stage.querySelectorAll(".state-node")]
         .filter(node => node !== target)
         .map(node => expanded(stageRect(node), NODE_CLEARANCE));
-      const labelObstacles = [...stage.querySelectorAll(".edge-label.transition-label")]
-        .map(label => expanded(stageRect(label), LABEL_CLEARANCE));
+      const labelObstacles = [
+        ...stage.querySelectorAll(".edge-label.transition-label"),
+        ...stage.querySelectorAll(".transition-io-cluster"),
+      ].map(label => expanded(stageRect(label), LABEL_CLEARANCE));
       const context = {
         width: stage.clientWidth,
         height: stage.clientHeight,
@@ -295,9 +303,21 @@ _SCRIPT = r"""
         .map(candidate => scoreCandidate(candidate, context))
         .filter(Boolean)
         .sort((left, right) => left.score - right.score);
-      if (!ranked.length) return;
+      if (!ranked.length) {
+        stage.dataset.initialRouteReady = "failed";
+        stage.dataset.initialRouteError = "no route candidate avoids nodes and labels";
+        throw Error(stage.dataset.initialRouteError);
+      }
 
-      const best = ranked[0];
+      const best = ranked.find(item => item.crossings === 0);
+      if (!best) {
+        stage.dataset.initialRouteReady = "failed";
+        stage.dataset.initialRouteError = `no crossing-free initial route; best=${ranked[0].crossings}`;
+        stage.dataset.initialRouteCandidateCount = String(ranked.length);
+        throw Error(stage.dataset.initialRouteError);
+      }
+      delete stage.dataset.initialRouteError;
+      stage.dataset.initialRouteCandidateCount = String(ranked.length);
       initialPath.setAttribute("d", routePath(best.candidate.points));
       initialPath.classList.add("initial-transition-path");
       initialPath.dataset.routeSide = best.candidate.side;
