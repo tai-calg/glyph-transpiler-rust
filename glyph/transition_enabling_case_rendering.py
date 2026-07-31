@@ -9,7 +9,7 @@ _SCRIPT = r'''
 const MARKER="glyph-transition-enabling-cases-v1";
 let cache=null,timer=null,running=false;
 const text=value=>String(value??"").trim();
-async function state(){if(cache)return cache;const response=await fetch("/api/state",{cache:"no-store"});if(!response.ok)throw Error("diagram state unavailable");return cache=await response.json()}
+async function state(){const live=typeof snapshot==="object"&&snapshot?snapshot:null;if(live)return live;if(cache)return cache;const response=await fetch("/api/state",{cache:"no-store"});if(!response.ok)throw Error("diagram state unavailable");return cache=await response.json()}
 function selectedMachine(data){const machines=data?.views?.state?.machines||[],name=document.getElementById("machine-select")?.selectedOptions?.[0]?.textContent;return machines.find(machine=>machine.name===name)||machines[0]||null}
 function actionOf(transition){const action=window.GlyphExecutionContext?.actionFor?.(transition)??transition?.action;if(typeof action==="string")return text(action);return text(action?.display)||text(action?.expression)}
 function casesOf(transition){return Array.isArray(transition?.enabling_cases)?transition.enabling_cases:[]}
@@ -56,7 +56,7 @@ function schedule(delay=0){clearTimeout(timer);timer=setTimeout(()=>apply().catc
 for(const event of["glyph-transition-io-clusters-ready","glyph-locale-changed","glyph-state-transition-ir-v3-labels-ready","glyph-execution-context-changed"]){document.addEventListener(event,()=>{cache=null;schedule(0)})}
 document.addEventListener("change",event=>{if(event.target?.id==="machine-select"){cache=null;const stage=document.querySelector(".state-node")?.closest(".graph-stage");if(stage)delete stage.dataset.transitionEnablingCasesReady;schedule(0)}});
 new MutationObserver(()=>schedule(30)).observe(document.getElementById("view")||document.body,{childList:true,subtree:true});
-window.glyphTransitionEnablingCases={marker:MARKER,apply:()=>schedule(0)};
+window.glyphTransitionEnablingCases={marker:MARKER,version:2,apply:async()=>{cache=null;for(let attempt=0;attempt<100&&running;attempt+=1)await new Promise(resolve=>setTimeout(resolve,10));if(running)throw Error("enabling-case renderer did not become idle");return apply()}};
 schedule(0);
 })();
 </script>

@@ -64,6 +64,7 @@ def test_transaction_contains_publication_grade_layout_phases() -> None:
     assert "writeStored(labelStorageKey(data),saved)" in html
     assert "window.glyphDiagramViewport?.fitInitial?.()" in html
     assert "await window.glyphTransitionIoClusters?.render?.()" in html
+    assert "await window.glyphTransitionEnablingCases?.apply?.()" in html
 
 
 def test_interaction_adapters_persist_only_real_drags() -> None:

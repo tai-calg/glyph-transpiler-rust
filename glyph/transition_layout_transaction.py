@@ -704,7 +704,10 @@ async function transaction(token,reason){
   await nextFrame();
   if(cancelled(token))return{status:"cancelled",stage};
   internalClusterRefresh=true;
-  try{await window.glyphTransitionIoClusters?.render?.()}finally{internalClusterRefresh=false}
+  try{
+    await window.glyphTransitionIoClusters?.render?.();
+    await window.glyphTransitionEnablingCases?.apply?.();
+  }finally{internalClusterRefresh=false}
   await nextFrame();
   if(cancelled(token))return{status:"cancelled",stage};
   await ensureClusters(stage,machine,token);
