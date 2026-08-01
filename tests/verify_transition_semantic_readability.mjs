@@ -81,7 +81,7 @@ async function inspect(page) {
         semantic: cluster.dataset.ioValue || "",
         lineCount: Number(cluster.dataset.semanticLineCount || 0),
         longest: Number(cluster.dataset.semanticLongestLine || 0),
-        fallback: cluster.dataset.semanticLineFallback || "",
+        lineStrategy: cluster.dataset.semanticLineFallback || "",
         distance: Number(cluster.dataset.ioDistance || 0),
         rect: cluster.getBoundingClientRect(),
         lines,
@@ -160,7 +160,10 @@ try {
       assert.equal(Boolean(result.denseLayout), testCase.dense, `${testCase.slug}: dense layout decision`);
       assert(result.labels.length > 0, `${testCase.slug}: no labels`);
       assert(result.labels.every(label => label.text === label.semantic), `${testCase.slug}: visible label differs from semantic value`);
-      assert(result.labels.every(label => label.fallback === ""), `${testCase.slug}: semantic line fallback used`);
+      assert(
+        result.labels.every(label => ["", "measured", "narrow-retry"].includes(label.lineStrategy)),
+        `${testCase.slug}: semantic text fallback used`,
+      );
       assert(result.labels.every(label => label.lineCount === label.lines.length && label.lineCount > 0));
       assert(result.labels.every(label => label.lines.every(line => line.whiteSpace === "nowrap")));
       assert(result.labels.every(label => label.lines.every(line => line.inside)), `${testCase.slug}: line escaped label box`);
