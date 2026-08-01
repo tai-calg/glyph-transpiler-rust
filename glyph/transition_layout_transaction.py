@@ -832,9 +832,6 @@ for(const eventName of[
 document.addEventListener("change",event=>{
   if(event.target?.id==="machine-select"){invalidateState();schedule("machine-change",0)}
 });
-document.addEventListener("pointerup",event=>{
-  if(event.target?.closest?.(".state-node,.transition-io-cluster"))schedule("manual-edit",24);
-},true);
 const view=document.getElementById("view")||document.body;
 new MutationObserver(synchronizeStage).observe(view,{childList:true,subtree:true});
 window.addEventListener("resize",()=>schedule("window-resize",120));
