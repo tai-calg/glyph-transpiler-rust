@@ -143,7 +143,11 @@ def test_interaction_adapters_persist_only_real_drags() -> None:
         assert 'eventName of["pagehide","beforeunload"]' in html
 
     assert "pointerDistance(active,event)<DRAG_THRESHOLD" in label_html
-    assert "if(visualDistance<1)return" in label_html
+    assert "active.finalPoint=point" in label_html
+    assert "if(!record.dragged||!record.finalPoint)return" in label_html
+    assert "setPointerCapture?.(event.pointerId)" in label_html
+    assert "releasePointerCapture?.(event.pointerId)" in label_html
+    assert 'publicationGuard()?.invalidate?.(active.stage,"manual-label-drag")' in label_html
     assert "nearestCertifiablePoint(record,requested)" in label_html
     assert "Math.hypot(next.x-anchor.x,next.y-anchor.y)<=MAX_DISTANCE+.25?next:null" in label_html
     assert "pointerDistance(active,event)<DRAG_THRESHOLD" in node_html
