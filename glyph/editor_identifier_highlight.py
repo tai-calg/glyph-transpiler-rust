@@ -9,10 +9,12 @@ _STYLE = r"""
 .identifier-highlight-surface{
   position:absolute;
   z-index:0;
+  display:none;
   overflow:hidden;
   background:#0b1018;
   pointer-events:none;
 }
+.editor-wrap.identifier-highlight-active>.identifier-highlight-surface{display:block}
 .identifier-highlight-layer{
   position:absolute;
   top:0;
@@ -24,7 +26,7 @@ _STYLE = r"""
   border:0;
   white-space:pre;
   tab-size:2;
-  color:transparent;
+  color:var(--text);
   background:transparent;
   pointer-events:none;
   user-select:none;
@@ -34,7 +36,7 @@ _STYLE = r"""
   margin:0;
   padding:0;
   border-radius:3px;
-  color:transparent;
+  color:var(--text);
   background:rgba(148,163,184,.24);
   box-shadow:0 0 0 1px rgba(148,163,184,.13);
 }
@@ -42,22 +44,22 @@ _STYLE = r"""
   position:relative;
   z-index:2;
 }
-.editor-wrap>.editor{
+.editor-wrap.identifier-highlight-active>.editor{
   position:relative;
   z-index:1;
+  color:transparent!important;
   background:transparent!important;
   caret-color:var(--text);
 }
-.editor-wrap>.editor::selection{
+.editor-wrap.identifier-highlight-active>.editor::selection{
+  color:transparent;
   background:rgba(148,163,184,.30);
 }
-.identifier-highlight-surface[data-identifier=""] .identifier-highlight-layer mark{
-  background:transparent;
-  box-shadow:none;
-}
 .theme-monochrome .identifier-highlight-surface{background:#fff!important}
+.theme-monochrome .identifier-highlight-layer,
+.theme-monochrome .identifier-highlight-layer mark{color:#111!important}
 .theme-monochrome .identifier-highlight-layer mark,
-.theme-monochrome .editor-wrap>.editor::selection{
+.theme-monochrome .editor-wrap.identifier-highlight-active>.editor::selection{
   background:rgba(0,0,0,.12)!important;
   box-shadow:0 0 0 1px rgba(0,0,0,.14)!important;
 }
@@ -129,6 +131,8 @@ function render(force=false){
   currentIdentifier=identifier;
   matchCount=0;
   highlight.innerHTML=renderHtml(value,identifier);
+  const active=Boolean(focused&&identifier);
+  parent.classList.toggle("identifier-highlight-active",active);
   surface.dataset.identifier=identifier;
   surface.dataset.identifierMatchCount=String(matchCount);
   sourceEditor.dataset.activeIdentifier=identifier;
