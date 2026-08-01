@@ -13,6 +13,7 @@ const num=value=>Number.parseFloat(value||"0")||0;
 const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
 const nodeName=node=>node.querySelector(".state-name,.node-name")?.textContent?.trim()||"node";
 const scaleFor=stage=>window.glyphDiagramViewport?.scaleFor(stage)||num(stage?.dataset.viewportScale)||1;
+const publicationGuard=()=>window.glyphNodeDragPublicationGuard||null;
 
 function invalidateState(){
   stateVersion+=1;
@@ -120,9 +121,15 @@ function constrainPosition(record,left,top){
   }
   return{left:record.startLeft,top:record.startTop,constrained:true};
 }
+function invalidatePublication(record,reason){
+  if(record.publicationInvalidated)return true;
+  record.publicationInvalidated=Boolean(publicationGuard()?.invalidate?.(record.stage,reason));
+  return record.publicationInvalidated;
+}
 function moveActive(event){
   if(!active||active.pointerId!==event.pointerId)return false;
   if(!active.moved&&pointerDistance(active,event)<DRAG_THRESHOLD)return false;
+  if(!active.moved)invalidatePublication(active,"manual-node-drag");
   active.moved=true;
   const scale=Math.max(.01,active.scale),grid=event.shiftKey?1:8;
   const width=Number.parseFloat(active.stage.style.width||"")||active.stage.scrollWidth;
@@ -199,6 +206,7 @@ document.addEventListener("pointerdown",event=>{
     startTop:num(node.style.top),
     scale:scaleFor(stage),
     moved:false,
+    publicationInvalidated:false,
     storageBefore:positionStorageState(),
   };
 },true);
@@ -220,18 +228,23 @@ document.addEventListener("pointerup",event=>{
     return;
   }
   record.positions=snapshot(record.stage);
-  queueMicrotask(()=>persist(record).catch(error=>report(error,"transition node position persistence failed")));
+  queueMicrotask(()=>persist(record).catch(error=>{
+    publicationGuard()?.schedule?.("manual-node-persist-failed");
+    report(error,"transition node position persistence failed");
+  }));
 },true);
 document.addEventListener("pointercancel",event=>{
   if(!active||active.pointerId!==event.pointerId)return;
   event.stopImmediatePropagation();
-  active.node.style.left=`${active.startLeft}px`;
-  active.node.style.top=`${active.startTop}px`;
-  active.node.classList.remove("dragging");
-  active=null;
+  const record=active;active=null;
+  record.node.style.left=`${record.startLeft}px`;
+  record.node.style.top=`${record.startTop}px`;
+  record.node.classList.remove("dragging");
+  if(record.publicationInvalidated)publicationGuard()?.schedule?.("manual-node-cancelled");
 },true);
 document.addEventListener("keydown",event=>{
   if(!event.key.startsWith("Arrow"))return;
+  if(event.target?.matches?.("input,textarea,select,[contenteditable=true]"))return;
   const node=document.querySelector(".state-node.selected-node");
   const stage=node?.closest(".graph-stage");
   if(!node||!stage||stage.dataset.transitionLayoutState!=="ready")return;
@@ -247,17 +260,22 @@ document.addEventListener("keydown",event=>{
     stage,
     startLeft:num(node.style.left),
     startTop:num(node.style.top),
+    publicationInvalidated:false,
   };
   const requestedLeft=clamp(record.startLeft+dx,8,Math.max(8,width-node.offsetWidth-8));
   const requestedTop=clamp(record.startTop+dy,8,Math.max(8,height-node.offsetHeight-8));
   const position=constrainPosition(record,requestedLeft,requestedTop);
   if(position.left===record.startLeft&&position.top===record.startTop)return;
+  invalidatePublication(record,"manual-node-keyboard");
   node.style.left=`${position.left}px`;
   node.style.top=`${position.top}px`;
   stage.dataset.transitionNodeClearance=String(NODE_CLEARANCE);
   stage.dataset.transitionNodeDragConstrained=position.constrained?"true":"false";
   record.positions=snapshot(stage);
-  queueMicrotask(()=>persist(record).catch(error=>report(error,"transition node keyboard persistence failed")));
+  queueMicrotask(()=>persist(record).catch(error=>{
+    publicationGuard()?.schedule?.("manual-node-keyboard-persist-failed");
+    report(error,"transition node keyboard persistence failed");
+  }));
 },true);
 document.addEventListener("change",event=>{
   if(event.target?.id==="machine-select"){
@@ -280,7 +298,7 @@ for(const eventName of["pagehide","beforeunload"]){
 }
 lastStage=document.querySelector(".state-node")?.closest(".graph-stage")||null;
 scheduleRestore(lastStage,0);
-window.glyphTransitionNodePositionAdapter={marker:MARKER,version:5,restore:()=>scheduleRestore(null,0)};
+window.glyphTransitionNodePositionAdapter={marker:MARKER,version:6,restore:()=>scheduleRestore(null,0)};
 })();
 </script>
 """
