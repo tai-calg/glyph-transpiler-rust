@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from copy import deepcopy
 from dataclasses import dataclass
 from enum import Enum
@@ -13,7 +14,7 @@ from .semantic_event import (
 )
 
 
-EVIDENCE_PROJECTION_VERSION = 5
+EVIDENCE_PROJECTION_VERSION = 6
 
 
 class EvidenceProjectionMode(str, Enum):
@@ -95,15 +96,26 @@ def audit_evidence_projection(
     evidence_field: str = "execution_evidence_v2",
     include_empty_evidence: bool = False,
 ) -> ProjectionReadinessReport:
-    """Audit every expected transition when completeness is requested.
+    """Audit every expected transition and reject ambiguous edge identity.
 
     ``include_empty_evidence`` means that a transition without the Evidence field is
     a rejected transition, not an invisible transition. This prevents a partial
-    Evidence set from reporting ready by shrinking the denominator.
+    Evidence set from reporting ready by shrinking the denominator. Duplicate view
+    edge IDs and Evidence whose edge ID differs from its owning transition are also
+    rejected before any Exact Action is considered.
     """
 
     machine_transitions = _mappings(machine_view.get("transitions"))
     expected = len(machine_transitions)
+    transition_edge_ids = tuple(
+        _transition_edge_id(transition, index)
+        for index, transition in enumerate(machine_transitions)
+    )
+    duplicate_edge_ids = {
+        edge_id
+        for edge_id, count in Counter(transition_edge_ids).items()
+        if count > 1
+    }
     transitions: list[TransitionProjectionReadiness] = []
     rejected = 0
     relevant = 0
@@ -111,10 +123,40 @@ def audit_evidence_projection(
     missing = 0
 
     for index, transition in enumerate(machine_transitions):
-        fallback_edge_id = str(
-            transition.get("id") or transition.get("edge_id") or index
-        )
+        transition_edge_id = transition_edge_ids[index]
         evidence = _mapping(transition.get(evidence_field))
+        evidence_edge_id = str(evidence.get("edge_id") or transition_edge_id)
+
+        if transition_edge_id in duplicate_edge_ids:
+            relevant += 1
+            rejected += 1
+            transitions.append(
+                TransitionProjectionReadiness(
+                    transition_edge_id,
+                    0,
+                    0,
+                    False,
+                    "duplicate-transition-edge-id",
+                    None,
+                )
+            )
+            continue
+
+        if evidence and evidence_edge_id != transition_edge_id:
+            relevant += 1
+            rejected += 1
+            transitions.append(
+                TransitionProjectionReadiness(
+                    transition_edge_id,
+                    0,
+                    0,
+                    False,
+                    "evidence-edge-id-mismatch",
+                    None,
+                )
+            )
+            continue
+
         if not evidence:
             if not include_empty_evidence:
                 continue
@@ -123,7 +165,7 @@ def audit_evidence_projection(
             missing += 1
             transitions.append(
                 TransitionProjectionReadiness(
-                    fallback_edge_id,
+                    transition_edge_id,
                     0,
                     0,
                     False,
@@ -140,7 +182,7 @@ def audit_evidence_projection(
         decisions = tuple(check_exact_action_projection(context) for context in contexts)
         rejected += sum(not decision.allowed for decision in decisions)
         item = _transition_readiness(
-            str(evidence.get("edge_id") or fallback_edge_id),
+            transition_edge_id,
             decisions,
         )
         transitions.append(item)
@@ -168,7 +210,8 @@ def project_machine_from_evidence(
 
     ``STRICT_EXACT`` first removes every System-owned compatibility projection from
     every transition. It then restores a System Action only when native Evidence is
-    exact. Missing or rejected Evidence therefore cannot leave a stale legacy Action.
+    exact and belongs unambiguously to that same transition. Missing, duplicate,
+    mismatched or rejected Evidence therefore cannot leave a stale legacy Action.
     Native Effect events receive ordered semantic identities before projection;
     Machine display aliases are marked only when their complete invocation sequence
     matches those exact events. Machine-owned ``action`` data is not removed.
@@ -184,25 +227,24 @@ def project_machine_from_evidence(
         evidence_field=evidence_field,
         include_empty_evidence=True,
     )
-    readiness = {item.edge_id: item for item in report.transitions}
+    readiness_by_transition = report.transitions
     projected: list[dict[str, object]] = []
 
     for index, original in enumerate(_mappings(result.get("transitions"))):
         transition = dict(original)
         evidence = _mapping(transition.get(evidence_field))
-        edge_id = str(
-            evidence.get("edge_id")
-            or transition.get("id")
-            or transition.get("edge_id")
-            or index
-        )
+        edge_id = _transition_edge_id(transition, index)
         if mode is EvidenceProjectionMode.STRICT_EXACT:
             transition = _strict_sanitize_transition(
                 transition,
                 remove_legacy_evidence=native_evidence,
             )
 
-        item = readiness.get(edge_id)
+        item = (
+            readiness_by_transition[index]
+            if index < len(readiness_by_transition)
+            else None
+        )
         if item is not None:
             transition["evidence_projection"] = item.to_ir()
             if mode is not EvidenceProjectionMode.SHADOW:
@@ -409,6 +451,17 @@ def _transition_readiness(
         True,
         "all-contexts-have-equivalent-exact-evidence",
         action,
+    )
+
+
+def _transition_edge_id(
+    transition: Mapping[str, object],
+    index: int,
+) -> str:
+    return str(
+        transition.get("id")
+        or transition.get("edge_id")
+        or index
     )
 
 
