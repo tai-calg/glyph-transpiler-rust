@@ -24,7 +24,17 @@ class TransitionNodePositionAdapterTests(unittest.TestCase):
         self.assertIn("event.stopImmediatePropagation()", html)
         self.assertIn("record.positions=snapshot(record.stage)", html)
         self.assertIn("manual-node-persisted", html)
-        self.assertIn("version:4", html)
+        self.assertIn("version:5", html)
+
+    def test_drag_keeps_label_feasible_clearance_from_other_nodes(self) -> None:
+        html = enhance_transition_node_position_adapter_html(DIAGRAM_HTML)
+
+        self.assertIn("NODE_CLEARANCE=96", html)
+        self.assertIn("function positionIsClear(record,left,top)", html)
+        self.assertIn("function constrainPosition(record,left,top)", html)
+        self.assertIn("for(let step=23;step>=0;step-=1)", html)
+        self.assertIn("const position=constrainPosition(active,requestedLeft,requestedTop)", html)
+        self.assertIn('active.stage.dataset.transitionNodeDragConstrained=position.constrained?"true":"false"', html)
 
     def test_simple_click_neither_moves_nor_persists(self) -> None:
         html = enhance_transition_node_position_adapter_html(DIAGRAM_HTML)
@@ -42,11 +52,12 @@ class TransitionNodePositionAdapterTests(unittest.TestCase):
             html,
         )
 
-    def test_keyboard_move_uses_the_same_transaction_boundary(self) -> None:
+    def test_keyboard_move_uses_the_same_clearance_and_transaction_boundary(self) -> None:
         html = enhance_transition_node_position_adapter_html(DIAGRAM_HTML)
 
         self.assertIn('document.addEventListener("keydown"', html)
         self.assertIn('document.querySelector(".state-node.selected-node")', html)
+        self.assertIn("const position=constrainPosition(record,requestedLeft,requestedTop)", html)
         self.assertIn("transition node keyboard persistence failed", html)
         self.assertIn("persist(record)", html)
 
