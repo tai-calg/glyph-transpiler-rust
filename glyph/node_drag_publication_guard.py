@@ -29,7 +29,7 @@ _SCRIPT = r"""
   window.glyphNodeDragPublicationGuard = Object.freeze({
     marker: MARKER,
     version: 3,
-    interactionOwner: "glyph-transition-node-position-adapter-v7",
+    interactionOwner: "glyph-transition-node-position-adapter-v8",
     ownsPointerEvents: false,
     ownsKeyboardEvents: false,
     invalidate,
