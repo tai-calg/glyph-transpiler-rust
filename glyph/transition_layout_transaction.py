@@ -57,7 +57,7 @@ _SCRIPT = r"""
 const MARKER="glyph-transition-layout-transaction-v1";
 const MAX_DISTANCE=96,GAP=6,DENSE_TRANSITIONS=7;
 const MIN_CANVAS_WIDTH=760,MIN_CANVAS_HEIGHT=560,CANVAS_PADDING=132;
-const LABEL_MIN_WIDTH=108,LABEL_MAX_WIDTH=520,LABEL_RETRY_WIDTH=320,LABEL_LAST_WIDTH=240;
+const LABEL_MIN_WIDTH=108,LABEL_MAX_WIDTH=520,LABEL_RETRY_WIDTH=320,LABEL_LAST_WIDTH=240,LABEL_TIGHT_WIDTH=86;
 const OPTION_LIMIT=160,SEARCH_STEPS=220000,SEARCH_BUDGET_MS=450;
 const PREREQUISITE_TIMEOUT_MS=9000,CLUSTER_TIMEOUT_MS=5000;
 const RINGS=[0,12,24,36,48,60,72,84,96],ANGLES=72;
@@ -678,6 +678,7 @@ async function placeWithRetry(stage,data,machine,token){
     {maxLineWidth:LABEL_MAX_WIDTH,growth:1},
     {maxLineWidth:LABEL_RETRY_WIDTH,growth:1.18},
     {maxLineWidth:LABEL_LAST_WIDTH,growth:1.32},
+    {maxLineWidth:LABEL_TIGHT_WIDTH,growth:1.32},
   ];
   let lastError=null;
   for(let attempt=0;attempt<attempts.length;attempt+=1){
