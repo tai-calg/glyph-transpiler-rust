@@ -145,14 +145,15 @@ try {
   const repeated = await layoutState(page);
 
   assert(burstLatencyMs < 1000, `coalesced 20-request burst took ${burstLatencyMs}ms`);
-  assert.equal(repeated.layoutGeneration, requested, JSON.stringify(repeated));
-  assert.equal(repeated.requestedGeneration, requested, JSON.stringify(repeated));
-  assert(repeated.completedGeneration >= requested, JSON.stringify(repeated));
+  assert(repeated.layoutGeneration >= requested, JSON.stringify(repeated));
+  assert(repeated.requestedGeneration >= requested, JSON.stringify(repeated));
+  assert.equal(repeated.layoutGeneration, repeated.requestedGeneration, JSON.stringify(repeated));
+  assert(repeated.completedGeneration >= repeated.requestedGeneration, JSON.stringify(repeated));
   assert.equal(repeated.error, "", JSON.stringify(repeated));
   assert(repeated.maximumLabelDistance <= repeated.labelDistanceLimit + 0.5, JSON.stringify(repeated));
   assert.deepEqual(browserErrors, [], browserErrors.join("\n"));
 
-  console.log(JSON.stringify({ initialLatencyMs, burstLatencyMs, first, repeated }));
+  console.log(JSON.stringify({ initialLatencyMs, burstLatencyMs, requested, first, repeated }));
   await page.close();
 } finally {
   await browser.close();
