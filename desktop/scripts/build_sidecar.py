@@ -75,6 +75,8 @@ def build(path: Path, *, development: bool) -> None:
             str(temp / "spec"),
             "--paths",
             str(ROOT),
+            "--collect-data",
+            "glyph",
         ]
         if not development:
             command.append("--clean")
