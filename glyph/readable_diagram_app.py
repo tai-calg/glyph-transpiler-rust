@@ -19,6 +19,7 @@ from .diagram_live_stability import (
 from .diagram_locale import enhance_diagram_locale_html
 from .diagram_rendered_geometry_adapter import enhance_diagram_rendered_geometry_html
 from .diagram_workspace_layout import enhance_workspace_layout_html
+from .editor_identifier_highlight import enhance_editor_identifier_highlight_html
 from .state_diagram_workspace import enhance_state_diagram_workspace_html
 from .state_viewport_reservation import enhance_state_viewport_reservation_html
 from .transition_enabling_case_rendering import (
@@ -30,6 +31,7 @@ from .transition_execution_context_selector import (
 from .transition_io_canonicalizer import enhance_transition_io_canonicalizer_html
 from .transition_io_clusters import enhance_transition_io_clusters_html
 from .transition_label_drag_guard import enhance_transition_label_drag_guard_html
+from .transition_label_inspector import enhance_transition_label_inspector_html
 from .transition_layout_interaction_adapter import (
     enhance_transition_layout_interaction_adapter_html,
 )
@@ -69,6 +71,7 @@ def _presentation_pipeline():
         enhance_diagram_editor_render_guard_html,
         enhance_code_derived_system_html,
         enhance_diagram_live_stability_html,
+        enhance_editor_identifier_highlight_html,
         enhance_diagram_label_editor_html,
         enhance_workspace_layout_html,
         enhance_state_viewport_reservation_html,
@@ -85,6 +88,7 @@ def _presentation_pipeline():
         enhance_transition_readable_exports_html,
         enhance_transition_readable_layout_html,
         enhance_transition_layout_transaction_html,
+        enhance_transition_label_inspector_html,
         enhance_transition_layout_interaction_adapter_html,
         enhance_transition_node_position_adapter_html,
         enhance_transition_layout_tab_guard_html,
