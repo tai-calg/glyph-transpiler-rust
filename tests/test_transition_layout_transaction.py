@@ -65,6 +65,7 @@ def test_transaction_contains_publication_grade_layout_phases() -> None:
     assert "window.glyphDiagramViewport?.fitInitial?.()" in html
     assert "await window.glyphTransitionIoClusters?.render?.()" in html
     assert "await window.glyphTransitionEnablingCases?.apply?.()" in html
+    assert "manual-edit" not in html
 
 
 def test_automatic_labels_use_alternate_arrow_anchors_only_as_fallback() -> None:
