@@ -11,17 +11,21 @@ from glyph.transition_node_layout_guard import (
 
 
 class TransitionNodeLayoutGuardTests(unittest.TestCase):
-    def test_enhancer_preserves_nearest_feasible_node_position(self) -> None:
+    def test_guard_delegates_without_owning_interaction_or_persistence(self) -> None:
         html = enhance_transition_node_layout_guard_html(DIAGRAM_HTML)
         self.assertIn("glyph-transition-node-layout-guard-v1-script", html)
-        self.assertIn("for(const ratio of[.75,.5,.25,0])", html)
-        self.assertIn("glyphTransitionIoCollisionSolver?.run", html)
-        self.assertIn("glyphTransitionLabelReadability?.repair", html)
-        self.assertIn("glyph.diagram.positions.v1:", html)
-        self.assertIn('ratio===0?"restored":"adjusted"', html)
-        self.assertIn('transitionIoNodeConstraint="restored"', html)
+        self.assertIn("glyphTransitionLayoutTransaction?.schedule", html)
+        self.assertIn('transitionIoNodeConstraint="delegated"', html)
+        self.assertIn("ownsPointerEvents:false", html)
+        self.assertIn("ownsPersistence:false", html)
+        self.assertIn("ownsRouting:false", html)
+        self.assertIn("version:2", html)
+        self.assertNotIn('document.addEventListener("pointerdown"', html)
+        self.assertNotIn('document.addEventListener("pointerup"', html)
+        self.assertNotIn("localStorage.setItem", html)
+        self.assertNotIn("function stateCurve(", html)
 
-    def test_prepared_app_installs_guard_after_readability(self) -> None:
+    def test_prepared_app_installs_passive_guard_after_readability(self) -> None:
         prepare_diagram_app()
         html = diagram_app.DIAGRAM_HTML
         guard = html.index("glyph-transition-node-layout-guard-v1-script")
