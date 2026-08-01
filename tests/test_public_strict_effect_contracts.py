@@ -6,7 +6,7 @@ import unittest
 
 from glyph.compilation import CompilationPipeline
 from glyph.compiler import ExternDecl
-from glyph.default_workspace import DEFAULT_SOURCE
+from glyph.default_workspace import PREVIOUS_CLI_DEFAULT_SOURCE
 from glyph.transition_analysis import (
     BUILTIN_DEFAULT_WORKSPACE_SOURCE_ID,
     PUBLIC_STRICT_EXCLUSIONS,
@@ -22,7 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def _builtin_default_source() -> str:
-    return DEFAULT_SOURCE
+    return PREVIOUS_CLI_DEFAULT_SOURCE
 
 
 def _program_source(source_id: str, source_path: str | None) -> str:
