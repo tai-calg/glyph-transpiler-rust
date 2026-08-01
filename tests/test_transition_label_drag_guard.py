@@ -15,9 +15,21 @@ class TransitionLabelDragGuardTests(unittest.TestCase):
         self.assertIn('interactionOwner:"glyph-transition-layout-interaction-adapter-v4"', html)
         self.assertIn("ownsPointerEvents:false", html)
         self.assertIn("ownsPersistence:false", html)
+        self.assertIn("function invalidate(stage,reason)", html)
+        self.assertIn('stage.dataset.transitionPublicationReady="false"', html)
+        self.assertIn('stage.dataset.layoutCertificateRequestState="invalidated"', html)
+        self.assertIn("glyphTransitionLayoutTransaction?.schedule?.(reason,0)", html)
+        self.assertIn("version:3", html)
         self.assertNotIn('addEventListener("pointerdown"', html)
         self.assertNotIn('addEventListener("pointerup"', html)
         self.assertNotIn("localStorage.setItem", html)
+
+    def test_dragged_cluster_remains_interactive_while_publication_is_invalid(self) -> None:
+        html = enhance_transition_label_drag_guard_html(DIAGRAM_HTML)
+
+        self.assertIn('.transition-io-cluster.dragging-io', html)
+        self.assertIn("visibility:visible!important", html)
+        self.assertIn("pointer-events:auto!important", html)
 
     def test_prepared_app_installs_passive_guard_after_layout_guards(self) -> None:
         prepare_diagram_app()
