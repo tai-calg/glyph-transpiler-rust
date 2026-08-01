@@ -64,6 +64,7 @@ async function state(){
   return cache=await response.json();
 }
 function selectedMachine(data){const machines=data?.views?.state?.machines||[],name=document.getElementById("machine-select")?.selectedOptions?.[0]?.textContent;return machines.find(machine=>machine.name===name)||machines[0]||null}
+function projectionModeOf(data,machine){return text(data?.views?.rtai_projection_mode)||text(machine?.analysis?.evidence_projection_mode)||"shadow"}
 function semanticOf(transition){const raw=transition?.rtai_semantic_status||{},status=["exact","may","unknown"].includes(text(raw.status))?text(raw.status):"unknown";return{status,label:status==="exact"?"Exact":status==="may"?"May":"Unknown",reason:text(raw.reason)||"native Evidence status is unavailable"}}
 function escapeId(value){return window.CSS?.escape?CSS.escape(value):value.replace(/[^A-Za-z0-9_-]/g,"\\$&")}
 function setDataset(element,name,value){if(element.dataset[name]===value)return false;element.dataset[name]=value;return true}
@@ -84,7 +85,7 @@ function clearCluster(cluster){
   if(cluster.classList.contains("rtai-semantic-badge-visible")){cluster.classList.remove("rtai-semantic-badge-visible");changed=true}
   return changed;
 }
-function signatureOf(machine){return[window.GlyphI18n?.locale||document.documentElement.lang||"ja",machine?.name||"",machine?.analysis?.evidence_projection_mode||"shadow",...(machine?.transitions||[]).map((transition,index)=>{const semantic=semanticOf(transition);return[text(transition.id)||`T${index+1}`,semantic.status,semantic.reason].join("\u001f")})].join("\u001e")}
+function signatureOf(machine,projectionMode){return[window.GlyphI18n?.locale||document.documentElement.lang||"ja",machine?.name||"",projectionMode,...(machine?.transitions||[]).map((transition,index)=>{const semantic=semanticOf(transition);return[text(transition.id)||`T${index+1}`,semantic.status,semantic.reason].join("\u001f")})].join("\u001e")}
 async function render(){
   if(disposed||running)return;
   const stage=document.querySelector(".state-node")?.closest(".graph-stage");
@@ -95,7 +96,7 @@ async function render(){
     if(disposed)return;
     const machine=selectedMachine(data);
     if(!machine)return;
-    const projectionMode=text(machine?.analysis?.evidence_projection_mode)||"shadow",strict=projectionMode==="strict-exact",signature=signatureOf(machine);
+    const projectionMode=projectionModeOf(data,machine),strict=projectionMode==="strict-exact",signature=signatureOf(machine,projectionMode);
     let changed=lastSignature!==signature;
     if(stage.dataset.rtaiProjectionMode!==projectionMode){stage.dataset.rtaiProjectionMode=projectionMode;changed=true}
     const liveIds=new Set();
