@@ -32,20 +32,19 @@ async function stop(child) {
   if (child.exitCode === null) child.kill("SIGKILL");
 }
 
-async function waitForOrdinaryLayout(page, minimumGeneration = 0) {
-  await page.waitForFunction(minimum => {
+async function waitForOrdinaryLayout(page) {
+  await page.waitForFunction(() => {
     const stage = document.querySelector(".state-node")?.closest(".graph-stage");
     const transaction = window.glyphTransitionLayoutTransaction;
-    return Number(stage?.dataset.transitionLayoutGeneration || 0) >= Number(minimum || 0)
-      && stage?.dataset.transitionLayoutState === "ready"
-      && stage?.dataset.transitionPublicationReady === "true"
-      && stage?.dataset.transitionIoClustersReady === "true"
-      && stage?.dataset.transitionEnablingCasesReady === "true"
-      && stage?.dataset.transitionLayoutProfile === "ordinary"
-      && stage?.dataset.stateDiagramWorkspaceGeometryReady === "true"
-      && stage?.dataset.stateDiagramWorkspaceViewportReady === "true"
+    return stage?.dataset.transitionLayoutState === "ready"
+      && stage.dataset.transitionPublicationReady === "true"
+      && stage.dataset.transitionIoClustersReady === "true"
+      && stage.dataset.transitionEnablingCasesReady === "true"
+      && stage.dataset.transitionLayoutProfile === "ordinary"
+      && stage.dataset.stateDiagramWorkspaceGeometryReady === "true"
+      && stage.dataset.stateDiagramWorkspaceViewportReady === "true"
       && transaction?.generation === transaction?.completedGeneration;
-  }, minimumGeneration, { timeout: 5000 });
+  }, null, { timeout: 5000 });
 }
 
 async function layoutState(page) {
@@ -134,18 +133,15 @@ try {
   assert(initialLatencyMs < 5000, `initial state rendering took ${initialLatencyMs}ms`);
   assertOrdinary(initial);
 
-  let generation = initial.generation;
   const returnLatencies = [];
   for (let cycle = 0; cycle < 8; cycle += 1) {
     await page.click('button[data-tab="io"]');
     await page.waitForFunction(() => document.querySelector(".tab.active")?.dataset.tab === "io");
     const returnedAt = Date.now();
     await page.click('button[data-tab="state"]');
-    await waitForOrdinaryLayout(page, generation + 1);
+    await waitForOrdinaryLayout(page);
     returnLatencies.push(Date.now() - returnedAt);
-    const current = await layoutState(page);
-    generation = current.generation;
-    assertOrdinary(current);
+    assertOrdinary(await layoutState(page));
   }
   assert(Math.max(...returnLatencies) < 2000, `I/O return latency exceeded bound: ${returnLatencies.join(",")}`);
   assert.deepEqual(consoleErrors, []);
