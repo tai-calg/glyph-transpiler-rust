@@ -104,9 +104,13 @@ try {
   await page.goto(url, { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => document.querySelector("#status")?.textContent === "ready");
   await page.click('button[data-tab="state"]');
-  await page.waitForFunction(() => (
-    document.querySelector(".graph-stage")?.dataset.transitionEnablingCasesReady === "true"
-  ));
+  await page.waitForFunction(() => {
+    const stage = document.querySelector(".state-node")?.closest(".graph-stage");
+    return stage?.dataset.transitionIoClustersReady === "true"
+      && stage?.dataset.transitionEnablingCasesReady === "true"
+      && stage?.dataset.transitionLayoutState === "ready"
+      && stage?.dataset.transitionLayoutProfile === "ordinary";
+  });
 
   const rendered = await page.locator(".transition-io-cluster").evaluateAll(elements => (
     elements.map(element => ({
@@ -116,6 +120,8 @@ try {
       action: element.dataset.actionValue || "",
       value: element.dataset.ioValue || "",
       count: element.dataset.enablingCaseCount || "",
+      distance: Number(element.dataset.ioDistance || "0"),
+      maxDistance: Number(element.dataset.maxIoDistance || "0"),
     }))
   ));
 
@@ -157,23 +163,8 @@ try {
     "[otherwise] ➞ write_motor(SetMotorPower(normalize(input.raw)))",
   );
 
-  try {
-    await page.waitForFunction(() => {
-      const stage = document.querySelector(".graph-stage");
-      return stage?.dataset.transitionLayoutState === "ready"
-        && stage?.dataset.transitionIoCollisionSolved === "true"
-        && stage?.dataset.transitionIoCollisionCount === "0";
-    });
-  } catch (error) {
-    const diagnostic = await page.locator(".graph-stage").evaluate(stage => ({
-      dataset: { ...stage.dataset },
-      transaction: window.glyphTransitionLayoutTransaction ? {
-        generation: window.glyphTransitionLayoutTransaction.generation,
-        completedGeneration: window.glyphTransitionLayoutTransaction.completedGeneration,
-        lastReason: window.glyphTransitionLayoutTransaction.lastReason,
-      } : null,
-    }));
-    throw new Error(`enabling-case layout did not settle\n${JSON.stringify(diagnostic, null, 2)}\n${error.stack}`);
+  for (const item of rendered) {
+    assert(item.distance <= item.maxDistance + 0.5, `${item.id} label escaped its arrow bound`);
   }
 
   const stageState = await page.locator(".graph-stage").evaluate(stage => ({
@@ -181,16 +172,20 @@ try {
     transitionCount: stage.querySelectorAll(".transition-io-cluster").length,
     clustersReady: stage.dataset.transitionIoClustersReady || "",
     enablingCasesReady: stage.dataset.transitionEnablingCasesReady || "",
-    collisionSolved: stage.dataset.transitionIoCollisionSolved || "",
-    collisionCount: stage.dataset.transitionIoCollisionCount || "",
-    semanticRoleLinesReady: stage.dataset.transitionSemanticRoleLinesReady || "",
     layoutState: stage.dataset.transitionLayoutState || "",
+    layoutProfile: stage.dataset.transitionLayoutProfile || "",
+    layoutBudgetMs: stage.dataset.transitionLayoutBudgetMs || "",
+    denseCanvas: stage.dataset.transitionDenseCanvas || "",
     layoutError: stage.dataset.transitionLayoutError || "",
   }));
   assert.equal(stageState.transitionCount, machine.transitions.length);
+  assert.equal(stageState.clustersReady, "true");
+  assert.equal(stageState.enablingCasesReady, "true");
   assert.equal(stageState.layoutState, "ready");
-  assert.equal(stageState.collisionSolved, "true");
-  assert.equal(stageState.collisionCount, "0");
+  assert.equal(stageState.layoutProfile, "ordinary");
+  assert.equal(stageState.layoutBudgetMs, "48");
+  assert.equal(stageState.denseCanvas, "disabled");
+  assert.equal(stageState.layoutError, "");
   assert.deepEqual(consoleErrors, []);
   console.log(`enabling-case-stage-state ${JSON.stringify(stageState)}`);
 
@@ -200,4 +195,4 @@ try {
   await stop(child);
 }
 
-console.log("verified Input Pattern, Guard, operation Action, emitted output separation, fallback, and collision-free layout");
+console.log("verified Input Pattern, Guard, operation Action, emitted output separation, fallback, and bounded ordinary layout");
