@@ -19,12 +19,13 @@ class TransitionNodePositionAdapterTests(unittest.TestCase):
 
         self.assertIn("DRAG_THRESHOLD=3", html)
         self.assertIn("moved:false", html)
+        self.assertIn("publicationInvalidated:false", html)
         self.assertIn("pointerDistance(active,event)<DRAG_THRESHOLD", html)
         self.assertIn("active.moved=true", html)
         self.assertIn("event.stopImmediatePropagation()", html)
         self.assertIn("record.positions=snapshot(record.stage)", html)
         self.assertIn("manual-node-persisted", html)
-        self.assertIn("version:5", html)
+        self.assertIn("version:6", html)
 
     def test_drag_keeps_label_feasible_clearance_from_other_nodes(self) -> None:
         html = enhance_transition_node_position_adapter_html(DIAGRAM_HTML)
@@ -52,14 +53,41 @@ class TransitionNodePositionAdapterTests(unittest.TestCase):
             html,
         )
 
-    def test_keyboard_move_uses_the_same_clearance_and_transaction_boundary(self) -> None:
+    def test_pointer_owner_invalidates_publication_after_threshold(self) -> None:
+        html = enhance_transition_node_position_adapter_html(DIAGRAM_HTML)
+
+        threshold = html.index("pointerDistance(active,event)<DRAG_THRESHOLD")
+        invalidation = html.index('invalidatePublication(active,"manual-node-drag")')
+        movement = html.index("active.moved=true")
+        self.assertLess(threshold, invalidation)
+        self.assertLess(invalidation, movement)
+        self.assertIn(
+            'publicationGuard()?.schedule?.("manual-node-cancelled")',
+            html,
+        )
+
+    def test_keyboard_move_owns_invalidation_and_ignores_form_controls(self) -> None:
         html = enhance_transition_node_position_adapter_html(DIAGRAM_HTML)
 
         self.assertIn('document.addEventListener("keydown"', html)
+        self.assertIn(
+            'event.target?.matches?.("input,textarea,select,[contenteditable=true]")',
+            html,
+        )
         self.assertIn('document.querySelector(".state-node.selected-node")', html)
         self.assertIn("const position=constrainPosition(record,requestedLeft,requestedTop)", html)
+        self.assertIn('invalidatePublication(record,"manual-node-keyboard")', html)
         self.assertIn("transition node keyboard persistence failed", html)
         self.assertIn("persist(record)", html)
+
+    def test_failed_persistence_still_requests_recertification(self) -> None:
+        html = enhance_transition_node_position_adapter_html(DIAGRAM_HTML)
+
+        self.assertIn('publicationGuard()?.schedule?.("manual-node-persist-failed")', html)
+        self.assertIn(
+            'publicationGuard()?.schedule?.("manual-node-keyboard-persist-failed")',
+            html,
+        )
 
     def test_enhancer_is_idempotent(self) -> None:
         once = enhance_transition_node_position_adapter_html(DIAGRAM_HTML)
