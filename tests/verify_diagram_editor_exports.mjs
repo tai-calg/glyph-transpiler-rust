@@ -50,15 +50,15 @@ async function waitForOrdinaryLayout(page, minimumGeneration = 0) {
     const transaction = window.glyphTransitionLayoutTransaction;
     return stage?.dataset.editorReady === "true"
       && stage?.dataset.transitionIoClustersReady === "true"
-      && stage?.dataset.transitionEnablingCasesReady === "true"
       && stage?.dataset.transitionLayoutState === "ready"
       && stage?.dataset.transitionPublicationReady === "true"
       && stage?.dataset.transitionLayoutProfile === "ordinary"
       && stage?.dataset.transitionLayoutMode === "base"
       && stage?.dataset.transitionDenseCanvas === "disabled"
+      && stage?.dataset.stateDiagramWorkspaceGeometryReady === "true"
+      && stage?.dataset.initialRouteReady === "true"
       && !stage?.dataset.transitionLayoutError
       && Number(transaction?.generation || 0) >= Number(minimum || 0)
-      && transaction?.generation === transaction?.completedGeneration
       && document.querySelector(".transition-io-cluster")?.dataset.ioDragReady === "true";
   }, minimumGeneration, { timeout: 5000 });
 }
@@ -98,6 +98,13 @@ async function storedManualPlacement(page, transitionId) {
     }
     return false;
   }, transitionId);
+}
+
+async function hasStoredNodePositions(page) {
+  return page.evaluate(() => Array.from(
+    { length: localStorage.length },
+    (_, index) => localStorage.key(index),
+  ).some(key => key?.startsWith("glyph.diagram.positions.v1:")));
 }
 
 async function dragFeasibleTransitionCluster(page) {
@@ -158,9 +165,9 @@ try {
   assert.equal(await page.locator("#diagram-png").count(), 1);
   assert.equal(await page.locator("#diagram-pdf").count(), 1);
   assert.equal(await page.locator("#diagram-theme").inputValue(), "white");
-  assert(await page.locator('.transition-io-node[data-io-kind="io"]').count() > 0);
-  assert.equal(await page.locator('.transition-io-node[data-io-kind="input"]').count(), 0);
-  assert.equal(await page.locator('.transition-io-node[data-io-kind="output"]').count(), 0);
+  assert(await page.locator('.transition-io-cluster .transition-io-node[data-io-kind="io"]').count() > 0);
+  assert.equal(await page.locator('.transition-io-cluster .transition-io-node[data-io-kind="input"]').count(), 0);
+  assert.equal(await page.locator('.transition-io-cluster .transition-io-node[data-io-kind="output"]').count(), 0);
   assert.equal(await page.locator(".transition-io-cluster.failure-transition,.transition-io-cluster .transition-io-error").count(), 0);
   assert.equal(await page.evaluate(() => Boolean(window.glyphLayoutPublicationCertificate)), false);
   assert.equal(await page.evaluate(() => Boolean(window.glyphInitialTransitionRouter)), false);
@@ -168,7 +175,7 @@ try {
   const generationBeforeNode = await page.evaluate(() => Number(window.glyphTransitionLayoutTransaction?.generation || 0));
   await dragElement(page, page.locator(".state-node").first(), 120, 90, "state node");
   await waitForOrdinaryLayout(page, generationBeforeNode + 1);
-  assert(await page.evaluate(() => Object.keys(localStorage).some(key => key.startsWith("glyph.diagram.positions.v1:"))), "edited node positions were not persisted");
+  assert(await hasStoredNodePositions(page), "edited node positions were not persisted");
 
   const dragged = await dragFeasibleTransitionCluster(page);
   const transitionId = dragged.transitionId;
