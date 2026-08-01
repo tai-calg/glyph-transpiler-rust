@@ -53,9 +53,20 @@ async function state(page) {
       routerCompletedGeneration: router?.completedGeneration ?? null,
       certificateGeneration: certificate?.generation ?? null,
       certificateCompletedGeneration: certificate?.completedGeneration ?? null,
+      nodeAdapterVersion: window.glyphTransitionNodePositionAdapter?.version ?? null,
+      nodeGuardVersion: window.glyphNodeDragPublicationGuard?.version ?? null,
       persisted: Object.keys(localStorage).some(key => key.startsWith("glyph.diagram.positions.v1:")),
     };
   });
+}
+
+async function nodePositions(page) {
+  return page.evaluate(() => [...document.querySelectorAll(".state-node")].map(node => ({
+    name: node.querySelector(".state-name,.node-name")?.textContent?.trim() || "",
+    left: Number.parseFloat(node.style.left || "0") || 0,
+    top: Number.parseFloat(node.style.top || "0") || 0,
+    selected: node.classList.contains("selected-node"),
+  })));
 }
 
 async function drag(page, locator, deltaX, deltaY) {
@@ -67,6 +78,32 @@ async function drag(page, locator, deltaX, deltaY) {
   await page.mouse.down();
   await page.mouse.move(x + deltaX, y + deltaY, {steps: 20});
   await page.mouse.up();
+}
+
+async function waitForCertified(page, label, minimumGeneration = 0) {
+  const samples = [];
+  for (let attempt = 0; attempt < 180; attempt += 1) {
+    const current = await state(page);
+    if (!samples.length || JSON.stringify(current) !== JSON.stringify(samples.at(-1))) {
+      samples.push(current);
+      console.log(`${label}-state ${JSON.stringify(current)}`);
+    }
+    if (current.layoutState === "ready"
+      && current.collisionSolved === "true"
+      && current.collisionCount === "0"
+      && current.semanticLines === "true"
+      && current.semanticRoleLines === "true"
+      && current.publicationReady === "true"
+      && current.certificateState === "valid"
+      && Number(current.transactionGeneration || 0) >= minimumGeneration
+      && current.transactionGeneration === current.transactionCompletedGeneration
+      && current.certificateGeneration === current.certificateCompletedGeneration
+      && current.persisted) {
+      return current;
+    }
+    await page.waitForTimeout(100);
+  }
+  throw new Error(`${label} did not converge: ${JSON.stringify(samples.at(-1))}`);
 }
 
 const logs = [];
@@ -99,37 +136,75 @@ try {
     return stage?.dataset.transitionLayoutState === "ready"
       && stage.dataset.transitionIoCollisionSolved === "true"
       && stage.dataset.transitionIoCollisionCount === "0"
-      && stage.dataset.transitionPublicationReady === "true";
+      && stage.dataset.transitionPublicationReady === "true"
+      && stage.dataset.layoutCertificateState === "valid";
   }, undefined, {timeout: 60_000});
 
-  console.log(`node-drag-before ${JSON.stringify(await state(page))}`);
-  await drag(page, page.locator(".state-node").first(), 170, 160);
+  const initial = await state(page);
+  assert.equal(initial.nodeAdapterVersion, 6, JSON.stringify(initial));
+  assert.equal(initial.nodeGuardVersion, 3, JSON.stringify(initial));
+  console.log(`node-drag-before ${JSON.stringify(initial)}`);
 
-  const samples = [];
-  for (let attempt = 0; attempt < 120; attempt += 1) {
-    const current = await state(page);
-    if (!samples.length || JSON.stringify(current) !== JSON.stringify(samples.at(-1))) {
-      samples.push(current);
-      console.log(`node-drag-state ${JSON.stringify(current)}`);
-    }
-    if (current.layoutState === "ready"
-      && current.collisionSolved === "true"
-      && current.collisionCount === "0"
-      && current.semanticLines === "true"
-      && current.semanticRoleLines === "true"
-      && current.publicationReady === "true"
-      && current.persisted) {
-      console.log(`node-drag-ready ${JSON.stringify(current)}`);
-      await page.close();
-      console.log("verified node drag invalidation, persistence, relayout, and recertification");
-      process.exitCode = 0;
-      break;
-    }
-    await page.waitForTimeout(100);
-  }
-  if (!process.exitCode && !samples.at(-1)?.publicationReady) {
-    throw new Error(`node drag did not converge: ${JSON.stringify(samples.at(-1))}`);
-  }
+  const pointerBefore = await nodePositions(page);
+  await drag(page, page.locator(".state-node").first(), 170, 160);
+  await page.waitForFunction(before => {
+    const node = document.querySelector(".state-node");
+    if (!node) return false;
+    const left = Number.parseFloat(node.style.left || "0") || 0;
+    const top = Number.parseFloat(node.style.top || "0") || 0;
+    return Math.abs(left - before.left) > 1 || Math.abs(top - before.top) > 1;
+  }, pointerBefore[0], {timeout: 10_000});
+  const pointerReady = await waitForCertified(
+    page,
+    "node-pointer",
+    Number(initial.transactionGeneration || 0) + 1,
+  );
+
+  const keyboardSetup = await page.evaluate(() => {
+    const node = document.querySelector(".state-node.selected-node") || document.querySelector(".state-node");
+    const stage = node?.closest(".graph-stage");
+    if (!node || !stage) return null;
+    node.classList.add("selected-node");
+    const left = Number.parseFloat(node.style.left || "0") || 0;
+    const top = Number.parseFloat(node.style.top || "0") || 0;
+    const width = Number.parseFloat(stage.style.width || "0") || stage.scrollWidth;
+    const direction = left + node.offsetWidth + 24 < width ? "ArrowRight" : "ArrowLeft";
+    document.activeElement?.blur?.();
+    return {left, top, direction};
+  });
+  assert(keyboardSetup, "keyboard node setup failed");
+  await page.keyboard.press(keyboardSetup.direction);
+  await page.waitForFunction(before => {
+    const node = document.querySelector(".state-node.selected-node");
+    if (!node) return false;
+    const left = Number.parseFloat(node.style.left || "0") || 0;
+    const top = Number.parseFloat(node.style.top || "0") || 0;
+    return Math.abs(left - before.left) > 1 || Math.abs(top - before.top) > 1;
+  }, keyboardSetup, {timeout: 10_000});
+  const keyboardReady = await waitForCertified(
+    page,
+    "node-keyboard",
+    Number(pointerReady.transactionGeneration || 0) + 1,
+  );
+
+  const beforeEditorKey = await nodePositions(page);
+  const editor = page.locator("#editor");
+  assert.equal(await editor.count(), 1, "editor textarea is missing");
+  await editor.focus();
+  await page.keyboard.press("ArrowRight");
+  await page.waitForTimeout(180);
+  const afterEditorKey = await nodePositions(page);
+  assert.deepEqual(afterEditorKey, beforeEditorKey, "editor arrow key moved a selected state node");
+  const afterEditorState = await state(page);
+  assert.equal(afterEditorState.publicationReady, "true", JSON.stringify(afterEditorState));
+  assert.equal(
+    afterEditorState.transactionGeneration,
+    keyboardReady.transactionGeneration,
+    "editor arrow key started a layout generation",
+  );
+
+  await page.close();
+  console.log("verified pointer and keyboard node movement, form-control isolation, persistence, relayout, and recertification");
 } finally {
   await browser.close();
   await stopProcess(child);
