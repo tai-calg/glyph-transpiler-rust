@@ -24,11 +24,13 @@ from .transition_execution_context_selector import (
     enhance_transition_execution_context_selector_html,
 )
 from .transition_io_clusters import enhance_transition_io_clusters_html
+from .transition_label_drag_guard import enhance_transition_label_drag_guard_html
 from .transition_layout_interaction_adapter import (
     enhance_transition_layout_interaction_adapter_html,
 )
 from .transition_layout_tab_guard import enhance_transition_layout_tab_guard_html
 from .transition_layout_transaction import enhance_transition_layout_transaction_html
+from .transition_node_layout_guard import enhance_transition_node_layout_guard_html
 from .transition_node_position_adapter import (
     enhance_transition_node_position_adapter_html,
 )
@@ -70,12 +72,14 @@ def _presentation_pipeline():
         enhance_diagram_locale_html,
         enhance_transition_execution_context_selector_html,
         enhance_transition_io_clusters_html,
+        enhance_transition_node_layout_guard_html,
+        enhance_transition_label_drag_guard_html,
+        enhance_transition_readable_exports_html,
         enhance_transition_readable_layout_html,
         enhance_transition_layout_transaction_html,
         enhance_transition_layout_interaction_adapter_html,
         enhance_transition_node_position_adapter_html,
         enhance_transition_layout_tab_guard_html,
-        enhance_transition_readable_exports_html,
         enhance_transition_semantic_status_ui_html,
     )
 
