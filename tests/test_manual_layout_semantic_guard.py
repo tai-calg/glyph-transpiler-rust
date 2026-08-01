@@ -46,14 +46,14 @@ def test_guard_only_preserves_semantics_and_does_not_own_recertification() -> No
     assert "version: 4" in html
 
 
-def test_guard_is_installed_after_transaction_and_before_interaction() -> None:
+def test_interactive_app_excludes_the_redundant_semantic_guard() -> None:
     names = [enhancer.__name__ for enhancer in _presentation_pipeline()]
 
     transaction = names.index("enhance_transition_layout_transaction_html")
-    guard = names.index("enhance_manual_layout_semantic_guard_html")
     interaction = names.index("enhance_transition_layout_interaction_adapter_html")
 
-    assert transaction < guard < interaction
+    assert transaction < interaction
+    assert "enhance_manual_layout_semantic_guard_html" not in names
 
 
 def test_guard_injected_javascript_is_syntactically_valid() -> None:
