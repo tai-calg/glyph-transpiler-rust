@@ -29,11 +29,18 @@ class DesktopServer:
     app: GlyphDiagramApp
     server: ThreadingHTTPServer
     token: str
+    require_auth: bool = True
+
+    @property
+    def origin(self) -> str:
+        host, port = self.server.server_address[:2]
+        return f"http://{host}:{port}"
 
     @property
     def launch_url(self) -> str:
-        host, port = self.server.server_address[:2]
-        return f"http://{host}:{port}/launch/{self.token}"
+        if self.require_auth:
+            return f"{self.origin}/launch/{self.token}"
+        return f"{self.origin}/"
 
     def close(self) -> None:
         self.server.shutdown()
@@ -71,12 +78,15 @@ def create_desktop_server(
     host: str = "127.0.0.1",
     port: int = 0,
     token: str | None = None,
+    require_auth: bool = True,
     view_builder: ViewBuilder = build_io_state_views,
 ) -> DesktopServer:
-    """Create the loopback-only authenticated Glyph Studio server.
+    """Create the shared loopback Glyph Studio server.
 
-    The Tauri shell and ``python3 glyph.py`` both use this function so they
-    cannot drift onto different HTML preparation or API paths.
+    The Tauri sidecar uses ``require_auth=True``. The direct Python launcher uses
+    ``require_auth=False`` because it opens the loopback URL in the user's normal
+    browser. Both modes use the same compiler, prepared HTML, API handlers, and
+    live-update implementation.
     """
 
     prepare_diagram_app()
@@ -117,6 +127,8 @@ def create_desktop_server(
             self.wfile.write(payload)
 
         def _authorized(self) -> bool:
+            if not require_auth:
+                return True
             return (
                 self.headers.get(_HEADER_NAME, "") == session_token
                 or _cookie_contains(self.headers.get("Cookie", ""), session_token)
@@ -142,23 +154,29 @@ def create_desktop_server(
             return source
 
         def _serve_app(self) -> None:
-            payload = _authenticated_html(diagram_app.DIAGRAM_HTML, session_token).encode(
-                "utf-8"
+            html = (
+                _authenticated_html(diagram_app.DIAGRAM_HTML, session_token)
+                if require_auth
+                else diagram_app.DIAGRAM_HTML
             )
+            payload = html.encode("utf-8")
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(payload)))
-            self.send_header(
-                "Set-Cookie",
-                f"{_COOKIE_NAME}={session_token}; HttpOnly; SameSite=Strict; Path=/",
-            )
+            if require_auth:
+                self.send_header(
+                    "Set-Cookie",
+                    f"{_COOKIE_NAME}={session_token}; HttpOnly; SameSite=Strict; Path=/",
+                )
             self._security_headers()
             self.end_headers()
             self.wfile.write(payload)
 
         def do_GET(self) -> None:
             path = urlsplit(self.path).path
-            if path == f"/launch/{session_token}":
+            if path == f"/launch/{session_token}" or (
+                not require_auth and path == "/"
+            ):
                 self._serve_app()
                 return
             if path == "/api/state":
@@ -190,7 +208,12 @@ def create_desktop_server(
             self._json({"error": "not found"}, HTTPStatus.NOT_FOUND)
 
     server = ThreadingHTTPServer((host, port), Handler)
-    return DesktopServer(app=app, server=server, token=session_token)
+    return DesktopServer(
+        app=app,
+        server=server,
+        token=session_token,
+        require_auth=require_auth,
+    )
 
 
 def run_studio_app(
@@ -201,7 +224,7 @@ def run_studio_app(
     open_browser: bool | None = None,
     view_builder: ViewBuilder = build_io_state_views,
 ) -> int:
-    """Run the same authenticated Studio runtime used by the native app."""
+    """Run the current Studio UI directly in the user's local browser."""
 
     selected_port = (
         int(os.environ.get("GLYPH_DIAGRAM_PORT", "0")) if port is None else port
@@ -210,6 +233,7 @@ def run_studio_app(
         source_path,
         host=host,
         port=selected_port,
+        require_auth=False,
         view_builder=view_builder,
     )
     should_open = (
