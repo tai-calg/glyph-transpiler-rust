@@ -1,9 +1,16 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
+import queue
+import subprocess
+import sys
 import tempfile
+import threading
+import time
 import unittest
 from unittest.mock import patch
+from urllib.request import urlopen
 
 from glyph.compilation import CompilationPipeline
 from glyph.default_workspace import APPLICATION_IDENTIFIER
@@ -107,6 +114,68 @@ class GlyphLauncherTests(unittest.TestCase):
             with patch.object(launcher, "run_studio_app", return_value=0) as run:
                 self.assertEqual(launcher.main([str(source)]), 0)
                 run.assert_called_once_with(source)
+
+    def test_python_script_serves_the_current_desktop_studio_html(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "workspace.glyph"
+            source.write_text(launcher.DEFAULT_SOURCE, encoding="utf-8")
+            environment = {
+                **os.environ,
+                "GLYPH_DIAGRAM_NO_BROWSER": "1",
+                "GLYPH_DIAGRAM_PORT": "0",
+                "PYTHONUNBUFFERED": "1",
+            }
+            process = subprocess.Popen(
+                [sys.executable, str(ROOT / "glyph.py"), str(source)],
+                cwd=ROOT,
+                env=environment,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+            )
+            lines: queue.Queue[str] = queue.Queue()
+
+            def read_output() -> None:
+                assert process.stdout is not None
+                for line in process.stdout:
+                    lines.put(line)
+
+            reader = threading.Thread(target=read_output, daemon=True)
+            reader.start()
+            launch_url = ""
+            captured: list[str] = []
+            deadline = time.monotonic() + 30
+            try:
+                while time.monotonic() < deadline and not launch_url:
+                    if process.poll() is not None:
+                        break
+                    try:
+                        line = lines.get(timeout=0.25)
+                    except queue.Empty:
+                        continue
+                    captured.append(line)
+                    if line.startswith("Glyph Studio: "):
+                        launch_url = line.removeprefix("Glyph Studio: ").strip()
+
+                self.assertTrue(
+                    launch_url,
+                    "python launcher did not publish the Studio URL:\n" + "".join(captured),
+                )
+                html = urlopen(launch_url, timeout=5).read().decode("utf-8")
+                self.assertIn("X-Glyph-Desktop-Token", html)
+                self.assertIn("glyph-diagram-middle-drag-zoom-v1-script", html)
+                self.assertIn("glyph-editor-identifier-highlight-v1-script", html)
+                self.assertIn("glyph-transition-label-inspector", html)
+            finally:
+                if process.poll() is None:
+                    process.terminate()
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait(timeout=5)
+                reader.join(timeout=1)
 
     def test_root_python_entrypoint_is_only_a_package_launcher_wrapper(self) -> None:
         wrapper = (ROOT / "glyph.py").read_text(encoding="utf-8")
