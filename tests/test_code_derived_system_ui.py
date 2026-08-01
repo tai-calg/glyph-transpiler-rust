@@ -11,15 +11,20 @@ from glyph.code_derived_system_ui import enhance_code_derived_system_html
 from glyph.diagram_ui import DIAGRAM_HTML
 
 
-class CheckedSystemContextUiTests(unittest.TestCase):
-    def test_enhancer_explains_checked_context_and_semantic_edges(self) -> None:
+class ExecutableSystemBoundaryUiTests(unittest.TestCase):
+    def test_enhancer_explains_entry_source_sink_and_call_edges(self) -> None:
         html = enhance_code_derived_system_html(DIAGRAM_HTML)
-        self.assertIn("glyph-checked-system-context-ui-v2", html)
-        self.assertIn("call graphとは別のview", html)
-        self.assertIn("Checked system context", html)
+        self.assertIn("glyph-executable-system-boundary-ui-v3", html)
+        self.assertIn("完全な関数実行境界", html)
+        self.assertIn("Executable System boundary", html)
         self.assertIn("Entry:", html)
-        self.assertIn("Boundary edges:", html)
-        self.assertIn('edges[index]?.label || "flow"', html)
+        self.assertIn("Sources:", html)
+        self.assertIn("Sinks:", html)
+        self.assertIn("Calls:", html)
+        self.assertIn('edges[index]?.label || "calls"', html)
+        self.assertIn("boundary-entry", html)
+        self.assertIn("boundary-source", html)
+        self.assertIn("boundary-sink", html)
 
     def test_enhancer_is_idempotent(self) -> None:
         once = enhance_code_derived_system_html(DIAGRAM_HTML)
@@ -31,7 +36,7 @@ class CheckedSystemContextUiTests(unittest.TestCase):
         html = enhance_code_derived_system_html(DIAGRAM_HTML)
         scripts = re.findall(r"<script[^>]*>(.*?)</script>", html, re.DOTALL)
         with tempfile.TemporaryDirectory() as directory:
-            script = Path(directory) / "checked-system-context-ui.js"
+            script = Path(directory) / "executable-system-boundary-ui.js"
             script.write_text("\n".join(scripts), encoding="utf-8")
             result = subprocess.run(
                 ["node", "--check", str(script)],
