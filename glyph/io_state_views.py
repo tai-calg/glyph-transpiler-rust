@@ -42,6 +42,8 @@ def empty_io_state_views() -> dict[str, object]:
 
 
 def _render_type(ty: TypeRef) -> str:
+    if ty.name in {"Result", "R"} and len(ty.args) == 2:
+        return f"{_render_type(ty.args[0])}|{_render_type(ty.args[1])}"
     if not ty.args:
         return ty.name
     return f"{ty.name}<{','.join(_render_type(arg) for arg in ty.args)}>"
@@ -132,6 +134,7 @@ def _node_from_component(
     signature = signatures.get(binding or "")
     port_direction = getattr(port, "direction", None)
     port_type = getattr(port, "type", None)
+    boundary_role = getattr(component, "role", None)
 
     if signature is None:
         kind = (
@@ -152,6 +155,7 @@ def _node_from_component(
             "declared_io": port is not None,
             "port_direction": port_direction,
             "port_type": port_type,
+            "boundary_role": boundary_role,
         }
 
     return {
@@ -166,18 +170,23 @@ def _node_from_component(
         "declared_io": True,
         "port_direction": port_direction,
         "port_type": port_type,
+        "boundary_role": boundary_role,
     }
 
 
 def _system_edge(edge: object) -> dict[str, object]:
     labels = {
+        "call": "calls",
         "data": "data",
         "return": "returns",
         "effect": "effect",
         "responsibility": "flow",
     }
     payload = asdict(edge)
-    payload["label"] = labels.get(payload.get("kind"), str(payload.get("kind", "flow")))
+    payload["label"] = labels.get(
+        payload.get("kind"),
+        str(payload.get("kind", "flow")),
+    )
     return payload
 
 
@@ -207,7 +216,10 @@ def _explicit_systems(
                 "id": system.id,
                 "name": system.name,
                 "kind": "checked-system-context",
-                "entry": declaration.entry_name if declaration is not None else None,
+                "contract": "executable-function-boundary",
+                "entry": declaration.entry_name if declaration is not None else system.entry,
+                "sources": list(system.sources),
+                "sinks": list(system.sinks),
                 "line": system.line,
                 "ports": [asdict(item) for item in system.ports],
                 "nodes": nodes,
@@ -248,6 +260,7 @@ def _implicit_program(
                 "declared_io": signature is not None,
                 "port_direction": None,
                 "port_type": None,
+                "boundary_role": None,
             }
         )
 
@@ -275,7 +288,10 @@ def _implicit_program(
         "id": "program_io",
         "name": "Program I/O",
         "kind": "derived-call-graph",
+        "contract": "derived-function-call-graph",
         "entry": None,
+        "sources": [],
+        "sinks": [],
         "line": 1,
         "nodes": nodes,
         "edges": edges,
@@ -293,7 +309,10 @@ def _unconnected_system(
         "id": "unconnected_declarations",
         "name": "Internal and unconnected declarations",
         "kind": "declaration-set",
+        "contract": "unconnected-callables",
         "entry": None,
+        "sources": [],
+        "sinks": [],
         "line": min(int(item["line"]) for item in remaining),
         "nodes": [
             {
@@ -307,6 +326,7 @@ def _unconnected_system(
                 "declared_io": True,
                 "port_direction": None,
                 "port_type": None,
+                "boundary_role": None,
             }
             for item in remaining
         ],
@@ -318,16 +338,17 @@ def build_io_state_views(
     model: CompilationModel,
     execution: ExecutionStructureIR,
 ) -> dict[str, object]:
-    """Project validated System Context and state-machine models for the UI.
+    """Project executable System boundaries and state-machine models for the UI.
 
-    Explicit `system` blocks describe checked boundary flow, not a call graph.
+    An explicit ``system`` identifies an entry function and the external source
+    and sink functions reachable from it. Function signatures provide all value
+    and error types. The displayed arrows are executable calls only; value ports
+    and manually authored mixed-flow edges are not part of this projection.
+
     Sources without a system declaration still receive a derived call-graph view.
-
     The normal application selects strict-exact only when the compiled source still
     matches one reviewed public strict v1 context. All other sources retain the
-    legacy-compatible shadow path. Strict selection disables the legacy System Action
-    analyzer and fails closed when native Evidence is incomplete. Rejection blockers
-    remain in the public view instead of being collapsed into a generic reason.
+    legacy-compatible shadow path.
     """
 
     external_names = _source_external_names(model)
