@@ -4,54 +4,14 @@ on:
   pull_request:
     branches: [main]
     paths:
-      - "glyph/diagram_fit_stability.py"
-      - "glyph/diagram_geometry_kernel.py"
-      - "glyph/diagram_rendered_geometry_adapter.py"
-      - "glyph/initial_transition_dependency_bridge.py"
-      - "glyph/initial_transition_layout.py"
-      - "glyph/layout_compact_shelf_repair.py"
-      - "glyph/layout_corridor_fast_repair.py"
-      - "glyph/layout_corridor_repair.py"
-      - "glyph/layout_dependency_bridge.py"
-      - "glyph/layout_local_repair.py"
-      - "glyph/layout_publication_certificate.py"
-      - "glyph/layout_shelf_repair.py"
-      - "glyph/layout_shelf_viewport_sync.py"
-      - "glyph/manual_layout_semantic_guard.py"
-      - "glyph/node_drag_publication_guard.py"
-      - "glyph/readable_diagram_app.py"
-      - "glyph/state_viewport_reservation.py"
-      - "glyph/transition_layout_transaction.py"
-      - "glyph/transition_node_position_adapter.py"
-      - "tests/test_diagram_fit_stability.py"
-      - "tests/test_diagram_geometry_kernel.py"
-      - "tests/test_initial_transition_dependency_bridge.py"
-      - "tests/test_initial_transition_layout.py"
-      - "tests/test_layout_compact_shelf_repair.py"
-      - "tests/test_layout_corridor_fast_repair.py"
-      - "tests/test_layout_corridor_repair.py"
-      - "tests/test_layout_dependency_bridge.py"
-      - "tests/test_layout_generation_protocol.py"
-      - "tests/test_layout_local_repair.py"
-      - "tests/test_layout_publication_certificate.py"
-      - "tests/test_layout_shelf_repair.py"
-      - "tests/test_layout_shelf_viewport_sync.py"
-      - "tests/test_manual_layout_semantic_guard.py"
-      - "tests/test_node_drag_publication_guard.py"
-      - "tests/test_state_viewport_reservation.py"
-      - "tests/test_transition_layout_transaction.py"
-      - "tests/verify_certified_layout_performance.mjs"
-      - "tests/verify_diagram_editor_exports.mjs"
-      - "tests/verify_node_drag_layout.mjs"
-      - "tests/verify_readme_state_snapshot.py"
-      - "tests/verify_state_diagram_rendering.mjs"
-      - "tests/verify_transition_layout_transaction.mjs"
+      - "glyph.py"
+      - "glyphc.py"
+      - "glyph/**"
+      - "tests/**/*.py"
+      - "tests/**/*.mjs"
+      - "examples/acceptance/**"
+      - "examples/state_diagrams/**"
       - "docs/images/glyph-studio-state-transition.png"
-      - "examples/acceptance/motor_safety.glyph"
-      - "examples/state_diagrams/conveyor_control.glyph"
-      - "examples/state_diagrams/dual_machines.glyph"
-      - "examples/state_diagrams/session_protocol.glyph"
-      - "examples/state_diagrams/traffic_light.glyph"
       - "docs/design/certified-incremental-layout-v1.md"
       - ".github/workflows/certified-layout.yml"
   workflow_dispatch:
@@ -62,7 +22,7 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -78,7 +38,7 @@ jobs:
           npm install playwright@1.54.2
           npx playwright install --with-deps chromium
 
-      - name: Verify geometry contracts
+      - name: Verify geometry and release contracts
         run: |
           python -m pytest -q \
             tests/test_diagram_fit_stability.py \
@@ -88,8 +48,11 @@ jobs:
             tests/test_layout_*.py \
             tests/test_manual_layout_semantic_guard.py \
             tests/test_node_drag_publication_guard.py \
+            tests/test_public_release_invariants.py \
             tests/test_state_viewport_reservation.py \
-            tests/test_transition_layout_transaction.py
+            tests/test_transition_layout_transaction.py \
+            tests/test_transition_node_position_adapter.py \
+            tests/test_transition_semantic_status_ui.py
 
       - name: Verify responsiveness and certificate reuse
         run: |
