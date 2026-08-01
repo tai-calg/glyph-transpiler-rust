@@ -107,7 +107,7 @@ class GlyphLauncherTests(unittest.TestCase):
         explicit = Path("examples/state_diagrams/traffic_light.glyph")
         self.assertEqual(launcher.resolve_input(explicit), explicit)
 
-    def test_main_starts_the_shared_authenticated_studio_runtime(self) -> None:
+    def test_main_starts_the_shared_studio_runtime(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / "workspace.glyph"
             source.write_text(launcher.DEFAULT_SOURCE, encoding="utf-8")
@@ -115,7 +115,7 @@ class GlyphLauncherTests(unittest.TestCase):
                 self.assertEqual(launcher.main([str(source)]), 0)
                 run.assert_called_once_with(source)
 
-    def test_python_script_serves_the_current_desktop_studio_html(self) -> None:
+    def test_python_script_serves_the_current_browser_studio_html(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / "workspace.glyph"
             source.write_text(launcher.DEFAULT_SOURCE, encoding="utf-8")
@@ -162,8 +162,12 @@ class GlyphLauncherTests(unittest.TestCase):
                     launch_url,
                     "python launcher did not publish the Studio URL:\n" + "".join(captured),
                 )
+                self.assertTrue(launch_url.endswith("/"), launch_url)
+                self.assertNotIn("/launch/", launch_url)
                 html = urlopen(launch_url, timeout=5).read().decode("utf-8")
-                self.assertIn("X-Glyph-Desktop-Token", html)
+                state = urlopen(launch_url + "api/state", timeout=5)
+                self.assertEqual(state.status, 200)
+                self.assertNotIn("X-Glyph-Desktop-Token", html)
                 self.assertIn("glyph-diagram-middle-drag-zoom-v1-script", html)
                 self.assertIn("glyph-editor-identifier-highlight-v1-script", html)
                 self.assertIn("glyph-transition-label-inspector", html)
