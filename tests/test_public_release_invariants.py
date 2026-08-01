@@ -16,15 +16,23 @@ def read(relative: str) -> str:
 
 def test_node_and_label_interactions_have_one_owner_each() -> None:
     node_guard = read("glyph/node_drag_publication_guard.py")
+    node_layout_guard = read("glyph/transition_node_layout_guard.py")
     node_owner = read("glyph/transition_node_position_adapter.py")
+    readable = read("glyph/transition_readable_layout.py")
     exports = read("glyph/diagram_editor_exports.py")
     label_guard = read("glyph/transition_label_drag_guard.py")
     label_owner = read("glyph/transition_layout_interaction_adapter.py")
 
-    for event_name in ("pointerdown", "pointermove", "pointerup", "pointercancel", "keydown"):
-        assert f'document.addEventListener("{event_name}"' not in node_guard
+    for source in (node_guard, node_layout_guard):
+        for event_name in ("pointerdown", "pointermove", "pointerup", "pointercancel", "keydown"):
+            assert f'document.addEventListener("{event_name}"' not in source
     assert "ownsPointerEvents: false" in node_guard
     assert "ownsKeyboardEvents: false" in node_guard
+    assert "ownsPointerEvents:false" in node_layout_guard
+    assert "ownsPersistence:false" in node_layout_guard
+    assert "ownsRouting:false" in node_layout_guard
+    assert "localStorage.setItem" not in node_layout_guard
+    assert "function stateCurve(" not in node_layout_guard
     assert 'invalidatePublication(active,"manual-node-drag")' in node_owner
     assert 'invalidatePublication(record,"manual-node-keyboard")' in node_owner
 
@@ -33,6 +41,12 @@ def test_node_and_label_interactions_have_one_owner_each() -> None:
     assert '!selected.matches(".graph-node")' in exports
     assert "function stateCurve(" not in exports
     assert 'stateNodeInteractionOwner:"glyph-transition-node-position-adapter-v7"' in exports
+
+    assert "ownsNodeLayout:false" in readable
+    assert "ownsScheduling:false" in readable
+    assert "node.style.left" not in readable
+    assert "semanticDenseLayout" not in readable
+    assert "MutationObserver" not in readable
 
     assert "ownsPointerEvents:false" in label_guard
     assert "ownsPersistence:false" in label_guard
