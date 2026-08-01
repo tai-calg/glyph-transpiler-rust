@@ -20,6 +20,9 @@ from .diagram_locale import enhance_diagram_locale_html
 from .diagram_rendered_geometry_adapter import enhance_diagram_rendered_geometry_html
 from .diagram_workspace_layout import enhance_workspace_layout_html
 from .state_viewport_reservation import enhance_state_viewport_reservation_html
+from .transition_enabling_case_rendering import (
+    enhance_transition_enabling_case_rendering_html,
+)
 from .transition_execution_context_selector import (
     enhance_transition_execution_context_selector_html,
 )
@@ -72,6 +75,7 @@ def _presentation_pipeline():
         enhance_diagram_locale_html,
         enhance_transition_execution_context_selector_html,
         enhance_transition_io_clusters_html,
+        enhance_transition_enabling_case_rendering_html,
         enhance_transition_node_layout_guard_html,
         enhance_transition_label_drag_guard_html,
         enhance_transition_readable_exports_html,
