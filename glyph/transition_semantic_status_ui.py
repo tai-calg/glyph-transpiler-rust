@@ -65,6 +65,7 @@ async function state(){
 }
 function selectedMachine(data){const machines=data?.views?.state?.machines||[],name=document.getElementById("machine-select")?.selectedOptions?.[0]?.textContent;return machines.find(machine=>machine.name===name)||machines[0]||null}
 function projectionModeOf(data,machine){return text(data?.views?.rtai_projection_mode)||text(machine?.analysis?.evidence_projection_mode)||"shadow"}
+function publicationReady(stage){return stage.dataset.transitionPublicationReady==="true"&&stage.dataset.layoutCertificateState==="valid"}
 function semanticOf(transition){const raw=transition?.rtai_semantic_status||{},status=["exact","may","unknown"].includes(text(raw.status))?text(raw.status):"unknown";return{status,label:status==="exact"?"Exact":status==="may"?"May":"Unknown",reason:text(raw.reason)||"native Evidence status is unavailable"}}
 function escapeId(value){return window.CSS?.escape?CSS.escape(value):value.replace(/[^A-Za-z0-9_-]/g,"\\$&")}
 function setDataset(element,name,value){if(element.dataset[name]===value)return false;element.dataset[name]=value;return true}
@@ -108,8 +109,9 @@ async function render(){
     });
     stage.querySelectorAll(".transition-io-cluster").forEach(cluster=>{if(!liveIds.has(text(cluster.dataset.transitionId)))changed=clearCluster(cluster)||changed});
     lastSignature=signature;
-    stage.dataset.rtaiSemanticStatusReady="true";
-    if(changed)document.dispatchEvent(new CustomEvent("glyph-transition-semantic-status-ready",{detail:{machine:machine.name,marker:MARKER}}));
+    const wasReady=stage.dataset.rtaiSemanticStatusReady==="true",published=publicationReady(stage);
+    stage.dataset.rtaiSemanticStatusReady=published?"true":"pending";
+    if(published&&(changed||!wasReady))document.dispatchEvent(new CustomEvent("glyph-transition-semantic-status-ready",{detail:{machine:machine.name,marker:MARKER}}));
   }finally{running=false}
 }
 function expectedShutdown(error){return disposed||error?.name==="AbortError"||document.visibilityState==="hidden"}
@@ -120,6 +122,8 @@ function schedule(delay=0){
 }
 function invalidate(){cache=null;schedule(0)}
 for(const event of["glyph-transition-io-clusters-ready","glyph-state-transition-ir-v4-labels-ready","glyph-execution-context-changed","glyph-locale-changed"]){document.addEventListener(event,invalidate)}
+for(const event of["glyph-transition-layout-transaction-ready","glyph-layout-publication-certificate-ready"]){document.addEventListener(event,()=>schedule(0))}
+document.addEventListener("glyph-layout-publication-certificate-failed",()=>{const stage=document.querySelector(".state-node")?.closest(".graph-stage");if(stage)stage.dataset.rtaiSemanticStatusReady="failed"});
 document.addEventListener("change",event=>{if(event.target?.id==="machine-select"){cache=null;lastSignature="";schedule(0)}});
 function dispose(){disposed=true;clearTimeout(timer);controller?.abort()}
 window.addEventListener("pagehide",dispose,{once:true});
