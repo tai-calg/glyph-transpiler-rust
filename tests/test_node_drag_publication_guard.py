@@ -9,44 +9,48 @@ from pathlib import Path
 from glyph.node_drag_publication_guard import (
     enhance_node_drag_publication_guard_html,
 )
-from glyph.readable_diagram_app import _presentation_pipeline
+from glyph.transition_node_position_adapter import (
+    enhance_transition_node_position_adapter_html,
+)
 
 
-def test_guard_invalidates_stale_publication_only_after_real_movement() -> None:
+def test_guard_exposes_fail_closed_publication_capability() -> None:
     html = enhance_node_drag_publication_guard_html(
         "<html><head></head><body></body></html>"
     )
 
-    assert "DRAG_THRESHOLD = 3" in html
-    assert "pointerDistance(active, event) < DRAG_THRESHOLD" in html
     assert 'stage.dataset.transitionLayoutState = "pending"' in html
     assert 'stage.dataset.transitionPublicationReady = "false"' in html
     assert 'stage.dataset.transitionIoCollisionSolved = "transaction-pending"' in html
     assert 'stage.dataset.layoutCertificateRequestState = "invalidated"' in html
-    assert 'invalidate(active.stage, "manual-node-drag")' in html
-    assert 'invalidate(stage, "manual-node-keyboard")' in html
-    assert 'stage.dataset.initialRouteReady = "pending"' not in html
-    assert 'stage.dataset.transitionSemanticLinesReady = "pending"' not in html
+    assert 'window.glyphTransitionLayoutTransaction?.schedule?.(reason, 0)' in html
+    assert "ownsPointerEvents: false" in html
+    assert "ownsKeyboardEvents: false" in html
+    assert "version: 3" in html
 
 
-def test_guard_directly_schedules_every_completed_movement() -> None:
+def test_guard_does_not_compete_for_interaction_events() -> None:
     html = enhance_node_drag_publication_guard_html(
         "<html><head></head><body></body></html>"
     )
 
-    assert 'schedule("manual-node-dragged")' in html
-    assert 'schedule("manual-node-cancelled")' in html
-    assert 'schedule("manual-node-keyboard")' in html
-    assert 'window.glyphTransitionLayoutTransaction?.schedule?.(reason, 0)' in html
+    assert 'document.addEventListener("pointerdown"' not in html
+    assert 'document.addEventListener("pointermove"' not in html
+    assert 'document.addEventListener("pointerup"' not in html
+    assert 'document.addEventListener("pointercancel"' not in html
+    assert 'document.addEventListener("keydown"' not in html
 
 
-def test_guard_precedes_node_position_owner() -> None:
-    names = [enhancer.__name__ for enhancer in _presentation_pipeline()]
+def test_node_owner_invokes_guard_after_accepting_the_interaction() -> None:
+    html = enhance_transition_node_position_adapter_html(
+        "<html><head></head><body></body></html>"
+    )
 
-    guard = names.index("enhance_node_drag_publication_guard_html")
-    owner = names.index("enhance_transition_node_position_adapter_html")
-
-    assert guard < owner
+    assert 'invalidatePublication(active,"manual-node-drag")' in html
+    assert 'invalidatePublication(record,"manual-node-keyboard")' in html
+    assert 'publicationGuard()?.schedule?.("manual-node-cancelled")' in html
+    assert 'event.target?.matches?.("input,textarea,select,[contenteditable=true]")' in html
+    assert "version:6" in html
 
 
 def test_guard_javascript_is_syntactically_valid() -> None:
