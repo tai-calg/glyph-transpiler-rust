@@ -93,16 +93,51 @@ class ViewEdgeSpecializationTests(unittest.TestCase):
         self.assertEqual(bindings[1].relation_edge_id, self.same_edge.edge_id)
         self.assertEqual(bindings[2].relation_edge_id, self.open_edge.edge_id)
 
+    def test_duplicate_view_ids_are_ambiguous_without_cross_binding(self) -> None:
+        transitions = [dict(item) for item in self.machine["transitions"]]
+        transitions[1]["id"] = transitions[0]["id"]
+        duplicate = {
+            "name": self.machine["name"],
+            "analysis": {},
+            "transitions": transitions,
+        }
+
+        bindings = specialize_view_edges(self.model, duplicate)
+        self.assertEqual(
+            [item.status for item in bindings[:2]],
+            [ViewEdgeBindingStatus.AMBIGUOUS, ViewEdgeBindingStatus.AMBIGUOUS],
+        )
+        self.assertIsNone(bindings[0].relation_edge_id)
+        self.assertIsNone(bindings[1].relation_edge_id)
+        self.assertEqual(bindings[0].source_state, "Closed")
+        self.assertEqual(bindings[1].source_state, "Open")
+
+        result = attach_view_edge_specialization(self.model, duplicate)
+        projected = result["transitions"]
+        self.assertEqual(
+            [
+                item["rtai_view_edge_specialization"]["status"]
+                for item in projected[:2]
+            ],
+            ["ambiguous", "ambiguous"],
+        )
+        self.assertEqual(
+            result["analysis"]["rtai_view_edge_ambiguous_binding_count"],
+            2,
+        )
+        self.assertEqual(
+            result["analysis"]["rtai_view_edge_exact_binding_count"],
+            1,
+        )
+
     def test_attachment_keeps_unmapped_edges_explicit(self) -> None:
         result = attach_view_edge_specialization(self.model, self.machine)
         self.assertEqual(
             result["analysis"]["rtai_view_edge_exact_binding_count"],
             3,
         )
-        self.assertEqual(
-            result["analysis"]["rtai_view_edge_unmapped_count"],
-            1,
-        )
+        self.assertEqual(bindings_version := result["rtai_view_edge_specialization"]["version"], 3)
+        self.assertEqual(bindings_version, result["transitions"][0]["rtai_view_edge_specialization"]["version"])
         self.assertEqual(
             result["transitions"][3]["rtai_view_edge_specialization"]["status"],
             "unmapped",
