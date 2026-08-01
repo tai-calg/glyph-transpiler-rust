@@ -146,7 +146,7 @@ const control=window.glyphTransitionLegacyControl;
 if(control)control.ownsScheduling=true;
 window.glyphTransitionLayoutTransaction={
   marker:MARKER,
-  version:9,
+  version:8,
   profile:"ordinary",
   budgetMs:TRANSACTION_DEADLINE_MS,
   maxFrames:MAX_FRAME_BUDGET,
