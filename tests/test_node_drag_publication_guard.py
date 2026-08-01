@@ -49,8 +49,10 @@ def test_node_owner_invokes_guard_after_accepting_the_interaction() -> None:
     assert 'invalidatePublication(active,"manual-node-drag")' in html
     assert 'invalidatePublication(record,"manual-node-keyboard")' in html
     assert 'publicationGuard()?.schedule?.("manual-node-cancelled")' in html
-    assert 'event.target?.matches?.("input,textarea,select,[contenteditable=true]")' in html
-    assert "version:6" in html
+    assert "function editingContext(event)" in html
+    assert "target?.closest?.(EDITING_SELECTOR)" in html
+    assert "focused?.closest?.(EDITING_SELECTOR)" in html
+    assert "version:7" in html
 
 
 def test_guard_javascript_is_syntactically_valid() -> None:
