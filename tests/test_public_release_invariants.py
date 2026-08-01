@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from glyph.readable_diagram_app import _presentation_pipeline
+from glyph.transition_analysis.public_effect_contracts import PUBLIC_STRICT_PROGRAMS
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -91,6 +92,40 @@ def test_generation_identity_flows_from_layout_through_route_to_publication() ->
     assert "geometryFingerprint(stage)" in certificate
     assert 'stage.dataset.transitionLayoutGeneration || "0"' in certificate
     assert "layoutCertificateFingerprint" in certificate
+
+
+def test_semantic_identity_joins_reject_duplicates_instead_of_overwriting() -> None:
+    specialization = read("glyph/transition_analysis/view_edge_specialization.py")
+    projection = read("glyph/transition_analysis/evidence_projection.py")
+    binding = read("glyph/transition_analysis/witness_binding.py")
+
+    assert "duplicate_view_ids" in specialization
+    assert "_ambiguous_identity" in specialization
+    assert "zip(original_transitions, bindings, strict=True)" in specialization
+    assert "by_view_id =" not in specialization
+
+    assert "duplicate_edge_ids" in projection
+    assert '"duplicate-transition-edge-id"' in projection
+    assert '"evidence-edge-id-mismatch"' in projection
+    assert "readiness_by_transition = report.transitions" in projection
+    assert "readiness = {item.edge_id" not in projection
+
+    assert "ambiguous: set[str]" in binding
+    assert "result.pop(edge_id, None)" in binding
+    assert "ambiguous.add(edge_id)" in binding
+
+
+def test_public_strict_catalog_identity_is_unambiguous() -> None:
+    source_ids = [item.source_id for item in PUBLIC_STRICT_PROGRAMS]
+    source_paths = [item.source_path for item in PUBLIC_STRICT_PROGRAMS if item.source_path]
+    contexts = [
+        (item.source_id, item.system, item.entry)
+        for item in PUBLIC_STRICT_PROGRAMS
+    ]
+
+    assert len(source_ids) == len(set(source_ids))
+    assert len(source_paths) == len(set(source_paths))
+    assert len(contexts) == len(set(contexts))
 
 
 def test_presentation_pipeline_preserves_protocol_ownership_order() -> None:
