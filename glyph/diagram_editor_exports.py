@@ -21,10 +21,9 @@ _SCRIPT = r"""
 (()=>{
 const root=document.documentElement;
 const $=selector=>document.querySelector(selector);
-const all=selector=>[...document.querySelectorAll(selector)];
 const num=value=>Number.parseFloat(value||"0")||0;
 const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
-const DRAG_THRESHOLD=3;
+const DRAG_THRESHOLD=3,EDITING_SELECTOR="input,textarea,select,[contenteditable=true]";
 let selected=null,drag=null,cache=null;
 
 const download=(blob,name)=>{
@@ -49,7 +48,7 @@ function key(stage){
 }
 function save(stage){
   const value={};
-  stage.querySelectorAll(".state-node,.graph-node").forEach(node=>{
+  stage.querySelectorAll(".graph-node").forEach(node=>{
     value[nameOf(node)]={x:num(node.style.left),y:num(node.style.top)};
   });
   localStorage.setItem(key(stage),JSON.stringify(value));
@@ -59,79 +58,50 @@ function restore(stage){
   try{value=JSON.parse(localStorage.getItem(key(stage))||"null")}catch{}
   if(!value)return false;
   let changed=false;
-  stage.querySelectorAll(".state-node,.graph-node").forEach(node=>{
+  stage.querySelectorAll(".graph-node").forEach(node=>{
     const position=value[nameOf(node)];
     if(position){node.style.left=`${position.x}px`;node.style.top=`${position.y}px`;changed=true}
   });
   return changed;
 }
 
-function stateCurve(source,target,same,index){
-  const x1=source.offsetLeft+source.offsetWidth/2,y1=source.offsetTop+source.offsetHeight/2;
-  const x2=target.offsetLeft+target.offsetWidth/2,y2=target.offsetTop+target.offsetHeight/2;
-  if(same){
-    const spread=58+index%3*14;
-    return `M ${x1-27} ${y1-34} C ${x1-spread} ${y1-98}, ${x1+spread} ${y1-98}, ${x1+27} ${y1-34}`;
-  }
-  const dx=x2-x1,dy=y2-y1,length=Math.max(1,Math.hypot(dx,dy));
-  const startX=x1+dx/length*source.offsetWidth/2,startY=y1+dy/length*source.offsetHeight/2;
-  const endX=x2-dx/length*target.offsetWidth/2,endY=y2-dy/length*target.offsetHeight/2;
-  const offset=(index%3-1)*22;
-  return `M ${startX} ${startY} Q ${(startX+endX)/2-dy*.1+offset} ${(startY+endY)/2+dx*.1+offset} ${endX} ${endY}`;
-}
-
-async function reroute(stage){
+async function rerouteGraph(stage){
+  if(stage.querySelector(".state-node"))return;
   const data=await state(),svg=stage.querySelector(":scope > svg.edge-svg");
   if(!svg)return;
-  if(stage.querySelector(".state-node")){
-    const rows=data.views?.state?.machines||[];
-    const name=$("#machine-select")?.selectedOptions?.[0]?.textContent;
-    const machine=rows.find(item=>item.name===name)||rows[0];
-    const nodes=new Map([...stage.querySelectorAll(".state-node")].map(node=>[nameOf(node),node]));
-    const paths=[...svg.querySelectorAll("path.state-transition-path")];
-    const labels=[...stage.querySelectorAll(".transition-label")];
-    (machine?.transitions||[]).forEach((transition,index)=>{
-      const source=nodes.get(transition.source_state),target=nodes.get(transition.target_state);
-      if(!source||!target)return;
-      paths[index]?.setAttribute("d",stateCurve(source,target,source===target,index));
-      if(labels[index]){
-        labels[index].style.left=`${(source.offsetLeft+target.offsetLeft+source.offsetWidth)/2+(index%3-1)*18}px`;
-        labels[index].style.top=`${(source.offsetTop+target.offsetTop+source.offsetHeight)/2-(source===target?80:0)+(index%2)*12}px`;
-      }
-    });
-    delete stage.dataset.initialTransitionRouting;
-    document.dispatchEvent(new CustomEvent("glyph-transition-input-action-labels-ready"));
-  }else{
-    const rows=data.views?.io?.systems||[];
-    const name=$("#system-select")?.selectedOptions?.[0]?.textContent;
-    const system=rows.find(item=>item.name===name)||rows[0];
-    const nodes=new Map([...stage.querySelectorAll(".graph-node")].map(node=>[nameOf(node),node]));
-    const paths=[...svg.querySelectorAll(":scope > path")];
-    const labels=[...stage.querySelectorAll(".edge-label")];
-    (system?.edges||[]).forEach((edge,index)=>{
-      const sourceName=(system.nodes||[]).find(node=>node.id===edge.source_id)?.name;
-      const targetName=(system.nodes||[]).find(node=>node.id===edge.target_id)?.name;
-      const source=nodes.get(sourceName),target=nodes.get(targetName);
-      if(!source||!target)return;
-      const x1=source.offsetLeft+source.offsetWidth,y1=source.offsetTop+source.offsetHeight/2;
-      const x2=target.offsetLeft,y2=target.offsetTop+target.offsetHeight/2;
-      const middle=Math.max(60,(x2-x1)*.48);
-      paths[index]?.setAttribute("d",`M ${x1} ${y1} C ${x1+middle} ${y1}, ${x2-middle} ${y2}, ${x2} ${y2}`);
-      if(labels[index]){
-        labels[index].style.left=`${(source.offsetLeft+target.offsetLeft+source.offsetWidth)/2}px`;
-        labels[index].style.top=`${(source.offsetTop+target.offsetTop+source.offsetHeight)/2}px`;
-      }
-    });
-  }
+  const rows=data.views?.io?.systems||[];
+  const name=$("#system-select")?.selectedOptions?.[0]?.textContent;
+  const system=rows.find(item=>item.name===name)||rows[0];
+  const nodes=new Map([...stage.querySelectorAll(".graph-node")].map(node=>[nameOf(node),node]));
+  const paths=[...svg.querySelectorAll(":scope > path")];
+  const labels=[...stage.querySelectorAll(".edge-label")];
+  (system?.edges||[]).forEach((edge,index)=>{
+    const sourceName=(system.nodes||[]).find(node=>node.id===edge.source_id)?.name;
+    const targetName=(system.nodes||[]).find(node=>node.id===edge.target_id)?.name;
+    const source=nodes.get(sourceName),target=nodes.get(targetName);
+    if(!source||!target)return;
+    const x1=source.offsetLeft+source.offsetWidth,y1=source.offsetTop+source.offsetHeight/2;
+    const x2=target.offsetLeft,y2=target.offsetTop+target.offsetHeight/2;
+    const middle=Math.max(60,(x2-x1)*.48);
+    paths[index]?.setAttribute("d",`M ${x1} ${y1} C ${x1+middle} ${y1}, ${x2-middle} ${y2}, ${x2} ${y2}`);
+    if(labels[index]){
+      labels[index].style.left=`${(source.offsetLeft+target.offsetLeft+source.offsetWidth)/2}px`;
+      labels[index].style.top=`${(source.offsetTop+target.offsetTop+source.offsetHeight)/2}px`;
+    }
+  });
 }
 
 function select(node){selected?.classList.remove("selected-node");selected=node;selected?.classList.add("selected-node")}
-function ready(stage){return stage.querySelector(".state-node")?stage.dataset.umlTransitionReady==="true"&&stage.dataset.initialRouteReady==="true":true}
 function edit(stage){
-  if(stage.dataset.editorReady==="true"||!ready(stage))return;
+  if(stage.dataset.editorReady==="true")return;
   stage.dataset.editorReady="true";stage.classList.add("editable");
-  const restored=restore(stage);if(restored)reroute(stage).catch(()=>{});
-  stage.querySelectorAll(".state-node,.graph-node").forEach(node=>{
+  if(stage.querySelector(".state-node")){
+    selected=null;drag=null;
+    stage.dataset.stateNodeInteractionOwner="glyph-transition-node-position-adapter-v7";
+    return;
+  }
+  const restored=restore(stage);if(restored)rerouteGraph(stage).catch(()=>{});
+  stage.querySelectorAll(".graph-node").forEach(node=>{
     node.onpointerdown=event=>{
       if(event.button)return;
       event.preventDefault();select(node);node.classList.add("dragging");node.setPointerCapture(event.pointerId);
@@ -146,14 +116,14 @@ function edit(stage){
       const left=drag.left+dx/scale,top=drag.top+dy/scale;
       node.style.left=`${Math.round(clamp(left,8,stage.scrollWidth-node.offsetWidth-8)/grid)*grid}px`;
       node.style.top=`${Math.round(clamp(top,8,stage.scrollHeight-node.offsetHeight-8)/grid)*grid}px`;
-      reroute(stage).catch(()=>{});
+      rerouteGraph(stage).catch(()=>{});
     };
     node.onpointerup=()=>{
       if(!drag||drag.node!==node)return;
       const moved=drag.moved;
       node.classList.remove("dragging");drag=null;
       if(!moved)return;
-      save(stage);reroute(stage).catch(()=>{});
+      save(stage);rerouteGraph(stage).catch(()=>{});
     };
     node.onclick=event=>{event.stopPropagation();select(node)};
   });
@@ -265,30 +235,34 @@ function tools(){
   const theme=localStorage.getItem("glyph.diagram.theme")||"white";
   $("#diagram-theme").value=theme;root.classList.toggle("theme-monochrome",theme==="monochrome");
   $("#diagram-theme").onchange=event=>{localStorage.setItem("glyph.diagram.theme",event.target.value);root.classList.toggle("theme-monochrome",event.target.value==="monochrome")};
-  $("#diagram-reset").onclick=()=>{const stage=$(".graph-stage");if(stage)localStorage.removeItem(key(stage));location.reload()};
+  $("#diagram-reset").onclick=async()=>{const stage=$(".graph-stage");if(!stage)return;await state();localStorage.removeItem(key(stage));location.reload()};
   $("#diagram-svg").onclick=()=>download(new Blob([svg()],{type:"image/svg+xml"}),`${base()}.svg`);
   $("#diagram-png").onclick=async()=>{const canvasElement=await canvas();canvasElement.toBlob(blob=>blob&&download(blob,`${base()}.png`),"image/png")};
   $("#diagram-pdf").onclick=()=>pdf().catch(error=>alert(error.message));
 }
 
 document.addEventListener("keydown",event=>{
-  if(!selected||!event.key.startsWith("Arrow"))return;
+  if(!selected||!selected.matches(".graph-node")||!event.key.startsWith("Arrow"))return;
+  const target=event.target?.nodeType===1?event.target:null;
+  const focused=document.activeElement?.nodeType===1?document.activeElement:null;
+  if(target?.closest?.(EDITING_SELECTOR)||focused?.closest?.(EDITING_SELECTOR))return;
   event.preventDefault();
   const step=event.shiftKey?1:8,dx=event.key==="ArrowLeft"?-step:event.key==="ArrowRight"?step:0,dy=event.key==="ArrowUp"?-step:event.key==="ArrowDown"?step:0;
   selected.style.left=`${Math.max(0,num(selected.style.left)+dx)}px`;selected.style.top=`${Math.max(0,num(selected.style.top)+dy)}px`;
-  const stage=selected.closest(".graph-stage");save(stage);reroute(stage).catch(()=>{});
+  const stage=selected.closest(".graph-stage");save(stage);rerouteGraph(stage).catch(()=>{});
 });
 
 function enhance(){tools();const stage=$(".graph-stage");if(stage)edit(stage)}
 new MutationObserver(()=>setTimeout(enhance,20)).observe(document.body,{childList:true,subtree:true});
 document.addEventListener("glyph-uml-transition-ready",enhance);document.addEventListener("glyph-initial-transition-ready",enhance);enhance();
+window.glyphDiagramEditorExports={marker:"glyph-diagram-editor-exports-v1",version:2,stateNodeInteractionOwner:"glyph-transition-node-position-adapter-v7"};
 })();
 </script>
 """
 
 
 def enhance_diagram_editor_exports_html(html: str) -> str:
-    """Add editable node positions, white themes, and SVG/PNG/PDF exports."""
+    """Add graph editing, white themes, and SVG/PNG/PDF exports."""
 
     if _MARKER in html:
         return html
