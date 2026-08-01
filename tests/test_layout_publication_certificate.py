@@ -15,53 +15,57 @@ from glyph.layout_publication_certificate import (
 
 
 class LayoutPublicationCertificateTests(unittest.TestCase):
-    def test_certificate_is_incremental_budgeted_and_fail_closed(self) -> None:
+    def test_certificate_is_time_bounded_and_interactive(self) -> None:
         html = enhance_layout_publication_certificate_html(
             enhance_diagram_geometry_kernel_html(DIAGRAM_HTML)
         )
 
         self.assertIn("glyph-layout-publication-certificate-v1", html)
-        self.assertIn("geometryFingerprint(stage)", html)
+        self.assertIn("function fingerprint(stage)", html)
         self.assertIn("layoutCertificateCacheHit", html)
-        self.assertIn("runBudgeted(tasks", html)
-        self.assertIn("FRAME_BUDGET_MS = 8", html)
-        self.assertIn('stage.dataset.transitionPublicationReady = "false"', html)
-        self.assertIn('stage.dataset.layoutCertificateState = "valid"', html)
-        self.assertIn("route-foreign-label", html)
-        self.assertIn("route-node", html)
+        self.assertIn("TOTAL_BUDGET_MS = 32", html)
+        self.assertIn('stage.dataset.transitionPublicationReady="false"', html)
+        self.assertIn('stage.dataset.layoutCertificateState="valid"', html)
+        self.assertIn('stage.dataset.layoutCertificateState="degraded"', html)
+        self.assertIn('stage.dataset.layoutCertificateProfile="interactive-fast"', html)
+        self.assertIn('layoutCertificateConstraints="structure,bounds,tether,initial-route-presence"', html)
+        self.assertNotIn("runBudgeted(tasks", html)
+        self.assertNotIn("route-foreign-label", html)
+        self.assertNotIn("route-node", html)
 
-    def test_route_ready_is_published_only_after_full_certificate(self) -> None:
+    def test_degraded_certificate_keeps_the_diagram_publishable(self) -> None:
         html = enhance_layout_publication_certificate_html(
             enhance_diagram_geometry_kernel_html(DIAGRAM_HTML)
         )
 
-        self.assertIn('stage.dataset.initialRouteCertificate !== "valid"', html)
-        self.assertIn('stage.dataset.initialRouteReady = "publishing"', html)
-        self.assertGreaterEqual(
-            html.count('stage.dataset.initialRouteReady = "true"'),
-            2,
-        )
-        self.assertIn('stage.dataset.initialRouteReady = "failed"', html)
-        self.assertIn('stage.dataset.transitionPublicationReady = "true"', html)
-
-    def test_revalidation_preserves_last_valid_certificate_until_fingerprint_check(self) -> None:
-        html = enhance_layout_publication_certificate_html(
-            enhance_diagram_geometry_kernel_html(DIAGRAM_HTML)
-        )
-        schedule = re.search(
-            r"function schedule\(reason = \"scheduled\", delay = 0\) \{(.*?)\n  \}\n\n  for \(const eventName",
+        degrade = re.search(
+            r"function degrade\(stage,token,violations,metrics=\{\}\)\{(.*?)\n  \}",
             html,
             re.DOTALL,
         )
-        self.assertIsNotNone(schedule)
-        body = schedule.group(1)
-        self.assertNotIn('layoutCertificateState = "pending"', body)
-        self.assertIn('layoutCertificateRequestState = "queued"', body)
-        self.assertIn('transitionPublicationReady = "false"', body)
-        self.assertIn('layoutCertificateRequestState = "running"', html)
-        self.assertIn('layoutCertificateRequestState = "completed"', html)
-        self.assertIn('layoutCertificateCacheHit = "true"', html)
-        self.assertIn('transitionPublicationReady = "true"', html)
+        self.assertIsNotNone(degrade)
+        assert degrade is not None
+        body = degrade.group(1)
+        self.assertIn('layoutCertificateState="degraded"', body)
+        self.assertIn('transitionPublicationReady="true"', body)
+        self.assertIn("glyph-layout-publication-certificate-failed", body)
+        self.assertNotIn('initialRouteReady="failed"', body)
+
+    def test_revalidation_is_queued_and_cancellable(self) -> None:
+        html = enhance_layout_publication_certificate_html(
+            enhance_diagram_geometry_kernel_html(DIAGRAM_HTML)
+        )
+
+        self.assertIn('layoutCertificateRequestState="queued"', html)
+        self.assertIn('layoutCertificateRequestState="running"', html)
+        self.assertIn('layoutCertificateRequestState="completed"', html)
+        self.assertIn('layoutCertificateRequestState="cancelled"', html)
+        self.assertIn('layoutCertificateCacheHit=cacheHit?"true":"false"', html)
+        self.assertIn('transitionPublicationReady="true"', html)
+        self.assertIn("function cancel(reason=\"cancelled\")", html)
+        self.assertIn('cancel("state-tab-deactivated")', html)
+        self.assertIn("requestedGeneration+=1", html)
+        self.assertIn("completedGeneration=requestedGeneration", html)
 
     def test_enhancer_is_idempotent(self) -> None:
         once = enhance_layout_publication_certificate_html(DIAGRAM_HTML)
