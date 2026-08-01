@@ -456,6 +456,19 @@ function anchorFractions(preferred){
   }
   return result;
 }
+function storedAnchorFraction(record,anchors){
+  if(finite(record?.anchorFraction))return clamp(record.anchorFraction,.18,.82);
+  if(finite(record?.x)&&finite(record?.y)&&finite(record?.dx)&&finite(record?.dy)){
+    const savedAnchor={x:record.x-record.dx,y:record.y-record.dy};
+    let nearest=anchors[0]||null,distance=Number.POSITIVE_INFINITY;
+    for(const anchor of anchors){
+      const candidate=Math.hypot(anchor.x-savedAnchor.x,anchor.y-savedAnchor.y);
+      if(candidate<distance){nearest=anchor;distance=candidate}
+    }
+    if(nearest)return nearest.fraction??.5;
+  }
+  return anchors[0]?.fraction??.5;
+}
 function project(point,anchor){
   const dx=point.x-anchor.x,dy=point.y-anchor.y,distance=Math.hypot(dx,dy);
   if(!distance||distance<=MAX_DISTANCE)return point;
@@ -551,9 +564,11 @@ function layoutEntries(stage,data,machine){
     fractions.set(transitionIndex,indices.length===1?.5:(rank+1)/(indices.length+1));
   }));
   const entries=clusters.map((cluster,index)=>{
-    const id=cluster.dataset.transitionId||`T${index+1}`,fraction=fractions.get(index)??.5;
+    const id=cluster.dataset.transitionId||`T${index+1}`,record=saved[id],routeFraction=fractions.get(index)??.5;
+    const routeAnchors=anchorFractions(routeFraction).map(value=>anchorFor(stage,id,index,value));
+    const fraction=storedAnchorFraction(record,routeAnchors);
     const anchors=anchorFractions(fraction).map(value=>anchorFor(stage,id,index,value));
-    const anchor=anchors[0],record=saved[id],manual=Boolean(record);
+    const anchor=anchors[0],manual=Boolean(record);
     const restored=finite(record?.dx)&&finite(record?.dy)
       ?{x:anchor.x+record.dx,y:anchor.y+record.dy}
       :finite(record?.x)&&finite(record?.y)?{x:record.x,y:record.y}
@@ -610,18 +625,19 @@ function applyAssignment(stage,data,entries,assignment){
   for(const entry of entries){
     const option=assignment.get(entry.cluster);
     if(!option)throw Error(`missing transition placement: ${entry.id}`);
-    const point=option.point,anchor=option.anchor||entry.anchor;
+    const point=option.point,anchor=option.anchor||entry.anchor,anchorFraction=anchor.fraction??.5;
     entry.cluster.style.left=`${point.x}px`;
     entry.cluster.style.top=`${point.y}px`;
     entry.cluster.dataset.anchorX=String(anchor.x);
     entry.cluster.dataset.anchorY=String(anchor.y);
+    entry.cluster.dataset.anchorFraction=String(anchorFraction);
     entry.cluster.dataset.ioDistance=String(Math.hypot(point.x-anchor.x,point.y-anchor.y));
     entry.cluster.dataset.maxIoDistance=String(MAX_DISTANCE);
     entry.cluster.dataset.manualIo=entry.manual?"true":"false";
     entry.cluster.dataset.ioCollisionSolved="true";
     entry.cluster.dataset.foreignEdgeHits=String(option.foreignEdgeHits||0);
     entry.cluster.classList.remove("layout-constrained","compact-io","micro-io","nano-io","stacked");
-    if(entry.manual)saved[entry.id]={x:point.x,y:point.y,dx:point.x-anchor.x,dy:point.y-anchor.y};
+    if(entry.manual)saved[entry.id]={x:point.x,y:point.y,dx:point.x-anchor.x,dy:point.y-anchor.y,anchorFraction};
   }
   writeStored(labelStorageKey(data),saved);
   stage.dataset.transitionIoCollisionSolved="true";
