@@ -81,13 +81,14 @@ const num=value=>Number.parseFloat(value||"0")||0;
 const esc=value=>String(value??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
 const stateName=node=>node.querySelector(".state-name")?.textContent?.trim()||"";
 
+function liveState(){return typeof snapshot==="object"&&snapshot?snapshot:null}
 function selectedMachine(data){
   const machines=data?.views?.state?.machines||[];
   const selected=document.getElementById("machine-select")?.selectedOptions?.[0]?.textContent;
   return machines.find(machine=>machine.name===selected)||machines[0]||null;
 }
 async function readMachine(){
-  const live=typeof snapshot==="object"&&snapshot?snapshot:null;
+  const live=liveState();
   if(live)return selectedMachine(live);
   const response=await fetch("/api/state",{cache:"no-store"});
   if(!response.ok)return null;
@@ -101,6 +102,14 @@ function stageSize(stage){
     width:Math.max(1,num(stage.style.width),stage.scrollWidth),
     height:Math.max(1,num(stage.style.height),stage.scrollHeight),
   };
+}
+function canonicalPositionKey(stage){
+  const digest=liveState()?.digest||stage.dataset.diagramDigest||"source";
+  const machine=document.getElementById("machine-select")?.value||0;
+  return`glyph.diagram.positions.v1:${digest}:state:${machine}`;
+}
+function markPositionMigration(key){
+  try{localStorage.setItem(`glyph.diagram.workspace.v1:${key}`,"1")}catch(error){console.warn("state diagram workspace migration marker unavailable",error)}
 }
 function persistShiftedPositions(stage,dx,dy){
   const source=stage.dataset.transitionNodePositionSource||"";
@@ -160,6 +169,7 @@ function applyWorkspaceOrigin(stage){
     const dot=stage.querySelector(".initial-dot");
     if(dot){dot.style.left=`${num(dot.style.left)+dx}px`;dot.style.top=`${num(dot.style.top)+dy}px`}
     if(positionState.startsWith("restored:"))persistShiftedPositions(stage,dx,dy);
+    else if(positionState==="none")markPositionMigration(canonicalPositionKey(stage));
   }
   stage.dataset.stateDiagramWorkspaceOriginReady="true";
   stage.dataset.stateDiagramWorkspaceOriginX=String(dx);
@@ -170,13 +180,13 @@ function statePath(a,b,same,index){
   const x1=a.offsetLeft+a.offsetWidth/2,y1=a.offsetTop+a.offsetHeight/2;
   const x2=b.offsetLeft+b.offsetWidth/2,y2=b.offsetTop+b.offsetHeight/2;
   if(same){const spread=58+index%3*14;return`M ${x1-27} ${y1-34} C ${x1-spread} ${y1-98}, ${x1+spread} ${y1-98}, ${x1+27} ${y1-34}`}
-  const dx=x2-x1,dy=y2-y1,len=Math.max(1,Math.hypot(dx,dy));
+  const dx=x2-x1,dy=y2-y1,len=Math.max(1,Math.hypot(dx,dy)),ux=dx/len,uy=dy/len;
   const rx=Math.max(1,a.offsetWidth/2),ry=Math.max(1,a.offsetHeight/2);
   const txr=Math.max(1,b.offsetWidth/2),tyr=Math.max(1,b.offsetHeight/2);
-  const sourceScale=1/Math.max(Math.abs(dx)/(rx||1),Math.abs(dy)/(ry||1),1/Math.max(rx,ry));
-  const targetScale=1/Math.max(Math.abs(dx)/(txr||1),Math.abs(dy)/(tyr||1),1/Math.max(txr,tyr));
-  const sx=x1+dx/len*Math.min(sourceScale,len/2),sy=y1+dy/len*Math.min(sourceScale,len/2);
-  const ex=x2-dx/len*Math.min(targetScale,len/2),ey=y2-dy/len*Math.min(targetScale,len/2);
+  const sourceRadius=1/Math.sqrt((ux*ux)/(rx*rx)+(uy*uy)/(ry*ry));
+  const targetRadius=1/Math.sqrt((ux*ux)/(txr*txr)+(uy*uy)/(tyr*tyr));
+  const sx=x1+ux*Math.min(sourceRadius,len/2),sy=y1+uy*Math.min(sourceRadius,len/2);
+  const ex=x2-ux*Math.min(targetRadius,len/2),ey=y2-uy*Math.min(targetRadius,len/2);
   const offset=(index%3-1)*22;
   return`M ${sx.toFixed(1)} ${sy.toFixed(1)} Q ${((sx+ex)/2-dy*.1+offset).toFixed(1)} ${((sy+ey)/2+dx*.1+offset).toFixed(1)} ${ex.toFixed(1)} ${ey.toFixed(1)}`;
 }
@@ -191,15 +201,17 @@ function updateInitialTransition(stage,machine,paths,nodes){
   const size=stageSize(stage),left=target.offsetLeft,top=target.offsetTop,right=left+target.offsetWidth,bottom=top+target.offsetHeight;
   const cx=left+target.offsetWidth/2,cy=top+target.offsetHeight/2;
   const spaces={top,left,right:size.width-right,bottom:size.height-bottom};
-  let side=spaces.top>=72?"top":Object.entries(spaces).sort((a,b)=>b[1]-a[1])[0][0];
+  const side=spaces.top>=72?"top":Object.entries(spaces).sort((a,b)=>b[1]-a[1])[0][0];
   let dotX=cx,dotY=top-54,startX=cx,startY=dotY+DOT_RADIUS,endX=cx,endY=top-2;
   if(side==="bottom"){dotY=bottom+54;startY=dotY-DOT_RADIUS;endY=bottom+2}
   else if(side==="left"){dotX=left-54;dotY=cy;startX=dotX+DOT_RADIUS;startY=cy;endX=left-2;endY=cy}
   else if(side==="right"){dotX=right+54;dotY=cy;startX=dotX-DOT_RADIUS;startY=cy;endX=right+2;endY=cy}
   dotX=Math.max(DOT_RADIUS+8,Math.min(size.width-DOT_RADIUS-8,dotX));
   dotY=Math.max(DOT_RADIUS+8,Math.min(size.height-DOT_RADIUS-8,dotY));
-  if(side==="top"){startY=dotY+DOT_RADIUS}else if(side==="bottom"){startY=dotY-DOT_RADIUS}
-  else if(side==="left"){startX=dotX+DOT_RADIUS}else{startX=dotX-DOT_RADIUS}
+  if(side==="top")startY=dotY+DOT_RADIUS;
+  else if(side==="bottom")startY=dotY-DOT_RADIUS;
+  else if(side==="left")startX=dotX+DOT_RADIUS;
+  else startX=dotX-DOT_RADIUS;
   initialPath.setAttribute("d",`M ${startX.toFixed(1)} ${startY.toFixed(1)} L ${endX.toFixed(1)} ${endY.toFixed(1)}`);
   dot.style.left=`${dotX-DOT_RADIUS}px`;dot.style.top=`${dotY-DOT_RADIUS}px`;
   dot.dataset.routeSide=side;initialPath.dataset.routeSide=side;
@@ -273,10 +285,10 @@ async function refresh(reason){
   try{
     const machine=await readMachine();if(!machine||!stage.isConnected)return;
     expandWorkspace(stage);
-    applyWorkspaceOrigin(stage);
+    const originReady=applyWorkspaceOrigin(stage);
     updateTransitionGeometry(stage,machine);
     renderTransitionIndex(stage,machine);
-    preserveOrdinaryScale(stage);
+    if(originReady)preserveOrdinaryScale(stage);
     stage.dataset.stateDiagramWorkspaceReason=reason;
     document.dispatchEvent(new CustomEvent("glyph-state-diagram-workspace-ready",{detail:{marker:MARKER,machine:machine.name,reason}}));
   }finally{running=false}
@@ -290,14 +302,14 @@ new MutationObserver(records=>{
   if(records.some(record=>record.type==="childList"||record.target?.classList?.contains("state-node")||record.target?.classList?.contains("graph-stage")))schedule("diagram-mutation");
 }).observe(view,{childList:true,subtree:true,attributes:true,attributeFilter:["style"]});
 document.addEventListener("change",event=>{if(event.target?.id==="machine-select")schedule("machine-change")});
-document.addEventListener("pointerup",event=>{if(event.target?.closest?.(".state-node"))schedule("node-drag-complete")},true);
+document.addEventListener("pointerup",event=>{if(event.target?.closest?.(".state-node")){setTimeout(()=>schedule("node-drag-complete"),20)}},true);
 document.addEventListener("pointercancel",()=>schedule("node-drag-cancelled"),true);
 document.addEventListener("glyph-transition-layout-transaction-ready",()=>schedule("layout-ready"));
 document.addEventListener("glyph-diagram-viewport-change",()=>schedule("viewport-change"));
 for(const eventName of["pagehide","beforeunload"]){window.addEventListener(eventName,()=>{destroyed=true;cancelAnimationFrame(frame)},{once:true})}
 window.glyphStateDiagramWorkspace={
   marker:MARKER,version:1,schedule,refresh:()=>schedule("api-refresh"),
-  audit:()=>{const stage=stageOf();return{ok:Boolean(stage?.dataset.stateDiagramWorkspaceGeometryReady==="true"&&stage?.nextElementSibling?.classList?.contains("transition-index")),width:num(stage?.style.width),height:num(stage?.style.height),initialReady:stage?.dataset.initialRouteReady||""}}
+  audit:()=>{const stage=stageOf(),panel=stage?.closest(".canvas-shell")?.nextElementSibling;return{ok:Boolean(stage?.dataset.stateDiagramWorkspaceGeometryReady==="true"&&panel?.classList?.contains("transition-index")),width:num(stage?.style.width),height:num(stage?.style.height),initialReady:stage?.dataset.initialRouteReady||""}}
 };
 schedule("bootstrap");
 })();
