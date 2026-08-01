@@ -40,8 +40,7 @@ _STYLE = r"""
 _SCRIPT = r"""
 <script id="glyph-transition-readable-layout-v1-script">
 (()=>{
-const MARKER="glyph-transition-readable-layout-v1",DENSE_TRANSITIONS=7,MAX_LINE=28;
-let timer=null,running=false;
+const MARKER="glyph-transition-readable-layout-v1",MAX_LINE=28;
 const text=value=>String(value??"");
 const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
 
@@ -78,9 +77,9 @@ function semanticLines(cluster){
 }
 
 function formatCluster(cluster){
-  const value=cluster.querySelector(".transition-io-value");if(!value)return;
+  const value=cluster.querySelector(".transition-io-value");if(!value)return false;
   const signature=JSON.stringify([cluster.dataset.inputValue||"",cluster.dataset.guardValue||"",cluster.dataset.outputValue||""]);
-  if(cluster.dataset.semanticLineSignature===signature)return;
+  if(cluster.dataset.semanticLineSignature===signature)return false;
   const lines=semanticLines(cluster),expected=cluster.dataset.ioValue||value.textContent||"";
   value.replaceChildren(...lines.map(line=>{
     const span=document.createElement("span");
@@ -101,78 +100,35 @@ function formatCluster(cluster){
   cluster.dataset.semanticLongestLine=String(longest);
   cluster.dataset.semanticLineSignature=signature;
   cluster.classList.add("semantic-readable-label");
-}
-
-function hasSavedNodes(){
-  const index=document.getElementById("machine-select")?.value||0;
-  return Object.keys(localStorage).some(key=>key.startsWith("glyph.diagram.positions.v1:")&&key.endsWith(`:state:${index}`));
-}
-
-function expandDenseStage(stage,clusters){
-  const nodes=[...stage.querySelectorAll(".state-node")];
-  if(clusters.length<DENSE_TRANSITIONS||nodes.length<2||hasSavedNodes())return false;
-  const signature=`${nodes.map(node=>node.querySelector(".state-name")?.textContent||"").join("|")}:${clusters.length}`;
-  if(stage.dataset.semanticDenseLayout===signature)return false;
-  const stageWidth=Math.max(1400,stage.scrollWidth),stageHeight=Math.max(1000,stage.scrollHeight),centerX=stageWidth/2,centerY=stageHeight/2;
-  const radiusX=Math.max(420,Math.min(520,stageWidth*.36)),radiusY=Math.max(300,Math.min(380,stageHeight*.34));
-  nodes.forEach((node,index)=>{
-    const angle=-Math.PI/2+index*2*Math.PI/nodes.length;
-    node.style.left=`${Math.round(centerX+Math.cos(angle)*radiusX-node.offsetWidth/2)}px`;
-    node.style.top=`${Math.round(centerY+Math.sin(angle)*radiusY-node.offsetHeight/2)}px`;
-  });
-  stage.style.width=`${stageWidth}px`;
-  stage.style.height=`${stageHeight}px`;
-  stage.dataset.semanticDenseLayout=signature;
   return true;
 }
 
-function markPending(stage){
-  if(!stage)return;
-  stage.dataset.transitionSemanticLinesReady="pending";
-  stage.dataset.transitionIoCollisionSolved="semantic-pending";
-  stage.dataset.transitionIoCollisionCount="-1";
-}
-
-async function apply(stage=document.querySelector(".state-node")?.closest(".graph-stage")){
-  if(running||!stage||stage.dataset.transitionIoClustersReady!=="true")return;
-  running=true;
-  try{
-    const clusters=[...stage.querySelectorAll(".transition-io-cluster")];
-    clusters.forEach(formatCluster);
-    const expanded=expandDenseStage(stage,clusters);
-    if(expanded){
-      await window.glyphTransitionNodeLayoutGuard?.requestLayout(stage);
-    }else{
-      window.glyphTransitionIoCollisionSolver?.run();
-    }
-    stage.dataset.transitionSemanticLinesReady="true";
-    document.dispatchEvent(new CustomEvent("glyph-transition-readable-layout-ready",{detail:{marker:MARKER,labels:clusters.length,expanded}}));
-  }finally{
-    running=false;
+function apply(stage=document.querySelector(".state-node")?.closest(".graph-stage")){
+  if(!stage||!stage.isConnected)return 0;
+  const clusters=[...stage.querySelectorAll(".transition-io-cluster")];
+  const changed=clusters.reduce((count,cluster)=>count+Number(formatCluster(cluster)),0);
+  stage.dataset.transitionSemanticLinesReady="formatted";
+  if(changed){
+    window.glyphTransitionLayoutTransaction?.schedule?.("semantic-line-format-updated",0);
   }
+  return changed;
 }
 
-function schedule(stage=null,delay=0){
-  clearTimeout(timer);
-  timer=setTimeout(()=>apply(stage||document.querySelector(".state-node")?.closest(".graph-stage")).catch(error=>console.error("readable transition layout failed",error)),delay);
-}
-document.addEventListener("glyph-transition-io-clusters-ready",event=>{
-  const stage=event.target?.querySelector?.(".graph-stage")||document.querySelector(".state-node")?.closest(".graph-stage");
-  markPending(stage);
-  schedule(stage,0);
+window.glyphTransitionReadableLayout=Object.freeze({
+  marker:MARKER,
+  version:2,
+  ownsNodeLayout:false,
+  ownsScheduling:false,
+  apply,
+  maxLineLength:MAX_LINE,
 });
-document.addEventListener("glyph-locale-changed",()=>schedule(null,0));
-document.addEventListener("change",event=>{if(event.target?.id==="machine-select")schedule(null,0)});
-new MutationObserver(()=>schedule(null,30)).observe(document.getElementById("view")||document.body,{childList:true,subtree:true});
-window.glyphTransitionReadableLayout={marker:MARKER,apply:()=>schedule(null,0),maxLineLength:MAX_LINE};
-schedule(null,0);
 })();
 </script>
 """
 
 
 def enhance_transition_readable_layout_html(html: str) -> str:
-    """Wrap labels at semantic boundaries and expand dense state diagrams."""
+    """Provide semantic label wrapping without owning node layout or scheduling."""
 
     if _MARKER in html:
         return html
