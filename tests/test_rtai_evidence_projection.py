@@ -60,20 +60,27 @@ def context(edge_id: str, operation: str = "actuator") -> dict[str, object]:
     }
 
 
+def transition(
+    edge_id: str,
+    contexts: list[dict[str, object]],
+    *,
+    evidence_edge_id: str | None = None,
+) -> dict[str, object]:
+    return {
+        "edge_id": edge_id,
+        "display_action": {"kind": "legacy"},
+        "execution_evidence_v2": {
+            "edge_id": evidence_edge_id or edge_id,
+            "contexts": contexts,
+        },
+    }
+
+
 def machine(contexts: list[dict[str, object]]) -> dict[str, object]:
     return {
         "name": "Door",
         "analysis": {},
-        "transitions": [
-            {
-                "edge_id": "Door:step:1:0",
-                "display_action": {"kind": "legacy"},
-                "execution_evidence_v2": {
-                    "edge_id": "Door:step:1:0",
-                    "contexts": contexts,
-                },
-            }
-        ],
+        "transitions": [transition("Door:step:1:0", contexts)],
     }
 
 
@@ -104,20 +111,88 @@ class EvidenceProjectionTests(unittest.TestCase):
             "exact-context-actions-disagree",
         )
 
+    def test_duplicate_transition_edge_ids_fail_closed_without_cross_projection(self) -> None:
+        duplicate = "Door:step:1:0"
+        value = {
+            "name": "Door",
+            "analysis": {},
+            "transitions": [
+                transition(duplicate, [context(duplicate, "actuator")]),
+                transition(duplicate, [context(duplicate, "alarm")]),
+            ],
+        }
+
+        report = audit_evidence_projection(value, include_empty_evidence=True)
+        self.assertFalse(report.ready)
+        self.assertEqual(report.ready_transition_count, 0)
+        self.assertEqual(
+            [item.reason for item in report.transitions],
+            ["duplicate-transition-edge-id", "duplicate-transition-edge-id"],
+        )
+
+        result = project_machine_from_evidence(
+            value,
+            mode=EvidenceProjectionMode.STRICT_EXACT,
+        )
+        self.assertTrue(result["analysis"]["evidence_projection_safe"])
+        self.assertFalse(result["analysis"]["evidence_projection_ready"])
+        for item in result["transitions"]:
+            self.assertIsNone(item["system_action"])
+            self.assertIsNone(item["evidence_display_action"])
+            self.assertEqual(
+                item["evidence_projection"]["reason"],
+                "duplicate-transition-edge-id",
+            )
+
+    def test_evidence_edge_id_must_match_its_owning_transition(self) -> None:
+        transition_edge = "Door:step:1:0"
+        foreign_edge = "Door:step:2:0"
+        value = {
+            "name": "Door",
+            "analysis": {},
+            "transitions": [
+                transition(
+                    transition_edge,
+                    [context(foreign_edge, "alarm")],
+                    evidence_edge_id=foreign_edge,
+                )
+            ],
+        }
+
+        report = audit_evidence_projection(value, include_empty_evidence=True)
+        self.assertFalse(report.ready)
+        self.assertEqual(report.ready_transition_count, 0)
+        self.assertEqual(
+            report.transitions[0].reason,
+            "evidence-edge-id-mismatch",
+        )
+
+        result = project_machine_from_evidence(
+            value,
+            mode=EvidenceProjectionMode.STRICT_EXACT,
+        )
+        projected = result["transitions"][0]
+        self.assertIsNone(projected["system_action"])
+        self.assertFalse(projected["legacy_system_action_fallback_allowed"])
+        self.assertEqual(
+            projected["evidence_projection"]["edge_id"],
+            transition_edge,
+        )
+
     def test_prefer_exact_publishes_candidate_without_replacing_display(self) -> None:
         value = machine([context("Door:step:1:0")])
         result = project_machine_from_evidence(
             value,
             mode=EvidenceProjectionMode.PREFER_EXACT,
         )
-        transition = result["transitions"][0]
-        self.assertEqual(transition["display_action"], {"kind": "legacy"})
+        projected = result["transitions"][0]
+        self.assertEqual(projected["display_action"], {"kind": "legacy"})
         self.assertEqual(
-            transition["evidence_projection_source"],
+            projected["evidence_projection_source"],
             "execution-evidence-v2",
         )
         self.assertEqual(
-            transition["evidence_projected_system_action"]["kind"],
+            projected["evidence_projected_system_action"]["kind"],
             "effect-trace",
         )
 
@@ -131,9 +206,9 @@ class EvidenceProjectionTests(unittest.TestCase):
             machine([invalid]),
             mode=EvidenceProjectionMode.STRICT_EXACT,
         )
-        transition = result["transitions"][0]
-        self.assertIsNone(transition["evidence_display_action"])
-        self.assertFalse(transition["legacy_system_action_fallback_allowed"])
+        projected = result["transitions"][0]
+        self.assertIsNone(projected["evidence_display_action"])
+        self.assertFalse(projected["legacy_system_action_fallback_allowed"])
         self.assertFalse(result["analysis"]["evidence_projection_ready"])
 
 
