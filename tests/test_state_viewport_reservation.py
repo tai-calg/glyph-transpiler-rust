@@ -33,15 +33,16 @@ class StateViewportReservationTests(unittest.TestCase):
         self.assertIn("MIN_VISIBLE_HEIGHT = 240", enhanced)
         self.assertIn('reason: "inactive-state-view"', enhanced)
 
-    def test_reservation_precedes_viewport_and_fit_certification(self) -> None:
+    def test_reservation_precedes_viewport_and_bounded_transaction(self) -> None:
         names = [enhancer.__name__ for enhancer in _presentation_pipeline()]
 
         reservation = names.index("enhance_state_viewport_reservation_html")
         viewport = names.index("enhance_diagram_canvas_viewport_html")
-        fit = names.index("enhance_diagram_fit_stability_html")
+        transaction = names.index("enhance_transition_layout_transaction_html")
 
         self.assertLess(reservation, viewport)
-        self.assertLess(viewport, fit)
+        self.assertLess(viewport, transaction)
+        self.assertNotIn("enhance_diagram_fit_stability_html", names)
 
 
 if __name__ == "__main__":
