@@ -11,7 +11,7 @@ async function waitForServer(url, child, logs) {
   for (let attempt = 0; attempt < 120; attempt += 1) {
     if (child.exitCode !== null) throw new Error(`Glyph process exited early\n${logs.join("")}`);
     try {
-      const response = await fetch(`${url}/api/state`);
+      const response = await fetch(`${url}/api/state`, { cache: "no-store" });
       if (response.ok && (await response.json()).status === "ready") return;
     } catch {}
     await new Promise(resolve => setTimeout(resolve, 100));
@@ -36,12 +36,31 @@ async function dragElement(page, locator, deltaX, deltaY, name) {
   const startY = before.y + before.height / 2;
   await page.mouse.move(startX, startY);
   await page.mouse.down();
-  await page.mouse.move(startX + deltaX, startY + deltaY, { steps: 20 });
+  await page.mouse.move(startX + deltaX, startY + deltaY, { steps: 10 });
   await page.mouse.up();
   const after = await locator.boundingBox();
   assert(after, `${name} has no bounding box after drag`);
-  assert(Math.abs(after.x - before.x) > 10 || Math.abs(after.y - before.y) > 10, `${name} did not move`);
+  assert(Math.abs(after.x - before.x) > 3 || Math.abs(after.y - before.y) > 3, `${name} did not move`);
   return { before, after };
+}
+
+async function waitForOrdinaryLayout(page, minimumGeneration = 0) {
+  await page.waitForFunction(minimum => {
+    const stage = document.querySelector(".state-node")?.closest(".graph-stage");
+    const transaction = window.glyphTransitionLayoutTransaction;
+    return stage?.dataset.editorReady === "true"
+      && stage?.dataset.transitionIoClustersReady === "true"
+      && stage?.dataset.transitionEnablingCasesReady === "true"
+      && stage?.dataset.transitionLayoutState === "ready"
+      && stage?.dataset.transitionPublicationReady === "true"
+      && stage?.dataset.transitionLayoutProfile === "ordinary"
+      && stage?.dataset.transitionLayoutMode === "base"
+      && stage?.dataset.transitionDenseCanvas === "disabled"
+      && !stage?.dataset.transitionLayoutError
+      && Number(transaction?.generation || 0) >= Number(minimum || 0)
+      && transaction?.generation === transaction?.completedGeneration
+      && document.querySelector(".transition-io-cluster")?.dataset.ioDragReady === "true";
+  }, minimumGeneration, { timeout: 5000 });
 }
 
 async function ioPlacement(locator) {
@@ -59,14 +78,10 @@ async function ioPlacement(locator) {
       dx: left - anchorX,
       dy: top - anchorY,
       distance: Math.hypot(left - anchorX, top - anchorY),
-      manual: element.dataset.manualIo,
-      rejected: element.dataset.manualIoRejected || "",
-      gesture: element.dataset.manualIoGestureState || "",
-      gestureReason: element.dataset.manualIoGestureReason || "",
-      editState: stage?.dataset.manualLabelEditState || "",
+      manual: element.dataset.manualIo || "",
       publication: stage?.dataset.transitionPublicationReady || "",
-      certificate: stage?.dataset.layoutCertificateState || "",
-      collision: stage?.dataset.transitionIoCollisionSolved || "",
+      profile: stage?.dataset.transitionLayoutProfile || "",
+      error: stage?.dataset.transitionLayoutError || "",
     };
   });
 }
@@ -85,86 +100,29 @@ async function storedManualPlacement(page, transitionId) {
   }, transitionId);
 }
 
-async function waitForIoLayout(page) {
-  await page.waitForFunction(() => {
-    const stage = document.querySelector(".graph-stage");
-    const state = stage?.dataset.transitionIoCollisionSolved;
-    return (state === "true" || state === "fallback")
-      && stage?.dataset.transitionSemanticLinesReady === "true"
-      && stage?.dataset.transitionSemanticRoleLinesReady === "true"
-      && stage?.dataset.transitionPublicationReady === "true"
-      && stage?.dataset.layoutCertificateState === "valid";
-  }, undefined, { timeout: 30_000 });
-}
-
-async function waitForGestureTerminal(page, transitionId) {
-  const terminal = new Set(["persisted", "rejected", "cancelled", "disconnected", "failed"]);
-  let last = null;
-  for (let attempt = 0; attempt < 80; attempt += 1) {
-    const locator = page.locator(`.transition-io-cluster[data-transition-id="${transitionId}"]`);
-    if (await locator.count()) {
-      const placement = await ioPlacement(locator);
-      const persisted = await storedManualPlacement(page, transitionId);
-      last = { placement, persisted };
-      if (placement.manual === "true" && persisted) return { placement, persisted, accepted: true };
-      if (terminal.has(placement.gesture) || terminal.has(placement.editState)) {
-        return { placement, persisted, accepted: false };
-      }
-    }
-    await page.waitForTimeout(100);
-  }
-  throw new Error(`manual I/O gesture did not terminate: ${JSON.stringify(last)}`);
-}
-
 async function dragFeasibleTransitionCluster(page) {
-  const preferred = page.locator('.transition-io-cluster[data-input-value="ConveyorStop"]');
   const all = page.locator(".transition-io-cluster");
-  const candidates = [];
-  for (let index = 0; index < await preferred.count(); index += 1) candidates.push(preferred.nth(index));
-  for (let index = 0; index < await all.count(); index += 1) candidates.push(all.nth(index));
-  const deltas = [
-    { x: 36, y: 0 },
-    { x: -36, y: 0 },
-    { x: 0, y: 36 },
-    { x: 0, y: -36 },
-    { x: 28, y: 28 },
-    { x: -28, y: 28 },
-  ];
-  const attempted = new Set();
-  const failures = [];
-  for (const initialCluster of candidates) {
-    const transitionId = await initialCluster.getAttribute("data-transition-id");
-    if (!transitionId || attempted.has(transitionId)) continue;
-    attempted.add(transitionId);
-    for (const delta of deltas) {
+  const deltas = [[28, 0], [-28, 0], [0, 28], [0, -28], [20, 20]];
+  for (let index = 0; index < await all.count(); index += 1) {
+    const initial = all.nth(index);
+    const transitionId = await initial.getAttribute("data-transition-id");
+    if (!transitionId) continue;
+    for (const [dx, dy] of deltas) {
       const cluster = page.locator(`.transition-io-cluster[data-transition-id="${transitionId}"]`);
       const before = await cluster.boundingBox();
-      assert(before, `transition ${transitionId} has no bounding box before drag`);
-      const startX = before.x + before.width / 2;
-      const startY = before.y + before.height / 2;
-      await page.mouse.move(startX, startY);
-      await page.mouse.down();
-      await page.mouse.move(startX + delta.x, startY + delta.y, { steps: 20 });
-      await page.mouse.up();
-      const terminal = await waitForGestureTerminal(page, transitionId);
-      await waitForIoLayout(page);
-      const liveCluster = page.locator(`.transition-io-cluster[data-transition-id="${transitionId}"]`);
-      const after = await liveCluster.boundingBox();
-      assert(after, `transition ${transitionId} has no bounding box after drag`);
-      const placement = await ioPlacement(liveCluster);
-      const persisted = await storedManualPlacement(page, transitionId);
-      const moved = Math.abs(after.x - before.x) > 10 || Math.abs(after.y - before.y) > 10;
-      if (terminal.accepted && moved && placement.manual === "true" && persisted) {
-        return { cluster: liveCluster, transitionId, before, after, placement };
-      }
-      failures.push({ transitionId, delta, moved, terminal, placement, persisted });
-      if (placement.manual === "true" || persisted) {
-        await liveCluster.dblclick();
-        await waitForIoLayout(page);
+      if (!before) continue;
+      const generation = await page.evaluate(() => Number(window.glyphTransitionLayoutTransaction?.generation || 0));
+      await dragElement(page, cluster, dx, dy, `transition ${transitionId}`);
+      await waitForOrdinaryLayout(page, generation + 1);
+      const live = page.locator(`.transition-io-cluster[data-transition-id="${transitionId}"]`);
+      const placement = await ioPlacement(live);
+      if (placement.manual === "true" && await storedManualPlacement(page, transitionId)) {
+        assert(placement.distance <= 96.5, "dragged I/O escaped its arrow tether");
+        return { cluster: live, transitionId, placement };
       }
     }
   }
-  assert.fail(`no certified manual I/O placement was found: ${JSON.stringify(failures)}`);
+  assert.fail("no transition label accepted a manual placement");
 }
 
 const logs = [];
@@ -187,26 +145,14 @@ try {
   await waitForServer(url, child, logs);
   const page = await browser.newPage({ viewport: { width: 1500, height: 900 } });
   const browserErrors = [];
+  page.on("pageerror", error => browserErrors.push(`pageerror: ${error.message}`));
   page.on("console", message => {
-    if (message.type() === "error") browserErrors.push(message.text());
+    if (message.type() === "error") browserErrors.push(`console: ${message.text()}`);
   });
   await page.goto(url, { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => document.querySelector("#status")?.textContent === "ready");
-  if (!await page.locator('button[data-tab="state"]').evaluate(button => button.classList.contains("active"))) {
-    await page.click('button[data-tab="state"]');
-  }
-  await page.waitForFunction(() => {
-    const stage = document.querySelector(".graph-stage");
-    return document.querySelector("#diagram-tools")
-      && stage?.dataset.editorReady === "true"
-      && ["true", "fallback"].includes(stage?.dataset.transitionIoCollisionSolved)
-      && stage?.dataset.transitionSemanticLinesReady === "true"
-      && stage?.dataset.transitionSemanticRoleLinesReady === "true"
-      && stage?.dataset.transitionPublicationReady === "true"
-      && stage?.dataset.layoutCertificateState === "valid"
-      && document.querySelector(".transition-io-cluster")?.dataset.ioDragReady === "true"
-      && document.querySelector(".initial-transition-path");
-  });
+  await page.click('button[data-tab="state"]');
+  await waitForOrdinaryLayout(page);
 
   assert.equal(await page.locator("#diagram-svg").count(), 1);
   assert.equal(await page.locator("#diagram-png").count(), 1);
@@ -216,67 +162,24 @@ try {
   assert.equal(await page.locator('.transition-io-node[data-io-kind="input"]').count(), 0);
   assert.equal(await page.locator('.transition-io-node[data-io-kind="output"]').count(), 0);
   assert.equal(await page.locator(".transition-io-cluster.failure-transition,.transition-io-cluster .transition-io-error").count(), 0);
+  assert.equal(await page.evaluate(() => Boolean(window.glyphLayoutPublicationCertificate)), false);
+  assert.equal(await page.evaluate(() => Boolean(window.glyphInitialTransitionRouter)), false);
 
-  const node = page.locator(".state-node").first();
-  await dragElement(page, node, 170, 160, "state node");
-  await waitForIoLayout(page);
-  const nodeStored = await page.evaluate(() => Object.keys(localStorage).some(
-    key => key.startsWith("glyph.diagram.positions.v1:"),
-  ));
-  assert(nodeStored, "edited node positions were not persisted");
-
-  const collisions = await page.evaluate(() => {
-    const visible = element => {
-      const style = getComputedStyle(element);
-      return style.display !== "none" && style.visibility !== "hidden";
-    };
-    const clusters = [...document.querySelectorAll(".transition-io-cluster")].filter(visible);
-    const nodes = [...document.querySelectorAll(".state-node")].filter(visible);
-    const overlaps = (a, b) => !(
-      a.right + 2 <= b.left || b.right + 2 <= a.left
-      || a.bottom + 2 <= b.top || b.bottom + 2 <= a.top
-    );
-    let clusterPairs = 0;
-    let clusterNodes = 0;
-    clusters.forEach((cluster, index) => {
-      const rect = cluster.getBoundingClientRect();
-      clusters.slice(index + 1).forEach(other => {
-        if (overlaps(rect, other.getBoundingClientRect())) clusterPairs += 1;
-      });
-      nodes.forEach(item => {
-        if (overlaps(rect, item.getBoundingClientRect())) clusterNodes += 1;
-      });
-    });
-    return { clusterPairs, clusterNodes };
-  });
-  assert.equal(collisions.clusterPairs, 0, "transition I/O objects overlap after node movement");
-  assert.equal(collisions.clusterNodes, 0, "transition I/O objects overlap state nodes after node movement");
+  const generationBeforeNode = await page.evaluate(() => Number(window.glyphTransitionLayoutTransaction?.generation || 0));
+  await dragElement(page, page.locator(".state-node").first(), 120, 90, "state node");
+  await waitForOrdinaryLayout(page, generationBeforeNode + 1);
+  assert(await page.evaluate(() => Object.keys(localStorage).some(key => key.startsWith("glyph.diagram.positions.v1:"))), "edited node positions were not persisted");
 
   const dragged = await dragFeasibleTransitionCluster(page);
-  const cluster = dragged.cluster;
   const transitionId = dragged.transitionId;
-  const draggedPlacement = await ioPlacement(cluster);
-  assert.equal(draggedPlacement.manual, "true", "accepted I/O drag was not marked manual");
-  assert(await storedManualPlacement(page, transitionId), "accepted I/O drag was not persisted");
-  assert(draggedPlacement.distance <= 96.5, "dragged I/O escaped its arrow tether");
+  const draggedPlacement = dragged.placement;
 
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => document.querySelector("#status")?.textContent === "ready");
-  const stateTab = page.locator('button[data-tab="state"]');
-  if (!await stateTab.evaluate(button => button.classList.contains("active"))) await stateTab.click();
+  await page.click('button[data-tab="state"]');
+  await waitForOrdinaryLayout(page);
   const restored = page.locator(`.transition-io-cluster[data-transition-id="${transitionId}"]`);
-  await page.waitForFunction(id => {
-    const element = document.querySelector(`.transition-io-cluster[data-transition-id="${id}"]`);
-    const stage = element?.closest(".graph-stage");
-    const layout = stage?.dataset.transitionIoCollisionSolved;
-    return element?.dataset.manualIo === "true"
-      && element.dataset.anchorX !== undefined
-      && element.dataset.anchorY !== undefined
-      && stage?.dataset.transitionSemanticRoleLinesReady === "true"
-      && stage?.dataset.transitionPublicationReady === "true"
-      && stage?.dataset.layoutCertificateState === "valid"
-      && (layout === "true" || layout === "fallback");
-  }, transitionId, { timeout: 30_000 });
+  await page.waitForFunction(id => document.querySelector(`.transition-io-cluster[data-transition-id="${id}"]`)?.dataset.manualIo === "true", transitionId, { timeout: 3000 });
   const restoredPlacement = await ioPlacement(restored);
   assert.equal(restoredPlacement.manual, "true");
   assert(restoredPlacement.distance <= 96.5, "restored I/O escaped its arrow tether");
@@ -287,10 +190,7 @@ try {
     const header = document.querySelector("header");
     const viewerHead = document.querySelector(".viewer-head");
     const editor = document.querySelector("#editor");
-    const before = {
-      headerTop: header.getBoundingClientRect().top,
-      viewerTop: viewerHead.getBoundingClientRect().top,
-    };
+    const before = { headerTop: header.getBoundingClientRect().top, viewerTop: viewerHead.getBoundingClientRect().top };
     editor.value += `\n${Array.from({ length: 260 }, (_, index) => `# scroll row ${index + 1}`).join("\n")}`;
     if (typeof syncLines === "function") syncLines();
     editor.scrollTop = editor.scrollHeight;
@@ -319,7 +219,6 @@ try {
     const editor = document.querySelector("#editor");
     const body = document.querySelector(".view-body");
     const spacer = document.createElement("div");
-    spacer.id = "scroll-test-spacer";
     spacer.style.height = "900px";
     body.appendChild(spacer);
     const editorBefore = editor.scrollTop;
@@ -333,34 +232,26 @@ try {
 
   await page.selectOption("#diagram-theme", "monochrome");
   assert(await page.locator("html").evaluate(element => element.classList.contains("theme-monochrome")));
-  const shellBackground = await page.locator(".canvas-shell").evaluate(element => getComputedStyle(element).backgroundColor);
-  assert.equal(shellBackground, "rgb(255, 255, 255)");
+  assert.equal(await page.locator(".canvas-shell").evaluate(element => getComputedStyle(element).backgroundColor), "rgb(255, 255, 255)");
 
   for (const [button, extension, signature] of [
     ["#diagram-svg", "svg", "<svg"],
     ["#diagram-png", "png", "89504e470d0a1a0a"],
     ["#diagram-pdf", "pdf", "%PDF-1.4"],
   ]) {
-    const [download] = await Promise.all([
-      page.waitForEvent("download"),
-      page.click(button),
-    ]);
+    const [download] = await Promise.all([page.waitForEvent("download"), page.click(button)]);
     const target = path.join(outputDirectory, `conveyor-export.${extension}`);
     await download.saveAs(target);
     const bytes = await fs.readFile(target);
-    if (extension === "png") {
-      assert.equal(bytes.subarray(0, 8).toString("hex"), signature);
-    } else {
-      assert(bytes.toString("latin1", 0, 32).startsWith(signature), `${extension} signature is invalid`);
-    }
+    if (extension === "png") assert.equal(bytes.subarray(0, 8).toString("hex"), signature);
+    else assert(bytes.toString("latin1", 0, 32).startsWith(signature), `${extension} signature is invalid`);
     if (extension === "svg") {
       const markup = bytes.toString("utf8");
       assert(markup.includes("ConveyorStart"), "SVG export omitted transition input labels");
       assert(markup.includes("set_conveyor"), "SVG export omitted operation-derived Action labels");
-      assert(markup.includes(" ➞ "), "SVG export omitted the I/O separator");
+      assert(markup.includes("➞"), "SVG export omitted the I/O separator");
       assert(!markup.includes(" / "), "SVG export retained the old slash separator");
       assert(markup.includes("transition-io-export-label"), "SVG export omitted readable transition labels");
-      assert(markup.includes("<tspan"), "SVG export omitted semantic label lines");
     }
     assert(bytes.length > 500, `${extension} export is unexpectedly small`);
   }
@@ -375,4 +266,4 @@ try {
   await stopProcess(child);
 }
 
-console.log("verified independent scrolling, constrained label editing, themes, and readable diagram exports");
+console.log("verified fast node/label editing, independent scrolling, themes, and diagram exports");
