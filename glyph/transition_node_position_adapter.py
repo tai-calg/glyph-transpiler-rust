@@ -8,6 +8,7 @@ _SCRIPT = r"""
 (()=>{
 const MARKER="glyph-transition-node-position-adapter-v1",DRAG_THRESHOLD=3,NODE_CLEARANCE=96;
 const POSITION_KEY_PREFIX="glyph.diagram.positions.v1:";
+const EDITING_SELECTOR="input,textarea,select,[contenteditable=true]";
 let active=null,stateCache=null,statePromise=null,stateAbort=null,stateVersion=0,lastStage=null,restoreGeneration=0,destroyed=false;
 const num=value=>Number.parseFloat(value||"0")||0;
 const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
@@ -96,6 +97,11 @@ function select(node){
   document.querySelector(".state-node.selected-node")?.classList.remove("selected-node");
   node?.classList.add("selected-node");
 }
+function editingContext(event){
+  const target=event.target?.nodeType===1?event.target:null;
+  const focused=document.activeElement?.nodeType===1?document.activeElement:null;
+  return Boolean(target?.closest?.(EDITING_SELECTOR)||focused?.closest?.(EDITING_SELECTOR));
+}
 function pointerDistance(record,event){return Math.hypot(event.clientX-record.startX,event.clientY-record.startY)}
 function positionIsClear(record,left,top){
   const right=left+record.node.offsetWidth,bottom=top+record.node.offsetHeight;
@@ -129,8 +135,6 @@ function invalidatePublication(record,reason){
 function moveActive(event){
   if(!active||active.pointerId!==event.pointerId)return false;
   if(!active.moved&&pointerDistance(active,event)<DRAG_THRESHOLD)return false;
-  if(!active.moved)invalidatePublication(active,"manual-node-drag");
-  active.moved=true;
   const scale=Math.max(.01,active.scale),grid=event.shiftKey?1:8;
   const width=Number.parseFloat(active.stage.style.width||"")||active.stage.scrollWidth;
   const height=Number.parseFloat(active.stage.style.height||"")||active.stage.scrollHeight;
@@ -141,6 +145,11 @@ function moveActive(event){
   const requestedLeft=Math.round(boundedLeft/grid)*grid;
   const requestedTop=Math.round(boundedTop/grid)*grid;
   const position=constrainPosition(active,requestedLeft,requestedTop);
+  if(!active.moved
+    &&position.left===active.startLeft
+    &&position.top===active.startTop)return false;
+  if(!active.moved)invalidatePublication(active,"manual-node-drag");
+  active.moved=true;
   active.node.style.left=`${position.left}px`;
   active.node.style.top=`${position.top}px`;
   active.stage.dataset.transitionNodeClearance=String(NODE_CLEARANCE);
@@ -244,7 +253,7 @@ document.addEventListener("pointercancel",event=>{
 },true);
 document.addEventListener("keydown",event=>{
   if(!event.key.startsWith("Arrow"))return;
-  if(event.target?.matches?.("input,textarea,select,[contenteditable=true]"))return;
+  if(editingContext(event))return;
   const node=document.querySelector(".state-node.selected-node");
   const stage=node?.closest(".graph-stage");
   if(!node||!stage||stage.dataset.transitionLayoutState!=="ready")return;
@@ -298,7 +307,7 @@ for(const eventName of["pagehide","beforeunload"]){
 }
 lastStage=document.querySelector(".state-node")?.closest(".graph-stage")||null;
 scheduleRestore(lastStage,0);
-window.glyphTransitionNodePositionAdapter={marker:MARKER,version:6,restore:()=>scheduleRestore(null,0)};
+window.glyphTransitionNodePositionAdapter={marker:MARKER,version:7,restore:()=>scheduleRestore(null,0)};
 })();
 </script>
 """
