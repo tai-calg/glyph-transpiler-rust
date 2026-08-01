@@ -35,13 +35,14 @@ async function stop(child) {
 async function waitForOrdinaryLayout(page) {
   await page.waitForFunction(() => {
     const stage = document.querySelector(".state-node")?.closest(".graph-stage");
-    return stage?.dataset.transitionLayoutState === "ready"
+    return document.querySelector(".tab.active")?.dataset.tab === "state"
+      && stage?.dataset.transitionLayoutState === "ready"
       && stage.dataset.transitionPublicationReady === "true"
       && stage.dataset.transitionIoClustersReady === "true"
-      && stage.dataset.transitionEnablingCasesReady === "true"
       && stage.dataset.transitionLayoutProfile === "ordinary"
       && stage.dataset.stateDiagramWorkspaceGeometryReady === "true"
-      && stage.dataset.stateDiagramWorkspaceViewportReady === "true";
+      && stage.dataset.initialRouteReady === "true"
+      && document.querySelectorAll(".transition-index .transition-detail").length > 0;
   }, null, { timeout: 5000 });
 }
 
