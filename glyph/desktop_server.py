@@ -105,13 +105,14 @@ def create_desktop_server(
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Referrer-Policy", "no-referrer")
-            self.send_header(
-                "Content-Security-Policy",
-                "default-src 'self'; connect-src 'self'; img-src 'self' data: blob:; "
-                "style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; "
-                "font-src 'self' data:; frame-ancestors tauri: http://tauri.localhost "
-                "http://127.0.0.1:*",
-            )
+            if require_auth:
+                self.send_header(
+                    "Content-Security-Policy",
+                    "default-src 'self'; connect-src 'self'; img-src 'self' data: blob:; "
+                    "style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; "
+                    "font-src 'self' data:; frame-ancestors tauri: http://tauri.localhost "
+                    "http://127.0.0.1:*",
+                )
 
         def _json(
             self,
