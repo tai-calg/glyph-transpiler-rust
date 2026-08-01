@@ -59,6 +59,7 @@ async function waitForOrdinary(page, machineName, transitionCount) {
       && stage.querySelectorAll(".transition-io-cluster").length === count;
   }, { name: machineName, count: transitionCount }, { timeout: 5000 });
 
+  // Semantic label projection may settle after geometry without moving the layout.
   const snapshot = async () => page.evaluate(() => ({
     clusters: [...document.querySelectorAll(".transition-io-cluster")].map(item => [item.dataset.transitionId, item.style.left, item.style.top]),
     paths: [...document.querySelectorAll(".state-transition-path")].map(item => item.getAttribute("d") || ""),
