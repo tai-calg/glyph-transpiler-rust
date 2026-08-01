@@ -448,6 +448,14 @@ function anchorFor(stage,id,index,fraction=.5){
   }
   return{x:(num(stage.style.width)||stage.clientWidth)/2,y:(num(stage.style.height)||stage.clientHeight)/2,normal:-Math.PI/2,fraction:.5,path:null};
 }
+function anchorFractions(preferred){
+  const result=[],seen=new Set();
+  for(const value of[preferred,.18,.3,.5,.7,.82]){
+    const fraction=clamp(value,.18,.82),key=fraction.toFixed(3);
+    if(!seen.has(key)){seen.add(key);result.push(fraction)}
+  }
+  return result;
+}
 function project(point,anchor){
   const dx=point.x-anchor.x,dy=point.y-anchor.y,distance=Math.hypot(dx,dy);
   if(!distance||distance<=MAX_DISTANCE)return point;
@@ -503,19 +511,25 @@ function samplePaths(stage){
 function pointInsideRect(point,rect,padding=2){return point.x>=rect.x-padding&&point.x<=rect.x+rect.width+padding&&point.y>=rect.y-padding&&point.y<=rect.y+rect.height+padding}
 function optionsFor(entry,stage,nodes,pathSamples){
   const values=[],seen=new Set();
-  for(const raw of candidatePoints(entry.anchor,entry.preferred)){
-    const point=feasiblePoint(raw,entry,stage);
-    if(!point)continue;
-    const rect=rectAt(entry.cluster,point);
-    if(!inside(rect,stage)||nodes.some(node=>intersects(rect,node)))continue;
-    const key=`${Math.round(point.x*10)}:${Math.round(point.y*10)}`;
-    if(seen.has(key))continue;
-    seen.add(key);
-    const displacement=Math.hypot(point.x-entry.preferred.x,point.y-entry.preferred.y);
-    const anchorDistance=Math.hypot(point.x-entry.anchor.x,point.y-entry.anchor.y);
-    const foreignEdgeHits=pathSamples.reduce((count,path)=>count+(path.id!==entry.id&&path.points.some(sample=>pointInsideRect(sample,rect))?1:0),0);
-    const score=displacement*(entry.manual?6:1)+anchorDistance*.02+foreignEdgeHits*36;
-    values.push({point,rect,score,foreignEdgeHits});
+  const anchors=entry.manual?[entry.anchor]:entry.anchors;
+  for(const anchor of anchors){
+    const preferred=entry.manual?entry.preferred:project(entry.preferred,anchor);
+    const candidateEntry={...entry,anchor,preferred};
+    for(const raw of candidatePoints(anchor,preferred)){
+      const point=feasiblePoint(raw,candidateEntry,stage);
+      if(!point)continue;
+      const rect=rectAt(entry.cluster,point);
+      if(!inside(rect,stage)||nodes.some(node=>intersects(rect,node)))continue;
+      const key=`${Math.round(point.x*10)}:${Math.round(point.y*10)}`;
+      if(seen.has(key))continue;
+      seen.add(key);
+      const displacement=Math.hypot(point.x-preferred.x,point.y-preferred.y);
+      const anchorDistance=Math.hypot(point.x-anchor.x,point.y-anchor.y);
+      const anchorShift=Math.abs((anchor.fraction??.5)-(entry.anchor.fraction??.5))*24;
+      const foreignEdgeHits=pathSamples.reduce((count,path)=>count+(path.id!==entry.id&&path.points.some(sample=>pointInsideRect(sample,rect))?1:0),0);
+      const score=displacement*(entry.manual?6:1)+anchorDistance*.02+anchorShift+foreignEdgeHits*36;
+      values.push({point,rect,score,foreignEdgeHits,anchor});
+    }
   }
   values.sort((left,right)=>left.score-right.score||left.point.y-right.point.y||left.point.x-right.point.x);
   return values.slice(0,OPTION_LIMIT);
@@ -533,13 +547,14 @@ function layoutEntries(stage,data,machine){
     fractions.set(transitionIndex,indices.length===1?.5:(rank+1)/(indices.length+1));
   }));
   const entries=clusters.map((cluster,index)=>{
-    const id=cluster.dataset.transitionId||`T${index+1}`,fraction=fractions.get(index)??.5,anchor=anchorFor(stage,id,index,fraction),record=saved[id];
-    const manual=Boolean(record);
+    const id=cluster.dataset.transitionId||`T${index+1}`,fraction=fractions.get(index)??.5;
+    const anchors=anchorFractions(fraction).map(value=>anchorFor(stage,id,index,value));
+    const anchor=anchors[0],record=saved[id],manual=Boolean(record);
     const restored=finite(record?.dx)&&finite(record?.dy)
       ?{x:anchor.x+record.dx,y:anchor.y+record.dy}
       :finite(record?.x)&&finite(record?.y)?{x:record.x,y:record.y}
       :{x:num(cluster.style.left)||anchor.x,y:num(cluster.style.top)||anchor.y};
-    const entry={cluster,index,id,anchor,manual,preferred:project(restored,anchor),options:[],congestion:0};
+    const entry={cluster,index,id,anchor,anchors,manual,preferred:project(restored,anchor),options:[],congestion:0};
     entry.options=optionsFor(entry,stage,nodes,pathSamples);
     return entry;
   });
@@ -591,18 +606,18 @@ function applyAssignment(stage,data,entries,assignment){
   for(const entry of entries){
     const option=assignment.get(entry.cluster);
     if(!option)throw Error(`missing transition placement: ${entry.id}`);
-    const point=option.point;
+    const point=option.point,anchor=option.anchor||entry.anchor;
     entry.cluster.style.left=`${point.x}px`;
     entry.cluster.style.top=`${point.y}px`;
-    entry.cluster.dataset.anchorX=String(entry.anchor.x);
-    entry.cluster.dataset.anchorY=String(entry.anchor.y);
-    entry.cluster.dataset.ioDistance=String(Math.hypot(point.x-entry.anchor.x,point.y-entry.anchor.y));
+    entry.cluster.dataset.anchorX=String(anchor.x);
+    entry.cluster.dataset.anchorY=String(anchor.y);
+    entry.cluster.dataset.ioDistance=String(Math.hypot(point.x-anchor.x,point.y-anchor.y));
     entry.cluster.dataset.maxIoDistance=String(MAX_DISTANCE);
     entry.cluster.dataset.manualIo=entry.manual?"true":"false";
     entry.cluster.dataset.ioCollisionSolved="true";
     entry.cluster.dataset.foreignEdgeHits=String(option.foreignEdgeHits||0);
     entry.cluster.classList.remove("layout-constrained","compact-io","micro-io","nano-io","stacked");
-    if(entry.manual)saved[entry.id]={x:point.x,y:point.y,dx:point.x-entry.anchor.x,dy:point.y-entry.anchor.y};
+    if(entry.manual)saved[entry.id]={x:point.x,y:point.y,dx:point.x-anchor.x,dy:point.y-anchor.y};
   }
   writeStored(labelStorageKey(data),saved);
   stage.dataset.transitionIoCollisionSolved="true";
