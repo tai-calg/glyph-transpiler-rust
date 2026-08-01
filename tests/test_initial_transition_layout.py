@@ -30,6 +30,19 @@ class InitialTransitionLayoutTests(unittest.TestCase):
         self.assertIn('stage.dataset.initialRouteCacheHit = "true"', html)
         self.assertIn('target.classList.add("initial-target")', html)
 
+    def test_cache_hit_and_fresh_route_share_one_completion_event(self) -> None:
+        html = enhance_initial_transition_html(DIAGRAM_HTML)
+
+        self.assertIn("function completeRoute(machine, token, details)", html)
+        self.assertEqual(html.count("completeRoute(machine, token, {"), 2)
+        self.assertEqual(
+            html.count('new CustomEvent("glyph-initial-transition-route-ready"'),
+            1,
+        )
+        self.assertIn("cacheHit: true", html)
+        self.assertIn("cacheHit: false", html)
+        self.assertIn("generation: token", html)
+
     def test_enhancer_is_idempotent(self) -> None:
         once = enhance_initial_transition_html(DIAGRAM_HTML)
         twice = enhance_initial_transition_html(once)
