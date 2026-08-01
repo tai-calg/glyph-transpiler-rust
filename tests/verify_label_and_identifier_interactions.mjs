@@ -40,6 +40,28 @@ async function drag(page, locator, deltaX, deltaY) {
   await page.mouse.up();
 }
 
+async function interactableLabelIndex(page) {
+  return page.evaluate(() => {
+    const clusters = [...document.querySelectorAll(".transition-io-cluster")];
+    const candidates = clusters.map((cluster, index) => {
+      const rect = cluster.getBoundingClientRect();
+      const x = rect.left + rect.width / 2;
+      const y = rect.top + rect.height / 2;
+      const hit = x >= 0 && x < innerWidth && y >= 0 && y < innerHeight
+        ? document.elementFromPoint(x, y)?.closest?.(".transition-io-cluster")
+        : null;
+      return {
+        index,
+        length: (cluster.dataset.ioValue || "").length,
+        interactable: hit === cluster,
+      };
+    });
+    return candidates
+      .filter(candidate => candidate.interactable)
+      .sort((a, b) => b.length - a.length || a.index - b.index)[0]?.index ?? -1;
+  });
+}
+
 const logs = [];
 const browserErrors = [];
 const port = 8901;
@@ -101,10 +123,12 @@ try {
     identifier: window.glyphEditorIdentifierHighlight.identifier(),
     matchCount: window.glyphEditorIdentifierHighlight.matchCount(),
     layerIdentifier: document.querySelector(".identifier-highlight-surface")?.dataset.identifier || "",
+    active: document.querySelector(".editor-wrap")?.classList.contains("identifier-highlight-active") || false,
   }));
   assert.equal(selectionResult.identifier, candidate.token);
   assert.equal(selectionResult.matchCount, candidate.count);
   assert.equal(selectionResult.layerIdentifier, candidate.token);
+  assert.equal(selectionResult.active, true);
 
   await page.evaluate(({ token, indexes }) => {
     const editor = document.getElementById("editor");
@@ -123,18 +147,13 @@ try {
     return stage?.dataset.transitionLayoutState === "ready"
       && stage?.dataset.transitionIoClustersReady === "true"
       && document.querySelectorAll(".transition-io-cluster").length > 0
-      && window.glyphTransitionLabelInspector?.version === 1;
+      && window.glyphTransitionLabelInspector?.version === 1
+      && !document.querySelector(".editor-wrap")?.classList.contains("identifier-highlight-active");
   }, { timeout: 60_000 });
 
-  const longestLabelIndex = await page.evaluate(() => {
-    const clusters = [...document.querySelectorAll(".transition-io-cluster")];
-    let best = 0;
-    clusters.forEach((cluster, index) => {
-      if ((cluster.dataset.ioValue || "").length > (clusters[best]?.dataset.ioValue || "").length) best = index;
-    });
-    return best;
-  });
-  const label = page.locator(".transition-io-cluster").nth(longestLabelIndex);
+  const labelIndex = await interactableLabelIndex(page);
+  assert(labelIndex >= 0, "no transition label is physically interactable");
+  const label = page.locator(".transition-io-cluster").nth(labelIndex);
   const expectedLabel = await label.evaluate(element => ({
     id: element.dataset.transitionId || "",
     fullText: element.dataset.ioValue || "",
