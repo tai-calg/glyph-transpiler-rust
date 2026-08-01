@@ -14,7 +14,7 @@ def test_workspace_restores_initial_transition_details_and_editing_area() -> Non
         "function updateTransitionGeometry(",
         "function renderTransitionIndex(",
         'class="transition-detail"',
-        'class="transition-index"',
+        'panel.className="transition-index"',
         'attributeFilter:["style"]',
         'stage.dataset.initialRouteCertificate="ordinary-follow"',
         'window.glyphTransitionIoClusters?.reroute?.(stage)',
