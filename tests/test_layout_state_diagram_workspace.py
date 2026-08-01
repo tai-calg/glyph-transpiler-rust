@@ -20,6 +20,7 @@ def test_workspace_restores_initial_transition_details_and_editing_area() -> Non
         'window.glyphTransitionIoClusters?.reroute?.(stage)',
         "stateDiagramWorkspaceOriginReady",
         "stateDiagramWorkspaceViewportReady",
+        "version:2",
     ):
         assert required in html
 
