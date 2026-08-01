@@ -165,7 +165,10 @@ try {
         `${testCase.slug}: semantic text fallback used`,
       );
       assert(result.labels.every(label => label.lineCount === label.lines.length && label.lineCount > 0));
-      assert(result.labels.every(label => label.lines.every(line => line.whiteSpace === "nowrap")));
+      assert(
+        result.labels.every(label => label.lines.every(line => ["nowrap", "pre"].includes(line.whiteSpace))),
+        `${testCase.slug}: browser rewrapped a certified semantic line`,
+      );
       assert(result.labels.every(label => label.lines.every(line => line.inside)), `${testCase.slug}: line escaped label box`);
       assert(result.labels.every(label => label.lines.every(line => line.text.trim().length >= 4)), `${testCase.slug}: character-fragmented line`);
       assert(result.labels.every(label => label.distance <= 96.5), `${testCase.slug}: label escaped arrow tether`);
