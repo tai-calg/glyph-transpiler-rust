@@ -24,21 +24,12 @@ from .initial_transition_dependency_bridge import (
     enhance_initial_transition_dependency_bridge_html,
 )
 from .initial_transition_layout import enhance_initial_transition_html
-from .layout_compact_shelf_repair import enhance_layout_compact_shelf_repair_html
-from .layout_corridor_fast_repair import enhance_layout_corridor_fast_repair_html
-from .layout_corridor_repair import enhance_layout_corridor_repair_html
 from .layout_dependency_bridge import enhance_layout_dependency_bridge_html
-from .layout_local_repair import enhance_layout_local_repair_html
 from .layout_publication_certificate import enhance_layout_publication_certificate_html
-from .layout_shelf_repair import enhance_layout_shelf_repair_html
-from .layout_shelf_viewport_sync import enhance_layout_shelf_viewport_sync_html
 from .manual_layout_semantic_guard import enhance_manual_layout_semantic_guard_html
 from .node_drag_publication_guard import enhance_node_drag_publication_guard_html
 from .state_transition_ir_renderer import enhance_state_transition_ir_html
 from .state_viewport_reservation import enhance_state_viewport_reservation_html
-from .transition_dense_canvas_dimensions import (
-    enhance_transition_dense_canvas_dimensions_html,
-)
 from .transition_enabling_case_rendering import (
     enhance_transition_enabling_case_rendering_html,
 )
@@ -46,10 +37,8 @@ from .transition_execution_context_selector import (
     enhance_transition_execution_context_selector_html,
 )
 from .transition_io_clusters import enhance_transition_io_clusters_html
-from .transition_io_collision_solver import enhance_transition_io_collision_solver_html
 from .transition_label_drag_guard import enhance_transition_label_drag_guard_html
 from .transition_label_layout import enhance_diagram_html
-from .transition_label_readability import enhance_transition_label_readability_html
 from .transition_layout_interaction_adapter import (
     enhance_transition_layout_interaction_adapter_html,
 )
@@ -85,7 +74,7 @@ def _install_diagram_diagnostic_localization() -> None:
 
 
 def _presentation_pipeline():
-    """Return the deterministic inner-to-outer presentation pipeline."""
+    """Return the lightweight deterministic presentation pipeline."""
 
     return (
         enhance_diagram_geometry_kernel_html,
@@ -108,16 +97,13 @@ def _presentation_pipeline():
         enhance_diagram_canvas_navigation_html,
         enhance_diagram_canvas_viewport_html,
         enhance_transition_io_clusters_html,
-        enhance_transition_io_collision_solver_html,
         enhance_diagram_locale_html,
-        enhance_transition_label_readability_html,
         enhance_transition_node_layout_guard_html,
         enhance_transition_label_drag_guard_html,
         enhance_transition_readable_exports_html,
         enhance_transition_readable_layout_html,
         enhance_transition_enabling_case_rendering_html,
         enhance_transition_semantic_role_lines_html,
-        enhance_transition_dense_canvas_dimensions_html,
         enhance_transition_layout_transaction_html,
         enhance_manual_layout_semantic_guard_html,
         enhance_transition_layout_interaction_adapter_html,
@@ -126,12 +112,6 @@ def _presentation_pipeline():
         enhance_transition_layout_tab_guard_html,
         enhance_transition_execution_context_selector_html,
         enhance_transition_semantic_status_ui_html,
-        enhance_layout_local_repair_html,
-        enhance_layout_corridor_repair_html,
-        enhance_layout_corridor_fast_repair_html,
-        enhance_layout_shelf_repair_html,
-        enhance_layout_compact_shelf_repair_html,
-        enhance_layout_shelf_viewport_sync_html,
         enhance_diagram_fit_stability_html,
         enhance_layout_dependency_bridge_html,
         enhance_layout_publication_certificate_html,
