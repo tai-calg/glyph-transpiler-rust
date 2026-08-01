@@ -56,23 +56,19 @@ def test_node_and_label_interactions_have_one_owner_each() -> None:
 
 def test_every_persisted_geometry_has_an_explicit_coordinate_frame() -> None:
     label_owner = read("glyph/transition_layout_interaction_adapter.py")
-    transaction = read("glyph/transition_layout_transaction.py")
+    clusters = read("glyph/transition_io_clusters.py")
     node_owner = read("glyph/transition_node_position_adapter.py")
-    exports = read("glyph/diagram_editor_exports.py")
     viewport = read("glyph/diagram_canvas_viewport.py")
 
     assert "anchorFraction:record.anchorFraction" in label_owner
-    assert "finite(record?.anchorFraction)" in transaction
-    assert "x:anchor.x+record.dx,y:anchor.y+record.dy" in transaction
-    assert "cluster.dataset.anchorFraction=String(anchor.fraction)" in transaction
+    assert "anchorFraction:clamp(num(cluster.dataset.anchorFraction)||.5,.18,.82)" in label_owner
+    assert "finite(record?.dx)&&finite(record?.dy)" in clusters
+    assert "x:anchor.x+record.dx,y:anchor.y+record.dy" in clusters
+    assert "cluster.dataset.anchorFraction=String(anchor.fraction)" in clusters
+    assert "cluster.dataset.ioDistance=String(Math.hypot(point.x-anchor.x,point.y-anchor.y))" in clusters
 
     assert '${data?.digest||"source"}:state:${machineIndex()}' in node_owner
     assert "value[nodeName(node)]={x:num(node.style.left),y:num(node.style.top)}" in node_owner
-    assert "standardCanvas(stage)" in transaction
-    assert "right+CANVAS_PADDING" in transaction
-
-    assert '$("#diagram-reset").onclick=async()=>' in exports
-    assert "await state();localStorage.removeItem(key(stage))" in exports
 
     assert 'const digest=activeStage()?.dataset.diagramDigest||"source"' in viewport
     assert "return `${digest}:${tab}:${index}`" in viewport
@@ -80,53 +76,56 @@ def test_every_persisted_geometry_has_an_explicit_coordinate_frame() -> None:
     assert "glyph.diagram.viewport-mode.v1" in viewport
 
 
-def test_interactive_rendering_is_time_bounded_and_never_hidden() -> None:
+def test_interactive_rendering_is_strictly_bounded_and_never_hidden() -> None:
     transaction = read("glyph/transition_layout_transaction.py")
+    clusters = read("glyph/transition_io_clusters.py")
+    enabling = read("glyph/transition_enabling_case_rendering.py")
     live = read("glyph/diagram_live_stability.py")
-    certificate = read("glyph/layout_publication_certificate.py")
     tab_guard = read("glyph/transition_layout_tab_guard.py")
 
-    assert "TOTAL_BUDGET_MS=120" in transaction
-    assert "PREREQUISITE_BUDGET_MS=180" in transaction
-    assert "CLUSTER_BUDGET_MS=80" in transaction
+    assert "TRANSACTION_DEADLINE_MS=48" in transaction
+    assert "MAX_FRAME_BUDGET=2" in transaction
+    assert "MAX_RETRIES=0" in transaction
     assert "SEARCH_STEPS" not in transaction
     assert "solveEntries" not in transaction
     assert 'stage.dataset.transitionDenseCanvas="disabled"' in transaction
     assert "visibility:visible!important" in transaction
+    assert "State diagram certification failed" not in transaction
 
-    assert "RENDER_BUDGET_MS = 180" in live
+    assert "RENDER_BUDGET_MS=16" in clusters
+    assert "STATE_REQUEST_TIMEOUT_MS=48" in clusters
+    assert "const MAX_DISTANCE=96" in clusters
+    assert "function pairRanks(" in clusters
+    assert "function candidates(" not in clusters
+    assert "for(let attempt=0;attempt<100" not in clusters
+    assert "setInterval(" not in clusters
+    assert "{childList:true,subtree:true}" not in clusters
+
+    assert "STATE_REQUEST_TIMEOUT_MS=48" in enabling
+    assert "for(let attempt=0;attempt<100" not in enabling
+    assert "{childList:true,subtree:true}" not in enabling
+
     assert "visibility:visible!important" in live
-    assert 'reveal(stage,"interactive-budget")' in live
     assert "State diagram certification failed" not in live
-
-    assert "TOTAL_BUDGET_MS = 32" in certificate
-    assert 'stage.dataset.layoutCertificateProfile="interactive-fast"' in certificate
-    assert 'stage.dataset.transitionPublicationReady="true"' in certificate
-    assert "function cancel(reason=" in certificate
 
     assert "waitForSettlement" not in tab_guard
     assert 'glyphTransitionLayoutTransaction?.cancel?.(reason)' in tab_guard
-    assert 'glyphLayoutPublicationCertificate?.cancel?.(reason)' in tab_guard
+    assert "glyphLayoutPublicationCertificate" not in tab_guard
 
 
-def test_generation_identity_flows_from_layout_through_route_to_publication() -> None:
+def test_layout_generation_is_cancelable_without_a_failure_screen() -> None:
     transaction = read("glyph/transition_layout_transaction.py")
-    route_bridge = read("glyph/initial_transition_dependency_bridge.py")
-    bootstrap = read("glyph/transition_layout_transaction_bootstrap.py")
-    certificate = read("glyph/layout_publication_certificate.py")
+    tab_guard = read("glyph/transition_layout_tab_guard.py")
 
     assert "transitionLayoutGeneration=String(token)" in transaction
-    assert "layoutGeneration: generation" in route_bridge
-    assert "initialRouteLayoutGeneration = generation" in route_bridge
-    assert "glyphLayoutPublicationCertificate?.schedule?.(" in route_bridge
-    assert route_bridge.index("glyphLayoutPublicationCertificate?.schedule?.(") < route_bridge.index(
-        'document.dispatchEvent(new CustomEvent("glyph-initial-transition-route-ready"'
-    )
+    assert "completedGeneration" in transaction
+    assert "token!==generation" in transaction
+    assert 'cancel("state-tab-deactivated")' in transaction
+    assert "State diagram certification failed" not in transaction
 
-    assert "const request=`${generation}:${routeEpoch}:${reason}`" in bootstrap
-    assert "function fingerprint(stage)" in certificate
-    assert 'stage.dataset.transitionLayoutGeneration||"0"' in certificate
-    assert "layoutCertificateFingerprint" in certificate
+    assert 'glyphTransitionLayoutTransaction?.cancel?.(reason)' in tab_guard
+    assert 'glyphTransitionLayoutTransaction?.schedule?.(reason,0)' in tab_guard
+    assert 'stage.dataset.transitionPublicationReady="true"' in tab_guard
 
 
 def test_semantic_identity_joins_reject_duplicates_instead_of_overwriting() -> None:
@@ -163,23 +162,31 @@ def test_public_strict_catalog_identity_is_unambiguous() -> None:
     assert len(contexts) == len(set(contexts))
 
 
-def test_presentation_pipeline_preserves_protocol_order_and_excludes_heavy_layers() -> None:
+def test_presentation_pipeline_preserves_lightweight_dependency_order() -> None:
     names = [enhancer.__name__ for enhancer in _presentation_pipeline()]
 
-    assert names.index("enhance_transition_layout_transaction_bootstrap_html") < names.index(
-        "enhance_transition_layout_transaction_html"
-    )
-    assert names.index("enhance_node_drag_publication_guard_html") < names.index(
-        "enhance_transition_node_position_adapter_html"
-    )
-    assert names.index("enhance_initial_transition_dependency_bridge_html") < names.index(
-        "enhance_layout_publication_certificate_html"
-    )
-    assert names[-1] == "enhance_layout_publication_certificate_html"
+    clusters = names.index("enhance_transition_io_clusters_html")
+    enabling = names.index("enhance_transition_enabling_case_rendering_html")
+    node_guard = names.index("enhance_transition_node_layout_guard_html")
+    label_guard = names.index("enhance_transition_label_drag_guard_html")
+    transaction = names.index("enhance_transition_layout_transaction_html")
+    interaction = names.index("enhance_transition_layout_interaction_adapter_html")
+    node_owner = names.index("enhance_transition_node_position_adapter_html")
+    tab_guard = names.index("enhance_transition_layout_tab_guard_html")
+    semantic = names.index("enhance_transition_semantic_status_ui_html")
+
+    assert clusters < enabling < node_guard < label_guard < transaction
+    assert transaction < interaction < node_owner < tab_guard < semantic
 
     for removed in (
+        "enhance_transition_layout_transaction_bootstrap_html",
+        "enhance_initial_transition_html",
+        "enhance_initial_transition_dependency_bridge_html",
+        "enhance_layout_publication_certificate_html",
+        "enhance_diagram_fit_stability_html",
         "enhance_transition_io_collision_solver_html",
         "enhance_transition_label_readability_html",
+        "enhance_transition_semantic_role_lines_html",
         "enhance_transition_dense_canvas_dimensions_html",
         "enhance_layout_local_repair_html",
         "enhance_layout_corridor_repair_html",
