@@ -25,7 +25,7 @@ class TransitionNodePositionAdapterTests(unittest.TestCase):
         self.assertIn("event.stopImmediatePropagation()", html)
         self.assertIn("record.positions=snapshot(record.stage)", html)
         self.assertIn("manual-node-persisted", html)
-        self.assertIn("version:6", html)
+        self.assertIn("version:7", html)
 
     def test_drag_keeps_label_feasible_clearance_from_other_nodes(self) -> None:
         html = enhance_transition_node_position_adapter_html(DIAGRAM_HTML)
@@ -53,27 +53,30 @@ class TransitionNodePositionAdapterTests(unittest.TestCase):
             html,
         )
 
-    def test_pointer_owner_invalidates_publication_after_threshold(self) -> None:
+    def test_pointer_owner_invalidates_only_after_real_feasible_movement(self) -> None:
         html = enhance_transition_node_position_adapter_html(DIAGRAM_HTML)
 
         threshold = html.index("pointerDistance(active,event)<DRAG_THRESHOLD")
+        no_movement = html.index("&&position.left===active.startLeft")
         invalidation = html.index('invalidatePublication(active,"manual-node-drag")')
         movement = html.index("active.moved=true")
-        self.assertLess(threshold, invalidation)
+        self.assertLess(threshold, no_movement)
+        self.assertLess(no_movement, invalidation)
         self.assertLess(invalidation, movement)
         self.assertIn(
             'publicationGuard()?.schedule?.("manual-node-cancelled")',
             html,
         )
 
-    def test_keyboard_move_owns_invalidation_and_ignores_form_controls(self) -> None:
+    def test_keyboard_move_owns_invalidation_and_ignores_editing_context(self) -> None:
         html = enhance_transition_node_position_adapter_html(DIAGRAM_HTML)
 
+        self.assertIn('const EDITING_SELECTOR="input,textarea,select,[contenteditable=true]"', html)
+        self.assertIn("function editingContext(event)", html)
+        self.assertIn("target?.closest?.(EDITING_SELECTOR)", html)
+        self.assertIn("focused?.closest?.(EDITING_SELECTOR)", html)
         self.assertIn('document.addEventListener("keydown"', html)
-        self.assertIn(
-            'event.target?.matches?.("input,textarea,select,[contenteditable=true]")',
-            html,
-        )
+        self.assertIn("if(editingContext(event))return", html)
         self.assertIn('document.querySelector(".state-node.selected-node")', html)
         self.assertIn("const position=constrainPosition(record,requestedLeft,requestedTop)", html)
         self.assertIn('invalidatePublication(record,"manual-node-keyboard")', html)
