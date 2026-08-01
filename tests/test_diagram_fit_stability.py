@@ -42,7 +42,7 @@ class DiagramFitStabilityTests(unittest.TestCase):
         self.assertIn(".state-node", script)
         self.assertIn(".transition-io-cluster", script)
         self.assertNotIn(".graph-node", script)
-        self.assertNotIn("glyph-diagram-viewport-change", script)
+        self.assertIn('"glyph-diagram-viewport-change"', script)
         self.assertIn('fitVisibilityState = "failed"', script)
         self.assertIn('fitVisibilityState = "ready"', script)
 
