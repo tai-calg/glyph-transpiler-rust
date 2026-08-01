@@ -1,4 +1,7 @@
 from glyph.diagram_canvas_viewport import enhance_diagram_canvas_viewport_html
+from glyph.initial_transition_dependency_bridge import (
+    enhance_initial_transition_dependency_bridge_html,
+)
 from glyph.readable_diagram_app import prepare_diagram_app
 from glyph.transition_layout_interaction_adapter import (
     enhance_transition_layout_interaction_adapter_html,
@@ -104,6 +107,25 @@ def test_manual_labels_restore_against_the_saved_arrow_anchor() -> None:
     assert "anchorFraction:clamp(num(cluster.dataset.anchorFraction)||.5,.18,.82)" in interaction_html
     assert "anchorFraction:record.anchorFraction" in interaction_html
     assert "record.cluster.dataset.anchorFraction=String(record.anchorFraction)" in interaction_html
+
+
+def test_certified_route_owner_requests_publication_directly() -> None:
+    html = enhance_initial_transition_dependency_bridge_html(
+        "<html><head></head><body></body></html>"
+    )
+
+    publication_request = (
+        'window.glyphLayoutPublicationCertificate?.schedule?.(\n'
+        '      "glyph-initial-transition-route-ready",\n'
+        "      0,\n"
+        "    );"
+    )
+    assert publication_request in html
+    assert html.index(publication_request) < html.index(
+        'document.dispatchEvent(new CustomEvent("glyph-initial-transition-route-ready"'
+    )
+    assert 'stage.dataset.initialRouteSettleState = "stable"' in html
+    assert "layoutGeneration: generation" in html
 
 
 def test_interaction_adapters_persist_only_real_drags() -> None:
