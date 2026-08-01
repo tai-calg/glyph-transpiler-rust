@@ -32,20 +32,18 @@ def test_guard_snapshots_and_restores_semantic_dataset_fields() -> None:
     assert 'stage.dataset.manualLayoutSemanticGuard = `restored:${restored}`' in html
 
 
-def test_guard_recertifies_after_route_generation_including_cache_hits() -> None:
+def test_guard_requests_one_router_generation_and_uses_shared_completion_event() -> None:
     html = enhance_manual_layout_semantic_guard_html(
         "<html><head></head><body></body></html>"
     )
 
     assert "requestPublicationRecertification()" in html
-    assert "waitForRouteAndPublish(stage, router, generation, token)" in html
-    assert "Number(router.completedGeneration || 0) >= generation" in html
-    assert 'stage.dataset.initialRouteReady === "true"' in html
-    assert 'stage.dataset.initialRouteCertificate === "valid"' in html
-    assert 'certificate.schedule("manual-layout-semantics-restored", 0)' in html
-    assert 'stage.dataset.manualLayoutSemanticGuard = "publication-certification-requested"' in html
-    assert 'stage.dataset.initialRouteReady = "pending"' in html
     assert 'router.schedule("manual-layout-semantics-restored", 0)' in html
+    assert 'stage.dataset.manualLayoutSemanticGuard = `route-certification-requested:${restoration}`' in html
+    assert "waitForRouteAndPublish" not in html
+    assert "ROUTE_WAIT_LIMIT" not in html
+    assert "ROUTE_WAIT_DELAY_MS" not in html
+    assert "glyphLayoutPublicationCertificate" not in html
 
 
 def test_guard_is_installed_after_transaction_and_before_interaction() -> None:
