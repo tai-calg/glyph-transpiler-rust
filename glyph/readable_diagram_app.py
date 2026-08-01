@@ -17,6 +17,7 @@ from .diagram_live_stability import (
     install_serial_compilation,
 )
 from .diagram_locale import enhance_diagram_locale_html
+from .diagram_middle_drag_zoom import enhance_diagram_middle_drag_zoom_html
 from .diagram_rendered_geometry_adapter import enhance_diagram_rendered_geometry_html
 from .diagram_workspace_layout import enhance_workspace_layout_html
 from .editor_identifier_highlight import enhance_editor_identifier_highlight_html
@@ -77,6 +78,7 @@ def _presentation_pipeline():
         enhance_state_viewport_reservation_html,
         enhance_diagram_canvas_navigation_html,
         enhance_diagram_canvas_viewport_html,
+        enhance_diagram_middle_drag_zoom_html,
         enhance_state_diagram_workspace_html,
         enhance_diagram_locale_html,
         enhance_transition_execution_context_selector_html,
