@@ -208,7 +208,7 @@ document.addEventListener("lostpointercapture",event=>{
 document.addEventListener("dblclick",event=>{const cluster=event.target?.closest?.(".transition-io-cluster");if(cluster)resetCluster(cluster).catch(error=>report(error,"manual transition position reset failed"))},true);
 document.addEventListener("change",event=>{if(event.target?.id==="machine-select"){selected=null;invalidateState()}});
 for(const eventName of["pagehide","beforeunload"]){window.addEventListener(eventName,()=>{destroyed=true;active=null;selected=null;invalidateState()},{once:true})}
-window.glyphTransitionLayoutInteractionAdapter={marker:MARKER,version:5,validateManualPlacement:manualPlacementViolation,nearestCertifiablePoint};
+window.glyphTransitionLayoutInteractionAdapter={marker:MARKER,version:4,validateManualPlacement:manualPlacementViolation,nearestCertifiablePoint};
 })();
 </script>
 """
