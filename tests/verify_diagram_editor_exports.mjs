@@ -50,6 +50,7 @@ async function ioPlacement(locator) {
     const top = Number.parseFloat(element.style.top || "0");
     const anchorX = Number(element.dataset.anchorX || 0);
     const anchorY = Number(element.dataset.anchorY || 0);
+    const stage = element.closest(".graph-stage");
     return {
       left,
       top,
@@ -60,6 +61,12 @@ async function ioPlacement(locator) {
       distance: Math.hypot(left - anchorX, top - anchorY),
       manual: element.dataset.manualIo,
       rejected: element.dataset.manualIoRejected || "",
+      gesture: element.dataset.manualIoGestureState || "",
+      gestureReason: element.dataset.manualIoGestureReason || "",
+      editState: stage?.dataset.manualLabelEditState || "",
+      publication: stage?.dataset.transitionPublicationReady || "",
+      certificate: stage?.dataset.layoutCertificateState || "",
+      collision: stage?.dataset.transitionIoCollisionSolved || "",
     };
   });
 }
@@ -84,8 +91,29 @@ async function waitForIoLayout(page) {
     const state = stage?.dataset.transitionIoCollisionSolved;
     return (state === "true" || state === "fallback")
       && stage?.dataset.transitionSemanticLinesReady === "true"
-      && stage?.dataset.transitionSemanticRoleLinesReady === "true";
-  });
+      && stage?.dataset.transitionSemanticRoleLinesReady === "true"
+      && stage?.dataset.transitionPublicationReady === "true"
+      && stage?.dataset.layoutCertificateState === "valid";
+  }, undefined, { timeout: 30_000 });
+}
+
+async function waitForGestureTerminal(page, transitionId) {
+  const terminal = new Set(["persisted", "rejected", "cancelled", "disconnected", "failed"]);
+  let last = null;
+  for (let attempt = 0; attempt < 80; attempt += 1) {
+    const locator = page.locator(`.transition-io-cluster[data-transition-id="${transitionId}"]`);
+    if (await locator.count()) {
+      const placement = await ioPlacement(locator);
+      const persisted = await storedManualPlacement(page, transitionId);
+      last = { placement, persisted };
+      if (placement.manual === "true" && persisted) return { placement, persisted, accepted: true };
+      if (terminal.has(placement.gesture) || terminal.has(placement.editState)) {
+        return { placement, persisted, accepted: false };
+      }
+    }
+    await page.waitForTimeout(100);
+  }
+  throw new Error(`manual I/O gesture did not terminate: ${JSON.stringify(last)}`);
 }
 
 async function dragFeasibleTransitionCluster(page) {
@@ -104,11 +132,12 @@ async function dragFeasibleTransitionCluster(page) {
   ];
   const attempted = new Set();
   const failures = [];
-  for (const cluster of candidates) {
-    const transitionId = await cluster.getAttribute("data-transition-id");
+  for (const initialCluster of candidates) {
+    const transitionId = await initialCluster.getAttribute("data-transition-id");
     if (!transitionId || attempted.has(transitionId)) continue;
     attempted.add(transitionId);
     for (const delta of deltas) {
+      const cluster = page.locator(`.transition-io-cluster[data-transition-id="${transitionId}"]`);
       const before = await cluster.boundingBox();
       assert(before, `transition ${transitionId} has no bounding box before drag`);
       const startX = before.x + before.width / 2;
@@ -117,19 +146,20 @@ async function dragFeasibleTransitionCluster(page) {
       await page.mouse.down();
       await page.mouse.move(startX + delta.x, startY + delta.y, { steps: 20 });
       await page.mouse.up();
+      const terminal = await waitForGestureTerminal(page, transitionId);
       await waitForIoLayout(page);
-      await page.waitForTimeout(180);
-      const after = await cluster.boundingBox();
+      const liveCluster = page.locator(`.transition-io-cluster[data-transition-id="${transitionId}"]`);
+      const after = await liveCluster.boundingBox();
       assert(after, `transition ${transitionId} has no bounding box after drag`);
-      const placement = await ioPlacement(cluster);
+      const placement = await ioPlacement(liveCluster);
       const persisted = await storedManualPlacement(page, transitionId);
       const moved = Math.abs(after.x - before.x) > 10 || Math.abs(after.y - before.y) > 10;
-      if (moved && placement.manual === "true" && persisted) {
-        return { cluster, transitionId, before, after, placement };
+      if (terminal.accepted && moved && placement.manual === "true" && persisted) {
+        return { cluster: liveCluster, transitionId, before, after, placement };
       }
-      failures.push({ transitionId, delta, moved, placement, persisted });
+      failures.push({ transitionId, delta, moved, terminal, placement, persisted });
       if (placement.manual === "true" || persisted) {
-        await cluster.dblclick();
+        await liveCluster.dblclick();
         await waitForIoLayout(page);
       }
     }
@@ -156,6 +186,10 @@ try {
   const url = `http://127.0.0.1:${port}`;
   await waitForServer(url, child, logs);
   const page = await browser.newPage({ viewport: { width: 1500, height: 900 } });
+  const browserErrors = [];
+  page.on("console", message => {
+    if (message.type() === "error") browserErrors.push(message.text());
+  });
   await page.goto(url, { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => document.querySelector("#status")?.textContent === "ready");
   if (!await page.locator('button[data-tab="state"]').evaluate(button => button.classList.contains("active"))) {
@@ -168,6 +202,8 @@ try {
       && ["true", "fallback"].includes(stage?.dataset.transitionIoCollisionSolved)
       && stage?.dataset.transitionSemanticLinesReady === "true"
       && stage?.dataset.transitionSemanticRoleLinesReady === "true"
+      && stage?.dataset.transitionPublicationReady === "true"
+      && stage?.dataset.layoutCertificateState === "valid"
       && document.querySelector(".transition-io-cluster")?.dataset.ioDragReady === "true"
       && document.querySelector(".initial-transition-path");
   });
@@ -184,7 +220,6 @@ try {
   const node = page.locator(".state-node").first();
   await dragElement(page, node, 170, 160, "state node");
   await waitForIoLayout(page);
-  await page.waitForTimeout(220);
   const nodeStored = await page.evaluate(() => Object.keys(localStorage).some(
     key => key.startsWith("glyph.diagram.positions.v1:"),
   ));
@@ -238,9 +273,10 @@ try {
       && element.dataset.anchorX !== undefined
       && element.dataset.anchorY !== undefined
       && stage?.dataset.transitionSemanticRoleLinesReady === "true"
+      && stage?.dataset.transitionPublicationReady === "true"
+      && stage?.dataset.layoutCertificateState === "valid"
       && (layout === "true" || layout === "fallback");
-  }, transitionId);
-  await page.waitForTimeout(220);
+  }, transitionId, { timeout: 30_000 });
   const restoredPlacement = await ioPlacement(restored);
   assert.equal(restoredPlacement.manual, "true");
   assert(restoredPlacement.distance <= 96.5, "restored I/O escaped its arrow tether");
@@ -329,6 +365,7 @@ try {
     assert(bytes.length > 500, `${extension} export is unexpectedly small`);
   }
 
+  assert.deepEqual(browserErrors, [], browserErrors.join("\n"));
   await page.screenshot({ path: path.join(outputDirectory, "conveyor-monochrome-editor.png"), fullPage: true });
   await page.selectOption("#diagram-theme", "white");
   await page.screenshot({ path: path.join(outputDirectory, "conveyor-white-editor.png"), fullPage: true });
