@@ -15,7 +15,7 @@ async function waitForServer(child, logs) {
       throw new Error(`Glyph diagram process exited early (${child.exitCode})\n${logs.join("")}`);
     }
     try {
-      const response = await fetch(`${url}/api/state`);
+      const response = await fetch(`${url}/api/state`, { cache: "no-store" });
       if (response.ok && (await response.json()).status === "ready") return;
     } catch {}
     await new Promise(resolve => setTimeout(resolve, 100));
@@ -33,37 +33,73 @@ async function stopProcess(child) {
   if (child.exitCode === null) child.kill("SIGKILL");
 }
 
-function assertCommittedIo(identity) {
-  assert(identity.clusters.length > 0, "no compact transition I/O was committed");
-  for (const cluster of identity.clusters) {
+async function waitForCommitted(page) {
+  await page.waitForFunction(() => {
+    const stage = document.querySelector(".state-node")?.closest(".graph-stage");
+    const transaction = window.glyphTransitionLayoutTransaction;
+    return stage?.dataset.renderStable === "true"
+      && stage.dataset.transitionLayoutState === "ready"
+      && stage.dataset.transitionPublicationReady === "true"
+      && stage.dataset.transitionIoClustersReady === "true"
+      && stage.dataset.transitionEnablingCasesReady === "true"
+      && stage.dataset.stateDiagramWorkspaceGeometryReady === "true"
+      && stage.dataset.stateDiagramWorkspaceViewportReady === "true"
+      && stage.dataset.initialRouteReady === "true"
+      && document.querySelectorAll(".transition-index .transition-detail").length > 0
+      && transaction?.generation === transaction?.completedGeneration;
+  }, null, { timeout: 5000 });
+}
+
+async function identity(page, mark = "") {
+  return page.evaluate(marker => {
+    const stage = document.querySelector(".state-node")?.closest(".graph-stage");
+    if (marker) stage.dataset.stabilityProbe = marker;
+    const visibleLegacyLabels = [...stage.querySelectorAll(".transition-label")].filter(item => {
+      const style = getComputedStyle(item);
+      return style.visibility !== "hidden" && style.display !== "none" && Number(style.opacity) > 0;
+    }).length;
+    return {
+      marker: stage.dataset.stabilityProbe || "",
+      visibility: getComputedStyle(stage).visibility,
+      width: Number.parseFloat(stage.style.width || "0") || 0,
+      height: Number.parseFloat(stage.style.height || "0") || 0,
+      layoutState: stage.dataset.transitionLayoutState || "",
+      publicationReady: stage.dataset.transitionPublicationReady || "",
+      initialReady: stage.dataset.initialRouteReady || "",
+      initialCertificate: stage.dataset.initialRouteCertificate || "",
+      initialPath: Boolean(stage.querySelector(":scope > svg.edge-svg > path.initial-transition-path")),
+      clusters: [...stage.querySelectorAll(".transition-io-cluster")].map(item => ({
+        transitionId: item.dataset.transitionId || "",
+        io: item.querySelector('.transition-io-node[data-io-kind="io"]')?.textContent?.trim(),
+        input: item.querySelector('.transition-io-node[data-io-kind="input"]')?.textContent?.trim() ?? null,
+        output: item.querySelector('.transition-io-node[data-io-kind="output"]')?.textContent?.trim() ?? null,
+        distance: Number(item.dataset.ioDistance || 0),
+      })),
+      visibleLegacyLabels,
+      detailIds: [...document.querySelectorAll(".transition-index .transition-detail")]
+        .map(item => item.dataset.transitionId || ""),
+    };
+  }, mark);
+}
+
+function assertCommitted(current) {
+  assert.equal(current.visibility, "visible");
+  assert.equal(current.layoutState, "ready");
+  assert.equal(current.publicationReady, "true");
+  assert.equal(current.initialReady, "true");
+  assert.equal(current.initialCertificate, "ordinary-follow");
+  assert.equal(current.initialPath, true);
+  assert(current.width >= 1600, `workspace width is ${current.width}`);
+  assert(current.height >= 960, `workspace height is ${current.height}`);
+  assert(current.clusters.length > 0, "no compact transition I/O was committed");
+  assert.equal(current.visibleLegacyLabels, 0, "legacy transition labels are visible");
+  for (const cluster of current.clusters) {
     assert(cluster.io, `${cluster.transitionId}: combined I/O object is missing`);
     assert.equal(cluster.input, null, `${cluster.transitionId}: legacy input object remains`);
     assert.equal(cluster.output, null, `${cluster.transitionId}: legacy output object remains`);
     assert(cluster.distance <= 96.5, `${cluster.transitionId}: I/O escaped its arrow tether`);
-    assert(identity.detailIds.includes(cluster.transitionId), `${cluster.transitionId}: no Transition details row`);
+    assert(current.detailIds.includes(cluster.transitionId), `${cluster.transitionId}: no transition detail row`);
   }
-  assert.equal(identity.visibleLegacyLabels, 0, "legacy transition labels are visible");
-}
-
-function readIdentity() {
-  const stage = document.querySelector(".state-node")?.closest(".graph-stage");
-  const visibleLegacyLabels = [...stage.querySelectorAll(".transition-label")].filter(item => {
-    const style = getComputedStyle(item);
-    return style.visibility !== "hidden" && style.display !== "none" && Number(style.opacity) > 0;
-  }).length;
-  return {
-    visibility: getComputedStyle(stage).visibility,
-    clusters: [...stage.querySelectorAll(".transition-io-cluster")].map(item => ({
-      transitionId: item.dataset.transitionId || "",
-      io: item.querySelector('.transition-io-node[data-io-kind="io"]')?.textContent?.trim(),
-      input: item.querySelector('.transition-io-node[data-io-kind="input"]')?.textContent?.trim() ?? null,
-      output: item.querySelector('.transition-io-node[data-io-kind="output"]')?.textContent?.trim() ?? null,
-      distance: Number(item.dataset.ioDistance || 0),
-    })),
-    visibleLegacyLabels,
-    detailIds: [...document.querySelectorAll(".transition-detail")].map(item => item.dataset.transitionId || ""),
-    initialPath: Boolean(stage.querySelector(":scope > svg.edge-svg > path.initial-transition-path")),
-  };
 }
 
 const logs = [];
@@ -83,103 +119,37 @@ const browser = await chromium.launch({ headless: true });
 try {
   await waitForServer(child, logs);
   const page = await browser.newPage({ viewport: { width: 1800, height: 1100 } });
+  const browserErrors = [];
+  page.on("pageerror", error => browserErrors.push(`pageerror: ${error.message}`));
+  page.on("console", message => {
+    if (message.type() === "error") browserErrors.push(`console: ${message.text()}`);
+  });
+
   await page.goto(url, { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => document.querySelector("#status")?.textContent === "ready");
   await page.click('button[data-tab="state"]');
-  await page.waitForFunction(() => {
-    const stage = document.querySelector(".state-node")?.closest(".graph-stage");
-    return stage?.dataset.renderStable === "true"
-      && stage.dataset.labelLayoutReady === "true"
-      && stage.dataset.umlTransitionReady === "true"
-      && stage.dataset.transitionInputActionLabelsReady === "true"
-      && stage.dataset.stateTransitionIRV2LabelsReady === "true"
-      && stage.dataset.transitionIoClustersReady === "true"
-      && stage.dataset.transitionIoCollisionSolved === "true"
-      && stage.dataset.initialRouteReady === "true";
-  });
+  await waitForCommitted(page);
 
-  const initialIdentity = await page.evaluate(() => {
-    const stage = document.querySelector(".state-node")?.closest(".graph-stage");
-    stage.dataset.stabilityProbe = "initial";
-    const visibleLegacyLabels = [...stage.querySelectorAll(".transition-label")].filter(item => {
-      const style = getComputedStyle(item);
-      return style.visibility !== "hidden" && style.display !== "none" && Number(style.opacity) > 0;
-    }).length;
-    return {
-      visibility: getComputedStyle(stage).visibility,
-      clusters: [...stage.querySelectorAll(".transition-io-cluster")].map(item => ({
-        transitionId: item.dataset.transitionId || "",
-        io: item.querySelector('.transition-io-node[data-io-kind="io"]')?.textContent?.trim(),
-        input: item.querySelector('.transition-io-node[data-io-kind="input"]')?.textContent?.trim() ?? null,
-        output: item.querySelector('.transition-io-node[data-io-kind="output"]')?.textContent?.trim() ?? null,
-        distance: Number(item.dataset.ioDistance || 0),
-      })),
-      visibleLegacyLabels,
-      detailIds: [...document.querySelectorAll(".transition-detail")].map(item => item.dataset.transitionId || ""),
-    };
-  });
-  assert.equal(initialIdentity.visibility, "visible");
-  assertCommittedIo(initialIdentity);
+  const initial = await identity(page, "initial");
+  assertCommitted(initial);
 
   await page.waitForTimeout(2200);
-  const unchanged = await page.evaluate(() => {
-    const stage = document.querySelector(".state-node")?.closest(".graph-stage");
-    return {
-      sameStage: stage?.dataset.stabilityProbe === "initial",
-      stable: stage?.dataset.renderStable,
-      ioReady: stage?.dataset.transitionIoClustersReady,
-      visibility: stage ? getComputedStyle(stage).visibility : null,
-    };
-  });
-  assert.equal(unchanged.sameStage, true, "unchanged polling replaced the committed state graph");
-  assert.equal(unchanged.stable, "true");
-  assert.equal(unchanged.ioReady, "true");
-  assert.equal(unchanged.visibility, "visible");
+  const unchanged = await identity(page);
+  assert.equal(unchanged.marker, "initial", "unchanged polling replaced the committed state graph");
+  assertCommitted(unchanged);
 
-  const pending = await page.evaluate(() => {
-    window.renderState();
-    const stage = document.querySelector(".state-node")?.closest(".graph-stage");
-    return {
-      sameStage: stage?.dataset.stabilityProbe === "initial",
-      stable: stage?.dataset.renderStable ?? null,
-      visibility: stage ? getComputedStyle(stage).visibility : null,
-    };
-  });
-  assert.equal(pending.sameStage, false, "forced render did not create a new graph stage");
-  assert.notEqual(pending.stable, "true");
-  assert.equal(pending.visibility, "hidden", "an unadjusted graph became visible");
-
+  await page.evaluate(() => window.renderState());
   await page.waitForFunction(() => {
     const stage = document.querySelector(".state-node")?.closest(".graph-stage");
-    return stage?.dataset.renderStable === "true"
-      && stage.dataset.stateTransitionIRV2LabelsReady === "true"
-      && stage.dataset.transitionIoClustersReady === "true"
-      && stage.dataset.transitionIoCollisionSolved === "true"
-      && stage.dataset.initialRouteReady === "true";
-  });
-  const committed = await page.evaluate(() => {
-    const stage = document.querySelector(".state-node")?.closest(".graph-stage");
-    const visibleLegacyLabels = [...stage.querySelectorAll(".transition-label")].filter(item => {
-      const style = getComputedStyle(item);
-      return style.visibility !== "hidden" && style.display !== "none" && Number(style.opacity) > 0;
-    }).length;
-    return {
-      visibility: getComputedStyle(stage).visibility,
-      clusters: [...stage.querySelectorAll(".transition-io-cluster")].map(item => ({
-        transitionId: item.dataset.transitionId || "",
-        io: item.querySelector('.transition-io-node[data-io-kind="io"]')?.textContent?.trim(),
-        input: item.querySelector('.transition-io-node[data-io-kind="input"]')?.textContent?.trim() ?? null,
-        output: item.querySelector('.transition-io-node[data-io-kind="output"]')?.textContent?.trim() ?? null,
-        distance: Number(item.dataset.ioDistance || 0),
-      })),
-      visibleLegacyLabels,
-      detailIds: [...document.querySelectorAll(".transition-detail")].map(item => item.dataset.transitionId || ""),
-      initialPath: Boolean(stage.querySelector(":scope > svg.edge-svg > path.initial-transition-path")),
-    };
-  });
-  assert.equal(committed.visibility, "visible");
-  assert.equal(committed.initialPath, true);
-  assertCommittedIo(committed);
+    return stage && stage.dataset.stabilityProbe !== "initial";
+  }, null, { timeout: 3000 });
+  await waitForCommitted(page);
+
+  const rerendered = await identity(page, "rerendered");
+  assertCommitted(rerendered);
+  assert.equal(rerendered.clusters.length, initial.clusters.length);
+  assert.deepEqual(new Set(rerendered.detailIds), new Set(initial.detailIds));
+  assert.deepEqual(browserErrors, [], browserErrors.join("\n"));
 
   await page.screenshot({
     path: path.join(outputDirectory, "stable-state-diagram.png"),
@@ -191,4 +161,4 @@ try {
   await stopProcess(child);
 }
 
-console.log("verified atomic state diagram rendering with compact transition I/O");
+console.log("verified stable ordinary workspace, transition details, and atomic rerendering");
