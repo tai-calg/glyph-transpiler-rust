@@ -36,6 +36,7 @@ def test_transaction_is_strictly_bounded_and_preserves_base_geometry() -> None:
         "TRANSACTION_DEADLINE_MS=48",
         "MAX_FRAME_BUDGET=2",
         "MAX_RETRIES=0",
+        "maxRetries:MAX_RETRIES",
         'stage.dataset.transitionLayoutProfile="ordinary"',
         'stage.dataset.transitionLayoutMode="base"',
         'stage.dataset.transitionDenseCanvas="disabled"',
