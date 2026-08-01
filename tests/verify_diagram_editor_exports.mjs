@@ -59,8 +59,23 @@ async function ioPlacement(locator) {
       dy: top - anchorY,
       distance: Math.hypot(left - anchorX, top - anchorY),
       manual: element.dataset.manualIo,
+      rejected: element.dataset.manualIoRejected || "",
     };
   });
+}
+
+async function storedManualPlacement(page, transitionId) {
+  return page.evaluate(id => {
+    for (let index = 0; index < localStorage.length; index += 1) {
+      const key = localStorage.key(index);
+      if (!key?.startsWith("glyph.diagram.transition-io.v1:")) continue;
+      try {
+        const value = JSON.parse(localStorage.getItem(key) || "{}");
+        if (Object.prototype.hasOwnProperty.call(value, id)) return true;
+      } catch {}
+    }
+    return false;
+  }, transitionId);
 }
 
 async function waitForIoLayout(page) {
@@ -88,6 +103,7 @@ async function dragFeasibleTransitionCluster(page) {
     { x: -28, y: 28 },
   ];
   const attempted = new Set();
+  const failures = [];
   for (const cluster of candidates) {
     const transitionId = await cluster.getAttribute("data-transition-id");
     if (!transitionId || attempted.has(transitionId)) continue;
@@ -101,18 +117,24 @@ async function dragFeasibleTransitionCluster(page) {
       await page.mouse.down();
       await page.mouse.move(startX + delta.x, startY + delta.y, { steps: 20 });
       await page.mouse.up();
-      await page.waitForTimeout(120);
+      await waitForIoLayout(page);
+      await page.waitForTimeout(180);
       const after = await cluster.boundingBox();
       assert(after, `transition ${transitionId} has no bounding box after drag`);
-      if (Math.abs(after.x - before.x) > 10 || Math.abs(after.y - before.y) > 10) {
-        await waitForIoLayout(page);
-        return { cluster, transitionId, before, after };
+      const placement = await ioPlacement(cluster);
+      const persisted = await storedManualPlacement(page, transitionId);
+      const moved = Math.abs(after.x - before.x) > 10 || Math.abs(after.y - before.y) > 10;
+      if (moved && placement.manual === "true" && persisted) {
+        return { cluster, transitionId, before, after, placement };
       }
-      await cluster.dblclick();
-      await waitForIoLayout(page);
+      failures.push({ transitionId, delta, moved, placement, persisted });
+      if (placement.manual === "true" || persisted) {
+        await cluster.dblclick();
+        await waitForIoLayout(page);
+      }
     }
   }
-  assert.fail("no transition I/O cluster had a feasible manual drag within the 96px tether");
+  assert.fail(`no certified manual I/O placement was found: ${JSON.stringify(failures)}`);
 }
 
 const logs = [];
@@ -198,13 +220,9 @@ try {
   const dragged = await dragFeasibleTransitionCluster(page);
   const cluster = dragged.cluster;
   const transitionId = dragged.transitionId;
-  await page.waitForFunction(() => Object.keys(localStorage).some(
-    key => key.startsWith("glyph.diagram.transition-io.v1:"),
-  ));
-  await page.waitForFunction(id => (
-    document.querySelector(`.transition-io-cluster[data-transition-id="${id}"]`)?.dataset.manualIo === "true"
-  ), transitionId);
   const draggedPlacement = await ioPlacement(cluster);
+  assert.equal(draggedPlacement.manual, "true", "accepted I/O drag was not marked manual");
+  assert(await storedManualPlacement(page, transitionId), "accepted I/O drag was not persisted");
   assert(draggedPlacement.distance <= 96.5, "dragged I/O escaped its arrow tether");
 
   await page.reload({ waitUntil: "domcontentloaded" });
