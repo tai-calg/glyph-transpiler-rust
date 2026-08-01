@@ -16,11 +16,8 @@ _SCRIPT = r"""
     "outputValue",
     "emittedOutputValue",
   ];
-  const ROUTE_WAIT_LIMIT = 400;
-  const ROUTE_WAIT_DELAY_MS = 25;
   let pending = null;
   let expiryTimer = null;
-  let publicationWaitToken = 0;
   let destroyed = false;
 
   function stageOf() {
@@ -60,7 +57,6 @@ _SCRIPT = r"""
 
   function armManualRun() {
     clearTimeout(expiryTimer);
-    publicationWaitToken += 1;
     pending = {
       stage: stageOf(),
       values: semanticSnapshot(),
@@ -68,45 +64,6 @@ _SCRIPT = r"""
     expiryTimer = setTimeout(() => {
       pending = null;
     }, 5000);
-  }
-
-  function waitForRouteAndPublish(stage, router, generation, token, attempt = 0) {
-    if (destroyed || token !== publicationWaitToken || !stage?.isConnected) return;
-    const routeComplete = Number(router.completedGeneration || 0) >= generation;
-    if (routeComplete) {
-      if (stage.dataset.initialRouteReady === "failed"
-        || stage.dataset.initialRouteCertificate === "failed") {
-        stage.dataset.manualLayoutSemanticGuard = "route-certification-failed";
-        return;
-      }
-      const certificate = window.glyphLayoutPublicationCertificate;
-      if (stage.dataset.initialRouteReady === "true"
-        && stage.dataset.initialRouteCertificate === "valid"
-        && certificate
-        && typeof certificate.schedule === "function") {
-        stage.dataset.manualLayoutSemanticGuard = "publication-certification-requested";
-        certificate.schedule("manual-layout-semantics-restored", 0);
-        return;
-      }
-    }
-    if (attempt >= ROUTE_WAIT_LIMIT) {
-      stage.dataset.manualLayoutSemanticGuard = "publication-wait-timeout";
-      console.error("manual layout publication recertification timed out", {
-        marker: MARKER,
-        generation,
-        completedGeneration: router.completedGeneration,
-        initialRouteReady: stage.dataset.initialRouteReady,
-        initialRouteCertificate: stage.dataset.initialRouteCertificate,
-      });
-      return;
-    }
-    setTimeout(() => waitForRouteAndPublish(
-      stage,
-      router,
-      generation,
-      token,
-      attempt + 1,
-    ), ROUTE_WAIT_DELAY_MS);
   }
 
   function requestPublicationRecertification() {
@@ -119,11 +76,8 @@ _SCRIPT = r"""
       || !restoration.startsWith("restored:")) return false;
     const router = window.glyphInitialTransitionRouter;
     if (!router || typeof router.schedule !== "function") return false;
-    const token = ++publicationWaitToken;
     stage.dataset.manualLayoutSemanticGuard = `route-certification-requested:${restoration}`;
-    stage.dataset.initialRouteReady = "pending";
-    const generation = router.schedule("manual-layout-semantics-restored", 0);
-    waitForRouteAndPublish(stage, router, generation, token);
+    router.schedule("manual-layout-semantics-restored", 0);
     return true;
   }
 
@@ -184,14 +138,13 @@ _SCRIPT = r"""
     window.addEventListener(eventName, () => {
       destroyed = true;
       pending = null;
-      publicationWaitToken += 1;
       clearTimeout(expiryTimer);
     }, {once: true});
   }
 
   window.glyphManualLayoutSemanticGuard = {
     marker: MARKER,
-    version: 2,
+    version: 3,
     install,
     requestPublicationRecertification,
     get armed() { return Boolean(pending) && !destroyed; },
