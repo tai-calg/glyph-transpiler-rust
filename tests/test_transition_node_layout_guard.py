@@ -14,7 +14,8 @@ class TransitionNodeLayoutGuardTests(unittest.TestCase):
     def test_guard_delegates_without_owning_interaction_or_persistence(self) -> None:
         html = enhance_transition_node_layout_guard_html(DIAGRAM_HTML)
         self.assertIn("glyph-transition-node-layout-guard-v1-script", html)
-        self.assertIn("glyphTransitionLayoutTransaction?.schedule", html)
+        self.assertIn("const transaction=window.glyphTransitionLayoutTransaction", html)
+        self.assertIn("transaction.schedule(reason,0)", html)
         self.assertIn('transitionIoNodeConstraint="delegated"', html)
         self.assertIn("ownsPointerEvents:false", html)
         self.assertIn("ownsPersistence:false", html)
