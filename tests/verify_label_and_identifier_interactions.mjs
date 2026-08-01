@@ -66,7 +66,7 @@ try {
   });
   await page.goto(url, { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => document.querySelector("#status")?.textContent === "ready");
-  await page.waitForFunction(() => window.glyphEditorIdentifierHighlight?.version === 1);
+  await page.waitForFunction(() => window.glyphEditorIdentifierHighlight?.version === 2);
 
   const candidate = await page.evaluate(() => {
     const editor = document.getElementById("editor");
@@ -100,7 +100,7 @@ try {
   const selectionResult = await page.evaluate(() => ({
     identifier: window.glyphEditorIdentifierHighlight.identifier(),
     matchCount: window.glyphEditorIdentifierHighlight.matchCount(),
-    layerIdentifier: document.querySelector(".identifier-editor-layer")?.dataset.identifier || "",
+    layerIdentifier: document.querySelector(".identifier-highlight-surface")?.dataset.identifier || "",
   }));
   assert.equal(selectionResult.identifier, candidate.token);
   assert.equal(selectionResult.matchCount, candidate.count);
