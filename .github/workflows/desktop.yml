@@ -4,14 +4,8 @@ on:
   pull_request:
     paths:
       - "desktop/**"
-      - "glyph/desktop_server.py"
-      - "glyph/manual_layout_semantic_guard.py"
-      - "glyph/node_drag_publication_guard.py"
-      - "glyph/readable_diagram_app.py"
-      - "glyph/transition_node_position_adapter.py"
+      - "glyph/**"
       - "tests/test_desktop_server.py"
-      - "tests/test_manual_layout_semantic_guard.py"
-      - "tests/test_node_drag_publication_guard.py"
       - "tests/test_tauri_desktop.py"
       - "pyproject.toml"
       - ".github/workflows/desktop.yml"
@@ -19,14 +13,8 @@ on:
     branches: [main]
     paths:
       - "desktop/**"
-      - "glyph/desktop_server.py"
-      - "glyph/manual_layout_semantic_guard.py"
-      - "glyph/node_drag_publication_guard.py"
-      - "glyph/readable_diagram_app.py"
-      - "glyph/transition_node_position_adapter.py"
+      - "glyph/**"
       - "tests/test_desktop_server.py"
-      - "tests/test_manual_layout_semantic_guard.py"
-      - "tests/test_node_drag_publication_guard.py"
       - "tests/test_tauri_desktop.py"
       - "pyproject.toml"
       - ".github/workflows/desktop.yml"
