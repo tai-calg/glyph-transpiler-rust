@@ -43,6 +43,7 @@ jobs:
           python -m pytest -q \
             tests/test_diagram_fit_stability.py \
             tests/test_diagram_geometry_kernel.py \
+            tests/test_diagram_middle_drag_zoom.py \
             tests/test_initial_transition_dependency_bridge.py \
             tests/test_initial_transition_layout.py \
             tests/test_layout_*.py \
@@ -66,3 +67,4 @@ jobs:
           timeout 180s node tests/verify_node_drag_layout.mjs
           timeout 180s node tests/verify_diagram_editor_exports.mjs
           timeout 180s node tests/verify_label_and_identifier_interactions.mjs
+          timeout 180s node tests/verify_interaction_visibility_and_middle_zoom.mjs
