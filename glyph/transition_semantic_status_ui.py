@@ -32,11 +32,10 @@ _STYLE = r"""
   white-space:nowrap;
   pointer-events:none;
 }
-.graph-stage[data-rtai-projection-mode="strict-exact"]
-  .transition-io-cluster[data-rtai-semantic-status]::after,
+.transition-io-cluster.rtai-semantic-badge-visible[data-rtai-semantic-status]::after,
 .transition-io-cluster[data-rtai-semantic-status]:hover::after,
 .transition-io-cluster[data-rtai-semantic-status].selected-io::after{
-  display:inline-flex;
+  display:inline-flex!important;
 }
 .theme-monochrome .transition-io-cluster[data-rtai-semantic-status]::after{
   color:#111!important;
@@ -68,18 +67,20 @@ function selectedMachine(data){const machines=data?.views?.state?.machines||[],n
 function semanticOf(transition){const raw=transition?.rtai_semantic_status||{},status=["exact","may","unknown"].includes(text(raw.status))?text(raw.status):"unknown";return{status,label:status==="exact"?"Exact":status==="may"?"May":"Unknown",reason:text(raw.reason)||"native Evidence status is unavailable"}}
 function escapeId(value){return window.CSS?.escape?CSS.escape(value):value.replace(/[^A-Za-z0-9_-]/g,"\\$&")}
 function setDataset(element,name,value){if(element.dataset[name]===value)return false;element.dataset[name]=value;return true}
-function updateCluster(cluster,semantic){
+function updateCluster(cluster,semantic,strict){
   let changed=false;
   changed=setDataset(cluster,"rtaiSemanticStatus",semantic.status)||changed;
   changed=setDataset(cluster,"rtaiSemanticLabel",semantic.label)||changed;
   changed=setDataset(cluster,"rtaiSemanticReason",semantic.reason)||changed;
   const title=`${semantic.label}: ${semantic.reason}`;
   if(cluster.dataset.rtaiSemanticTitle!==title){cluster.dataset.rtaiSemanticTitle=title;changed=true}
+  if(cluster.classList.toggle("rtai-semantic-badge-visible",strict)!==strict)changed=true;
   return changed;
 }
 function clearCluster(cluster){
   let changed=false;
   for(const name of["rtaiSemanticStatus","rtaiSemanticLabel","rtaiSemanticReason","rtaiSemanticTitle"]){if(name in cluster.dataset){delete cluster.dataset[name];changed=true}}
+  if(cluster.classList.contains("rtai-semantic-badge-visible")){cluster.classList.remove("rtai-semantic-badge-visible");changed=true}
   return changed;
 }
 function signatureOf(machine){return[window.GlyphI18n?.locale||document.documentElement.lang||"ja",machine?.name||"",machine?.analysis?.evidence_projection_mode||"shadow",...(machine?.transitions||[]).map((transition,index)=>{const semantic=semanticOf(transition);return[text(transition.id)||`T${index+1}`,semantic.status,semantic.reason].join("\u001f")})].join("\u001e")}
@@ -93,7 +94,7 @@ async function render(){
     if(disposed)return;
     const machine=selectedMachine(data);
     if(!machine)return;
-    const projectionMode=text(machine?.analysis?.evidence_projection_mode)||"shadow",signature=signatureOf(machine);
+    const projectionMode=text(machine?.analysis?.evidence_projection_mode)||"shadow",strict=projectionMode==="strict-exact",signature=signatureOf(machine);
     let changed=lastSignature!==signature;
     if(stage.dataset.rtaiProjectionMode!==projectionMode){stage.dataset.rtaiProjectionMode=projectionMode;changed=true}
     const liveIds=new Set();
@@ -101,7 +102,7 @@ async function render(){
       const id=text(transition.id)||`T${index+1}`;
       liveIds.add(id);
       const cluster=stage.querySelector(`.transition-io-cluster[data-transition-id="${escapeId(id)}"]`);
-      if(cluster)changed=updateCluster(cluster,semanticOf(transition))||changed;
+      if(cluster)changed=updateCluster(cluster,semanticOf(transition),strict)||changed;
     });
     stage.querySelectorAll(".transition-io-cluster").forEach(cluster=>{if(!liveIds.has(text(cluster.dataset.transitionId)))changed=clearCluster(cluster)||changed});
     lastSignature=signature;
