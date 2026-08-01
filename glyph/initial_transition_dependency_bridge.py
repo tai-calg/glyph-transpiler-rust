@@ -219,15 +219,20 @@ _SCRIPT = r"""
     stage.dataset.initialRouteLayoutGeneration = generation;
     lastSignature = after;
 
+    const detail = {
+      ...(event?.detail || {}),
+      marker: MARKER,
+      stable: true,
+      layoutGeneration: generation,
+      crossings: certificate.crossings,
+      clearance: certificate.clearance,
+    };
+    window.glyphLayoutPublicationCertificate?.schedule?.(
+      "glyph-initial-transition-route-ready",
+      0,
+    );
     document.dispatchEvent(new CustomEvent("glyph-initial-transition-route-ready", {
-      detail: {
-        ...(event?.detail || {}),
-        marker: MARKER,
-        stable: true,
-        layoutGeneration: generation,
-        crossings: certificate.crossings,
-        clearance: certificate.clearance,
-      },
+      detail,
     }));
   }
 
