@@ -1,0 +1,70 @@
+name: Certified Incremental Layout
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "glyph.py"
+      - "glyphc.py"
+      - "glyph/**"
+      - "tests/**/*.py"
+      - "tests/**/*.mjs"
+      - "examples/acceptance/**"
+      - "examples/state_diagrams/**"
+      - "docs/images/glyph-studio-state-transition.png"
+      - "docs/design/certified-incremental-layout-v1.md"
+      - ".github/workflows/certified-layout.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install browser, image verifier, and test runner
+        run: |
+          python -m pip install pillow==12.0.0 pytest==8.3.5
+          npm install playwright@1.54.2
+          npx playwright install --with-deps chromium
+
+      - name: Verify geometry and release contracts
+        run: |
+          python -m pytest -q \
+            tests/test_diagram_fit_stability.py \
+            tests/test_diagram_geometry_kernel.py \
+            tests/test_diagram_middle_drag_zoom.py \
+            tests/test_initial_transition_dependency_bridge.py \
+            tests/test_initial_transition_layout.py \
+            tests/test_layout_*.py \
+            tests/test_manual_layout_semantic_guard.py \
+            tests/test_node_drag_publication_guard.py \
+            tests/test_public_release_invariants.py \
+            tests/test_state_viewport_reservation.py \
+            tests/test_transition_layout_transaction.py \
+            tests/test_transition_node_position_adapter.py \
+            tests/test_transition_semantic_status_ui.py
+
+      - name: Verify responsiveness and certificate reuse
+        run: |
+          timeout 180s node tests/verify_certified_layout_performance.mjs
+
+      - name: Verify publication rendering, editing, and README baseline
+        run: |
+          timeout 180s node tests/verify_state_diagram_rendering.mjs
+          python tests/verify_readme_state_snapshot.py
+          timeout 180s node tests/verify_transition_layout_transaction.mjs
+          timeout 180s node tests/verify_node_drag_layout.mjs
+          timeout 180s node tests/verify_diagram_editor_exports.mjs
+          timeout 180s node tests/verify_label_and_identifier_interactions.mjs
+          timeout 180s node tests/verify_interaction_visibility_and_middle_zoom.mjs

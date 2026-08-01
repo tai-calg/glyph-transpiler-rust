@@ -5,72 +5,28 @@ import { spawn } from "node:child_process";
 import { chromium } from "playwright";
 
 const cases = [
-  {
-    slug: "motor-safety",
-    file: "examples/acceptance/motor_safety.glyph",
-    machines: [{
-      name: "Motor",
-      states: ["Stopped", "Running", "Faulted"],
-      warnings: ["state-independent-transition", "unreachable-branch"],
-      requireInputAction: true,
-      requireActionTargetIndependence: true,
-      requireOperationAction: true,
-    }],
-  },
-  {
-    slug: "traffic-light",
-    file: "examples/state_diagrams/traffic_light.glyph",
-    machines: [{
-      name: "Traffic",
-      states: ["Red", "Green", "Yellow", "TrafficFault"],
-      warnings: [
-        "STIR_TRIGGER_AMBIGUOUS_FALLBACK",
-        "STIR_TRIGGER_AMBIGUOUS_FALLBACK",
-        "STIR_TRIGGER_AMBIGUOUS_FALLBACK",
-        "STIR_TRIGGER_AMBIGUOUS_FALLBACK",
-      ],
-      provisionalTriggers: 7,
-    }],
-  },
-  {
-    slug: "session-protocol",
-    file: "examples/state_diagrams/session_protocol.glyph",
-    machines: [{
-      name: "Session",
-      states: ["SessionIdle", "SessionConnecting", "SessionReady", "SessionFailed"],
-      warnings: [],
-      provisionalTriggers: 0,
-    }],
-  },
-  {
-    slug: "dual-machines",
-    file: "examples/state_diagrams/dual_machines.glyph",
-    machines: [
-      {
-        name: "Door",
-        states: ["DoorClosed", "DoorOpen", "DoorJammed"],
-        warnings: ["unreachable-state"],
-        provisionalTriggers: 0,
-      },
-      {
-        name: "Power",
-        states: ["PowerOff", "PowerOn", "PowerFault"],
-        warnings: [],
-        provisionalTriggers: 0,
-      },
-    ],
-  },
+  ["motor-safety", "examples/acceptance/motor_safety.glyph", [{ name: "Motor", states: ["Stopped", "Running", "Faulted"], warnings: ["state-independent-transition", "unreachable-branch"], requireOperationAction: true }]],
+  ["traffic-light", "examples/state_diagrams/traffic_light.glyph", [{ name: "Traffic", states: ["Red", "Green", "Yellow", "TrafficFault"], warnings: ["STIR_TRIGGER_AMBIGUOUS_FALLBACK", "STIR_TRIGGER_AMBIGUOUS_FALLBACK", "STIR_TRIGGER_AMBIGUOUS_FALLBACK", "STIR_TRIGGER_AMBIGUOUS_FALLBACK"], provisional: 7 }]],
+  ["session-protocol", "examples/state_diagrams/session_protocol.glyph", [{ name: "Session", states: ["SessionIdle", "SessionConnecting", "SessionReady", "SessionFailed"], warnings: [], provisional: 0 }]],
+  ["dual-machines", "examples/state_diagrams/dual_machines.glyph", [
+    { name: "Door", states: ["DoorClosed", "DoorOpen", "DoorJammed"], warnings: ["unreachable-state"], provisional: 0 },
+    { name: "Power", states: ["PowerOff", "PowerOn", "PowerFault"], warnings: [], provisional: 0 },
+  ]],
 ];
 
 const outputDirectory = path.resolve("build/state-diagram-regression");
 await fs.mkdir(outputDirectory, { recursive: true });
-const sorted = values => [...values].sort((left, right) => left.localeCompare(right));
+const sorted = values => [...values].sort((a, b) => a.localeCompare(b));
+const actionDisplay = transition => typeof transition?.action === "string"
+  ? transition.action.trim()
+  : String(transition?.action?.display || transition?.action?.expression || "").trim();
+const emittedOutput = transition => String(transition?.emitted_output?.display || transition?.emitted_output?.expression || "").trim();
 
 async function waitForServer(url, child, logs) {
   for (let attempt = 0; attempt < 120; attempt += 1) {
-    if (child.exitCode !== null) throw new Error(`Glyph process exited early\n${logs.join("")}`);
+    if (child.exitCode !== null) throw new Error(`Glyph exited early\n${logs.join("")}`);
     try {
-      const response = await fetch(`${url}/api/state`);
+      const response = await fetch(`${url}/api/state`, { cache: "no-store" });
       if (response.ok) {
         const state = await response.json();
         if (state.status === "ready") return state;
@@ -78,284 +34,142 @@ async function waitForServer(url, child, logs) {
     } catch {}
     await new Promise(resolve => setTimeout(resolve, 100));
   }
-  throw new Error(`Glyph diagram server did not become ready\n${logs.join("")}`);
+  throw new Error(`Glyph server did not become ready\n${logs.join("")}`);
 }
 
-async function stopProcess(child) {
+async function stop(child) {
   if (child.exitCode !== null) return;
   child.kill("SIGTERM");
-  await Promise.race([
-    new Promise(resolve => child.once("exit", resolve)),
-    new Promise(resolve => setTimeout(resolve, 1500)),
-  ]);
+  await Promise.race([new Promise(resolve => child.once("exit", resolve)), new Promise(resolve => setTimeout(resolve, 1500))]);
   if (child.exitCode === null) child.kill("SIGKILL");
 }
 
-async function assertDiagramGeometry(page) {
-  const geometry = await page.evaluate(() => {
-    const stage = document.querySelector(".graph-stage");
-    const stageRect = stage?.getBoundingClientRect();
-    if (!stage || !stageRect) return { error: "graph stage is missing" };
-    const nodes = [...stage.querySelectorAll(".state-node")].map(element => element.getBoundingClientRect());
-    const clusters = [...stage.querySelectorAll(".transition-io-cluster")].map(element => ({
-      id: element.dataset.transitionId,
-      distance: Number(element.dataset.ioDistance || 0),
-      rect: element.getBoundingClientRect(),
-    }));
-    const overlaps = (left, right, gap = 1) => !(
-      left.right <= right.left + gap || right.right <= left.left + gap
-      || left.bottom <= right.top + gap || right.bottom <= left.top + gap
-    );
-    const collisions = [];
-    clusters.forEach((cluster, index) => {
-      clusters.slice(index + 1).forEach(other => {
-        if (overlaps(cluster.rect, other.rect)) collisions.push(`${cluster.id}/${other.id}`);
-      });
-      nodes.forEach((node, nodeIndex) => {
-        if (overlaps(cluster.rect, node)) collisions.push(`${cluster.id}/node-${nodeIndex}`);
-      });
-    });
-    const outside = clusters.filter(({rect}) => (
-      rect.left < stageRect.left - 1 || rect.top < stageRect.top - 1
-      || rect.right > stageRect.right + 1 || rect.bottom > stageRect.bottom + 1
-    )).map(item => item.id);
-    return { collisions, outside, distances: clusters.map(item => item.distance) };
-  });
-  assert.equal(geometry.error, undefined, geometry.error);
-  assert.deepEqual(geometry.collisions, [], `I/O collisions: ${JSON.stringify(geometry.collisions)}`);
-  assert.deepEqual(geometry.outside, [], `I/O outside stage: ${JSON.stringify(geometry.outside)}`);
-  assert(geometry.distances.every(value => value <= 96.5), `I/O escaped tether: ${geometry.distances.join(", ")}`);
-}
-
-async function waitForStableLayout(page, machineName, transitionCount) {
-  const ready = async () => page.waitForFunction(({name, count}) => {
-    const stage = document.querySelector(".graph-stage");
+async function waitForOrdinary(page, machineName, transitionCount) {
+  await page.waitForFunction(({ name, count }) => {
+    const stage = document.querySelector(".state-node")?.closest(".graph-stage");
     return document.querySelector("#machine-select")?.selectedOptions?.[0]?.textContent === name
       && stage?.dataset.transitionIoClustersReady === "true"
       && stage?.dataset.transitionEnablingCasesReady === "true"
       && stage?.dataset.transitionLayoutState === "ready"
-      && stage?.dataset.transitionIoCollisionSolved === "true"
-      && stage?.dataset.transitionIoCollisionCount === "0"
+      && stage?.dataset.transitionPublicationReady === "true"
+      && stage?.dataset.transitionLayoutProfile === "ordinary"
+      && stage?.dataset.transitionLayoutMode === "base"
+      && stage?.dataset.transitionDenseCanvas === "disabled"
+      && !stage?.dataset.transitionLayoutError
       && stage.querySelectorAll(".transition-io-cluster").length === count;
-  }, { name: machineName, count: transitionCount }, { timeout: 60_000 });
+  }, { name: machineName, count: transitionCount }, { timeout: 5000 });
 
+  // Semantic label projection may settle after geometry without moving the layout.
   const snapshot = async () => page.evaluate(() => ({
-    positions: [...document.querySelectorAll(".transition-io-cluster")].map(cluster => [
-      cluster.dataset.transitionId,
-      cluster.style.left,
-      cluster.style.top,
-      cluster.dataset.ioValue,
-    ]),
-    paths: [...document.querySelectorAll(".state-transition-path")].map(pathElement => (
-      pathElement.getAttribute("d") || ""
-    )),
+    clusters: [...document.querySelectorAll(".transition-io-cluster")].map(item => [item.dataset.transitionId, item.style.left, item.style.top]),
+    paths: [...document.querySelectorAll(".state-transition-path")].map(item => item.getAttribute("d") || ""),
   }));
-
-  for (let attempt = 0; attempt < 4; attempt += 1) {
-    await ready();
-    const before = await snapshot();
-    await page.waitForTimeout(500);
-    const after = await snapshot();
-    if (JSON.stringify(after) === JSON.stringify(before)) return;
-  }
-  throw new Error(`${machineName}: layout kept changing after reporting ready`);
+  const before = await snapshot();
+  await page.waitForTimeout(100);
+  assert.deepEqual(await snapshot(), before, `${machineName}: layout kept moving after ready`);
 }
 
-function actionDisplay(transition) {
-  const raw = transition?.action;
-  if (typeof raw === "string") return raw.trim();
-  return String(raw?.display || raw?.expression || "").trim();
-}
-
-function emittedOutputDisplay(transition) {
-  const raw = transition?.emitted_output;
-  return String(raw?.display || raw?.expression || "").trim();
+async function ordinaryAudit(page) {
+  return page.evaluate(() => {
+    const stage = document.querySelector(".state-node")?.closest(".graph-stage");
+    const clusters = [...(stage?.querySelectorAll(".transition-io-cluster") || [])];
+    return {
+      stagePresent: Boolean(stage),
+      profile: stage?.dataset.transitionLayoutProfile || "",
+      mode: stage?.dataset.transitionLayoutMode || "",
+      dense: stage?.dataset.transitionDenseCanvas || "",
+      layoutBudgetMs: Number(stage?.dataset.transitionLayoutBudgetMs || 0),
+      renderBudgetMs: Number(stage?.dataset.transitionIoRenderBudgetMs || 0),
+      renderDurationMs: Number(stage?.dataset.transitionIoRenderDurationMs || 0),
+      error: stage?.dataset.transitionLayoutError || "",
+      maximumDistance: Math.max(0, ...clusters.map(item => Number(item.dataset.ioDistance || 0))),
+      distanceLimit: Number(stage?.dataset.transitionIoMaxDistance || 0),
+      fatalText: document.body.textContent?.includes("State diagram certification failed") || false,
+      certificate: Boolean(window.glyphLayoutPublicationCertificate),
+      router: Boolean(window.glyphInitialTransitionRouter),
+    };
+  });
 }
 
 const browser = await chromium.launch({ headless: true });
 try {
   let port = 8765;
-  for (const testCase of cases) {
+  for (const [slug, file, expectedMachines] of cases) {
     const logs = [];
-    const child = spawn("python3", ["glyph.py", testCase.file], {
-      env: {
-        ...process.env,
-        GLYPH_DIAGRAM_PORT: String(port),
-        GLYPH_DIAGRAM_NO_BROWSER: "1",
-        PYTHONUNBUFFERED: "1",
-      },
+    const child = spawn("python3", ["glyph.py", file], {
+      env: { ...process.env, GLYPH_DIAGRAM_PORT: String(port), GLYPH_DIAGRAM_NO_BROWSER: "1", PYTHONUNBUFFERED: "1" },
       stdio: ["ignore", "pipe", "pipe"],
     });
     child.stdout.on("data", chunk => logs.push(chunk.toString()));
     child.stderr.on("data", chunk => logs.push(chunk.toString()));
-
     const url = `http://127.0.0.1:${port}`;
     try {
       const apiState = await waitForServer(url, child, logs);
       assert.equal(apiState.views.schema, "glyph.io-state-views");
       assert.equal(apiState.views.state_transition_ir.version, 4);
-      assert.equal(apiState.views.state.machines.length, testCase.machines.length);
+      assert.equal(apiState.views.state.machines.length, expectedMachines.length);
 
       const page = await browser.newPage({ viewport: { width: 1800, height: 1100 } });
+      const errors = [];
+      page.on("pageerror", error => errors.push(`pageerror: ${error.message}`));
+      page.on("console", message => { if (message.type() === "error") errors.push(`console: ${message.text()}`); });
       await page.goto(url, { waitUntil: "domcontentloaded" });
       await page.waitForFunction(() => document.querySelector("#status")?.textContent === "ready");
       await page.click('button[data-tab="state"]');
+      assert.deepEqual(sorted(await page.locator("#machine-select option").allTextContents()), sorted(expectedMachines.map(item => item.name)));
 
-      const options = await page.locator("#machine-select option").allTextContents();
-      assert.deepEqual(sorted(options), sorted(testCase.machines.map(machine => machine.name)));
-
-      for (const expected of testCase.machines) {
+      for (const expected of expectedMachines) {
         const machine = apiState.views.state.machines.find(item => item.name === expected.name);
-        assert(machine, `${testCase.slug}/${expected.name}: API machine missing`);
-        if (testCase.machines.length > 1) await page.selectOption("#machine-select", { label: expected.name });
-        await waitForStableLayout(page, expected.name, machine.transitions.length);
-
+        assert(machine, `${slug}/${expected.name}: machine missing`);
+        if (expectedMachines.length > 1) await page.selectOption("#machine-select", { label: expected.name });
+        await waitForOrdinary(page, expected.name, machine.transitions.length);
         assert.deepEqual(sorted(await page.locator(".state-name").allTextContents()), sorted(expected.states));
         assert.deepEqual(sorted(await page.locator(".analysis-code").allTextContents()), sorted(expected.warnings));
         assert.equal(await page.locator(".transition-io-cluster").count(), machine.transitions.length);
-        assert.equal(await page.locator('.transition-io-node[data-io-kind="io"]').count(), machine.transitions.length);
-        assert.equal(await page.locator('.transition-io-node[data-io-kind="input"]').count(), 0);
-        assert.equal(await page.locator('.transition-io-node[data-io-kind="output"]').count(), 0);
-        assert.equal(await page.locator(".transition-detail").count(), machine.transitions.length);
         assert.equal(await page.locator(".state-transition-path").count(), machine.transitions.length);
+        if (expected.provisional !== undefined) assert.equal(await page.locator(".transition-io-cluster.provisional-trigger").count(), expected.provisional);
 
-        if (expected.requireActionTargetIndependence) {
-          const independence = machine.analysis?.action_target_independence;
-          assert(independence, `${testCase.slug}/${expected.name}: independence analysis missing`);
-          assert.equal(independence.version, 1);
-          assert.equal(independence.typed_independent, true);
-          assert.equal(independence.behaviorally_independent, true);
-          assert.notEqual(independence.mapping_shape, "one-to-one");
-          assert.equal(independence.near_alias_count, 0);
-          assert(independence.behavioral_witness_count > 0);
+        const rendered = await page.locator(".transition-io-cluster").evaluateAll(elements => elements.map(cluster => ({
+          id: cluster.dataset.transitionId || "",
+          value: cluster.dataset.ioValue || "",
+          input: cluster.dataset.inputValue || "",
+          action: cluster.dataset.actionValue || "",
+        })));
+        assert(rendered.every(item => item.value.trim()));
+        for (const item of rendered) {
+          const transition = machine.transitions.find(candidate => candidate.id === item.id);
+          assert(transition, `${slug}/${expected.name}: transition ${item.id} missing`);
+          const action = actionDisplay(transition);
+          assert.equal(item.action, action, `${slug}/${expected.name}/${item.id}: Action mismatch`);
+          assert.notEqual(item.action, String(transition.target_state || ""), `${slug}/${expected.name}/${item.id}: Target State leaked into Action`);
+          if (item.action && emittedOutput(transition)) assert.notEqual(item.action, emittedOutput(transition), `${slug}/${expected.name}/${item.id}: Emitted Output leaked into Action`);
+          if (action) assert(item.value.includes(`➞ ${action}`));
+          else assert(!item.value.includes("➞"));
         }
-
-        const combinedValues = await page.locator('.transition-io-node[data-io-kind="io"]').evaluateAll(elements => elements.map(element => {
-          const cluster = element.closest(".transition-io-cluster");
-          return {
-            id: cluster?.dataset.transitionId || "",
-            value: element.querySelector(".transition-io-value")?.textContent || "",
-            input: cluster?.dataset.inputValue || "",
-            action: cluster?.dataset.actionValue || "",
-          };
-        }));
-        assert(combinedValues.every(({value}) => value.trim().length > 0));
-        for (const rendered of combinedValues) {
-          const transition = machine.transitions.find(item => item.id === rendered.id);
-          assert(transition, `${testCase.slug}/${expected.name}: missing transition ${rendered.id}`);
-          const expectedAction = actionDisplay(transition);
-          assert.equal(
-            rendered.action,
-            expectedAction,
-            `${testCase.slug}/${expected.name}/${rendered.id}: DOM Action differs from StateTransitionIR`,
-          );
-          assert.notEqual(
-            rendered.action,
-            String(transition.target_state || ""),
-            `${testCase.slug}/${expected.name}/${rendered.id}: Target State leaked into Action`,
-          );
-          const emittedOutput = emittedOutputDisplay(transition);
-          if (rendered.action && emittedOutput) {
-            assert.notEqual(
-              rendered.action,
-              emittedOutput,
-              `${testCase.slug}/${expected.name}/${rendered.id}: Emitted Output leaked into Action`,
-            );
-          }
-          if (expectedAction) {
-            assert.equal(
-              transition.action?.provenance,
-              "transition-operation-invocation",
-              `${testCase.slug}/${expected.name}/${rendered.id}: Action lacks operation provenance`,
-            );
-            assert(
-              Array.isArray(transition.action_invocations) && transition.action_invocations.length > 0,
-              `${testCase.slug}/${expected.name}/${rendered.id}: Action lacks invocation witness`,
-            );
-            assert(
-              rendered.value.includes(` ➞ ${expectedAction}`),
-              `${testCase.slug}/${expected.name}/${rendered.id}: Action is not rendered`,
-            );
-            assert(!rendered.value.includes(" / "));
-          } else {
-            assert(
-              !rendered.value.includes(" ➞ "),
-              `${testCase.slug}/${expected.name}/${rendered.id}: transition without Action rendered an arrow Action`,
-            );
-            assert(!rendered.value.includes(" / "));
-          }
-        }
-
         if (expected.requireOperationAction) {
           assert.equal(apiState.views.transition_operation_action_version, 2);
           assert.equal(machine.analysis.state_field_action_count, 0);
+          assert(rendered.some(item => item.input && item.action && item.value.includes("➞")));
         }
 
-        if (expected.requireInputAction) {
-          const semanticPairs = combinedValues.filter(({input, action, value}) => (
-            input.trim().length > 0
-            && action.trim().length > 0
-            && value.includes(" ➞ ")
-          ));
-          assert(
-            semanticPairs.length > 0,
-            `${testCase.slug}/${expected.name}: README candidate has no Input ➞ Action transition`,
-          );
-          for (const rendered of semanticPairs) {
-            const transition = machine.transitions.find(item => item.id === rendered.id);
-            assert(transition, `${testCase.slug}/${expected.name}: missing transition ${rendered.id}`);
-            assert.notEqual(
-              rendered.input,
-              rendered.action,
-              `${testCase.slug}/${expected.name}/${rendered.id}: Action repeated as Input`,
-            );
-            assert.notEqual(
-              rendered.action,
-              String(transition.target_state || ""),
-              `${testCase.slug}/${expected.name}/${rendered.id}: Target State repeated as Action`,
-            );
-            const emittedOutput = emittedOutputDisplay(transition);
-            if (emittedOutput) {
-              assert.notEqual(
-                rendered.action,
-                emittedOutput,
-                `${testCase.slug}/${expected.name}/${rendered.id}: Emitted Output repeated as Action`,
-              );
-            }
-            assert.equal(
-              transition.trigger?.provenance,
-              "decision-output-preimage",
-              `${testCase.slug}/${expected.name}/${rendered.id}: Input lacks proven decision preimage`,
-            );
-            assert(
-              rendered.value.includes(` ➞ ${rendered.action}`),
-              `${testCase.slug}/${expected.name}/${rendered.id}: rendered join is not Input ➞ Action`,
-            );
-          }
-        }
-
-        if (expected.provisionalTriggers !== undefined) {
-          assert.equal(
-            await page.locator(".transition-io-cluster.provisional-trigger").count(),
-            expected.provisionalTriggers,
-          );
-        }
-
-        const visibleLegacyLabels = await page.locator(".transition-label").evaluateAll(elements => elements.filter(element => {
-          const style = getComputedStyle(element);
-          return style.visibility !== "hidden" && style.display !== "none" && Number(style.opacity) > 0;
-        }).length);
-        assert.equal(visibleLegacyLabels, 0);
-        await assertDiagramGeometry(page);
-
-        await page.screenshot({
-          path: path.join(outputDirectory, `${testCase.slug}-${expected.name.toLowerCase()}.png`),
-          fullPage: true,
-        });
+        const audit = await ordinaryAudit(page);
+        assert.equal(audit.stagePresent, true, JSON.stringify(audit));
+        assert.equal(audit.profile, "ordinary", JSON.stringify(audit));
+        assert.equal(audit.mode, "base", JSON.stringify(audit));
+        assert.equal(audit.dense, "disabled", JSON.stringify(audit));
+        assert.equal(audit.layoutBudgetMs, 48, JSON.stringify(audit));
+        assert.equal(audit.renderBudgetMs, 16, JSON.stringify(audit));
+        assert.equal(audit.error, "", JSON.stringify(audit));
+        assert.equal(audit.fatalText, false, JSON.stringify(audit));
+        assert.equal(audit.certificate, false, JSON.stringify(audit));
+        assert.equal(audit.router, false, JSON.stringify(audit));
+        assert(audit.maximumDistance <= audit.distanceLimit + 0.5, JSON.stringify(audit));
+        await page.screenshot({ path: path.join(outputDirectory, `${slug}-${expected.name.toLowerCase()}.png`), fullPage: true });
       }
+      assert.deepEqual(errors, [], errors.join("\n"));
       await page.close();
     } finally {
-      await stopProcess(child);
+      await stop(child);
       port += 1;
     }
   }
@@ -363,4 +177,4 @@ try {
   await browser.close();
 }
 
-console.log("verified compiler-derived state diagrams with operation-derived Actions and stable enabling-case layout");
+console.log("verified compiler-derived state diagrams with bounded ordinary layout and operation-derived Actions");

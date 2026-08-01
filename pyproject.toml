@@ -37,6 +37,7 @@ desktop = [
 ]
 
 [project.scripts]
+glyph = "glyph.launcher:main"
 glyphc = "glyphc:main"
 glyph-ui = "glyph.ui_cli:main"
 glyph-gradio = "glyph.ui_cli:main"
@@ -51,4 +52,4 @@ packages = ["glyph"]
 py-modules = ["glyphc", "glyph_gradio"]
 
 [tool.setuptools.package-data]
-glyph = ["py.typed"]
+glyph = ["py.typed", "resources/*.glyph"]

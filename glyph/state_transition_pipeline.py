@@ -12,6 +12,9 @@ from .state_transition_contract import (
     TRANSITION_ACTION_SCOPE_VERSION,
     TRANSITION_ACTION_TARGET_INDEPENDENCE_VERSION,
     TRANSITION_ENABLING_CASES_VERSION,
+    TRANSITION_EXECUTION_CONTEXT_CONTROL_FLOW_VERSION,
+    TRANSITION_EXECUTION_CONTEXT_PROJECTION_VERSION,
+    TRANSITION_EXECUTION_EVIDENCE_VERSION,
     TRANSITION_INPUT_PREIMAGE_VERSION,
     TRANSITION_OPERATION_ACTION_VERSION,
     TRANSITION_RESULT_CONSUMER_ACTION_VERSION,
@@ -22,6 +25,35 @@ from .state_transition_contract import (
 from .transition_action_projection import project_machine_transition_actions
 from .transition_action_scopes import project_transition_action_scopes
 from .transition_action_target_independence import analyze_action_target_independence
+from .transition_analysis import (
+    RTAI_SEMANTIC_BOOTSTRAP_VERSION,
+    VerifiedEffectContractRegistry,
+    attach_execution_evidence_v2,
+    attach_rtai_semantic_bootstrap,
+)
+from .transition_analysis.abstract_evidence_shadow import (
+    RTAI_ABSTRACT_EVIDENCE_SHADOW_VERSION,
+    attach_rtai_abstract_execution_evidence,
+)
+from .transition_analysis.evidence_projection import (
+    EVIDENCE_PROJECTION_VERSION,
+    EvidenceProjectionMode,
+    project_machine_from_evidence,
+)
+from .transition_analysis.lowering import lower_compilation_model_report
+from .transition_analysis.native_projection_readiness import (
+    NATIVE_EVIDENCE_READINESS_VERSION,
+    attach_native_evidence_projection_readiness,
+)
+from .transition_analysis.semantic_status import (
+    RTAI_SEMANTIC_STATUS_VERSION,
+    attach_rtai_semantic_status,
+)
+from .transition_analysis.view_edge_specialization import (
+    VIEW_EDGE_SPECIALIZATION_VERSION,
+    attach_view_edge_specialization,
+)
+from .transition_analysis.witness_generation import TargetedWitnessRegistry
 from .transition_condition_roles import classify_machine_transition_roles
 from .transition_enabling_case_compatibility import preserve_legacy_transition_metadata
 from .transition_enabling_case_defaults import ensure_machine_enabling_cases
@@ -29,7 +61,7 @@ from .transition_enabling_cases import attach_machine_enabling_cases
 from .transition_input_provenance import expand_machine_transition_inputs
 from .transition_operation_action_finalization import finalize_machine_operation_actions
 from .transition_output_action_compatibility import attach_output_action_compatibility
-from .transition_system_execution_actions import (
+from .transition_system_execution_control_flow import (
     attach_transition_system_execution_actions,
 )
 
@@ -113,9 +145,21 @@ def _publish_machine_contract(machine: dict[str, object]) -> dict[str, object]:
 def enrich_state_transition_ir(
     model: CompilationModel,
     views: dict[str, object],
+    *,
+    rtai_effect_contracts: VerifiedEffectContractRegistry | None = None,
+    rtai_projection_mode: EvidenceProjectionMode = EvidenceProjectionMode.SHADOW,
+    rtai_witness_max_cases: int = 4096,
+    rtai_targeted_witnesses: TargetedWitnessRegistry | None = None,
 ) -> dict[str, object]:
-    """Compile and publish the complete StateTransitionIR contract."""
+    """Compile and publish the complete StateTransitionIR contract.
 
+    The default remains legacy-compatible shadow mode. ``STRICT_EXACT`` is an
+    explicit migration/campaign mode: the legacy System Action analyzer and its
+    adapter are not executed, native Evidence is the sole System Action source,
+    and missing proof fails closed without fallback.
+    """
+
+    strict_native = rtai_projection_mode is EvidenceProjectionMode.STRICT_EXACT
     original = deepcopy(views)
     result = compile_state_transition_ir(model, views)
     analyzed_by_name = {
@@ -134,12 +178,64 @@ def enrich_state_transition_ir(
     projected = [
         project_machine_transition_actions(model, machine) for machine in lowered
     ]
-    system_executed = [
-        attach_transition_system_execution_actions(model, machine)
-        for machine in projected
+
+    if strict_native:
+        # Strict migration mode proves that the replacement can stand alone. Do not
+        # execute the legacy System Action analyzer or create legacy Evidence.
+        system_stage = projected
+    else:
+        system_executed = [
+            attach_transition_system_execution_actions(model, machine)
+            for machine in projected
+        ]
+        system_stage = [
+            attach_execution_evidence_v2(machine) for machine in system_executed
+        ]
+
+    rtai_report = lower_compilation_model_report(model)
+    bootstrapped = [
+        attach_rtai_semantic_bootstrap(
+            model,
+            machine,
+            functions=rtai_report.functions,
+            lowering_issues=rtai_report.issues,
+        )
+        for machine in system_stage
     ]
+    specialized = [
+        attach_view_edge_specialization(model, machine)
+        for machine in bootstrapped
+    ]
+    native_evidenced = [
+        attach_rtai_abstract_execution_evidence(
+            model,
+            machine,
+            effect_contracts=rtai_effect_contracts,
+            witness_max_cases=rtai_witness_max_cases,
+            targeted_witnesses=rtai_targeted_witnesses,
+        )
+        for machine in specialized
+    ]
+    native_readiness = [
+        attach_native_evidence_projection_readiness(machine)
+        for machine in native_evidenced
+    ]
+    native_status = [
+        attach_rtai_semantic_status(machine)
+        for machine in native_readiness
+    ]
+    if strict_native:
+        evidence_audited = native_status
+    else:
+        evidence_audited = [
+            project_machine_from_evidence(
+                machine,
+                mode=EvidenceProjectionMode.SHADOW,
+            )
+            for machine in native_status
+        ]
     compatible = [
-        attach_output_action_compatibility(machine) for machine in system_executed
+        attach_output_action_compatibility(machine) for machine in evidence_audited
     ]
     classified = [
         classify_machine_transition_roles(model, machine) for machine in compatible
@@ -159,6 +255,15 @@ def enrich_state_transition_ir(
         finalize_machine_operation_actions(machine) for machine in enabled
     ]
     scoped = [project_transition_action_scopes(machine) for machine in finalized]
+    if rtai_projection_mode is not EvidenceProjectionMode.SHADOW:
+        scoped = [
+            project_machine_from_evidence(
+                machine,
+                mode=rtai_projection_mode,
+                evidence_field="rtai_execution_evidence_v2",
+            )
+            for machine in scoped
+        ]
     state["machines"] = [
         _publish_machine_contract(
             _attach_action_target_independence(model, machine)
@@ -178,6 +283,31 @@ def enrich_state_transition_ir(
         TRANSITION_SYSTEM_EXECUTION_ACTION_VERSION
     )
     result["transition_action_scope_version"] = TRANSITION_ACTION_SCOPE_VERSION
+    result["transition_execution_context_control_flow_version"] = (
+        TRANSITION_EXECUTION_CONTEXT_CONTROL_FLOW_VERSION
+    )
+    result["transition_execution_context_projection_version"] = (
+        TRANSITION_EXECUTION_CONTEXT_PROJECTION_VERSION
+    )
+    result["transition_execution_evidence_version"] = (
+        TRANSITION_EXECUTION_EVIDENCE_VERSION
+    )
+    result["rtai_semantic_bootstrap_version"] = RTAI_SEMANTIC_BOOTSTRAP_VERSION
+    result["rtai_abstract_execution_evidence_version"] = (
+        RTAI_ABSTRACT_EVIDENCE_SHADOW_VERSION
+    )
+    result["rtai_view_edge_specialization_version"] = (
+        VIEW_EDGE_SPECIALIZATION_VERSION
+    )
+    result["rtai_native_evidence_readiness_version"] = (
+        NATIVE_EVIDENCE_READINESS_VERSION
+    )
+    result["rtai_semantic_status_version"] = RTAI_SEMANTIC_STATUS_VERSION
+    result["rtai_evidence_projection_version"] = EVIDENCE_PROJECTION_VERSION
+    result["rtai_projection_mode"] = rtai_projection_mode.value
+    result["rtai_effect_contracts_configured"] = rtai_effect_contracts is not None
+    result["rtai_targeted_witnesses_configured"] = rtai_targeted_witnesses is not None
+    result["rtai_legacy_system_action_analyzer_enabled"] = not strict_native
     result["transition_action_target_independence_version"] = (
         TRANSITION_ACTION_TARGET_INDEPENDENCE_VERSION
     )
@@ -188,5 +318,53 @@ def enrich_state_transition_ir(
         for diagnostic in machine.get("diagnostics", [])
         if diagnostic.get("severity") == "warning"
     )
+    summary["rtai_evidence_projection_ready_machines"] = sum(
+        bool(machine.get("analysis", {}).get("evidence_projection_ready"))
+        for machine in state["machines"]
+    )
+    summary["rtai_native_evidence_projection_ready_machines"] = sum(
+        bool(
+            machine.get("analysis", {}).get(
+                "rtai_native_evidence_projection_ready"
+            )
+        )
+        for machine in state["machines"]
+    )
+    summary["rtai_strict_projection_active_machines"] = sum(
+        machine.get("analysis", {}).get("evidence_projection_mode")
+        == EvidenceProjectionMode.STRICT_EXACT.value
+        for machine in state["machines"]
+    )
+    summary["rtai_semantic_exact_transition_count"] = sum(
+        int(machine.get("analysis", {}).get("rtai_semantic_exact_transition_count", 0))
+        for machine in state["machines"]
+    )
+    summary["rtai_semantic_may_transition_count"] = sum(
+        int(machine.get("analysis", {}).get("rtai_semantic_may_transition_count", 0))
+        for machine in state["machines"]
+    )
+    summary["rtai_semantic_unknown_transition_count"] = sum(
+        int(machine.get("analysis", {}).get("rtai_semantic_unknown_transition_count", 0))
+        for machine in state["machines"]
+    )
+    summary["rtai_abstract_execution_exact_projection_count"] = sum(
+        int(
+            machine.get("analysis", {}).get(
+                "rtai_abstract_execution_exact_projection_count",
+                0,
+            )
+        )
+        for machine in state["machines"]
+    )
+    summary["rtai_view_edge_exact_binding_count"] = sum(
+        int(
+            machine.get("analysis", {}).get(
+                "rtai_view_edge_exact_binding_count",
+                0,
+            )
+        )
+        for machine in state["machines"]
+    )
+    summary["rtai_legacy_system_action_analyzer_enabled"] = not strict_native
     result["summary"] = summary
     return localize_state_views(result)

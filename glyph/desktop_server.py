@@ -5,15 +5,18 @@ from dataclasses import dataclass
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import os
 from pathlib import Path
 import secrets
 import signal
 import threading
 from typing import Any
 from urllib.parse import urlsplit
+import webbrowser
 
 from . import diagram_app
-from .diagram_app import GlyphDiagramApp
+from .diagram_app import GlyphDiagramApp, ViewBuilder
+from .io_state_views import build_io_state_views
 from .readable_diagram_app import prepare_diagram_app
 
 
@@ -26,11 +29,18 @@ class DesktopServer:
     app: GlyphDiagramApp
     server: ThreadingHTTPServer
     token: str
+    require_auth: bool = True
+
+    @property
+    def origin(self) -> str:
+        host, port = self.server.server_address[:2]
+        return f"http://{host}:{port}"
 
     @property
     def launch_url(self) -> str:
-        host, port = self.server.server_address[:2]
-        return f"http://{host}:{port}/launch/{self.token}"
+        if self.require_auth:
+            return f"{self.origin}/launch/{self.token}"
+        return f"{self.origin}/"
 
     def close(self) -> None:
         self.server.shutdown()
@@ -68,11 +78,19 @@ def create_desktop_server(
     host: str = "127.0.0.1",
     port: int = 0,
     token: str | None = None,
+    require_auth: bool = True,
+    view_builder: ViewBuilder = build_io_state_views,
 ) -> DesktopServer:
-    """Create a loopback-only authenticated server for the Tauri shell."""
+    """Create the shared loopback Glyph Studio server.
+
+    The Tauri sidecar uses ``require_auth=True``. The direct Python launcher uses
+    ``require_auth=False`` because it opens the loopback URL in the user's normal
+    browser. Both modes use the same compiler, prepared HTML, API handlers, and
+    live-update implementation.
+    """
 
     prepare_diagram_app()
-    app = GlyphDiagramApp(source_path)
+    app = GlyphDiagramApp(source_path, view_builder=view_builder)
     app.rebuild()
     app.start_watching()
     session_token = token or secrets.token_urlsafe(32)
@@ -87,13 +105,14 @@ def create_desktop_server(
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Referrer-Policy", "no-referrer")
-            self.send_header(
-                "Content-Security-Policy",
-                "default-src 'self'; connect-src 'self'; img-src 'self' data: blob:; "
-                "style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; "
-                "font-src 'self' data:; frame-ancestors tauri: http://tauri.localhost "
-                "http://127.0.0.1:*",
-            )
+            if require_auth:
+                self.send_header(
+                    "Content-Security-Policy",
+                    "default-src 'self'; connect-src 'self'; img-src 'self' data: blob:; "
+                    "style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; "
+                    "font-src 'self' data:; frame-ancestors tauri: http://tauri.localhost "
+                    "http://127.0.0.1:*",
+                )
 
         def _json(
             self,
@@ -109,6 +128,8 @@ def create_desktop_server(
             self.wfile.write(payload)
 
         def _authorized(self) -> bool:
+            if not require_auth:
+                return True
             return (
                 self.headers.get(_HEADER_NAME, "") == session_token
                 or _cookie_contains(self.headers.get("Cookie", ""), session_token)
@@ -134,23 +155,29 @@ def create_desktop_server(
             return source
 
         def _serve_app(self) -> None:
-            payload = _authenticated_html(diagram_app.DIAGRAM_HTML, session_token).encode(
-                "utf-8"
+            html = (
+                _authenticated_html(diagram_app.DIAGRAM_HTML, session_token)
+                if require_auth
+                else diagram_app.DIAGRAM_HTML
             )
+            payload = html.encode("utf-8")
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(payload)))
-            self.send_header(
-                "Set-Cookie",
-                f"{_COOKIE_NAME}={session_token}; HttpOnly; SameSite=Strict; Path=/",
-            )
+            if require_auth:
+                self.send_header(
+                    "Set-Cookie",
+                    f"{_COOKIE_NAME}={session_token}; HttpOnly; SameSite=Strict; Path=/",
+                )
             self._security_headers()
             self.end_headers()
             self.wfile.write(payload)
 
         def do_GET(self) -> None:
             path = urlsplit(self.path).path
-            if path == f"/launch/{session_token}":
+            if path == f"/launch/{session_token}" or (
+                not require_auth and path == "/"
+            ):
                 self._serve_app()
                 return
             if path == "/api/state":
@@ -182,7 +209,52 @@ def create_desktop_server(
             self._json({"error": "not found"}, HTTPStatus.NOT_FOUND)
 
     server = ThreadingHTTPServer((host, port), Handler)
-    return DesktopServer(app=app, server=server, token=session_token)
+    return DesktopServer(
+        app=app,
+        server=server,
+        token=session_token,
+        require_auth=require_auth,
+    )
+
+
+def run_studio_app(
+    source_path: str | Path,
+    *,
+    host: str = "127.0.0.1",
+    port: int | None = None,
+    open_browser: bool | None = None,
+    view_builder: ViewBuilder = build_io_state_views,
+) -> int:
+    """Run the current Studio UI directly in the user's local browser."""
+
+    selected_port = (
+        int(os.environ.get("GLYPH_DIAGRAM_PORT", "0")) if port is None else port
+    )
+    studio = create_desktop_server(
+        source_path,
+        host=host,
+        port=selected_port,
+        require_auth=False,
+        view_builder=view_builder,
+    )
+    should_open = (
+        os.environ.get("GLYPH_DIAGRAM_NO_BROWSER") != "1"
+        if open_browser is None
+        else open_browser
+    )
+    print(f"Glyph Studio: {studio.launch_url}")
+    print(f"Source: {studio.app.input_path}")
+    print("終了: Ctrl+C")
+    if should_open:
+        threading.Timer(0.15, lambda: webbrowser.open(studio.launch_url)).start()
+    try:
+        studio.server.serve_forever(poll_interval=0.25)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        studio.server.server_close()
+        studio.app.stop()
+    return 0
 
 
 def _parser() -> argparse.ArgumentParser:

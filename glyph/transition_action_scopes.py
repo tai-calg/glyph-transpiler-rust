@@ -3,11 +3,26 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Mapping, Sequence
 
-from ._transition_action_ir import build_operation_action, renumber_invocations, text
+from ._transition_action_ir import renumber_invocations, text
+from .state_transition_contract import (
+    TRANSITION_ACTION_SCOPE_VERSION,
+    TRANSITION_EXECUTION_CONTEXT_CONTROL_FLOW_VERSION,
+    TRANSITION_EXECUTION_CONTEXT_PROJECTION_VERSION,
+    TRANSITION_SYSTEM_EXECUTION_ACTION_VERSION,
+)
 
 
 _CONTEXT_REQUIRED_CODE = "STIR_SYSTEM_ACTION_CONTEXT_REQUIRED"
 _DISPLAY_PROJECTION_PROVENANCE = "transition-display-action-projection"
+_BLOCKING_STATUSES = {"unresolved", "multiple-transition-calls"}
+
+
+def _context_key(context: Mapping[str, object]) -> tuple[str, str, str]:
+    return (
+        text(context.get("scope")) or "system",
+        text(context.get("system")),
+        text(context.get("entry")),
+    )
 
 
 def _invocations(value: object) -> list[dict[str, object]]:
@@ -16,13 +31,57 @@ def _invocations(value: object) -> list[dict[str, object]]:
     return [dict(item) for item in value if isinstance(item, Mapping)]
 
 
-def _sequence_key(
-    invocations: Sequence[Mapping[str, object]],
-) -> tuple[tuple[str, object], ...]:
-    return tuple(
-        (text(item.get("expression")), item.get("failure_type"))
-        for item in invocations
+def _action_text(value: object) -> str:
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, Mapping):
+        return text(value.get("display")) or text(value.get("expression"))
+    return ""
+
+
+def _case_signature(case: Mapping[str, object]) -> tuple[object, ...]:
+    return (
+        text(case.get("condition")),
+        text(case.get("status")),
+        text(case.get("outcome")),
+        bool(case.get("reaches_continuation", True)),
+        tuple(
+            (text(item.get("expression")), item.get("failure_type"))
+            for item in _invocations(case.get("action_invocations", []))
+        ),
     )
+
+
+def _binding_signature(binding: Mapping[str, object]) -> tuple[object, ...]:
+    cases = binding.get("action_cases", [])
+    case_signature = (
+        tuple(_case_signature(item) for item in cases if isinstance(item, Mapping))
+        if isinstance(cases, Sequence) and not isinstance(cases, (str, bytes))
+        else ()
+    )
+    return (
+        text(binding.get("status")) or "resolved",
+        _action_text(binding.get("action")),
+        tuple(
+            (text(item.get("expression")), item.get("failure_type"))
+            for item in _invocations(binding.get("action_invocations", []))
+        ),
+        case_signature,
+    )
+
+
+def _context_invocations(context: Mapping[str, object]) -> list[dict[str, object]]:
+    cases = context.get("action_cases", [])
+    if isinstance(cases, Sequence) and not isinstance(cases, (str, bytes)):
+        flattened = [
+            dict(item)
+            for case in cases
+            if isinstance(case, Mapping)
+            for item in _invocations(case.get("action_invocations", []))
+        ]
+        if flattened:
+            return flattened
+    return _invocations(context.get("action_invocations", []))
 
 
 def _diagnostic(message: str, line: int) -> dict[str, object]:
@@ -51,45 +110,67 @@ def _append_once(
     diagnostics.append(diagnostic)
 
 
-def _display_action(
-    machine_invocations: Sequence[Mapping[str, object]],
-    execution_invocations: Sequence[Mapping[str, object]],
+def _composed_action(
+    machine_action: object,
+    execution_action: object,
     *,
     scope: str,
     systems: Sequence[str],
     entries: Sequence[str],
-) -> tuple[dict[str, object] | None, list[dict[str, object]]]:
-    combined = renumber_invocations(
-        [*machine_invocations, *execution_invocations]
-    )
-    action = build_operation_action(combined)
-    if action is not None:
-        # The value is still operation-derived. Projection is a separate axis,
-        # not a replacement provenance category.
-        action["projection_provenance"] = _DISPLAY_PROJECTION_PROVENANCE
-        action["scope"] = scope
-        action["systems"] = list(systems)
-        action["entries"] = list(entries)
-    return action, combined
+) -> dict[str, object] | None:
+    parts = [_action_text(machine_action), _action_text(execution_action)]
+    parts = [item for item in parts if item]
+    if not parts:
+        return None
+    display = "; ".join(parts)
+    result = {
+        "display": display,
+        "expression": display,
+        "operation": None,
+        "operations": [],
+        "kind": "operation-invocation" if len(parts) == 1 else "operation-sequence",
+        "effectful": True,
+        "provenance": "transition-operation-invocation",
+        "projection_provenance": _DISPLAY_PROJECTION_PROVENANCE,
+        "scope": scope,
+        "systems": list(systems),
+        "entries": list(entries),
+        "source": {"line": 1, "column": 1},
+    }
+    if isinstance(machine_action, Mapping) and machine_action.get("source"):
+        result["source"] = deepcopy(machine_action.get("source"))
+    elif isinstance(execution_action, Mapping) and execution_action.get("source"):
+        result["source"] = deepcopy(execution_action.get("source"))
+    return result
 
 
 def project_transition_action_scopes(
     machine_view: dict[str, object],
 ) -> dict[str, object]:
-    """Publish intrinsic, execution-context, and renderer Action axes.
+    """Project display Actions only when every applicable context is represented.
 
-    ``machine_action`` belongs to the reusable machine transition.
-    ``execution_action_bindings`` belong to concrete system entries.
-    ``display_action`` is a view projection only. The compatibility fields
-    ``action`` and ``action_invocations`` mirror that projection for older
-    consumers while retaining explicit projection metadata.
+    `execution_contexts` is the complete set, including actionless and unresolved
+    contexts. `execution_action_bindings` remains a compatibility subset containing
+    only resolved contexts that actually publish an Action.
     """
 
     result = deepcopy(machine_view)
     diagnostics = [dict(item) for item in result.get("diagnostics", [])]
     transitions: list[dict[str, object]] = []
-    divergent_count = 0
+    context_required_count = 0
     projected_count = 0
+    result_dependent_count = 0
+    sequenced_count = 0
+    expected_context_keys = {
+        _context_key(context)
+        for candidate in result.get("transitions", [])
+        if not candidate.get("synthesized_failure")
+        for context in candidate.get(
+            "execution_contexts",
+            candidate.get("execution_action_bindings", []),
+        )
+        if isinstance(context, Mapping)
+    }
 
     for original in result.get("transitions", []):
         transition = dict(original)
@@ -97,126 +178,158 @@ def project_transition_action_scopes(
         machine_invocations = _invocations(transition.get("action_invocations", []))
         machine_effects = _invocations(transition.get("effect_invocations", []))
         transition["machine_action"] = machine_action
-        transition["machine_action_invocations"] = [
-            dict(item) for item in machine_invocations
-        ]
-        transition["machine_effect_invocations"] = [
-            dict(item) for item in machine_effects
-        ]
+        transition["machine_action_invocations"] = [dict(item) for item in machine_invocations]
+        transition["machine_effect_invocations"] = [dict(item) for item in machine_effects]
 
-        bindings = [
+        contexts = [
             dict(item)
-            for item in transition.get("execution_action_bindings", [])
+            for item in transition.get(
+                "execution_contexts",
+                transition.get("execution_action_bindings", []),
+            )
             if isinstance(item, Mapping)
         ]
-        if transition.get("synthesized_failure"):
-            # A failed machine operation does not return the transition result;
-            # caller operations that consume that result cannot execute.
-            bindings = []
-            transition["execution_action_bindings"] = []
+        transition["execution_contexts"] = contexts
+        transition["execution_action_bindings"] = [
+            dict(item)
+            for item in contexts
+            if text(item.get("status")) not in _BLOCKING_STATUSES
+            and item.get("action") is not None
+        ]
 
-        by_sequence: dict[
-            tuple[tuple[str, object], ...],
-            list[dict[str, object]],
-        ] = {}
-        for binding in bindings:
-            key = _sequence_key(_invocations(binding.get("action_invocations", [])))
-            by_sequence.setdefault(key, []).append(binding)
+        for context in contexts:
+            for invocation in _context_invocations(context):
+                relation = invocation.get("execution_relation")
+                if relation == "result-dependency":
+                    result_dependent_count += 1
+                elif relation == "post-transition-control":
+                    sequenced_count += 1
 
         source = transition.get("source", {})
         line = int(source.get("line", 1)) if isinstance(source, Mapping) else 1
-        selected_bindings: list[dict[str, object]] = []
-        execution_invocations: list[dict[str, object]] = []
-        display_scope = "machine" if machine_invocations else "none"
+        present_context_keys = {_context_key(item) for item in contexts}
+        missing_context_keys = (
+            set()
+            if transition.get("synthesized_failure")
+            else expected_context_keys - present_context_keys
+        )
+        statuses = [text(item.get("status")) or "resolved" for item in contexts]
+        blocking = any(status in _BLOCKING_STATUSES for status in statuses)
+        signatures: dict[tuple[object, ...], list[dict[str, object]]] = {}
+        for context in contexts:
+            signatures.setdefault(_binding_signature(context), []).append(context)
 
-        if len(by_sequence) == 1:
-            selected_bindings = next(iter(by_sequence.values()))
-            representative = selected_bindings[0]
-            execution_invocations = _invocations(
-                representative.get("action_invocations", [])
-            )
-            display_scope = "composed" if machine_invocations else "system"
-        elif len(by_sequence) > 1:
-            divergent_count += 1
-            systems = [
-                str(item.get("system") or item.get("entry") or "unknown")
-                for item in bindings
+        context_required = blocking or len(signatures) > 1 or bool(missing_context_keys)
+        selected_contexts: list[dict[str, object]] = []
+        representative: dict[str, object] | None = None
+        if contexts and not context_required and len(signatures) == 1:
+            selected_contexts = next(iter(signatures.values()))
+            representative = selected_contexts[0]
+
+        if context_required:
+            context_required_count += 1
+            names = [
+                f"{item.get('system') or 'implicit'} / {item.get('entry') or '?'}"
+                f" ({item.get('status') or 'resolved'})"
+                for item in contexts
             ]
+            names.extend(
+                f"{system or 'implicit'} / {entry or '?'} (missing)"
+                for _, system, entry in sorted(missing_context_keys)
+            )
             _append_once(
                 diagnostics,
                 _diagnostic(
                     (
-                        "machine transition has different system-entry Actions "
-                        f"for {', '.join(systems)}; select an execution context "
-                        "instead of treating a system operation as machine Action"
+                        "machine transition has incomplete or different system execution "
+                        f"contexts for {', '.join(names)}; select one context explicitly"
                     ),
                     line,
                 ),
             )
 
+        execution_action = representative.get("action") if representative else None
+        execution_invocations = (
+            _invocations(representative.get("action_invocations", []))
+            if representative
+            else []
+        )
+        execution_effects = (
+            _invocations(representative.get("effect_invocations", []))
+            if representative
+            else []
+        )
         systems = sorted(
             {
                 str(item.get("system"))
-                for item in selected_bindings
+                for item in selected_contexts
                 if item.get("system")
             }
         )
         entries = sorted(
             {
                 str(item.get("entry"))
-                for item in selected_bindings
+                for item in selected_contexts
                 if item.get("entry")
             }
         )
-        display_action, display_invocations = _display_action(
-            machine_invocations,
-            execution_invocations,
+        display_scope = (
+            "composed"
+            if machine_action is not None and execution_action is not None
+            else "system"
+            if execution_action is not None
+            else "machine"
+            if machine_action is not None
+            else "none"
+        )
+        display_action = _composed_action(
+            machine_action,
+            execution_action,
             scope=display_scope,
             systems=systems,
             entries=entries,
         )
-        display_effects = renumber_invocations(
-            [
-                *machine_effects,
-                *(
-                    _invocations(
-                        selected_bindings[0].get("effect_invocations", [])
-                    )
-                    if selected_bindings
-                    else []
-                ),
-            ]
+        display_invocations = renumber_invocations(
+            [*machine_invocations, *execution_invocations]
         )
+        display_effects = renumber_invocations([*machine_effects, *execution_effects])
         if display_action is not None:
             projected_count += 1
+
+        status_counts: dict[str, int] = {}
+        for status in statuses:
+            status_counts[status] = status_counts.get(status, 0) + 1
 
         transition["display_action"] = display_action
         transition["display_action_invocations"] = display_invocations
         transition["display_effect_invocations"] = display_effects
         transition["action_scope"] = {
-            "machine": bool(machine_invocations),
-            "execution_context_count": len(bindings),
-            "selected_context_count": len(selected_bindings),
+            "machine": bool(machine_action),
+            "execution_context_count": len(contexts),
+            "selected_context_count": len(selected_contexts),
             "display_scope": display_scope,
             "systems": systems,
             "entries": entries,
-            "context_required": len(by_sequence) > 1,
+            "context_required": context_required,
+            "context_status_counts": status_counts,
+            "missing_execution_context_count": len(missing_context_keys),
         }
-
-        # Compatibility projection for existing renderer/API consumers.
         transition["action"] = deepcopy(display_action)
-        transition["action_invocations"] = [
-            dict(item) for item in display_invocations
-        ]
+        transition["action_invocations"] = [dict(item) for item in display_invocations]
         transition["effect_invocations"] = [dict(item) for item in display_effects]
         transitions.append(transition)
 
     analysis = dict(result.get("analysis", {}))
     analysis.update(
         {
-            "transition_action_scope_version": 1,
+            "transition_system_execution_action_version": TRANSITION_SYSTEM_EXECUTION_ACTION_VERSION,
+            "transition_execution_context_control_flow_version": TRANSITION_EXECUTION_CONTEXT_CONTROL_FLOW_VERSION,
+            "transition_action_scope_version": TRANSITION_ACTION_SCOPE_VERSION,
+            "transition_execution_context_projection_version": TRANSITION_EXECUTION_CONTEXT_PROJECTION_VERSION,
             "display_action_transition_count": projected_count,
-            "system_action_context_required_count": divergent_count,
+            "system_action_context_required_count": context_required_count,
+            "execution_action_result_dependent_count": result_dependent_count,
+            "execution_action_sequenced_count": sequenced_count,
         }
     )
     result["transitions"] = transitions

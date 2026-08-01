@@ -11,7 +11,7 @@ from glyph.transition_semantic_role_lines import (
 
 
 class TransitionSemanticRoleLineTests(unittest.TestCase):
-    def test_enhancer_splits_roles_without_character_breaking(self) -> None:
+    def test_legacy_enhancer_splits_roles_without_character_breaking(self) -> None:
         html = enhance_transition_semantic_role_lines_html(DIAGRAM_HTML)
         self.assertIn("glyph-transition-semantic-role-lines-v1-script", html)
         self.assertIn("transition-role-line", html)
@@ -21,15 +21,13 @@ class TransitionSemanticRoleLineTests(unittest.TestCase):
         self.assertIn("transitionSemanticRoleLinesReady", html)
         self.assertIn("glyphTransitionIoCollisionSolver?.run", html)
 
-    def test_prepared_app_installs_role_lines_last(self) -> None:
+    def test_interactive_app_excludes_collision_solver_role_lines(self) -> None:
         prepare_diagram_app()
         html = diagram_app.DIAGRAM_HTML
-        role_lines = html.index("glyph-transition-semantic-role-lines-v1-script")
-        readable_layout = html.index("glyph-transition-readable-layout-v1-script")
-        exports = html.index("glyph-transition-readable-exports-v1-script")
-        self.assertGreater(role_lines, readable_layout)
-        self.assertGreater(role_lines, exports)
-        self.assertIn("window.glyphTransitionSemanticRoleLines", html)
+        self.assertNotIn("glyph-transition-semantic-role-lines-v1-script", html)
+        self.assertNotIn("window.glyphTransitionSemanticRoleLines", html)
+        self.assertIn("glyph-transition-readable-layout-v1-script", html)
+        self.assertIn("glyph-transition-readable-exports-v1-script", html)
 
 
 if __name__ == "__main__":

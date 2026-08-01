@@ -7,81 +7,43 @@ _SCRIPT = r"""
 <script id="glyph-transition-layout-tab-guard-v1-script">
 (()=>{
 const MARKER="glyph-transition-layout-tab-guard-v1";
-const ACTIVE_VALUE="true",INACTIVE_VALUE="inactive-tab";
-let bypass=false,switching=false;
-
+function activeTab(){return document.querySelector(".tab.active")?.dataset.tab||"state"}
 function stateStages(){
   return[...document.querySelectorAll(".graph-stage")].filter(stage=>stage.querySelector(".state-node"));
 }
-function activeTab(){return document.querySelector(".tab.active")?.dataset.tab||"state"}
-function deactivate(){
+function deactivate(reason="inactive-tab"){
+  window.glyphTransitionLayoutTransaction?.cancel?.(reason);
   for(const stage of stateStages()){
-    if(stage.dataset.stateTransitionIRV3LabelsReady===ACTIVE_VALUE)stage.dataset.transitionTabPreviousReady=ACTIVE_VALUE;
-    stage.dataset.stateTransitionIRV3LabelsReady=INACTIVE_VALUE;
     stage.dataset.transitionLayoutTab="inactive";
+    stage.dataset.transitionLayoutState="ready";
+    stage.dataset.transitionLayoutReady="true";
+    stage.dataset.transitionPublicationReady="true";
   }
 }
-function activate(){
-  for(const stage of stateStages()){
-    if(stage.dataset.stateTransitionIRV3LabelsReady===INACTIVE_VALUE||stage.dataset.transitionTabPreviousReady===ACTIVE_VALUE){
-      stage.dataset.stateTransitionIRV3LabelsReady=ACTIVE_VALUE;
-    }
-    delete stage.dataset.transitionTabPreviousReady;
-    stage.dataset.transitionLayoutTab="active";
-  }
-  window.glyphTransitionLayoutTransaction?.schedule("state-tab-activated",0);
+function activate(reason="state-tab-activated"){
+  for(const stage of stateStages())stage.dataset.transitionLayoutTab="active";
+  return window.glyphTransitionLayoutTransaction?.schedule?.(reason,0)??0;
 }
 function synchronize(){
-  if(activeTab()==="state")activate();
-  else deactivate();
+  return activeTab()==="state"?activate("state-tab-synchronized"):deactivate("state-tab-synchronized");
 }
-async function waitForSettlement(){
-  for(let attempt=0;attempt<120;attempt+=1){
-    const stages=stateStages();
-    if(!stages.length)return;
-    const settled=stages.every(stage=>["ready","failed",undefined].includes(stage.dataset.transitionLayoutState));
-    if(settled)return;
-    await new Promise(resolve=>setTimeout(resolve,16));
-  }
-}
-async function switchAfterSettlement(tab){
-  if(switching)return;
-  switching=true;
-  try{
-    await waitForSettlement();
-    deactivate();
-    bypass=true;
-    tab.click();
-  }finally{
-    bypass=false;
-    switching=false;
-  }
-}
-
 document.addEventListener("click",event=>{
   const tab=event.target?.closest?.(".tab[data-tab]");
   if(!tab)return;
-  if(bypass){
-    if(tab.dataset.tab!=="state")deactivate();
-    return;
-  }
-  if(tab.dataset.tab==="state"){
-    queueMicrotask(activate);
-    setTimeout(activate,40);
-    return;
-  }
-  event.preventDefault();
-  event.stopImmediatePropagation();
-  switchAfterSettlement(tab).catch(error=>console.error("transition tab switch failed",error));
+  if(tab.dataset.tab==="state")requestAnimationFrame(()=>activate("state-tab-activated"));
+  else deactivate("state-tab-deactivated");
 },true);
-window.glyphTransitionLayoutTabGuard={marker:MARKER,synchronize};
+document.addEventListener("change",event=>{
+  if(event.target?.id==="machine-select")requestAnimationFrame(()=>activate("machine-change"));
+});
+window.glyphTransitionLayoutTabGuard={marker:MARKER,version:3,synchronize,activate,deactivate};
 })();
 </script>
 """
 
 
 def enhance_transition_layout_tab_guard_html(html: str) -> str:
-    """Run state-transition layout work only while the state diagram tab is active."""
+    """Cancel stale work on I/O and restart a bounded state render on return."""
 
     if _MARKER in html:
         return html

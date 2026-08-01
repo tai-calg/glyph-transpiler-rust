@@ -77,6 +77,39 @@ function actionDisplay(transition) {
   return String(raw?.display || raw?.expression || "").trim();
 }
 
+async function diagramState(page) {
+  return page.evaluate(() => {
+    const stage = document.querySelector(".graph-stage");
+    return {
+      selected: document.querySelector("#machine-select")?.selectedOptions?.[0]?.textContent,
+      umlReady: stage?.dataset.umlTransitionReady,
+      labelsReady: stage?.dataset.transitionInputActionLabelsReady,
+      failureNotationReady: stage?.dataset.failureResultNotationReady,
+      layoutState: stage?.dataset.transitionLayoutState,
+      layoutReason: stage?.dataset.transitionLayoutReason,
+      layoutGeneration: stage?.dataset.transitionLayoutGeneration,
+      layoutError: stage?.dataset.transitionLayoutError,
+      routeReady: stage?.dataset.initialRouteReady,
+      routeCertificate: stage?.dataset.initialRouteCertificate,
+      routeReason: stage?.dataset.initialRouteReason,
+      routeError: stage?.dataset.initialRouteError,
+      routeFailureDetails: stage?.dataset.initialRouteFailureDetails,
+      routeProtocolState: stage?.dataset.initialRouteProtocolState,
+      routeProtocolReason: stage?.dataset.initialRouteProtocolReason,
+      routeProtocolSequence: stage?.dataset.initialRouteProtocolSequence,
+      routeGeneration: window.glyphInitialTransitionRouter?.generation,
+      routeCompletedGeneration: window.glyphInitialTransitionRouter?.completedGeneration,
+      certificateState: stage?.dataset.layoutCertificateState,
+      certificateRequestState: stage?.dataset.layoutCertificateRequestState,
+      certificateReason: stage?.dataset.layoutCertificateReason,
+      certificateViolations: stage?.dataset.layoutCertificateViolations,
+      certificateGeneration: window.glyphLayoutPublicationCertificate?.generation,
+      certificateCompletedGeneration: window.glyphLayoutPublicationCertificate?.completedGeneration,
+      publicationReady: stage?.dataset.transitionPublicationReady,
+    };
+  });
+}
+
 const browser = await chromium.launch({ headless: true });
 try {
   let port = 8965;
@@ -106,17 +139,17 @@ try {
       );
 
       for (const effect of testCase.expectedEffects) {
-      const witnesses = machine.transitions.filter(transition => (
-        actionDisplay(transition) === effect
-        && (transition.action_invocations || []).some(invocation => invocation.expression === effect)
-        && (transition.effect_invocations || []).some(invocation => invocation.expression === effect)
-        && transition.action?.effectful === true
-      ));
-      assert(
-        witnesses.length > 0,
-        `${testCase.machine}: missing Action/Effect dual-role witness: ${effect}`,
-      );
-    }
+        const witnesses = machine.transitions.filter(transition => (
+          actionDisplay(transition) === effect
+          && (transition.action_invocations || []).some(invocation => invocation.expression === effect)
+          && (transition.effect_invocations || []).some(invocation => invocation.expression === effect)
+          && transition.action?.effectful === true
+        ));
+        assert(
+          witnesses.length > 0,
+          `${testCase.machine}: missing Action/Effect dual-role witness: ${effect}`,
+        );
+      }
 
       await fs.writeFile(
         path.join(outputDirectory, `${testCase.slug}.json`),
@@ -128,21 +161,34 @@ try {
         viewport: { width: 1800, height: 1250 },
         deviceScaleFactor: 1,
       });
+      const browserErrors = [];
+      page.on("pageerror", error => browserErrors.push(`pageerror: ${error.message}`));
+      page.on("console", message => {
+        if (message.type() === "error") browserErrors.push(`console: ${message.text()}`);
+      });
       await page.goto(url, { waitUntil: "domcontentloaded" });
       await page.waitForFunction(() => document.querySelector("#status")?.textContent === "ready");
       await page.click('button[data-tab="state"]');
-      await page.waitForFunction(
-        machineName => {
-          const selected = document.querySelector("#machine-select")?.selectedOptions?.[0]?.textContent;
-          const stage = document.querySelector(".graph-stage");
-          return selected === machineName
-            && stage?.dataset.umlTransitionReady === "true"
-            && stage?.dataset.transitionInputActionLabelsReady === "true"
-            && stage?.dataset.failureResultNotationReady === "true"
-            && stage?.dataset.initialRouteReady === "true";
-        },
-        testCase.machine,
-      );
+      try {
+        await page.waitForFunction(
+          machineName => {
+            const selected = document.querySelector("#machine-select")?.selectedOptions?.[0]?.textContent;
+            const stage = document.querySelector(".graph-stage");
+            return selected === machineName
+              && stage?.dataset.umlTransitionReady === "true"
+              && stage?.dataset.transitionInputActionLabelsReady === "true"
+              && stage?.dataset.failureResultNotationReady === "true"
+              && stage?.dataset.initialRouteReady === "true";
+          },
+          testCase.machine,
+          { timeout: 10000 },
+        );
+      } catch (error) {
+        throw new Error(
+          `${testCase.machine}: diagram readiness timed out: ${JSON.stringify(await diagramState(page))}\n`
+          + `browser errors: ${JSON.stringify(browserErrors)}\n${error.message}`,
+        );
+      }
 
       const semantic = await page.locator(".transition-detail-uml").allTextContents();
       const compact = await page.locator(".edge-label.transition-label.compact").allTextContents();
@@ -156,11 +202,11 @@ try {
         );
       }
       for (const effect of testCase.expectedEffects) {
-      assert(
-        visible.some(label => label.includes(`➡︎${effect}`)),
-        `${testCase.machine}: operation-derived Action is not visible: ${effect}`,
-      );
-    }
+        assert(
+          visible.some(label => label.includes(`➡︎${effect}`)),
+          `${testCase.machine}: operation-derived Action is not visible: ${effect}`,
+        );
+      }
       assert(
         visible.every(label => !label.includes("➡︎—")),
         `${testCase.machine}: missing Action is rendered as a placeholder Action`,

@@ -72,8 +72,24 @@ _SCRIPT = r"""
     return raw || "otherwise";
   }
 
+  function actionText(value) {
+    if (typeof value === "string") return text(value);
+    if (value?.kind === "effect-trace" && Array.isArray(value.events)) {
+      return value.events
+        .map(event => text(event?.expression) || text(event?.display) || text(event?.operation))
+        .filter(Boolean)
+        .join("; ");
+    }
+    return text(value?.display) || text(value?.expression);
+  }
+
+  function resolvedActionOf(transition) {
+    const selected = window.GlyphExecutionContext?.actionFor?.(transition);
+    return actionText(selected ?? transition?.display_action ?? transition?.action);
+  }
+
   function actionOf(transition) {
-    return text(transition?.action) || "—";
+    return resolvedActionOf(transition) || "—";
   }
 
   function inputActionOf(transition) {
@@ -83,12 +99,13 @@ _SCRIPT = r"""
   function signatureOf(machine) {
     return [
       machine?.name || "",
+      window.GlyphExecutionContext?.selectedKey?.() || "auto",
       ...(machine?.transitions || []).map(transition => [
         transition.source_state,
         transition.target_state,
         transition.event ?? "",
         transition.guard ?? "",
-        transition.action ?? "",
+        resolvedActionOf(transition),
         transition.condition_raw ?? transition.condition ?? "",
       ].join("\u001f")),
     ].join("\u001e");
@@ -231,6 +248,7 @@ _SCRIPT = r"""
 
   document.addEventListener("glyph-transition-layout-ready", schedule);
   document.addEventListener("glyph-uml-transition-ready", schedule);
+  document.addEventListener("glyph-execution-context-changed", schedule);
   document.addEventListener("change", event => {
     if (event.target?.id === "machine-select") schedule();
   });

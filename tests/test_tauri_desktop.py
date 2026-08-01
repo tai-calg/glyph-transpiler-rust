@@ -7,18 +7,30 @@ import subprocess
 import unittest
 
 from glyph import compile_outputs
+from glyph.default_workspace import APPLICATION_IDENTIFIER, DEFAULT_SOURCE
 
 
 ROOT = Path(__file__).resolve().parents[1]
 DESKTOP = ROOT / "desktop"
+CANONICAL_DEFAULT = ROOT / "glyph" / "resources" / "default.glyph"
 
 
 class TauriDesktopTests(unittest.TestCase):
-    def test_default_desktop_source_compiles(self) -> None:
-        source_path = DESKTOP / "resources" / "default.glyph"
-        result = compile_outputs(source_path.read_text(encoding="utf-8"), source_path.name)
+    def test_default_desktop_source_is_the_canonical_python_resource(self) -> None:
+        source = CANONICAL_DEFAULT.read_text(encoding="utf-8")
+        self.assertEqual(source, DEFAULT_SOURCE)
+        result = compile_outputs(source, CANONICAL_DEFAULT.name)
         self.assertIn("pub fn control", result.artifacts.logic)
         self.assertIn("architecture-ir.json", result.diagrams.files)
+
+        rust = (DESKTOP / "src-tauri" / "src" / "main.rs").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(
+            'include_str!("../../../glyph/resources/default.glyph")',
+            rust,
+        )
+        self.assertFalse((DESKTOP / "resources" / "default.glyph").exists())
 
     def test_tauri_security_boundary_is_narrow(self) -> None:
         config = json.loads(
@@ -35,6 +47,8 @@ class TauriDesktopTests(unittest.TestCase):
         self.assertEqual(capability["permissions"], ["core:default"])
         self.assertNotIn("shell:", json.dumps(capability))
         self.assertNotIn("fs:", json.dumps(capability))
+        self.assertEqual(config["identifier"], APPLICATION_IDENTIFIER)
+        self.assertNotIn("resources", config["bundle"])
 
     def test_tauri_icons_are_generated_before_every_native_build(self) -> None:
         package = json.loads((DESKTOP / "package.json").read_text(encoding="utf-8"))

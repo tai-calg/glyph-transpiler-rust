@@ -36,13 +36,20 @@ SOURCE = """machine Counter(state:State,input:Input)
 
 
 class DiagramLiveStabilityTests(unittest.TestCase):
-    def test_frontend_defaults_to_state_and_does_not_reset_pending_on_child_mutation(self) -> None:
+    def test_frontend_defaults_to_state_and_never_hides_bounded_rendering(self) -> None:
         html = enhance_diagram_live_stability_html(DIAGRAM_HTML)
         self.assertIn("glyph-diagram-live-stability-v2", html)
         self.assertIn('activeTab="state"', html)
         self.assertIn("requestGeneration", html)
-        self.assertIn("previewController.abort()", html)
+        self.assertIn("previewController?.abort()", html)
         self.assertIn("POLL_INTERVAL_MS = 3000", html)
+        self.assertIn("RENDER_BUDGET_MS = 180", html)
+        self.assertIn("glyph-layout-publication-certificate-ready", html)
+        self.assertIn('reveal(stage,"interactive-budget")', html)
+        self.assertIn("visibility:visible!important", html)
+        self.assertIn("opacity:1!important", html)
+        self.assertNotIn("State diagram certification failed", html)
+        self.assertNotIn("diagram remains hidden", html)
         script = re.search(
             r'<script id="glyph-diagram-live-stability-v2-script">(.*?)</script>',
             html,
@@ -50,7 +57,8 @@ class DiagramLiveStabilityTests(unittest.TestCase):
         )
         self.assertIsNotNone(script)
         assert script is not None
-        self.assertNotIn("childList", script.group(1))
+        self.assertIn("MutationObserver", script.group(1))
+        self.assertIn('attributeFilter:["data-transition-layout-state","data-layout-certificate-state","data-transition-publication-ready"]', script.group(1))
 
     @unittest.skipUnless(shutil.which("node"), "Node.js is not installed")
     def test_frontend_javascript_is_syntactically_valid(self) -> None:

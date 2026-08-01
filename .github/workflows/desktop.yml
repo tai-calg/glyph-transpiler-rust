@@ -4,8 +4,7 @@ on:
   pull_request:
     paths:
       - "desktop/**"
-      - "glyph/desktop_server.py"
-      - "glyph/readable_diagram_app.py"
+      - "glyph/**"
       - "tests/test_desktop_server.py"
       - "tests/test_tauri_desktop.py"
       - "pyproject.toml"
@@ -14,8 +13,7 @@ on:
     branches: [main]
     paths:
       - "desktop/**"
-      - "glyph/desktop_server.py"
-      - "glyph/readable_diagram_app.py"
+      - "glyph/**"
       - "tests/test_desktop_server.py"
       - "tests/test_tauri_desktop.py"
       - "pyproject.toml"

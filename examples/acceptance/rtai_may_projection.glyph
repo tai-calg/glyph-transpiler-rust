@@ -1,0 +1,34 @@
+system LargeControl
+  entry control
+
+  in state:State
+  in input:Input
+  out state_out:State
+
+  state -> control
+  input -> control
+  control -> state_out
+  control -> actuator
+
+machine Large(state:State,input:Input)
+  select=state.mode
+  init=State(Idle)
+  next=step(state,input)
+  success=Active
+  failure=Idle
+
++Mode=Idle|Active
+*State(mode:Mode)
+*Input(b0:B,b1:B,b2:B,b3:B,b4:B,b5:B,b6:B,b7:B,b8:B,b9:B,b10:B,b11:B,b12:B)
+
+# The Effect contract is supplied by tests/run_rtai_may_diagram_app.py.
+!actuator(state:State):State
+
+>step(state:State,input:Input):State
+  input.b0 >> State(Active)
+  _ >> State(Idle)
+
+>control(state:State,input:Input):State
+  next := step(state,input)
+  observed := actuator(next)
+  observed

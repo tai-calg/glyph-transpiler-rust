@@ -51,5 +51,7 @@ machine Motor(state:MotorState,input:Input)
     _ >> MotorState(Faulted,LatchFault,write_motor(LatchFault))
   next
 
-# 一周期のentryは、遷移分岐で実行済みの作用結果を返す。
->cycle(state:MotorState,input:Input):Receipt=step(state,input).receipt
+# entryは遷移を一度だけ実行し、その遷移内で得た作用結果を返す。
+>cycle(state:MotorState,input:Input):Receipt
+  next := step(state,input)
+  next.receipt

@@ -40,7 +40,11 @@ fn default_workspace(app: &AppHandle) -> Result<PathBuf, String> {
     fs::create_dir_all(&directory).map_err(error_text)?;
     let path = directory.join("workspace.glyph");
     if !path.exists() {
-        fs::write(&path, include_str!("../../resources/default.glyph")).map_err(error_text)?;
+        fs::write(
+            &path,
+            include_str!("../../../glyph/resources/default.glyph"),
+        )
+        .map_err(error_text)?;
     }
     Ok(path)
 }

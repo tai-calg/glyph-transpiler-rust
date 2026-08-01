@@ -32,9 +32,6 @@
     "externalBin": [
       "binaries/glyph-studio-server"
     ],
-    "resources": [
-      "../resources/default.glyph"
-    ],
     "shortDescription": "Compiler-backed systems design editor",
     "longDescription": "Glyph Studio desktop application with state-transition, I/O and architecture views.",
     "icon": [
