@@ -38,14 +38,14 @@ class DiagramEditorClickDragBoundaryTests(unittest.TestCase):
         self.assertIn("releasePointerCapture?.(event.pointerId)", html)
         self.assertIn("manual-label-persisted", html)
 
-    def test_manual_label_is_snapped_before_canonical_persistence(self) -> None:
+    def test_manual_label_respects_node_and_tether_before_persistence(self) -> None:
         html = enhance_transition_layout_interaction_adapter_html(DIAGRAM_HTML)
 
         self.assertIn("nearestCertifiablePoint", html)
         self.assertIn("manualPlacementViolation", html)
-        self.assertIn("route-foreign-label", html)
         self.assertIn("label-node-overlap", html)
-        self.assertIn("label-label-overlap", html)
+        self.assertNotIn("route-foreign-label", html)
+        self.assertNotIn("label-label-overlap", html)
         self.assertIn("manualIoAdjusted", html)
         self.assertIn("manual-label-rejected", html)
         self.assertLess(
