@@ -73,13 +73,17 @@ async function run(token,reason){
     if(destroyed||token!==generation)return{ok:false,cancelled:true,generation:token};
     const stage=stageOf();
     if(stage&&stage.querySelector(".state-node")){
+      window.glyphStateDiagramWorkspace?.prepare?.(stage);
       window.glyphTransitionIoClusters?.reroute?.(stage);
       return markReady(stage,token,reason,false);
     }
     if(frame<MAX_FRAME_BUDGET&&performance.now()<deadline)await nextFrame(deadline);
   }
   const stage=stageOf();
-  if(stage)return markReady(stage,token,reason,true);
+  if(stage){
+    window.glyphStateDiagramWorkspace?.prepare?.(stage);
+    return markReady(stage,token,reason,true);
+  }
   completedGeneration=Math.max(completedGeneration,token);
   return{ok:false,missingStage:true,generation:token,reason};
 }
@@ -142,7 +146,7 @@ const control=window.glyphTransitionLegacyControl;
 if(control)control.ownsScheduling=true;
 window.glyphTransitionLayoutTransaction={
   marker:MARKER,
-  version:8,
+  version:9,
   profile:"ordinary",
   budgetMs:TRANSACTION_DEADLINE_MS,
   maxFrames:MAX_FRAME_BUDGET,
@@ -162,7 +166,7 @@ schedule("initial",0);
 
 
 def enhance_transition_layout_transaction_html(html: str) -> str:
-    """Install a bounded readiness transaction without changing diagram geometry."""
+    """Install a bounded readiness transaction after ordinary workspace geometry."""
 
     if _MARKER in html:
         return html
