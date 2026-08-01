@@ -29,6 +29,14 @@ class TransitionSemanticStatusUiTests(unittest.TestCase):
             html,
         )
 
+    def test_public_projection_mode_precedes_machine_compatibility_value(self) -> None:
+        html = enhance_transition_semantic_status_ui_html(DIAGRAM_HTML)
+
+        self.assertIn("function projectionModeOf(data,machine)", html)
+        self.assertIn("text(data?.views?.rtai_projection_mode)", html)
+        self.assertIn("text(machine?.analysis?.evidence_projection_mode)", html)
+        self.assertIn("signatureOf(machine,projectionMode)", html)
+
     def test_enhancer_is_idempotent(self) -> None:
         once = enhance_transition_semantic_status_ui_html(DIAGRAM_HTML)
         twice = enhance_transition_semantic_status_ui_html(once)
