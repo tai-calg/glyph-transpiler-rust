@@ -153,7 +153,9 @@ async function clickDoesNotPersistManualLayout(page) {
   assert(transitionId, "transition id missing before click test");
   const generation = Number(await page.locator(".graph-stage").getAttribute("data-transition-layout-generation") || 0);
   await cluster.click();
-  await waitForNextTransaction(page, generation);
+  await page.waitForTimeout(120);
+  const generationAfterLabelClick = Number(await page.locator(".graph-stage").getAttribute("data-transition-layout-generation") || 0);
+  assert.equal(generationAfterLabelClick, generation, "a simple label click scheduled layout work");
   const storedLabel = await page.evaluate(id => {
     const key = Object.keys(localStorage).find(value => value.startsWith("glyph.diagram.transition-io.v1:"));
     return key ? (JSON.parse(localStorage.getItem(key) || "{}")[id] ?? null) : null;
@@ -164,7 +166,9 @@ async function clickDoesNotPersistManualLayout(page) {
   const node = page.locator(".state-node").first();
   const nodeGeneration = Number(await page.locator(".graph-stage").getAttribute("data-transition-layout-generation") || 0);
   await node.click();
-  await waitForNextTransaction(page, nodeGeneration);
+  await page.waitForTimeout(120);
+  const generationAfterNodeClick = Number(await page.locator(".graph-stage").getAttribute("data-transition-layout-generation") || 0);
+  assert.equal(generationAfterNodeClick, nodeGeneration, "a simple node click scheduled layout work");
   const storedNodes = await page.evaluate(() => {
     const key = Object.keys(localStorage).find(value => value.startsWith("glyph.diagram.positions.v1:"));
     return key ? JSON.parse(localStorage.getItem(key) || "{}") : null;
