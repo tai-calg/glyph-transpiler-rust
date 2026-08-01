@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from copy import deepcopy
 from pathlib import Path
+from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 from glyph.compilation import CompilationPipeline
 from glyph.transition_analysis.effect_contract import (
@@ -152,6 +154,42 @@ class WitnessBindingTests(unittest.TestCase):
             typed_concrete_value_ir(1.0),
             {"kind": "float", "value": "0x1.0000000000000p+0"},
         )
+
+    def test_duplicate_relation_edge_ids_receive_no_authorizing_fingerprint(self) -> None:
+        edges = (
+            SimpleNamespace(
+                edge_id="duplicate-edge",
+                ordinal=0,
+                effective_guard="left",
+                result_expression="A",
+                target_state="A",
+                completion="normal",
+            ),
+            SimpleNamespace(
+                edge_id="duplicate-edge",
+                ordinal=1,
+                effective_guard="right",
+                result_expression="B",
+                target_state="B",
+                completion="normal",
+            ),
+        )
+        relation = SimpleNamespace(
+            machine_id="Machine",
+            transition_function="step",
+            formals=("state", "input"),
+            edges=edges,
+        )
+        model = SimpleNamespace(machines=(SimpleNamespace(name="Machine"),))
+
+        with patch(
+            "glyph.transition_analysis.witness_binding.build_machine_relation",
+            return_value=relation,
+        ):
+            fingerprints = relation_edge_fingerprints(model)
+
+        self.assertNotIn("duplicate-edge", fingerprints)
+        self.assertEqual(fingerprints, {})
 
     def test_generated_witnesses_are_bound_to_current_program_and_edges(self) -> None:
         source = FIXTURE.read_text(encoding="utf-8")
