@@ -7,7 +7,6 @@ from glyph.transition_analysis.public_effect_contracts import PUBLIC_STRICT_PROG
 
 
 ROOT = Path(__file__).resolve().parents[1]
-GLYPH = ROOT / "glyph"
 
 
 def read(relative: str) -> str:
@@ -63,40 +62,51 @@ def test_every_persisted_geometry_has_an_explicit_coordinate_frame() -> None:
     viewport = read("glyph/diagram_canvas_viewport.py")
 
     assert "anchorFraction:record.anchorFraction" in label_owner
-    assert "storedAnchorFraction(record,routeAnchors)" in transaction
-    assert "x:record.x-record.dx,y:record.y-record.dy" in transaction
+    assert "finite(record?.anchorFraction)" in transaction
+    assert "x:anchor.x+record.dx,y:anchor.y+record.dy" in transaction
+    assert "cluster.dataset.anchorFraction=String(anchor.fraction)" in transaction
 
     assert '${data?.digest||"source"}:state:${machineIndex()}' in node_owner
     assert "value[nodeName(node)]={x:num(node.style.left),y:num(node.style.top)}" in node_owner
-    assert "ensureCanvas(stage" in transaction
-    assert "nodes.right+CANVAS_PADDING" in transaction
+    assert "standardCanvas(stage)" in transaction
+    assert "right+CANVAS_PADDING" in transaction
 
     assert '$("#diagram-reset").onclick=async()=>' in exports
     assert "await state();localStorage.removeItem(key(stage))" in exports
 
-    assert "const digest=activeStage()?.dataset.diagramDigest||\"source\"" in viewport
+    assert 'const digest=activeStage()?.dataset.diagramDigest||"source"' in viewport
     assert "return `${digest}:${tab}:${index}`" in viewport
     assert "glyph.diagram.viewport-scale.v1" in viewport
     assert "glyph.diagram.viewport-mode.v1" in viewport
 
 
-def test_public_ready_flags_are_bound_to_the_final_certificate() -> None:
+def test_interactive_rendering_is_time_bounded_and_never_hidden() -> None:
+    transaction = read("glyph/transition_layout_transaction.py")
     live = read("glyph/diagram_live_stability.py")
-    semantic = read("glyph/transition_semantic_status_ui.py")
-    fit = read("glyph/diagram_fit_stability.py")
     certificate = read("glyph/layout_publication_certificate.py")
+    tab_guard = read("glyph/transition_layout_tab_guard.py")
 
-    for source in (live, semantic):
-        assert "transitionPublicationReady" in source
-        assert "layoutCertificateState" in source
-        assert '==="true"' in source
-        assert '==="valid"' in source
+    assert "TOTAL_BUDGET_MS=120" in transaction
+    assert "PREREQUISITE_BUDGET_MS=180" in transaction
+    assert "CLUSTER_BUDGET_MS=80" in transaction
+    assert "SEARCH_STEPS" not in transaction
+    assert "solveEntries" not in transaction
+    assert 'stage.dataset.transitionDenseCanvas="disabled"' in transaction
+    assert "visibility:visible!important" in transaction
 
-    assert "transitionPublicationReady" in fit
-    assert "layoutCertificateState" in fit
-    assert 'stage.dataset.layoutCertificateState = "valid"' in certificate
-    assert 'stage.dataset.transitionPublicationReady = "true"' in certificate
-    assert 'stage.dataset.transitionPublicationReady = "false"' in certificate
+    assert "RENDER_BUDGET_MS = 180" in live
+    assert "visibility:visible!important" in live
+    assert 'reveal(stage,"interactive-budget")' in live
+    assert "State diagram certification failed" not in live
+
+    assert "TOTAL_BUDGET_MS = 32" in certificate
+    assert 'stage.dataset.layoutCertificateProfile="interactive-fast"' in certificate
+    assert 'stage.dataset.transitionPublicationReady="true"' in certificate
+    assert "function cancel(reason=" in certificate
+
+    assert "waitForSettlement" not in tab_guard
+    assert 'glyphTransitionLayoutTransaction?.cancel?.(reason)' in tab_guard
+    assert 'glyphLayoutPublicationCertificate?.cancel?.(reason)' in tab_guard
 
 
 def test_generation_identity_flows_from_layout_through_route_to_publication() -> None:
@@ -114,8 +124,8 @@ def test_generation_identity_flows_from_layout_through_route_to_publication() ->
     )
 
     assert "const request=`${generation}:${routeEpoch}:${reason}`" in bootstrap
-    assert "geometryFingerprint(stage)" in certificate
-    assert 'stage.dataset.transitionLayoutGeneration || "0"' in certificate
+    assert "function fingerprint(stage)" in certificate
+    assert 'stage.dataset.transitionLayoutGeneration||"0"' in certificate
     assert "layoutCertificateFingerprint" in certificate
 
 
@@ -153,7 +163,7 @@ def test_public_strict_catalog_identity_is_unambiguous() -> None:
     assert len(contexts) == len(set(contexts))
 
 
-def test_presentation_pipeline_preserves_protocol_ownership_order() -> None:
+def test_presentation_pipeline_preserves_protocol_order_and_excludes_heavy_layers() -> None:
     names = [enhancer.__name__ for enhancer in _presentation_pipeline()]
 
     assert names.index("enhance_transition_layout_transaction_bootstrap_html") < names.index(
@@ -166,6 +176,19 @@ def test_presentation_pipeline_preserves_protocol_ownership_order() -> None:
         "enhance_layout_publication_certificate_html"
     )
     assert names[-1] == "enhance_layout_publication_certificate_html"
+
+    for removed in (
+        "enhance_transition_io_collision_solver_html",
+        "enhance_transition_label_readability_html",
+        "enhance_transition_dense_canvas_dimensions_html",
+        "enhance_layout_local_repair_html",
+        "enhance_layout_corridor_repair_html",
+        "enhance_layout_corridor_fast_repair_html",
+        "enhance_layout_shelf_repair_html",
+        "enhance_layout_compact_shelf_repair_html",
+        "enhance_layout_shelf_viewport_sync_html",
+    ):
+        assert removed not in names
 
 
 def test_certified_workflow_cannot_miss_new_glyph_or_browser_layers() -> None:
