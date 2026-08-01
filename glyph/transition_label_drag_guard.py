@@ -40,7 +40,7 @@ function schedule(reason){
 // reset remain exclusively implemented by glyphTransitionLayoutInteractionAdapter.
 window.glyphTransitionLabelDragGuard=Object.freeze({
   marker:MARKER,
-  version:4,
+  version:3,
   interactionOwner:"glyph-transition-layout-interaction-adapter-v4",
   ownsPointerEvents:false,
   ownsPersistence:false,
