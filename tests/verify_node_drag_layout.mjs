@@ -80,6 +80,21 @@ async function drag(page, locator, deltaX, deltaY) {
   await page.mouse.up();
 }
 
+function certified(current, minimumGeneration = 0) {
+  return current.layoutState === "ready"
+    && current.collisionSolved === "true"
+    && current.collisionCount === "0"
+    && current.semanticLines === "true"
+    && current.semanticRoleLines === "true"
+    && current.publicationReady === "true"
+    && current.certificateState === "valid"
+    && Number(current.transactionGeneration || 0) >= minimumGeneration
+    && current.transactionGeneration === current.transactionCompletedGeneration
+    && current.routerGeneration === current.routerCompletedGeneration
+    && current.certificateGeneration === current.certificateCompletedGeneration
+    && current.persisted;
+}
+
 async function waitForCertified(page, label, minimumGeneration = 0) {
   const samples = [];
   for (let attempt = 0; attempt < 180; attempt += 1) {
@@ -88,25 +103,33 @@ async function waitForCertified(page, label, minimumGeneration = 0) {
       samples.push(current);
       console.log(`${label}-state ${JSON.stringify(current)}`);
     }
-    if (current.layoutState === "ready"
-      && current.collisionSolved === "true"
-      && current.collisionCount === "0"
-      && current.semanticLines === "true"
-      && current.semanticRoleLines === "true"
-      && current.publicationReady === "true"
-      && current.certificateState === "valid"
-      && Number(current.transactionGeneration || 0) >= minimumGeneration
-      && current.transactionGeneration === current.transactionCompletedGeneration
-      && current.certificateGeneration === current.certificateCompletedGeneration
-      && current.persisted) {
-      return current;
-    }
+    if (certified(current, minimumGeneration)) return current;
     await page.waitForTimeout(100);
   }
   throw new Error(`${label} did not converge: ${JSON.stringify(samples.at(-1))}`);
 }
 
+async function waitForQuiescence(page, label, minimumGeneration) {
+  let previous = "";
+  let stableSamples = 0;
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    const currentState = await state(page);
+    const positions = await nodePositions(page);
+    const signature = JSON.stringify({currentState, positions});
+    if (certified(currentState, minimumGeneration) && signature === previous) {
+      stableSamples += 1;
+      if (stableSamples >= 5) return {currentState, positions};
+    } else {
+      stableSamples = 0;
+    }
+    previous = signature;
+    await page.waitForTimeout(100);
+  }
+  throw new Error(`${label} did not remain quiescent: ${previous}`);
+}
+
 const logs = [];
+const browserErrors = [];
 const port = 8898;
 const child = spawn("python3", ["glyph.py", "examples/state_diagrams/conveyor_control.glyph"], {
   env: {
@@ -125,7 +148,10 @@ try {
   const url = `http://127.0.0.1:${port}`;
   await waitForServer(url, child, logs);
   const page = await browser.newPage({viewport: {width: 1500, height: 900}});
-  page.on("console", message => console.log(`browser:${message.type()}:${message.text()}`));
+  page.on("console", message => {
+    console.log(`browser:${message.type()}:${message.text()}`);
+    if (message.type() === "error") browserErrors.push(message.text());
+  });
   await page.goto(url, {waitUntil: "domcontentloaded"});
   await page.waitForFunction(() => document.querySelector("#status")?.textContent === "ready");
   if (!await page.locator('button[data-tab="state"]').evaluate(button => button.classList.contains("active"))) {
@@ -141,7 +167,7 @@ try {
   }, undefined, {timeout: 60_000});
 
   const initial = await state(page);
-  assert.equal(initial.nodeAdapterVersion, 6, JSON.stringify(initial));
+  assert.equal(initial.nodeAdapterVersion, 7, JSON.stringify(initial));
   assert.equal(initial.nodeGuardVersion, 3, JSON.stringify(initial));
   console.log(`node-drag-before ${JSON.stringify(initial)}`);
 
@@ -186,25 +212,50 @@ try {
     "node-keyboard",
     Number(pointerReady.transactionGeneration || 0) + 1,
   );
+  const quiescent = await waitForQuiescence(
+    page,
+    "node-keyboard",
+    Number(keyboardReady.transactionGeneration || 0),
+  );
 
-  const beforeEditorKey = await nodePositions(page);
   const editor = page.locator("#editor");
   assert.equal(await editor.count(), 1, "editor textarea is missing");
   await editor.focus();
+  const focused = await page.evaluate(() => ({
+    id: document.activeElement?.id || "",
+    tag: document.activeElement?.tagName || "",
+  }));
+  assert.deepEqual(focused, {id: "editor", tag: "TEXTAREA"});
   await page.keyboard.press("ArrowRight");
-  await page.waitForTimeout(180);
-  const afterEditorKey = await nodePositions(page);
-  assert.deepEqual(afterEditorKey, beforeEditorKey, "editor arrow key moved a selected state node");
-  const afterEditorState = await state(page);
-  assert.equal(afterEditorState.publicationReady, "true", JSON.stringify(afterEditorState));
-  assert.equal(
-    afterEditorState.transactionGeneration,
-    keyboardReady.transactionGeneration,
-    "editor arrow key started a layout generation",
+  await page.waitForTimeout(600);
+  const afterEditorPositions = await nodePositions(page);
+  assert.deepEqual(
+    afterEditorPositions,
+    quiescent.positions,
+    "editor arrow key moved a selected state node",
   );
+  const afterEditorState = await state(page);
+  assert.deepEqual(
+    {
+      transactionGeneration: afterEditorState.transactionGeneration,
+      routerGeneration: afterEditorState.routerGeneration,
+      certificateGeneration: afterEditorState.certificateGeneration,
+      publicationReady: afterEditorState.publicationReady,
+      certificateState: afterEditorState.certificateState,
+    },
+    {
+      transactionGeneration: quiescent.currentState.transactionGeneration,
+      routerGeneration: quiescent.currentState.routerGeneration,
+      certificateGeneration: quiescent.currentState.certificateGeneration,
+      publicationReady: "true",
+      certificateState: "valid",
+    },
+    "editor arrow key or a latent request changed the certified generation",
+  );
+  assert.deepEqual(browserErrors, [], browserErrors.join("\n"));
 
   await page.close();
-  console.log("verified pointer and keyboard node movement, form-control isolation, persistence, relayout, and recertification");
+  console.log("verified pointer and keyboard node movement, quiescence, editor isolation, persistence, relayout, and recertification");
 } finally {
   await browser.close();
   await stopProcess(child);
