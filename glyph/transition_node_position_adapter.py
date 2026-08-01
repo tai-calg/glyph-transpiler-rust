@@ -15,6 +15,7 @@ const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
 const nodeName=node=>node.querySelector(".state-name,.node-name")?.textContent?.trim()||"node";
 const scaleFor=stage=>window.glyphDiagramViewport?.scaleFor(stage)||num(stage?.dataset.viewportScale)||1;
 const publicationGuard=()=>window.glyphNodeDragPublicationGuard||null;
+const workspace=()=>window.glyphStateDiagramWorkspace||null;
 
 function invalidateState(){
   stateVersion+=1;
@@ -82,11 +83,12 @@ function snapshot(stage){
   });
   return value;
 }
-function apply(stage,value){
+function apply(stage,value,key=null){
   let count=0;
   stage.querySelectorAll(".state-node").forEach(node=>{
-    const position=value[nodeName(node)];
-    if(!position||!Number.isFinite(Number(position.x))||!Number.isFinite(Number(position.y)))return;
+    const raw=value[nodeName(node)];
+    if(!raw||!Number.isFinite(Number(raw.x))||!Number.isFinite(Number(raw.y)))return;
+    const position=workspace()?.mapRestoredPosition?.(stage,key,raw)||raw;
     node.style.left=`${Number(position.x)}px`;
     node.style.top=`${Number(position.y)}px`;
     count+=1;
@@ -160,7 +162,8 @@ async function persist(record){
   if(destroyed||!record.stage.isConnected)return;
   const data=await diagramState(),key=canonicalKey(data);
   write(key,record.positions);
-  if(record.stage.isConnected)apply(record.stage,record.positions);
+  workspace()?.markPositionMigration?.(record.stage,key);
+  if(record.stage.isConnected)apply(record.stage,record.positions,key);
   record.stage.dataset.transitionNodePositions=`saved:${Object.keys(record.positions).length}`;
   window.glyphTransitionLayoutTransaction?.schedule("manual-node-persisted",0);
 }
@@ -181,8 +184,11 @@ async function restore(stage,token){
     window.glyphTransitionLayoutTransaction?.schedule("node-positions-none",0);
     return false;
   }
-  const count=apply(stage,value);
-  write(key,value);
+  const count=apply(stage,value,source);
+  const normalized=snapshot(stage);
+  write(key,normalized);
+  workspace()?.markPositionMigration?.(stage,source);
+  workspace()?.markPositionMigration?.(stage,key);
   stage.dataset.transitionNodePositions=`restored:${count}`;
   stage.dataset.transitionNodePositionSource=source;
   window.glyphTransitionLayoutTransaction?.schedule("node-positions-restored",0);
@@ -307,14 +313,14 @@ for(const eventName of["pagehide","beforeunload"]){
 }
 lastStage=document.querySelector(".state-node")?.closest(".graph-stage")||null;
 scheduleRestore(lastStage,0);
-window.glyphTransitionNodePositionAdapter={marker:MARKER,version:7,restore:()=>scheduleRestore(null,0)};
+window.glyphTransitionNodePositionAdapter={marker:MARKER,version:8,restore:()=>scheduleRestore(null,0)};
 })();
 </script>
 """
 
 
 def enhance_transition_node_position_adapter_html(html: str) -> str:
-    """Own, persist, and restore state-node interaction in canonical key space."""
+    """Own, persist, migrate, and restore state-node positions."""
 
     if _MARKER in html:
         return html
