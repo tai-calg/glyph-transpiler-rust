@@ -55,18 +55,14 @@ class PipelineAndArchitectureTests(unittest.TestCase):
         self.assertEqual(len(source.splitlines()), len(joined.splitlines()))
         self.assertIn(">run(x:U):U=x /> |n| n+1", joined)
 
-    def test_system_context_uses_boundary_flow_and_explicit_ext(self) -> None:
+    def test_system_context_uses_entry_source_sink_and_derived_calls(self) -> None:
         source = """
 system Door
   entry control
-  in sensor:U
-  in panel:U
-  out result:B
-  sensor -> control
-  panel -> control
-  control -> result
-  control -> lock
-  control -> log
+  source sensor
+  source panel
+  sink lock
+  sink log
 
 ext sensor():U
 ext panel():U
@@ -77,53 +73,167 @@ ext panel():U
 >control():B=log(lock(sum_inputs()))
 """
         model = parse_compilation_model(source, "door.glyph")
+        declaration = model.systems[0]
+        self.assertEqual(declaration.entry_name, "control")
+        self.assertEqual(declaration.source_names, ("sensor", "panel"))
+        self.assertEqual(declaration.sink_names, ("lock", "log"))
+
         system = model.architecture.systems[0]
-        kinds = {component.name: component.kind for component in system.components}
-        self.assertEqual(kinds["sensor"], "external")
-        self.assertEqual(kinds["panel"], "external")
-        self.assertEqual(kinds["control"], "function")
-        self.assertEqual(kinds["lock"], "effect")
-        self.assertEqual(kinds["log"], "effect")
-        self.assertNotIn("sum_inputs", kinds)
+        self.assertEqual(system.entry, "control")
+        self.assertEqual(system.sources, ("sensor", "panel"))
+        self.assertEqual(system.sinks, ("log", "lock"))
+        self.assertEqual(system.ports, ())
+
+        components = {component.name: component for component in system.components}
+        self.assertEqual(components["control"].role, "entry")
+        self.assertEqual(components["sum_inputs"].role, "internal")
+        self.assertEqual(components["sensor"].role, "source")
+        self.assertEqual(components["panel"].role, "source")
+        self.assertEqual(components["lock"].role, "sink")
+        self.assertEqual(components["log"].role, "sink")
 
         names = {component.id: component.name for component in system.components}
         edges = {(names[e.source_id], names[e.target_id], e.kind) for e in system.edges}
         self.assertEqual(
             edges,
             {
-                ("sensor", "control", "data"),
-                ("panel", "control", "data"),
-                ("control", "result", "return"),
-                ("control", "lock", "effect"),
-                ("control", "log", "effect"),
+                ("control", "log", "call"),
+                ("control", "lock", "call"),
+                ("control", "sum_inputs", "call"),
+                ("sum_inputs", "sensor", "call"),
+                ("sum_inputs", "panel", "call"),
             },
         )
-        evidence_kinds = {item.kind for item in system.evidence}
-        self.assertIn("external-input-read", evidence_kinds)
-        self.assertIn("return-type", evidence_kinds)
-        self.assertIn("effect-reachability", evidence_kinds)
+        self.assertEqual({item.kind for item in system.evidence}, {"call"})
 
         bundle = compile_diagram_bundle(source, "door.glyph")
         self.assertIn("architecture.mmd", bundle.files)
         self.assertIn("architecture-ir.json", bundle.files)
-        self.assertIn("sensor", bundle.files["architecture.mmd"])
+        self.assertIn("sum_inputs", bundle.files["architecture.mmd"])
         self.assertIn("control", bundle.files["architecture.mmd"])
 
-    def test_system_edges_are_checked_architecture_assertions(self) -> None:
+    def test_entry_signature_is_the_complete_system_request_and_response(self) -> None:
         source = """
 system Door
+  entry control
+  source sensor
+  sink actuator
+
++Error=ReadFailed|WriteFailed
+*Input(open:B)
+*Receipt(done:B)
+ext sensor():Input|Error
+!actuator(input:Input):Receipt|Error
+>control():Receipt|Error=actuator(sensor()?)
+"""
+        model = parse_compilation_model(source, "door.glyph")
+        system = model.architecture.systems[0]
+        self.assertEqual(system.entry, "control")
+        self.assertEqual(system.sources, ("sensor",))
+        self.assertEqual(system.sinks, ("actuator",))
+        self.assertEqual(system.ports, ())
+
+    def test_missing_reachable_source_is_rejected(self) -> None:
+        source = """
+system Broken
+  entry control
+ext sensor():U
+>control():U=sensor()
+"""
+        with self.assertRaisesRegex(GlyphError, "sourceとして宣言していない"):
+            parse_compilation_model(source)
+
+    def test_missing_reachable_sink_is_rejected(self) -> None:
+        source = """
+system Broken
+  entry control
+!actuator(x:U):()
+>control(x:U):()=actuator(x)
+"""
+        with self.assertRaisesRegex(GlyphError, "sinkとして宣言していない"):
+            parse_compilation_model(source)
+
+    def test_source_must_be_ext_function(self) -> None:
+        source = """
+system Broken
+  entry control
+  source helper
+>helper():U=1
+>control():U=helper()
+"""
+        with self.assertRaisesRegex(GlyphError, "`ext`外部入力関数"):
+            parse_compilation_model(source)
+
+    def test_sink_must_be_effect_function(self) -> None:
+        source = """
+system Broken
+  entry control
+  sink helper
+>helper(x:U):U=x
+>control(x:U):U=helper(x)
+"""
+        with self.assertRaisesRegex(GlyphError, "`!`外部作用関数"):
+            parse_compilation_model(source)
+
+    def test_declared_boundary_must_be_reachable_from_entry(self) -> None:
+        source = """
+system Broken
+  entry control
+  source sensor
+ext sensor():U
+>control():U=1
+"""
+        with self.assertRaisesRegex(GlyphError, "entry 'control' から呼び出されない"):
+            parse_compilation_model(source)
+
+    def test_duplicate_boundary_role_is_rejected(self) -> None:
+        source = """
+system Broken
+  entry control
+  source sensor
+  sink sensor
+ext sensor():U
+>control():U=sensor()
+"""
+        with self.assertRaisesRegex(GlyphError, "sourceとして宣言済み"):
+            parse_compilation_model(source)
+
+    def test_pure_system_needs_only_entry(self) -> None:
+        source = """
+system Pure
+  entry control
+>helper(x:U):U=x+1
+>control(x:U):U=helper(x)
+"""
+        model = parse_compilation_model(source)
+        system = model.architecture.systems[0]
+        self.assertEqual(system.sources, ())
+        self.assertEqual(system.sinks, ())
+        self.assertEqual(
+            {component.name for component in system.components},
+            {"control", "helper"},
+        )
+
+    def test_legacy_system_flow_is_accepted_but_not_authoritative(self) -> None:
+        source = """
+system Legacy
   entry control
   in x:U
   out result:()
   x -> control
   control -> result
   control -> actuator
-
 !actuator(x:U):()
 >control(x:U):()=actuator(x)
 """
-        model = parse_compilation_model(source, "door.glyph")
-        self.assertEqual(len(model.architecture.systems[0].edges), 3)
+        model = parse_compilation_model(source)
+        declaration = model.systems[0]
+        self.assertEqual(declaration.syntax, "legacy-flow")
+        system = model.architecture.systems[0]
+        self.assertEqual(system.ports, ())
+        self.assertEqual(system.sinks, ("actuator",))
+        self.assertEqual(len(system.edges), 1)
+        self.assertEqual(system.edges[0].kind, "call")
 
     def test_removed_equals_entry_syntax_is_rejected(self) -> None:
         with self.assertRaisesRegex(GlyphError, "system Name=entry.*廃止"):
@@ -133,10 +243,6 @@ system Door
         source = """
 system Broken
   entry missing
-  in x:U
-  out result:U
-  x -> missing
-  missing -> result
 >present(x:U):U=x
 """
         with self.assertRaisesRegex(GlyphError, "entry 'missing' は未宣言"):
@@ -146,61 +252,12 @@ system Broken
         source = """
 system Broken
   entry control
-  in x:U
-  out result:U
-  x -> control
-  control -> result
 >control(x:U):U=driver(x)
 """
         with self.assertRaisesRegex(GlyphError, "ext name\\(args\\):Type"):
             parse_compilation_model(source)
 
-    def test_undeclared_system_endpoint_is_rejected(self) -> None:
-        source = """
-system Broken
-  entry control
-  in x:U
-  out result:U
-  x -> control
-  ghost -> control
-  control -> result
->control(x:U):U=x
-"""
-        with self.assertRaisesRegex(GlyphError, "endpoint 'ghost' は未宣言"):
-            parse_compilation_model(source)
-
-    def test_asserted_effect_edge_must_exist_in_code(self) -> None:
-        source = """
-system Broken
-  entry control
-  in x:U
-  out result:U
-  x -> control
-  control -> result
-  control -> alarm
-!alarm(x:U):()
->control(x:U):U=x
-"""
-        with self.assertRaisesRegex(GlyphError, "到達可能なコードpathが存在しない"):
-            parse_compilation_model(source)
-
-    def test_duplicate_system_assertion_is_rejected(self) -> None:
-        source = """
-system Broken
-  entry control
-  in x:U
-  out result:()
-  x -> control
-  control -> result
-  control -> alarm
-  control -> alarm
-!alarm(x:U):()
->control(x:U):()=alarm(x)
-"""
-        with self.assertRaisesRegex(GlyphError, "重複"):
-            parse_compilation_model(source)
-
-    def test_bare_system_requires_explicit_entry_ports_and_flow(self) -> None:
+    def test_bare_system_requires_explicit_entry(self) -> None:
         with self.assertRaisesRegex(GlyphError, "entry function_name"):
             parse_compilation_model("system Empty\n>entry(x:U):U=x\n")
 
