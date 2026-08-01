@@ -25,7 +25,18 @@ class TransitionNodePositionAdapterTests(unittest.TestCase):
         self.assertIn("event.stopImmediatePropagation()", html)
         self.assertIn("record.positions=snapshot(record.stage)", html)
         self.assertIn("manual-node-persisted", html)
-        self.assertIn("version:7", html)
+        self.assertIn("version:8", html)
+
+    def test_saved_positions_are_migrated_to_the_expanded_workspace(self) -> None:
+        html = enhance_transition_node_position_adapter_html(DIAGRAM_HTML)
+
+        self.assertIn("const workspace=()=>window.glyphStateDiagramWorkspace||null", html)
+        self.assertIn("workspace()?.mapRestoredPosition?.(stage,key,raw)||raw", html)
+        self.assertIn("const count=apply(stage,value,source)", html)
+        self.assertIn("const normalized=snapshot(stage)", html)
+        self.assertIn("write(key,normalized)", html)
+        self.assertIn("workspace()?.markPositionMigration?.(stage,source)", html)
+        self.assertIn("workspace()?.markPositionMigration?.(record.stage,key)", html)
 
     def test_drag_keeps_label_feasible_clearance_from_other_nodes(self) -> None:
         html = enhance_transition_node_position_adapter_html(DIAGRAM_HTML)
