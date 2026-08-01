@@ -99,7 +99,10 @@ async function dragOneNode(page) {
       await page.waitForTimeout(80);
       const after = await node.boundingBox();
       if (after && (Math.abs(after.x - before.x) > 4 || Math.abs(after.y - before.y) > 4)) {
-        await page.waitForFunction(() => Object.keys(localStorage).some(key => key.startsWith("glyph.diagram.positions.v1:")));
+        await page.waitForFunction(() => Array.from(
+          { length: localStorage.length },
+          (_, storageIndex) => localStorage.key(storageIndex),
+        ).some(key => key?.startsWith("glyph.diagram.positions.v1:")));
         return;
       }
     }
@@ -124,7 +127,10 @@ async function dragOneLabel(page) {
       await page.waitForTimeout(80);
       const after = await cluster.boundingBox();
       if (after && (Math.abs(after.x - before.x) > 3 || Math.abs(after.y - before.y) > 3)) {
-        await page.waitForFunction(() => Object.keys(localStorage).some(key => key.startsWith("glyph.diagram.transition-io.v1:")));
+        await page.waitForFunction(() => Array.from(
+          { length: localStorage.length },
+          (_, storageIndex) => localStorage.key(storageIndex),
+        ).some(key => key?.startsWith("glyph.diagram.transition-io.v1:")));
         return;
       }
     }
