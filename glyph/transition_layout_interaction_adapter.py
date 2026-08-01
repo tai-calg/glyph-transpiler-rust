@@ -7,7 +7,7 @@ _SCRIPT = r"""
 <script id="glyph-transition-layout-interaction-adapter-v1-script">
 (()=>{
 const MARKER="glyph-transition-layout-interaction-adapter-v1",MAX_DISTANCE=96,DRAG_THRESHOLD=3;
-const FOREIGN_ROUTE_CLEARANCE=1,NODE_CLEARANCE=2,LABEL_CLEARANCE=2;
+const NODE_CLEARANCE=2;
 const SNAP_RADII=[0,8,16,24,32,48,64,80,96],SNAP_DIRECTIONS=16;
 let active=null,selected=null,stateCache=null,statePromise=null,stateAbort=null,stateVersion=0,destroyed=false,gestureSequence=0;
 const num=value=>Number.parseFloat(value||"0")||0;
@@ -43,7 +43,6 @@ function pointerDistance(record,event){return Math.hypot(event.clientX-record.st
 function requestedPoint(record,event){return feasible({x:record.left+(event.clientX-record.startX)/record.scale,y:record.top+(event.clientY-record.startY)/record.scale},record.anchor,record.cluster,record.stage)}
 function centeredRect(cluster,point,margin=0){return{left:point.x-cluster.offsetWidth/2-margin,top:point.y-cluster.offsetHeight/2-margin,right:point.x+cluster.offsetWidth/2+margin,bottom:point.y+cluster.offsetHeight/2+margin}}
 function elementRect(element,margin=0){return{left:element.offsetLeft-margin,top:element.offsetTop-margin,right:element.offsetLeft+element.offsetWidth+margin,bottom:element.offsetTop+element.offsetHeight+margin}}
-function clusterRect(cluster,margin=0){const x=num(cluster.style.left),y=num(cluster.style.top);return centeredRect(cluster,{x,y},margin)}
 function overlaps(a,b){return!(a.right<=b.left||b.right<=a.left||a.bottom<=b.top||b.bottom<=a.top)}
 function liveCluster(record){
   if(record.cluster?.isConnected)return record.cluster;
@@ -73,22 +72,9 @@ function refreshRecord(record){
   return true;
 }
 function manualPlacementViolation(record,point){
-  const geometry=window.glyphDiagramGeometry;
-  if(!geometry||geometry.version<1)return"geometry-kernel-unavailable";
-  const candidate=centeredRect(record.cluster,point,LABEL_CLEARANCE);
+  const candidate=centeredRect(record.cluster,point,NODE_CLEARANCE);
   for(const node of record.stage.querySelectorAll(".state-node")){
     if(overlaps(candidate,elementRect(node,NODE_CLEARANCE)))return"label-node-overlap";
-  }
-  for(const cluster of record.stage.querySelectorAll(".transition-io-cluster")){
-    if(cluster===record.cluster)continue;
-    if(overlaps(candidate,clusterRect(cluster,LABEL_CLEARANCE)))return"label-label-overlap";
-  }
-  for(const path of record.stage.querySelectorAll(":scope > svg.edge-svg > path.state-transition-path")){
-    if((path.dataset.transitionId||"")===record.id)continue;
-    const polyline=geometry.flattenPathElement(path,{tolerance:.35,maxSegmentLength:3});
-    if(geometry.polylineHitsRect(polyline,centeredRect(record.cluster,point,FOREIGN_ROUTE_CLEARANCE))){
-      return"route-foreign-label";
-    }
   }
   return"";
 }
