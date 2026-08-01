@@ -26,12 +26,15 @@ class TransitionNodeLayoutGuardTests(unittest.TestCase):
         self.assertNotIn("localStorage.setItem", html)
         self.assertNotIn("function stateCurve(", html)
 
-    def test_prepared_app_installs_passive_guard_after_readability(self) -> None:
+    def test_prepared_app_installs_passive_guard_before_fast_transaction(self) -> None:
         prepare_diagram_app()
         html = diagram_app.DIAGRAM_HTML
         guard = html.index("glyph-transition-node-layout-guard-v1-script")
-        readability = html.index("glyph-transition-label-readability-v1-script")
-        self.assertGreater(guard, readability)
+        clusters = html.index("glyph-transition-io-clusters-v1-script")
+        transaction = html.index("glyph-transition-layout-transaction-v1-script")
+        self.assertGreater(guard, clusters)
+        self.assertLess(guard, transaction)
+        self.assertNotIn("glyph-transition-label-readability-v1-script", html)
         self.assertIn("window.glyphTransitionNodeLayoutGuard", html)
 
 
