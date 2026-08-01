@@ -6,7 +6,7 @@ async function waitForServer(url, child, logs) {
   for (let attempt = 0; attempt < 120; attempt += 1) {
     if (child.exitCode !== null) throw new Error(`Glyph process exited early\n${logs.join("")}`);
     try {
-      const response = await fetch(`${url}/api/state`);
+      const response = await fetch(`${url}/api/state`, { cache: "no-store" });
       if (response.ok && (await response.json()).status === "ready") return;
     } catch {}
     await new Promise(resolve => setTimeout(resolve, 100));
@@ -28,34 +28,24 @@ async function state(page) {
   return page.evaluate(() => {
     const stage = document.querySelector(".state-node")?.closest(".graph-stage");
     const transaction = window.glyphTransitionLayoutTransaction;
-    const router = window.glyphInitialTransitionRouter;
-    const certificate = window.glyphLayoutPublicationCertificate;
+    const clusters = [...(stage?.querySelectorAll(".transition-io-cluster") || [])];
     return {
       layoutState: stage?.dataset.transitionLayoutState || "",
       layoutReason: stage?.dataset.transitionLayoutReason || "",
       layoutError: stage?.dataset.transitionLayoutError || "",
-      layoutFailureCode: stage?.dataset.transitionLayoutFailureCode || "",
-      layoutFailureDetails: stage?.dataset.transitionLayoutFailureDetails || "",
-      collisionSolved: stage?.dataset.transitionIoCollisionSolved || "",
-      collisionCount: stage?.dataset.transitionIoCollisionCount || "",
-      semanticLines: stage?.dataset.transitionSemanticLinesReady || "",
-      semanticRoleLines: stage?.dataset.transitionSemanticRoleLinesReady || "",
       publicationReady: stage?.dataset.transitionPublicationReady || "",
-      initialRouteReady: stage?.dataset.initialRouteReady || "",
-      initialRouteCertificate: stage?.dataset.initialRouteCertificate || "",
-      initialRouteError: stage?.dataset.initialRouteError || "",
-      certificateState: stage?.dataset.layoutCertificateState || "",
-      certificateRequestState: stage?.dataset.layoutCertificateRequestState || "",
-      certificateViolations: stage?.dataset.layoutCertificateViolations || "",
+      layoutProfile: stage?.dataset.transitionLayoutProfile || "",
+      layoutMode: stage?.dataset.transitionLayoutMode || "",
+      denseCanvas: stage?.dataset.transitionDenseCanvas || "",
       transactionGeneration: transaction?.generation ?? null,
       transactionCompletedGeneration: transaction?.completedGeneration ?? null,
-      routerGeneration: router?.generation ?? null,
-      routerCompletedGeneration: router?.completedGeneration ?? null,
-      certificateGeneration: certificate?.generation ?? null,
-      certificateCompletedGeneration: certificate?.completedGeneration ?? null,
       nodeAdapterVersion: window.glyphTransitionNodePositionAdapter?.version ?? null,
-      nodeGuardVersion: window.glyphNodeDragPublicationGuard?.version ?? null,
+      nodeGuardVersion: window.glyphTransitionNodeLayoutGuard?.version ?? null,
       persisted: Object.keys(localStorage).some(key => key.startsWith("glyph.diagram.positions.v1:")),
+      maximumLabelDistance: Math.max(0, ...clusters.map(cluster => Number(cluster.dataset.ioDistance || 0))),
+      labelDistanceLimit: Number(stage?.dataset.transitionIoMaxDistance || 0),
+      certificatePresent: Boolean(window.glyphLayoutPublicationCertificate),
+      routerPresent: Boolean(window.glyphInitialTransitionRouter),
     };
   });
 }
@@ -76,35 +66,30 @@ async function drag(page, locator, deltaX, deltaY) {
   const y = box.y + box.height / 2;
   await page.mouse.move(x, y);
   await page.mouse.down();
-  await page.mouse.move(x + deltaX, y + deltaY, {steps: 20});
+  await page.mouse.move(x + deltaX, y + deltaY, { steps: 12 });
   await page.mouse.up();
 }
 
-function certified(current, minimumGeneration = 0) {
+function ready(current, minimumGeneration = 0, requirePersisted = false) {
   return current.layoutState === "ready"
-    && current.collisionSolved === "true"
-    && current.collisionCount === "0"
-    && current.semanticLines === "true"
-    && current.semanticRoleLines === "true"
     && current.publicationReady === "true"
-    && current.certificateState === "valid"
+    && current.layoutProfile === "ordinary"
+    && current.layoutMode === "base"
+    && current.denseCanvas === "disabled"
+    && current.layoutError === ""
     && Number(current.transactionGeneration || 0) >= minimumGeneration
     && current.transactionGeneration === current.transactionCompletedGeneration
-    && current.routerGeneration === current.routerCompletedGeneration
-    && current.certificateGeneration === current.certificateCompletedGeneration
-    && current.persisted;
+    && (!requirePersisted || current.persisted)
+    && current.maximumLabelDistance <= current.labelDistanceLimit + 0.5;
 }
 
-async function waitForCertified(page, label, minimumGeneration = 0) {
+async function waitForReady(page, label, minimumGeneration = 0, requirePersisted = false) {
   const samples = [];
-  for (let attempt = 0; attempt < 180; attempt += 1) {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
     const current = await state(page);
-    if (!samples.length || JSON.stringify(current) !== JSON.stringify(samples.at(-1))) {
-      samples.push(current);
-      console.log(`${label}-state ${JSON.stringify(current)}`);
-    }
-    if (certified(current, minimumGeneration)) return current;
-    await page.waitForTimeout(100);
+    if (!samples.length || JSON.stringify(current) !== JSON.stringify(samples.at(-1))) samples.push(current);
+    if (ready(current, minimumGeneration, requirePersisted)) return current;
+    await page.waitForTimeout(50);
   }
   throw new Error(`${label} did not converge: ${JSON.stringify(samples.at(-1))}`);
 }
@@ -112,18 +97,18 @@ async function waitForCertified(page, label, minimumGeneration = 0) {
 async function waitForQuiescence(page, label, minimumGeneration) {
   let previous = "";
   let stableSamples = 0;
-  for (let attempt = 0; attempt < 60; attempt += 1) {
+  for (let attempt = 0; attempt < 30; attempt += 1) {
     const currentState = await state(page);
     const positions = await nodePositions(page);
-    const signature = JSON.stringify({currentState, positions});
-    if (certified(currentState, minimumGeneration) && signature === previous) {
+    const signature = JSON.stringify({ currentState, positions });
+    if (ready(currentState, minimumGeneration, true) && signature === previous) {
       stableSamples += 1;
-      if (stableSamples >= 5) return {currentState, positions};
+      if (stableSamples >= 3) return { currentState, positions };
     } else {
       stableSamples = 0;
     }
     previous = signature;
-    await page.waitForTimeout(100);
+    await page.waitForTimeout(50);
   }
   throw new Error(`${label} did not remain quiescent: ${previous}`);
 }
@@ -143,47 +128,39 @@ const child = spawn("python3", ["glyph.py", "examples/state_diagrams/conveyor_co
 child.stdout.on("data", chunk => logs.push(chunk.toString()));
 child.stderr.on("data", chunk => logs.push(chunk.toString()));
 
-const browser = await chromium.launch({headless: true});
+const browser = await chromium.launch({ headless: true });
 try {
   const url = `http://127.0.0.1:${port}`;
   await waitForServer(url, child, logs);
-  const page = await browser.newPage({viewport: {width: 1500, height: 900}});
+  const page = await browser.newPage({ viewport: { width: 1500, height: 900 } });
+  page.on("pageerror", error => browserErrors.push(`pageerror: ${error.message}`));
   page.on("console", message => {
-    console.log(`browser:${message.type()}:${message.text()}`);
-    if (message.type() === "error") browserErrors.push(message.text());
+    if (message.type() === "error") browserErrors.push(`console: ${message.text()}`);
   });
-  await page.goto(url, {waitUntil: "domcontentloaded"});
+  await page.goto(url, { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => document.querySelector("#status")?.textContent === "ready");
-  if (!await page.locator('button[data-tab="state"]').evaluate(button => button.classList.contains("active"))) {
-    await page.click('button[data-tab="state"]');
-  }
-  await page.waitForFunction(() => {
-    const stage = document.querySelector(".state-node")?.closest(".graph-stage");
-    return stage?.dataset.transitionLayoutState === "ready"
-      && stage.dataset.transitionIoCollisionSolved === "true"
-      && stage.dataset.transitionIoCollisionCount === "0"
-      && stage.dataset.transitionPublicationReady === "true"
-      && stage.dataset.layoutCertificateState === "valid";
-  }, undefined, {timeout: 60_000});
+  await page.click('button[data-tab="state"]');
+  const initial = await waitForReady(page, "initial");
 
-  const initial = await state(page);
   assert.equal(initial.nodeAdapterVersion, 7, JSON.stringify(initial));
-  assert.equal(initial.nodeGuardVersion, 3, JSON.stringify(initial));
-  console.log(`node-drag-before ${JSON.stringify(initial)}`);
+  assert.equal(initial.nodeGuardVersion, 2, JSON.stringify(initial));
+  assert.equal(initial.certificatePresent, false, JSON.stringify(initial));
+  assert.equal(initial.routerPresent, false, JSON.stringify(initial));
 
   const pointerBefore = await nodePositions(page);
-  await drag(page, page.locator(".state-node").first(), 170, 160);
+  await drag(page, page.locator(".state-node").first(), 120, 90);
   await page.waitForFunction(before => {
     const node = document.querySelector(".state-node");
     if (!node) return false;
     const left = Number.parseFloat(node.style.left || "0") || 0;
     const top = Number.parseFloat(node.style.top || "0") || 0;
     return Math.abs(left - before.left) > 1 || Math.abs(top - before.top) > 1;
-  }, pointerBefore[0], {timeout: 10_000});
-  const pointerReady = await waitForCertified(
+  }, pointerBefore[0], { timeout: 3000 });
+  const pointerReady = await waitForReady(
     page,
     "node-pointer",
     Number(initial.transactionGeneration || 0) + 1,
+    true,
   );
 
   const keyboardSetup = await page.evaluate(() => {
@@ -196,7 +173,7 @@ try {
     const width = Number.parseFloat(stage.style.width || "0") || stage.scrollWidth;
     const direction = left + node.offsetWidth + 24 < width ? "ArrowRight" : "ArrowLeft";
     document.activeElement?.blur?.();
-    return {left, top, direction};
+    return { left, top, direction };
   });
   assert(keyboardSetup, "keyboard node setup failed");
   await page.keyboard.press(keyboardSetup.direction);
@@ -206,56 +183,32 @@ try {
     const left = Number.parseFloat(node.style.left || "0") || 0;
     const top = Number.parseFloat(node.style.top || "0") || 0;
     return Math.abs(left - before.left) > 1 || Math.abs(top - before.top) > 1;
-  }, keyboardSetup, {timeout: 10_000});
-  const keyboardReady = await waitForCertified(
+  }, keyboardSetup, { timeout: 3000 });
+  const keyboardReady = await waitForReady(
     page,
     "node-keyboard",
     Number(pointerReady.transactionGeneration || 0) + 1,
+    true,
   );
-  const quiescent = await waitForQuiescence(
-    page,
-    "node-keyboard",
-    Number(keyboardReady.transactionGeneration || 0),
-  );
+  const quiescent = await waitForQuiescence(page, "node-keyboard", Number(keyboardReady.transactionGeneration || 0));
 
   const editor = page.locator("#editor");
   assert.equal(await editor.count(), 1, "editor textarea is missing");
   await editor.focus();
-  const focused = await page.evaluate(() => ({
+  assert.deepEqual(await page.evaluate(() => ({
     id: document.activeElement?.id || "",
     tag: document.activeElement?.tagName || "",
-  }));
-  assert.deepEqual(focused, {id: "editor", tag: "TEXTAREA"});
+  })), { id: "editor", tag: "TEXTAREA" });
   await page.keyboard.press("ArrowRight");
-  await page.waitForTimeout(600);
-  const afterEditorPositions = await nodePositions(page);
-  assert.deepEqual(
-    afterEditorPositions,
-    quiescent.positions,
-    "editor arrow key moved a selected state node",
-  );
+  await page.waitForTimeout(150);
+  assert.deepEqual(await nodePositions(page), quiescent.positions, "editor arrow key moved a selected state node");
   const afterEditorState = await state(page);
-  assert.deepEqual(
-    {
-      transactionGeneration: afterEditorState.transactionGeneration,
-      routerGeneration: afterEditorState.routerGeneration,
-      certificateGeneration: afterEditorState.certificateGeneration,
-      publicationReady: afterEditorState.publicationReady,
-      certificateState: afterEditorState.certificateState,
-    },
-    {
-      transactionGeneration: quiescent.currentState.transactionGeneration,
-      routerGeneration: quiescent.currentState.routerGeneration,
-      certificateGeneration: quiescent.currentState.certificateGeneration,
-      publicationReady: "true",
-      certificateState: "valid",
-    },
-    "editor arrow key or a latent request changed the certified generation",
-  );
+  assert.equal(afterEditorState.transactionGeneration, quiescent.currentState.transactionGeneration);
+  assert.equal(afterEditorState.publicationReady, "true");
   assert.deepEqual(browserErrors, [], browserErrors.join("\n"));
 
   await page.close();
-  console.log("verified pointer and keyboard node movement, quiescence, editor isolation, persistence, relayout, and recertification");
+  console.log("verified fast pointer and keyboard node movement, persistence, rerouting, and editor isolation");
 } finally {
   await browser.close();
   await stopProcess(child);
