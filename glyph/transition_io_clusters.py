@@ -44,8 +44,9 @@ _STYLE = r"""
   max-width:264px;
   font:700 9px/1.25 ui-monospace,SFMono-Regular,Menlo,monospace;
   color:var(--text);
-  white-space:normal;
-  overflow-wrap:anywhere;
+  white-space:normal!important;
+  text-overflow:clip!important;
+  overflow-wrap:anywhere!important;
   text-align:center;
 }
 .transition-io-cluster.provisional-trigger .transition-io-node.io{
@@ -134,13 +135,14 @@ function inputOf(transition){
   if(trigger)return`${trigger.role==="provisional-trigger"?"? ":""}${trigger.display}`;
   if(unknown.length)return`? ${unknown.join(" & ")}`;
   const raw=text(transition?.event)||text(transition?.condition_raw);
-  return raw||"otherwise";
+  if(!raw)return"otherwise";
+  return raw;
 }
 function projectionOf(transition){
   return window.GlyphExecutionContext?.projectionFor?.(transition)||{action:transition?.action,status:"auto"};
 }
 function actionOf(transition){
-  const action=projectionOf(transition).action;
+  const action=window.GlyphExecutionContext?.actionFor?.(transition)??projectionOf(transition).action;
   if(typeof action==="string")return text(action);
   if(action?.kind==="effect-trace"&&Array.isArray(action.events)){
     return action.events.map(event=>text(event?.expression)||text(event?.display)||text(event?.operation)).filter(Boolean).join("; ");
@@ -176,7 +178,7 @@ function storageKey(data){
   const digest=data?.digest||"source",index=document.getElementById("machine-select")?.value||0;
   return`glyph.diagram.transition-io.v1:${digest}:${index}`;
 }
-function parseSaved(key){try{return JSON.parse(localStorage.getItem(key)||"{}")||{}}catch{return{}}}
+function parseSaved(data){try{return JSON.parse(localStorage.getItem(storageKey(data))||"{}")||{}}catch{return{}}}
 function pathFor(stage,id,index){
   const escaped=window.CSS?.escape?CSS.escape(id):String(id).replace(/[^A-Za-z0-9_-]/g,"\\$&");
   return stage.querySelector(`path.state-transition-path[data-transition-id="${escaped}"]`)
@@ -337,7 +339,7 @@ function updateCluster(cluster,transition,id,line){
   bindCluster(cluster);
 }
 function arrange(stage,data,machine){
-  const transitions=machine?.transitions||[],lanes=pairRanks(transitions),saved=parseSaved(storageKey(data));
+  const transitions=machine?.transitions||[],lanes=pairRanks(transitions),saved=parseSaved(data);
   transitions.forEach((transition,index)=>{
     const id=transition.id||`T${index+1}`;
     const escaped=window.CSS?.escape?CSS.escape(id):id;
