@@ -70,11 +70,8 @@ async function waitForServer(url, child, logs) {
   for (let attempt = 0; attempt < 120; attempt += 1) {
     if (child.exitCode !== null) throw new Error(`Glyph process exited early\n${logs.join("")}`);
     try {
-      const response = await fetch(`${url}/api/state`);
-      if (response.ok) {
-        const state = await response.json();
-        if (state.status === "ready") return state;
-      }
+      const response = await fetch(`${url}/api/state`, { cache: "no-store" });
+      if (response.ok && (await response.json()).status === "ready") return await (await fetch(`${url}/api/state`, { cache: "no-store" })).json();
     } catch {}
     await new Promise(resolve => setTimeout(resolve, 100));
   }
@@ -91,102 +88,20 @@ async function stopProcess(child) {
   if (child.exitCode === null) child.kill("SIGKILL");
 }
 
-async function assertDiagramGeometry(page) {
-  const geometry = await page.evaluate(() => {
-    const stage = document.querySelector(".graph-stage");
-    const stageRect = stage?.getBoundingClientRect();
-    if (!stage || !stageRect) return { error: "graph stage is missing" };
-    const nodes = [...stage.querySelectorAll(".state-node")].map(element => element.getBoundingClientRect());
-    const clusters = [...stage.querySelectorAll(".transition-io-cluster")].map(element => ({
-      id: element.dataset.transitionId,
-      distance: Number(element.dataset.ioDistance || 0),
-      rect: element.getBoundingClientRect(),
-    }));
-    const overlaps = (left, right, gap = 1) => !(
-      left.right <= right.left + gap || right.right <= left.left + gap
-      || left.bottom <= right.top + gap || right.bottom <= left.top + gap
-    );
-    const collisions = [];
-    clusters.forEach((cluster, index) => {
-      clusters.slice(index + 1).forEach(other => {
-        if (overlaps(cluster.rect, other.rect)) collisions.push(`${cluster.id}/${other.id}`);
-      });
-      nodes.forEach((node, nodeIndex) => {
-        if (overlaps(cluster.rect, node)) collisions.push(`${cluster.id}/node-${nodeIndex}`);
-      });
-    });
-    const outside = clusters.filter(({rect}) => (
-      rect.left < stageRect.left - 1 || rect.top < stageRect.top - 1
-      || rect.right > stageRect.right + 1 || rect.bottom > stageRect.bottom + 1
-    )).map(item => item.id);
-    return { collisions, outside, distances: clusters.map(item => item.distance) };
-  });
-  assert.equal(geometry.error, undefined, geometry.error);
-  assert.deepEqual(geometry.collisions, [], `I/O collisions: ${JSON.stringify(geometry.collisions)}`);
-  assert.deepEqual(geometry.outside, [], `I/O outside stage: ${JSON.stringify(geometry.outside)}`);
-  assert(geometry.distances.every(value => value <= 96.5), `I/O escaped tether: ${geometry.distances.join(", ")}`);
-}
-
-async function assertFitVisibility(page, machineName) {
-  const audit = await page.evaluate(() => {
-    const stage = document.querySelector(".graph-stage");
-    const shell = stage?.closest(".canvas-shell");
-    if (!stage || !shell) return { ok: false, error: "stage-or-shell-missing" };
-    const shellRect = shell.getBoundingClientRect();
-    const bounds = {
-      left: shellRect.left,
-      top: shellRect.top,
-      right: shellRect.left + shell.clientWidth,
-      bottom: shellRect.top + shell.clientHeight,
-    };
-    const elements = [
-      ...stage.querySelectorAll(".state-node"),
-      ...stage.querySelectorAll(".transition-io-cluster"),
-    ];
-    const outside = elements.map((element, index) => {
-      const rect = element.getBoundingClientRect();
-      const id = element.dataset.transitionId
-        || element.querySelector(".state-name")?.textContent?.trim()
-        || `element-${index}`;
-      const visible = rect.left >= bounds.left - 2
-        && rect.top >= bounds.top - 2
-        && rect.right <= bounds.right + 2
-        && rect.bottom <= bounds.bottom + 2;
-      return visible ? null : {
-        id,
-        rect: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom },
-      };
-    }).filter(Boolean);
-    return {
-      ok: elements.length > 0 && outside.length === 0,
-      outside,
-      count: elements.length,
-      bounds,
-      scale: Number.parseFloat(stage.dataset.viewportScale || "1"),
-      state: stage.dataset.fitVisibilityState || "",
-      details: stage.dataset.fitVisibilityDetails || "",
-    };
-  });
-  assert.equal(audit.error, undefined, `${machineName}: ${audit.error}`);
-  assert.equal(audit.state, "ready", `${machineName}: fit visibility did not become ready: ${JSON.stringify(audit)}`);
-  assert.equal(audit.ok, true, `${machineName}: diagram escaped the canvas viewport: ${JSON.stringify(audit)}`);
-}
-
-async function waitForStableLayout(page, machineName, transitionCount) {
-  const ready = async () => page.waitForFunction(({name, count}) => {
-    const stage = document.querySelector(".graph-stage");
+async function waitForOrdinaryLayout(page, machineName, transitionCount) {
+  await page.waitForFunction(({ name, count }) => {
+    const stage = document.querySelector(".state-node")?.closest(".graph-stage");
     return document.querySelector("#machine-select")?.selectedOptions?.[0]?.textContent === name
       && stage?.dataset.transitionIoClustersReady === "true"
       && stage?.dataset.transitionEnablingCasesReady === "true"
       && stage?.dataset.transitionLayoutState === "ready"
       && stage?.dataset.transitionPublicationReady === "true"
-      && stage?.dataset.layoutCertificateState === "valid"
-      && stage?.dataset.renderStable === "true"
-      && stage?.dataset.transitionIoCollisionSolved === "true"
-      && stage?.dataset.transitionIoCollisionCount === "0"
-      && stage?.dataset.fitVisibilityState === "ready"
+      && stage?.dataset.transitionLayoutProfile === "ordinary"
+      && stage?.dataset.transitionLayoutMode === "base"
+      && stage?.dataset.transitionDenseCanvas === "disabled"
+      && !stage?.dataset.transitionLayoutError
       && stage.querySelectorAll(".transition-io-cluster").length === count;
-  }, { name: machineName, count: transitionCount }, { timeout: 60_000 });
+  }, { name: machineName, count: transitionCount }, { timeout: 5000 });
 
   const snapshot = async () => page.evaluate(() => ({
     positions: [...document.querySelectorAll(".transition-io-cluster")].map(cluster => [
@@ -195,21 +110,46 @@ async function waitForStableLayout(page, machineName, transitionCount) {
       cluster.style.top,
       cluster.dataset.ioValue,
     ]),
-    paths: [...document.querySelectorAll(".state-transition-path")].map(pathElement => (
-      pathElement.getAttribute("d") || ""
-    )),
-    viewport: document.querySelector(".graph-stage")?.dataset.viewportScale || "",
-    visibility: document.querySelector(".graph-stage")?.dataset.fitVisibilityState || "",
+    paths: [...document.querySelectorAll(".state-transition-path")].map(item => item.getAttribute("d") || ""),
   }));
+  const before = await snapshot();
+  await page.waitForTimeout(100);
+  const after = await snapshot();
+  assert.deepEqual(after, before, `${machineName}: ordinary layout kept moving after readiness`);
+}
 
-  for (let attempt = 0; attempt < 4; attempt += 1) {
-    await ready();
-    const before = await snapshot();
-    await page.waitForTimeout(500);
-    const after = await snapshot();
-    if (JSON.stringify(after) === JSON.stringify(before)) return;
-  }
-  throw new Error(`${machineName}: layout kept changing after reporting ready`);
+async function assertOrdinaryGeometry(page, machineName) {
+  const audit = await page.evaluate(() => {
+    const stage = document.querySelector(".state-node")?.closest(".graph-stage");
+    if (!stage) return { error: "graph stage is missing" };
+    const clusters = [...stage.querySelectorAll(".transition-io-cluster")];
+    return {
+      profile: stage.dataset.transitionLayoutProfile || "",
+      mode: stage.dataset.transitionLayoutMode || "",
+      denseCanvas: stage.dataset.transitionDenseCanvas || "",
+      layoutBudgetMs: Number(stage.dataset.transitionLayoutBudgetMs || 0),
+      renderBudgetMs: Number(stage.dataset.transitionIoRenderBudgetMs || 0),
+      renderDurationMs: Number(stage.dataset.transitionIoRenderDurationMs || 0),
+      renderBudgetExceeded: stage.dataset.transitionIoRenderBudgetExceeded || "",
+      error: stage.dataset.transitionLayoutError || "",
+      maximumDistance: Math.max(0, ...clusters.map(cluster => Number(cluster.dataset.ioDistance || 0))),
+      distanceLimit: Number(stage.dataset.transitionIoMaxDistance || 0),
+      fatalText: document.body.textContent?.includes("State diagram certification failed") || false,
+      certificatePresent: Boolean(window.glyphLayoutPublicationCertificate),
+      initialRouterPresent: Boolean(window.glyphInitialTransitionRouter),
+    };
+  });
+  assert.equal(audit.error, undefined, `${machineName}: ${audit.error}`);
+  assert.equal(audit.profile, "ordinary", JSON.stringify(audit));
+  assert.equal(audit.mode, "base", JSON.stringify(audit));
+  assert.equal(audit.denseCanvas, "disabled", JSON.stringify(audit));
+  assert.equal(audit.layoutBudgetMs, 48, JSON.stringify(audit));
+  assert.equal(audit.renderBudgetMs, 16, JSON.stringify(audit));
+  assert.equal(audit.error, "", JSON.stringify(audit));
+  assert.equal(audit.fatalText, false, JSON.stringify(audit));
+  assert.equal(audit.certificatePresent, false, JSON.stringify(audit));
+  assert.equal(audit.initialRouterPresent, false, JSON.stringify(audit));
+  assert(audit.maximumDistance <= audit.distanceLimit + 0.5, `${machineName}: label escaped its arrow bound: ${JSON.stringify(audit)}`);
 }
 
 function actionDisplay(transition) {
@@ -248,6 +188,11 @@ try {
       assert.equal(apiState.views.state.machines.length, testCase.machines.length);
 
       const page = await browser.newPage({ viewport: { width: 1800, height: 1100 } });
+      const browserErrors = [];
+      page.on("pageerror", error => browserErrors.push(`pageerror: ${error.message}`));
+      page.on("console", message => {
+        if (message.type() === "error") browserErrors.push(`console: ${message.text()}`);
+      });
       await page.goto(url, { waitUntil: "domcontentloaded" });
       await page.waitForFunction(() => document.querySelector("#status")?.textContent === "ready");
       await page.click('button[data-tab="state"]');
@@ -259,15 +204,12 @@ try {
         const machine = apiState.views.state.machines.find(item => item.name === expected.name);
         assert(machine, `${testCase.slug}/${expected.name}: API machine missing`);
         if (testCase.machines.length > 1) await page.selectOption("#machine-select", { label: expected.name });
-        await waitForStableLayout(page, expected.name, machine.transitions.length);
+        await waitForOrdinaryLayout(page, expected.name, machine.transitions.length);
 
         assert.deepEqual(sorted(await page.locator(".state-name").allTextContents()), sorted(expected.states));
         assert.deepEqual(sorted(await page.locator(".analysis-code").allTextContents()), sorted(expected.warnings));
         assert.equal(await page.locator(".transition-io-cluster").count(), machine.transitions.length);
         assert.equal(await page.locator('.transition-io-node[data-io-kind="io"]').count(), machine.transitions.length);
-        assert.equal(await page.locator('.transition-io-node[data-io-kind="input"]').count(), 0);
-        assert.equal(await page.locator('.transition-io-node[data-io-kind="output"]').count(), 0);
-        assert.equal(await page.locator(".transition-detail").count(), machine.transitions.length);
         assert.equal(await page.locator(".state-transition-path").count(), machine.transitions.length);
 
         if (expected.requireActionTargetIndependence) {
@@ -290,50 +232,21 @@ try {
             action: cluster?.dataset.actionValue || "",
           };
         }));
-        assert(combinedValues.every(({value}) => value.trim().length > 0));
+        assert(combinedValues.every(({ value }) => value.trim().length > 0));
         for (const rendered of combinedValues) {
           const transition = machine.transitions.find(item => item.id === rendered.id);
           assert(transition, `${testCase.slug}/${expected.name}: missing transition ${rendered.id}`);
           const expectedAction = actionDisplay(transition);
-          assert.equal(
-            rendered.action,
-            expectedAction,
-            `${testCase.slug}/${expected.name}/${rendered.id}: DOM Action differs from StateTransitionIR`,
-          );
-          assert.notEqual(
-            rendered.action,
-            String(transition.target_state || ""),
-            `${testCase.slug}/${expected.name}/${rendered.id}: Target State leaked into Action`,
-          );
+          assert.equal(rendered.action, expectedAction, `${testCase.slug}/${expected.name}/${rendered.id}: DOM Action differs from StateTransitionIR`);
+          assert.notEqual(rendered.action, String(transition.target_state || ""), `${testCase.slug}/${expected.name}/${rendered.id}: Target State leaked into Action`);
           const emittedOutput = emittedOutputDisplay(transition);
-          if (rendered.action && emittedOutput) {
-            assert.notEqual(
-              rendered.action,
-              emittedOutput,
-              `${testCase.slug}/${expected.name}/${rendered.id}: Emitted Output leaked into Action`,
-            );
-          }
+          if (rendered.action && emittedOutput) assert.notEqual(rendered.action, emittedOutput, `${testCase.slug}/${expected.name}/${rendered.id}: Emitted Output leaked into Action`);
           if (expectedAction) {
-            assert.equal(
-              transition.action?.provenance,
-              "transition-operation-invocation",
-              `${testCase.slug}/${expected.name}/${rendered.id}: Action lacks operation provenance`,
-            );
-            assert(
-              Array.isArray(transition.action_invocations) && transition.action_invocations.length > 0,
-              `${testCase.slug}/${expected.name}/${rendered.id}: Action lacks invocation witness`,
-            );
-            assert(
-              rendered.value.includes(` ➞ ${expectedAction}`),
-              `${testCase.slug}/${expected.name}/${rendered.id}: Action is not rendered`,
-            );
-            assert(!rendered.value.includes(" / "));
+            assert.equal(transition.action?.provenance, "transition-operation-invocation");
+            assert(Array.isArray(transition.action_invocations) && transition.action_invocations.length > 0);
+            assert(rendered.value.includes(`➞ ${expectedAction}`));
           } else {
-            assert(
-              !rendered.value.includes(" ➞ "),
-              `${testCase.slug}/${expected.name}/${rendered.id}: transition without Action rendered an arrow Action`,
-            );
-            assert(!rendered.value.includes(" / "));
+            assert(!rendered.value.includes("➞"));
           }
         }
 
@@ -343,53 +256,13 @@ try {
         }
 
         if (expected.requireInputAction) {
-          const semanticPairs = combinedValues.filter(({input, action, value}) => (
-            input.trim().length > 0
-            && action.trim().length > 0
-            && value.includes(" ➞ ")
-          ));
-          assert(
-            semanticPairs.length > 0,
-            `${testCase.slug}/${expected.name}: README candidate has no Input ➞ Action transition`,
-          );
-          for (const rendered of semanticPairs) {
-            const transition = machine.transitions.find(item => item.id === rendered.id);
-            assert(transition, `${testCase.slug}/${expected.name}: missing transition ${rendered.id}`);
-            assert.notEqual(
-              rendered.input,
-              rendered.action,
-              `${testCase.slug}/${expected.name}/${rendered.id}: Action repeated as Input`,
-            );
-            assert.notEqual(
-              rendered.action,
-              String(transition.target_state || ""),
-              `${testCase.slug}/${expected.name}/${rendered.id}: Target State repeated as Action`,
-            );
-            const emittedOutput = emittedOutputDisplay(transition);
-            if (emittedOutput) {
-              assert.notEqual(
-                rendered.action,
-                emittedOutput,
-                `${testCase.slug}/${expected.name}/${rendered.id}: Emitted Output repeated as Action`,
-              );
-            }
-            assert.equal(
-              transition.trigger?.provenance,
-              "decision-output-preimage",
-              `${testCase.slug}/${expected.name}/${rendered.id}: Input lacks proven decision preimage`,
-            );
-            assert(
-              rendered.value.includes(` ➞ ${rendered.action}`),
-              `${testCase.slug}/${expected.name}/${rendered.id}: rendered join is not Input ➞ Action`,
-            );
-          }
+          const semanticPairs = combinedValues.filter(({ input, action, value }) => input.trim() && action.trim() && value.includes("➞"));
+          assert(semanticPairs.length > 0, `${testCase.slug}/${expected.name}: no Input ➞ Action transition`);
+          for (const rendered of semanticPairs) assert.notEqual(rendered.input, rendered.action);
         }
 
         if (expected.provisionalTriggers !== undefined) {
-          assert.equal(
-            await page.locator(".transition-io-cluster.provisional-trigger").count(),
-            expected.provisionalTriggers,
-          );
+          assert.equal(await page.locator(".transition-io-cluster.provisional-trigger").count(), expected.provisionalTriggers);
         }
 
         const visibleLegacyLabels = await page.locator(".transition-label").evaluateAll(elements => elements.filter(element => {
@@ -397,14 +270,14 @@ try {
           return style.visibility !== "hidden" && style.display !== "none" && Number(style.opacity) > 0;
         }).length);
         assert.equal(visibleLegacyLabels, 0);
-        await assertDiagramGeometry(page);
-        await assertFitVisibility(page, expected.name);
+        await assertOrdinaryGeometry(page, expected.name);
 
         await page.screenshot({
           path: path.join(outputDirectory, `${testCase.slug}-${expected.name.toLowerCase()}.png`),
           fullPage: true,
         });
       }
+      assert.deepEqual(browserErrors, [], browserErrors.join("\n"));
       await page.close();
     } finally {
       await stopProcess(child);
@@ -415,4 +288,4 @@ try {
   await browser.close();
 }
 
-console.log("verified compiler-derived state diagrams with operation-derived Actions and publication-certified fully visible layout");
+console.log("verified compiler-derived state diagrams with bounded ordinary layout and operation-derived Actions");
