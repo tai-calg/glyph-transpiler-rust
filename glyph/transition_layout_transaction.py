@@ -509,30 +509,34 @@ function samplePaths(stage){
   });
 }
 function pointInsideRect(point,rect,padding=2){return point.x>=rect.x-padding&&point.x<=rect.x+rect.width+padding&&point.y>=rect.y-padding&&point.y<=rect.y+rect.height+padding}
-function optionsFor(entry,stage,nodes,pathSamples){
-  const values=[],seen=new Set();
-  const anchors=entry.manual?[entry.anchor]:entry.anchors;
-  for(const anchor of anchors){
-    const preferred=entry.manual?entry.preferred:project(entry.preferred,anchor);
-    const candidateEntry={...entry,anchor,preferred};
-    for(const raw of candidatePoints(anchor,preferred)){
-      const point=feasiblePoint(raw,candidateEntry,stage);
-      if(!point)continue;
-      const rect=rectAt(entry.cluster,point);
-      if(!inside(rect,stage)||nodes.some(node=>intersects(rect,node)))continue;
-      const key=`${Math.round(point.x*10)}:${Math.round(point.y*10)}`;
-      if(seen.has(key))continue;
-      seen.add(key);
-      const displacement=Math.hypot(point.x-preferred.x,point.y-preferred.y);
-      const anchorDistance=Math.hypot(point.x-anchor.x,point.y-anchor.y);
-      const anchorShift=Math.abs((anchor.fraction??.5)-(entry.anchor.fraction??.5))*24;
-      const foreignEdgeHits=pathSamples.reduce((count,path)=>count+(path.id!==entry.id&&path.points.some(sample=>pointInsideRect(sample,rect))?1:0),0);
-      const score=displacement*(entry.manual?6:1)+anchorDistance*.02+anchorShift+foreignEdgeHits*36;
-      values.push({point,rect,score,foreignEdgeHits,anchor});
-    }
+function optionsAtAnchor(entry,anchor,preferred,stage,nodes,pathSamples){
+  const values=[],seen=new Set(),candidateEntry={...entry,anchor,preferred};
+  for(const raw of candidatePoints(anchor,preferred)){
+    const point=feasiblePoint(raw,candidateEntry,stage);
+    if(!point)continue;
+    const rect=rectAt(entry.cluster,point);
+    if(!inside(rect,stage)||nodes.some(node=>intersects(rect,node)))continue;
+    const key=`${Math.round(point.x*10)}:${Math.round(point.y*10)}`;
+    if(seen.has(key))continue;
+    seen.add(key);
+    const displacement=Math.hypot(point.x-preferred.x,point.y-preferred.y);
+    const anchorDistance=Math.hypot(point.x-anchor.x,point.y-anchor.y);
+    const anchorShift=Math.abs((anchor.fraction??.5)-(entry.anchor.fraction??.5))*24;
+    const foreignEdgeHits=pathSamples.reduce((count,path)=>count+(path.id!==entry.id&&path.points.some(sample=>pointInsideRect(sample,rect))?1:0),0);
+    const score=displacement*(entry.manual?6:1)+anchorDistance*.02+anchorShift+foreignEdgeHits*36;
+    values.push({point,rect,score,foreignEdgeHits,anchor});
   }
   values.sort((left,right)=>left.score-right.score||left.point.y-right.point.y||left.point.x-right.point.x);
   return values.slice(0,OPTION_LIMIT);
+}
+function optionsFor(entry,stage,nodes,pathSamples){
+  const primary=optionsAtAnchor(entry,entry.anchor,entry.preferred,stage,nodes,pathSamples);
+  if(primary.length||entry.manual)return primary;
+  for(const anchor of entry.anchors.slice(1)){
+    const values=optionsAtAnchor(entry,anchor,anchor,stage,nodes,pathSamples);
+    if(values.length)return values;
+  }
+  return[];
 }
 function layoutEntries(stage,data,machine){
   const clusters=[...stage.querySelectorAll(".transition-io-cluster")],nodes=[...stage.querySelectorAll(".state-node")].map(nodeRect);
