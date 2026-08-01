@@ -100,12 +100,19 @@ async function persist(record){
   if(!point){reject(record,manualPlacementViolation(record,requested)||"no-certifiable-position");return}
   delete record.cluster.dataset.manualIoRejected;
   record.cluster.dataset.manualIoAdjusted=String(Math.hypot(point.x-requested.x,point.y-requested.y)>0.5);
-  const data=await diagramState(),key=storageKey(data),saved=parseStored(key);saved[record.id]={x:point.x,y:point.y,dx:point.x-record.anchor.x,dy:point.y-record.anchor.y};writeStored(key,saved);
-  record.cluster.style.left=`${point.x}px`;record.cluster.style.top=`${point.y}px`;record.cluster.dataset.manualIo="true";record.cluster.dataset.ioDistance=String(Math.hypot(point.x-record.anchor.x,point.y-record.anchor.y));window.glyphTransitionLayoutTransaction?.schedule("manual-label-persisted",0);
+  const data=await diagramState(),key=storageKey(data),saved=parseStored(key);
+  saved[record.id]={x:point.x,y:point.y,dx:point.x-record.anchor.x,dy:point.y-record.anchor.y,anchorFraction:record.anchorFraction};
+  writeStored(key,saved);
+  record.cluster.style.left=`${point.x}px`;
+  record.cluster.style.top=`${point.y}px`;
+  record.cluster.dataset.anchorFraction=String(record.anchorFraction);
+  record.cluster.dataset.manualIo="true";
+  record.cluster.dataset.ioDistance=String(Math.hypot(point.x-record.anchor.x,point.y-record.anchor.y));
+  window.glyphTransitionLayoutTransaction?.schedule("manual-label-persisted",0);
 }
 async function resetCluster(cluster){const data=await diagramState(),key=storageKey(data),saved=parseStored(key),id=cluster.dataset.transitionId||"";if(id in saved){delete saved[id];writeStored(key,saved)}cluster.dataset.manualIo="false";delete cluster.dataset.manualIoRejected;delete cluster.dataset.manualIoAdjusted;window.glyphTransitionLayoutTransaction?.schedule("manual-label-reset",0)}
 function finish(event){if(!active||active.pointerId!==event.pointerId)return;const record=active;active=null;record.cluster.classList.remove("dragging-io");persist(record).catch(error=>report(error,"manual transition position persistence failed"))}
-document.addEventListener("pointerdown",event=>{const cluster=event.target?.closest?.(".transition-io-cluster");if(!cluster||event.button!==0)return;const stage=cluster.closest(".graph-stage");if(!stage||stage.dataset.transitionLayoutState!=="ready")return;select(cluster);cluster.classList.add("dragging-io");active={cluster,stage,id:cluster.dataset.transitionId||"",pointerId:event.pointerId,startX:event.clientX,startY:event.clientY,left:num(cluster.style.left),top:num(cluster.style.top),anchor:{x:num(cluster.dataset.anchorX),y:num(cluster.dataset.anchorY)},scale:scaleFor(stage),dragged:false}},true);
+document.addEventListener("pointerdown",event=>{const cluster=event.target?.closest?.(".transition-io-cluster");if(!cluster||event.button!==0)return;const stage=cluster.closest(".graph-stage");if(!stage||stage.dataset.transitionLayoutState!=="ready")return;select(cluster);cluster.classList.add("dragging-io");active={cluster,stage,id:cluster.dataset.transitionId||"",pointerId:event.pointerId,startX:event.clientX,startY:event.clientY,left:num(cluster.style.left),top:num(cluster.style.top),anchor:{x:num(cluster.dataset.anchorX),y:num(cluster.dataset.anchorY)},anchorFraction:clamp(num(cluster.dataset.anchorFraction)||.5,.18,.82),scale:scaleFor(stage),dragged:false}},true);
 document.addEventListener("pointermove",event=>{if(!active||active.pointerId!==event.pointerId)return;if(!active.dragged&&pointerDistance(active,event)<DRAG_THRESHOLD)return;active.dragged=true;const point=requestedPoint(active,event);if(!point)return;active.cluster.style.left=`${point.x}px`;active.cluster.style.top=`${point.y}px`;active.cluster.dataset.ioDistance=String(Math.hypot(point.x-active.anchor.x,point.y-active.anchor.y))},true);
 document.addEventListener("pointerup",finish,true);
 document.addEventListener("pointercancel",event=>{if(!active||active.pointerId!==event.pointerId)return;active.cluster.style.left=`${active.left}px`;active.cluster.style.top=`${active.top}px`;active.cluster.classList.remove("dragging-io");active=null},true);
