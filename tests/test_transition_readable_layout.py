@@ -26,14 +26,15 @@ class TransitionReadableLayoutTests(unittest.TestCase):
         self.assertNotIn("glyphTransitionNodeLayoutGuard?.requestLayout", html)
         self.assertNotIn("MutationObserver", html)
 
-    def test_prepared_app_installs_semantic_formatter_last(self) -> None:
+    def test_prepared_app_installs_semantic_formatter_before_fast_transaction(self) -> None:
         prepare_diagram_app()
         html = diagram_app.DIAGRAM_HTML
         semantic = html.index("glyph-transition-readable-layout-v1-script")
         exports = html.index("glyph-transition-readable-exports-v1-script")
-        readability = html.index("glyph-transition-label-readability-v1-script")
+        transaction = html.index("glyph-transition-layout-transaction-v1-script")
         self.assertGreater(semantic, exports)
-        self.assertGreater(semantic, readability)
+        self.assertLess(semantic, transaction)
+        self.assertNotIn("glyph-transition-label-readability-v1-script", html)
         self.assertIn("window.glyphTransitionReadableLayout", html)
 
 
