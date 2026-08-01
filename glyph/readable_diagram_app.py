@@ -27,6 +27,7 @@ from .transition_enabling_case_rendering import (
 from .transition_execution_context_selector import (
     enhance_transition_execution_context_selector_html,
 )
+from .transition_io_canonicalizer import enhance_transition_io_canonicalizer_html
 from .transition_io_clusters import enhance_transition_io_clusters_html
 from .transition_label_drag_guard import enhance_transition_label_drag_guard_html
 from .transition_layout_interaction_adapter import (
@@ -77,6 +78,7 @@ def _presentation_pipeline():
         enhance_diagram_locale_html,
         enhance_transition_execution_context_selector_html,
         enhance_transition_io_clusters_html,
+        enhance_transition_io_canonicalizer_html,
         enhance_transition_enabling_case_rendering_html,
         enhance_transition_node_layout_guard_html,
         enhance_transition_label_drag_guard_html,
