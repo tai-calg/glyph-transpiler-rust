@@ -1,9 +1,9 @@
 name: Update README State Snapshot Once
 
 on:
-  push:
+  pull_request:
     branches:
-      - agent/system-action-control-flow-completeness-v2
+      - main
     paths:
       - ".github/workflows/update-readme-state-snapshot-once.yml"
 
@@ -12,11 +12,13 @@ permissions:
 
 jobs:
   update:
+    if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.ref }}
           fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
@@ -39,4 +41,4 @@ jobs:
           git rm .github/workflows/update-readme-state-snapshot-once.yml
           git add docs/images/glyph-studio-state-transition.png
           git commit -m "Refresh expanded state diagram snapshot"
-          git push origin "HEAD:${GITHUB_REF_NAME}"
+          git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
