@@ -67,6 +67,19 @@ def test_transaction_contains_publication_grade_layout_phases() -> None:
     assert "await window.glyphTransitionEnablingCases?.apply?.()" in html
 
 
+def test_automatic_labels_explore_multiple_arrow_anchors_without_relaxing_tether() -> None:
+    html = enhance_transition_layout_transaction_html(
+        "<html><head></head><body></body></html>"
+    )
+
+    assert "function anchorFractions(preferred)" in html
+    assert "const anchors=anchorFractions(fraction).map(value=>anchorFor(stage,id,index,value))" in html
+    assert "const anchors=entry.manual?[entry.anchor]:entry.anchors" in html
+    assert "const point=option.point,anchor=option.anchor||entry.anchor" in html
+    assert "entry.cluster.dataset.ioDistance=String(Math.hypot(point.x-anchor.x,point.y-anchor.y))" in html
+    assert "const MAX_DISTANCE=96" in html
+
+
 def test_interaction_adapters_persist_only_real_drags() -> None:
     label_html = enhance_transition_layout_interaction_adapter_html(
         "<html><head></head><body></body></html>"
