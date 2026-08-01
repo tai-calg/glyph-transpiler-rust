@@ -13,6 +13,7 @@ let active=null,selected=null,stateCache=null,statePromise=null,stateAbort=null,
 const num=value=>Number.parseFloat(value||"0")||0;
 const scaleFor=stage=>window.glyphDiagramViewport?.scaleFor(stage)||num(stage?.dataset.viewportScale)||1;
 const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
+const publicationGuard=()=>window.glyphTransitionLabelDragGuard||null;
 function invalidateState(){stateVersion+=1;stateCache=null;statePromise=null;stateAbort?.abort();stateAbort=null}
 async function diagramState(){
   const live=typeof snapshot==="object"&&snapshot?snapshot:null;
@@ -80,29 +81,31 @@ function nearestCertifiablePoint(record,requested){
   candidates.sort((a,b)=>Math.hypot(a.x-requested.x,a.y-requested.y)-Math.hypot(b.x-requested.x,b.y-requested.y));
   return candidates.find(point=>!manualPlacementViolation(record,point))||null;
 }
-function reject(record,reason){
+function restoreRecord(record){
   record.cluster.style.left=`${record.left}px`;
   record.cluster.style.top=`${record.top}px`;
   record.cluster.dataset.ioDistance=String(Math.hypot(record.left-record.anchor.x,record.top-record.anchor.y));
+}
+function reject(record,reason){
+  restoreRecord(record);
   record.cluster.dataset.manualIo="false";
   record.cluster.dataset.manualIoRejected=reason;
-  window.glyphTransitionLayoutTransaction?.schedule("manual-label-rejected",0);
+  publicationGuard()?.schedule?.("manual-label-rejected");
 }
 async function persist(record){
-  if(!record.dragged)return;
-  await new Promise(resolve=>setTimeout(resolve,0));
+  if(!record.dragged||!record.finalPoint)return;
   if(destroyed||!record.cluster.isConnected||!record.stage.isConnected)return;
-  const current={x:num(record.cluster.style.left),y:num(record.cluster.style.top)},visualDistance=Math.hypot(current.x-record.left,current.y-record.top);
-  if(visualDistance<1)return;
-  const requested=feasible(current,record.anchor,record.cluster,record.stage);
+  const requested=feasible(record.finalPoint,record.anchor,record.cluster,record.stage);
   if(!requested){reject(record,"outside-tether");return}
   const point=nearestCertifiablePoint(record,requested);
   if(!point){reject(record,manualPlacementViolation(record,requested)||"no-certifiable-position");return}
   delete record.cluster.dataset.manualIoRejected;
   record.cluster.dataset.manualIoAdjusted=String(Math.hypot(point.x-requested.x,point.y-requested.y)>0.5);
-  const data=await diagramState(),key=storageKey(data),saved=parseStored(key);
+  const data=await diagramState();
+  if(destroyed||!record.cluster.isConnected||!record.stage.isConnected)return;
+  const key=storageKey(data),saved=parseStored(key);
   saved[record.id]={x:point.x,y:point.y,dx:point.x-record.anchor.x,dy:point.y-record.anchor.y,anchorFraction:record.anchorFraction};
-  writeStored(key,saved);
+  if(!writeStored(key,saved)){reject(record,"persistence-unavailable");return}
   record.cluster.style.left=`${point.x}px`;
   record.cluster.style.top=`${point.y}px`;
   record.cluster.dataset.anchorFraction=String(record.anchorFraction);
@@ -111,11 +114,45 @@ async function persist(record){
   window.glyphTransitionLayoutTransaction?.schedule("manual-label-persisted",0);
 }
 async function resetCluster(cluster){const data=await diagramState(),key=storageKey(data),saved=parseStored(key),id=cluster.dataset.transitionId||"";if(id in saved){delete saved[id];writeStored(key,saved)}cluster.dataset.manualIo="false";delete cluster.dataset.manualIoRejected;delete cluster.dataset.manualIoAdjusted;window.glyphTransitionLayoutTransaction?.schedule("manual-label-reset",0)}
-function finish(event){if(!active||active.pointerId!==event.pointerId)return;const record=active;active=null;record.cluster.classList.remove("dragging-io");persist(record).catch(error=>report(error,"manual transition position persistence failed"))}
-document.addEventListener("pointerdown",event=>{const cluster=event.target?.closest?.(".transition-io-cluster");if(!cluster||event.button!==0)return;const stage=cluster.closest(".graph-stage");if(!stage||stage.dataset.transitionLayoutState!=="ready")return;select(cluster);cluster.classList.add("dragging-io");active={cluster,stage,id:cluster.dataset.transitionId||"",pointerId:event.pointerId,startX:event.clientX,startY:event.clientY,left:num(cluster.style.left),top:num(cluster.style.top),anchor:{x:num(cluster.dataset.anchorX),y:num(cluster.dataset.anchorY)},anchorFraction:clamp(num(cluster.dataset.anchorFraction)||.5,.18,.82),scale:scaleFor(stage),dragged:false}},true);
-document.addEventListener("pointermove",event=>{if(!active||active.pointerId!==event.pointerId)return;if(!active.dragged&&pointerDistance(active,event)<DRAG_THRESHOLD)return;active.dragged=true;const point=requestedPoint(active,event);if(!point)return;active.cluster.style.left=`${point.x}px`;active.cluster.style.top=`${point.y}px`;active.cluster.dataset.ioDistance=String(Math.hypot(point.x-active.anchor.x,point.y-active.anchor.y))},true);
+function finish(event){
+  if(!active||active.pointerId!==event.pointerId)return;
+  event.preventDefault();event.stopImmediatePropagation();
+  const record=active;active=null;
+  record.cluster.releasePointerCapture?.(event.pointerId);
+  record.cluster.classList.remove("dragging-io");
+  persist(record).catch(error=>{
+    restoreRecord(record);
+    publicationGuard()?.schedule?.("manual-label-persist-failed");
+    report(error,"manual transition position persistence failed");
+  });
+}
+document.addEventListener("pointerdown",event=>{
+  const cluster=event.target?.closest?.(".transition-io-cluster");if(!cluster||event.button!==0)return;
+  const stage=cluster.closest(".graph-stage");if(!stage||stage.dataset.transitionLayoutState!=="ready")return;
+  event.preventDefault();event.stopImmediatePropagation();
+  select(cluster);cluster.classList.add("dragging-io");cluster.setPointerCapture?.(event.pointerId);
+  active={cluster,stage,id:cluster.dataset.transitionId||"",pointerId:event.pointerId,startX:event.clientX,startY:event.clientY,left:num(cluster.style.left),top:num(cluster.style.top),anchor:{x:num(cluster.dataset.anchorX),y:num(cluster.dataset.anchorY)},anchorFraction:clamp(num(cluster.dataset.anchorFraction)||.5,.18,.82),scale:scaleFor(stage),dragged:false,publicationInvalidated:false,finalPoint:null};
+},true);
+document.addEventListener("pointermove",event=>{
+  if(!active||active.pointerId!==event.pointerId)return;
+  event.preventDefault();event.stopImmediatePropagation();
+  if(!active.dragged&&pointerDistance(active,event)<DRAG_THRESHOLD)return;
+  const point=requestedPoint(active,event);if(!point)return;
+  if(!active.dragged){
+    active.publicationInvalidated=Boolean(publicationGuard()?.invalidate?.(active.stage,"manual-label-drag"));
+  }
+  active.dragged=true;active.finalPoint=point;
+  active.cluster.style.left=`${point.x}px`;active.cluster.style.top=`${point.y}px`;active.cluster.dataset.ioDistance=String(Math.hypot(point.x-active.anchor.x,point.y-active.anchor.y));
+},true);
 document.addEventListener("pointerup",finish,true);
-document.addEventListener("pointercancel",event=>{if(!active||active.pointerId!==event.pointerId)return;active.cluster.style.left=`${active.left}px`;active.cluster.style.top=`${active.top}px`;active.cluster.classList.remove("dragging-io");active=null},true);
+document.addEventListener("pointercancel",event=>{
+  if(!active||active.pointerId!==event.pointerId)return;
+  event.stopImmediatePropagation();
+  const record=active;active=null;
+  record.cluster.releasePointerCapture?.(event.pointerId);
+  restoreRecord(record);record.cluster.classList.remove("dragging-io");
+  if(record.publicationInvalidated)publicationGuard()?.schedule?.("manual-label-cancelled");
+},true);
 document.addEventListener("dblclick",event=>{const cluster=event.target?.closest?.(".transition-io-cluster");if(cluster)resetCluster(cluster).catch(error=>report(error,"manual transition position reset failed"))},true);
 document.addEventListener("change",event=>{if(event.target?.id==="machine-select"){selected=null;invalidateState()}});
 for(const eventName of["pagehide","beforeunload"]){window.addEventListener(eventName,()=>{destroyed=true;active=null;selected=null;invalidateState()},{once:true})}
@@ -126,7 +163,7 @@ window.glyphTransitionLayoutInteractionAdapter={marker:MARKER,version:4,validate
 
 
 def enhance_transition_layout_interaction_adapter_html(html: str) -> str:
-    """Own label drag and snap persisted placements to certified geometry."""
+    """Own label drag and persist the captured final point to certified geometry."""
 
     if _MARKER in html:
         return html
