@@ -76,7 +76,7 @@ def test_automatic_labels_use_alternate_arrow_anchors_only_as_fallback() -> None
     )
 
     assert "function anchorFractions(preferred)" in html
-    assert "const anchors=anchorFractions(fraction).map(value=>anchorFor(stage,id,index,value))" in html
+    assert "const routeAnchors=anchorFractions(routeFraction).map(value=>anchorFor(stage,id,index,value))" in html
     assert "const primary=optionsAtAnchor(entry,entry.anchor,entry.preferred,stage,nodes,pathSamples)" in html
     assert "if(primary.length||entry.manual)return primary" in html
     assert "for(const anchor of entry.anchors.slice(1))" in html
@@ -84,6 +84,26 @@ def test_automatic_labels_use_alternate_arrow_anchors_only_as_fallback() -> None
     assert "const point=option.point,anchor=option.anchor||entry.anchor" in html
     assert "entry.cluster.dataset.ioDistance=String(Math.hypot(point.x-anchor.x,point.y-anchor.y))" in html
     assert "const MAX_DISTANCE=96" in html
+
+
+def test_manual_labels_restore_against_the_saved_arrow_anchor() -> None:
+    transaction_html = enhance_transition_layout_transaction_html(
+        "<html><head></head><body></body></html>"
+    )
+    interaction_html = enhance_transition_layout_interaction_adapter_html(
+        "<html><head></head><body></body></html>"
+    )
+
+    assert "function storedAnchorFraction(record,anchors)" in transaction_html
+    assert "finite(record?.anchorFraction)" in transaction_html
+    assert "x:record.x-record.dx,y:record.y-record.dy" in transaction_html
+    assert "const fraction=storedAnchorFraction(record,routeAnchors)" in transaction_html
+    assert "entry.cluster.dataset.anchorFraction=String(anchorFraction)" in transaction_html
+    assert "dy:point.y-anchor.y,anchorFraction" in transaction_html
+
+    assert "anchorFraction:clamp(num(cluster.dataset.anchorFraction)||.5,.18,.82)" in interaction_html
+    assert "anchorFraction:record.anchorFraction" in interaction_html
+    assert "record.cluster.dataset.anchorFraction=String(record.anchorFraction)" in interaction_html
 
 
 def test_interaction_adapters_persist_only_real_drags() -> None:
