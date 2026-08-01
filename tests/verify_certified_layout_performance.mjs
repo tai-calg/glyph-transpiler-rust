@@ -67,7 +67,7 @@ async function layoutState(page) {
       transactionProfile: transaction?.profile || "",
       transactionBudgetMs: Number(transaction?.budgetMs || 0),
       maxFrames: Number(transaction?.maxFrames || 0),
-      maxRetries: Number(transaction?.maxRetries || -1),
+      maxRetries: Number(transaction?.maxRetries ?? -1),
       requestedGeneration: Number(transaction?.generation || 0),
       completedGeneration: Number(transaction?.completedGeneration || 0),
       audit: transaction?.audit?.() || null,
