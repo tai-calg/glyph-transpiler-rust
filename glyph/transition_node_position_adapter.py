@@ -6,7 +6,7 @@ _MARKER = "glyph-transition-node-position-adapter-v1"
 _SCRIPT = r"""
 <script id="glyph-transition-node-position-adapter-v1-script">
 (()=>{
-const MARKER="glyph-transition-node-position-adapter-v1",DRAG_THRESHOLD=3;
+const MARKER="glyph-transition-node-position-adapter-v1",DRAG_THRESHOLD=3,NODE_CLEARANCE=96;
 const POSITION_KEY_PREFIX="glyph.diagram.positions.v1:";
 let active=null,stateCache=null,statePromise=null,stateAbort=null,stateVersion=0,lastStage=null,restoreGeneration=0,destroyed=false;
 const num=value=>Number.parseFloat(value||"0")||0;
@@ -96,6 +96,30 @@ function select(node){
   node?.classList.add("selected-node");
 }
 function pointerDistance(record,event){return Math.hypot(event.clientX-record.startX,event.clientY-record.startY)}
+function positionIsClear(record,left,top){
+  const right=left+record.node.offsetWidth,bottom=top+record.node.offsetHeight;
+  return[...record.stage.querySelectorAll(".state-node")].every(other=>{
+    if(other===record.node)return true;
+    const otherLeft=other.offsetLeft,otherTop=other.offsetTop;
+    const otherRight=otherLeft+other.offsetWidth,otherBottom=otherTop+other.offsetHeight;
+    return right+NODE_CLEARANCE<=otherLeft
+      || otherRight+NODE_CLEARANCE<=left
+      || bottom+NODE_CLEARANCE<=otherTop
+      || otherBottom+NODE_CLEARANCE<=top;
+  });
+}
+function constrainPosition(record,left,top){
+  if(positionIsClear(record,left,top))return{left,top,constrained:false};
+  for(let step=23;step>=0;step-=1){
+    const ratio=step/24;
+    const candidateLeft=record.startLeft+(left-record.startLeft)*ratio;
+    const candidateTop=record.startTop+(top-record.startTop)*ratio;
+    if(positionIsClear(record,candidateLeft,candidateTop)){
+      return{left:candidateLeft,top:candidateTop,constrained:true};
+    }
+  }
+  return{left:record.startLeft,top:record.startTop,constrained:true};
+}
 function moveActive(event){
   if(!active||active.pointerId!==event.pointerId)return false;
   if(!active.moved&&pointerDistance(active,event)<DRAG_THRESHOLD)return false;
@@ -107,8 +131,13 @@ function moveActive(event){
   const top=active.startTop+(event.clientY-active.startY)/scale;
   const boundedLeft=clamp(left,8,Math.max(8,width-active.node.offsetWidth-8));
   const boundedTop=clamp(top,8,Math.max(8,height-active.node.offsetHeight-8));
-  active.node.style.left=`${Math.round(boundedLeft/grid)*grid}px`;
-  active.node.style.top=`${Math.round(boundedTop/grid)*grid}px`;
+  const requestedLeft=Math.round(boundedLeft/grid)*grid;
+  const requestedTop=Math.round(boundedTop/grid)*grid;
+  const position=constrainPosition(active,requestedLeft,requestedTop);
+  active.node.style.left=`${position.left}px`;
+  active.node.style.top=`${position.top}px`;
+  active.stage.dataset.transitionNodeClearance=String(NODE_CLEARANCE);
+  active.stage.dataset.transitionNodeDragConstrained=position.constrained?"true":"false";
   return true;
 }
 async function persist(record){
@@ -213,9 +242,21 @@ document.addEventListener("keydown",event=>{
   const dy=event.key==="ArrowUp"?-step:event.key==="ArrowDown"?step:0;
   const width=Number.parseFloat(stage.style.width||"")||stage.scrollWidth;
   const height=Number.parseFloat(stage.style.height||"")||stage.scrollHeight;
-  node.style.left=`${clamp(num(node.style.left)+dx,8,Math.max(8,width-node.offsetWidth-8))}px`;
-  node.style.top=`${clamp(num(node.style.top)+dy,8,Math.max(8,height-node.offsetHeight-8))}px`;
-  const record={node,stage,positions:snapshot(stage)};
+  const record={
+    node,
+    stage,
+    startLeft:num(node.style.left),
+    startTop:num(node.style.top),
+  };
+  const requestedLeft=clamp(record.startLeft+dx,8,Math.max(8,width-node.offsetWidth-8));
+  const requestedTop=clamp(record.startTop+dy,8,Math.max(8,height-node.offsetHeight-8));
+  const position=constrainPosition(record,requestedLeft,requestedTop);
+  if(position.left===record.startLeft&&position.top===record.startTop)return;
+  node.style.left=`${position.left}px`;
+  node.style.top=`${position.top}px`;
+  stage.dataset.transitionNodeClearance=String(NODE_CLEARANCE);
+  stage.dataset.transitionNodeDragConstrained=position.constrained?"true":"false";
+  record.positions=snapshot(stage);
   queueMicrotask(()=>persist(record).catch(error=>report(error,"transition node keyboard persistence failed")));
 },true);
 document.addEventListener("change",event=>{
@@ -239,7 +280,7 @@ for(const eventName of["pagehide","beforeunload"]){
 }
 lastStage=document.querySelector(".state-node")?.closest(".graph-stage")||null;
 scheduleRestore(lastStage,0);
-window.glyphTransitionNodePositionAdapter={marker:MARKER,version:4,restore:()=>scheduleRestore(null,0)};
+window.glyphTransitionNodePositionAdapter={marker:MARKER,version:5,restore:()=>scheduleRestore(null,0)};
 })();
 </script>
 """
