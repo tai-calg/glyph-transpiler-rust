@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import ast
 from pathlib import Path
 import unittest
 
 from glyph.compilation import CompilationPipeline
+from glyph.default_workspace import DEFAULT_SOURCE
 from glyph.io_state_views import build_io_state_views
 from glyph.transition_analysis.evidence_projection import EvidenceProjectionMode
 from glyph.transition_analysis.public_effect_contracts import (
@@ -18,19 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def _builtin_default_source() -> str:
-    tree = ast.parse((ROOT / "glyph.py").read_text(encoding="utf-8"))
-    for node in tree.body:
-        if not isinstance(node, ast.Assign):
-            continue
-        if not any(
-            isinstance(target, ast.Name) and target.id == "DEFAULT_SOURCE"
-            for target in node.targets
-        ):
-            continue
-        value = ast.literal_eval(node.value)
-        if isinstance(value, str):
-            return value
-    raise AssertionError("glyph.py DEFAULT_SOURCE is unavailable")
+    return DEFAULT_SOURCE
 
 
 def _program_source(source_id: str, source_path: str | None) -> str:
