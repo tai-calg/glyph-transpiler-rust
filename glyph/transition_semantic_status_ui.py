@@ -74,7 +74,8 @@ function updateCluster(cluster,semantic,strict){
   changed=setDataset(cluster,"rtaiSemanticReason",semantic.reason)||changed;
   const title=`${semantic.label}: ${semantic.reason}`;
   if(cluster.dataset.rtaiSemanticTitle!==title){cluster.dataset.rtaiSemanticTitle=title;changed=true}
-  if(cluster.classList.toggle("rtai-semantic-badge-visible",strict)!==strict)changed=true;
+  const badgeVisible=cluster.classList.contains("rtai-semantic-badge-visible");
+  if(badgeVisible!==strict){cluster.classList.toggle("rtai-semantic-badge-visible",strict);changed=true}
   return changed;
 }
 function clearCluster(cluster){
