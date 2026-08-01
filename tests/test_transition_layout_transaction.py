@@ -53,6 +53,8 @@ def test_transaction_contains_publication_grade_layout_phases() -> None:
 
     assert "SEARCH_BUDGET_MS=450" in html
     assert "SEARCH_STEPS=220000" in html
+    assert "LABEL_TIGHT_WIDTH=86" in html
+    assert "{maxLineWidth:LABEL_TIGHT_WIDTH,growth:1.32}" in html
     assert "splitByWidth" in html
     assert "renderedCanonical" in html
     assert "feasiblePoint" in html
