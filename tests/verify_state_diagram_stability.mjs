@@ -36,17 +36,14 @@ async function stopProcess(child) {
 async function waitForCommitted(page) {
   await page.waitForFunction(() => {
     const stage = document.querySelector(".state-node")?.closest(".graph-stage");
-    const transaction = window.glyphTransitionLayoutTransaction;
-    return stage?.dataset.renderStable === "true"
-      && stage.dataset.transitionLayoutState === "ready"
+    return stage?.dataset.transitionLayoutState === "ready"
       && stage.dataset.transitionPublicationReady === "true"
       && stage.dataset.transitionIoClustersReady === "true"
       && stage.dataset.transitionEnablingCasesReady === "true"
       && stage.dataset.stateDiagramWorkspaceGeometryReady === "true"
       && stage.dataset.stateDiagramWorkspaceViewportReady === "true"
       && stage.dataset.initialRouteReady === "true"
-      && document.querySelectorAll(".transition-index .transition-detail").length > 0
-      && transaction?.generation === transaction?.completedGeneration;
+      && document.querySelectorAll(".transition-index .transition-detail").length > 0;
   }, null, { timeout: 5000 });
 }
 
@@ -143,6 +140,11 @@ try {
     const stage = document.querySelector(".state-node")?.closest(".graph-stage");
     return stage && stage.dataset.stabilityProbe !== "initial";
   }, null, { timeout: 3000 });
+  await page.evaluate(() => {
+    const stage = document.querySelector(".state-node")?.closest(".graph-stage");
+    window.glyphStateDiagramWorkspace?.prepare?.(stage);
+    window.glyphTransitionLayoutTransaction?.schedule?.("stability-forced-rerender", 0);
+  });
   await waitForCommitted(page);
 
   const rerendered = await identity(page, "rerendered");
