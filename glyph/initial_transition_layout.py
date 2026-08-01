@@ -210,6 +210,18 @@ _SCRIPT = r"""
     stage.dataset.transitionPublicationReady = "false";
   }
 
+  function completeRoute(machine, token, details) {
+    completedGeneration = token;
+    document.dispatchEvent(new CustomEvent("glyph-initial-transition-route-ready", {
+      detail: {
+        ...details,
+        machine: machine.name,
+        generation: token,
+        marker: MARKER,
+      },
+    }));
+  }
+
   async function applyRouting(token) {
     const started = performance.now();
     const stage = document.querySelector(".state-node")?.closest(".graph-stage");
@@ -245,7 +257,15 @@ _SCRIPT = r"""
       stage.dataset.initialRouteReady = "true";
       stage.dataset.initialRouteCacheHit = "true";
       stage.dataset.initialRouteDurationMs = (performance.now() - started).toFixed(2);
-      completedGeneration = token;
+      completeRoute(machine, token, {
+        side: initialPath.dataset.routeSide || dot.dataset.routeSide || "",
+        crossings: Number(initialPath.dataset.routeCrossings || 0),
+        clearance: Number(initialPath.dataset.routeClearance || 0),
+        audited: 0,
+        yields: 0,
+        maxSliceMs: 0,
+        cacheHit: true,
+      });
       return;
     }
 
@@ -319,19 +339,15 @@ _SCRIPT = r"""
     stage.dataset.initialRouteYieldCount = String(result.yields);
     stage.dataset.initialRouteMaxSliceMs = result.maxSliceMs.toFixed(2);
     stage.dataset.initialRouteDurationMs = (performance.now() - started).toFixed(2);
-    completedGeneration = token;
-    document.dispatchEvent(new CustomEvent("glyph-initial-transition-route-ready", {
-      detail: {
-        machine: machine.name,
-        side: best.item.candidate.side,
-        crossings: finalCertificate.crossings,
-        clearance: finalCertificate.clearance,
-        audited,
-        yields: result.yields,
-        maxSliceMs: result.maxSliceMs,
-        marker: MARKER,
-      },
-    }));
+    completeRoute(machine, token, {
+      side: best.item.candidate.side,
+      crossings: finalCertificate.crossings,
+      clearance: finalCertificate.clearance,
+      audited,
+      yields: result.yields,
+      maxSliceMs: result.maxSliceMs,
+      cacheHit: false,
+    });
   }
 
   async function drain() {
