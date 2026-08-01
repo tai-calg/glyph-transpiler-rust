@@ -8,16 +8,23 @@ _STYLE = r"""
 .editor-wrap{
   grid-template-columns:auto minmax(0,1fr)!important;
 }
-.identifier-editor-layer{
+.editor-wrap>.lines{
+  grid-column:1;
+  grid-row:1;
+}
+.identifier-highlight-surface{
   position:relative;
+  z-index:0;
+  grid-column:2;
+  grid-row:1;
   min-width:0;
   min-height:0;
   overflow:hidden;
   background:#0b1018;
+  pointer-events:none;
 }
 .identifier-highlight-layer{
   position:absolute;
-  z-index:0;
   top:0;
   left:0;
   margin:0;
@@ -41,18 +48,21 @@ _STYLE = r"""
   background:rgba(148,163,184,.24);
   box-shadow:0 0 0 1px rgba(148,163,184,.13);
 }
-.identifier-editor-layer>.editor{
-  position:absolute;
+.editor-wrap>.editor{
+  position:relative;
   z-index:1;
-  inset:0;
+  grid-column:2;
+  grid-row:1;
+  min-width:0;
+  min-height:0;
   background:transparent!important;
   caret-color:var(--text);
 }
-.identifier-editor-layer[data-identifier=""] .identifier-highlight-layer mark{
+.identifier-highlight-surface[data-identifier=""] .identifier-highlight-layer mark{
   background:transparent;
   box-shadow:none;
 }
-.theme-monochrome .identifier-editor-layer{background:#fff!important}
+.theme-monochrome .identifier-highlight-surface{background:#fff!important}
 .theme-monochrome .identifier-highlight-layer mark{
   background:rgba(0,0,0,.12)!important;
   box-shadow:0 0 0 1px rgba(0,0,0,.14)!important;
@@ -68,19 +78,20 @@ const IDENTIFIER=/^[A-Za-z_][A-Za-z0-9_]*$/;
 const SOURCE_IDENTIFIER=/[A-Za-z_][A-Za-z0-9_]*/g;
 const sourceEditor=document.getElementById("editor");
 if(!sourceEditor||sourceEditor.dataset.identifierHighlightReady==="true")return;
-const originalParent=sourceEditor.parentElement;
-const layer=document.createElement("div");
-layer.className="identifier-editor-layer";
+const parent=sourceEditor.parentElement;
+const surface=document.createElement("div");
+surface.className="identifier-highlight-surface";
 const highlight=document.createElement("pre");
 highlight.className="identifier-highlight-layer";
 highlight.id="identifier-highlight-layer";
 highlight.setAttribute("aria-hidden","true");
-originalParent.insertBefore(layer,sourceEditor);
-layer.append(highlight,sourceEditor);
+surface.append(highlight);
+parent.insertBefore(surface,sourceEditor);
 sourceEditor.dataset.identifierHighlightReady="true";
-let frame=0,lastValue="",lastStart=-1,lastEnd=-1,currentIdentifier="",matchCount=0;
+let frame=0,lastValue="",lastStart=-1,lastEnd=-1,lastFocused=false,currentIdentifier="",matchCount=0;
 const esc=value=>String(value??"").replace(/[&<>]/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[char]));
-function identifierAt(value,start,end){
+function identifierAt(value,start,end,focused){
+  if(!focused)return"";
   if(start!==end){
     const selected=value.slice(start,end);
     return IDENTIFIER.test(selected)?selected:"";
@@ -113,26 +124,26 @@ function syncGeometry(){
 }
 function render(force=false){
   frame=0;
-  const value=sourceEditor.value,start=sourceEditor.selectionStart||0,end=sourceEditor.selectionEnd||0;
-  if(!force&&value===lastValue&&start===lastStart&&end===lastEnd){syncGeometry();return}
-  const identifier=identifierAt(value,start,end);
+  const value=sourceEditor.value,start=sourceEditor.selectionStart||0,end=sourceEditor.selectionEnd||0,focused=document.activeElement===sourceEditor;
+  if(!force&&value===lastValue&&start===lastStart&&end===lastEnd&&focused===lastFocused){syncGeometry();return}
+  const identifier=identifierAt(value,start,end,focused);
   currentIdentifier=identifier;
   matchCount=0;
   highlight.innerHTML=renderHtml(value,identifier);
-  layer.dataset.identifier=identifier;
-  layer.dataset.identifierMatchCount=String(matchCount);
+  surface.dataset.identifier=identifier;
+  surface.dataset.identifierMatchCount=String(matchCount);
   sourceEditor.dataset.activeIdentifier=identifier;
   sourceEditor.dataset.identifierMatchCount=String(matchCount);
-  lastValue=value;lastStart=start;lastEnd=end;
+  lastValue=value;lastStart=start;lastEnd=end;lastFocused=focused;
   syncGeometry();
   document.dispatchEvent(new CustomEvent("glyph-editor-identifier-highlighted",{detail:{marker:MARKER,identifier,matchCount}}));
 }
 function schedule(force=false){
-  if(force){lastValue="\u0000"}
+  if(force)lastValue="\u0000";
   if(frame)return;
   frame=requestAnimationFrame(()=>render(force));
 }
-for(const eventName of["input","keyup","mouseup","select","click","focus"]){sourceEditor.addEventListener(eventName,()=>schedule())}
+for(const eventName of["input","keyup","mouseup","select","click","focus","blur"]){sourceEditor.addEventListener(eventName,()=>schedule())}
 sourceEditor.addEventListener("scroll",syncGeometry,{passive:true});
 document.addEventListener("selectionchange",()=>{if(document.activeElement===sourceEditor)schedule()});
 const status=document.getElementById("status");
@@ -142,7 +153,7 @@ for(const eventName of["glyph-locale-changed","glyph-transition-layout-transacti
 schedule(true);
 window.glyphEditorIdentifierHighlight={
   marker:MARKER,
-  version:1,
+  version:2,
   identifier:()=>currentIdentifier,
   matchCount:()=>matchCount,
   refresh:()=>schedule(true),
@@ -153,7 +164,7 @@ window.glyphEditorIdentifierHighlight={
 
 
 def enhance_editor_identifier_highlight_html(html: str) -> str:
-    """Highlight every exact lexical occurrence of the identifier at the caret or selection."""
+    """Highlight every exact lexical occurrence of the focused identifier."""
 
     if _MARKER in html:
         return html
