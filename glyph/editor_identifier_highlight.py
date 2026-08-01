@@ -152,7 +152,7 @@ for(const eventName of["glyph-locale-changed","glyph-transition-layout-transacti
 schedule(true);
 window.glyphEditorIdentifierHighlight={
   marker:MARKER,
-  version:3,
+  version:2,
   identifier:()=>currentIdentifier,
   matchCount:()=>matchCount,
   refresh:()=>schedule(true),
