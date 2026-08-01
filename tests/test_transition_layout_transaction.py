@@ -38,6 +38,7 @@ def test_transaction_is_strictly_bounded_and_preserves_base_geometry() -> None:
         "MAX_RETRIES=0",
         'stage.dataset.transitionLayoutProfile="ordinary"',
         'stage.dataset.transitionLayoutMode="base"',
+        'stage.dataset.transitionDenseCanvas="disabled"',
         'stage.dataset.transitionPublicationReady="true"',
         "requestAndWait",
         'geometryOwner:"base-renderer"',
