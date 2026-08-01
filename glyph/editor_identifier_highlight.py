@@ -5,20 +5,10 @@ _MARKER = "glyph-editor-identifier-highlight-v1"
 
 _STYLE = r"""
 <style id="glyph-editor-identifier-highlight-v1-style">
-.editor-wrap{
-  grid-template-columns:auto minmax(0,1fr)!important;
-}
-.editor-wrap>.lines{
-  grid-column:1;
-  grid-row:1;
-}
+.editor-wrap{position:relative}
 .identifier-highlight-surface{
-  position:relative;
+  position:absolute;
   z-index:0;
-  grid-column:2;
-  grid-row:1;
-  min-width:0;
-  min-height:0;
   overflow:hidden;
   background:#0b1018;
   pointer-events:none;
@@ -48,22 +38,26 @@ _STYLE = r"""
   background:rgba(148,163,184,.24);
   box-shadow:0 0 0 1px rgba(148,163,184,.13);
 }
+.editor-wrap>.lines{
+  position:relative;
+  z-index:2;
+}
 .editor-wrap>.editor{
   position:relative;
   z-index:1;
-  grid-column:2;
-  grid-row:1;
-  min-width:0;
-  min-height:0;
   background:transparent!important;
   caret-color:var(--text);
+}
+.editor-wrap>.editor::selection{
+  background:rgba(148,163,184,.30);
 }
 .identifier-highlight-surface[data-identifier=""] .identifier-highlight-layer mark{
   background:transparent;
   box-shadow:none;
 }
 .theme-monochrome .identifier-highlight-surface{background:#fff!important}
-.theme-monochrome .identifier-highlight-layer mark{
+.theme-monochrome .identifier-highlight-layer mark,
+.theme-monochrome .editor-wrap>.editor::selection{
   background:rgba(0,0,0,.12)!important;
   box-shadow:0 0 0 1px rgba(0,0,0,.14)!important;
 }
@@ -118,6 +112,11 @@ function renderHtml(value,identifier){
   return html||"\u200b";
 }
 function syncGeometry(){
+  const parentRect=parent.getBoundingClientRect(),editorRect=sourceEditor.getBoundingClientRect();
+  surface.style.left=`${editorRect.left-parentRect.left}px`;
+  surface.style.top=`${editorRect.top-parentRect.top}px`;
+  surface.style.width=`${editorRect.width}px`;
+  surface.style.height=`${editorRect.height}px`;
   highlight.style.width=`${Math.max(sourceEditor.clientWidth,sourceEditor.scrollWidth)}px`;
   highlight.style.height=`${Math.max(sourceEditor.clientHeight,sourceEditor.scrollHeight)}px`;
   highlight.style.transform=`translate(${-sourceEditor.scrollLeft}px,${-sourceEditor.scrollTop}px)`;
@@ -153,7 +152,7 @@ for(const eventName of["glyph-locale-changed","glyph-transition-layout-transacti
 schedule(true);
 window.glyphEditorIdentifierHighlight={
   marker:MARKER,
-  version:2,
+  version:3,
   identifier:()=>currentIdentifier,
   matchCount:()=>matchCount,
   refresh:()=>schedule(true),
