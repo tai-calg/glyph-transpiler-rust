@@ -302,7 +302,11 @@ def _unconnected_system(
     signatures: dict[str, dict[str, object]],
     bound: set[str],
 ) -> dict[str, object] | None:
-    remaining = [item for name, item in signatures.items() if name not in bound]
+    remaining = [
+        item
+        for name, item in signatures.items()
+        if name not in bound and not name.startswith("__glyph_")
+    ]
     if not remaining:
         return None
     return {
