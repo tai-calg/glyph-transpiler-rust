@@ -60,7 +60,7 @@ async function waitForOrdinary(page, machineName, transitionCount) {
   }, { name: machineName, count: transitionCount }, { timeout: 5000 });
 
   const snapshot = async () => page.evaluate(() => ({
-    clusters: [...document.querySelectorAll(".transition-io-cluster")].map(item => [item.dataset.transitionId, item.style.left, item.style.top, item.dataset.ioValue]),
+    clusters: [...document.querySelectorAll(".transition-io-cluster")].map(item => [item.dataset.transitionId, item.style.left, item.style.top]),
     paths: [...document.querySelectorAll(".state-transition-path")].map(item => item.getAttribute("d") || ""),
   }));
   const before = await snapshot();
