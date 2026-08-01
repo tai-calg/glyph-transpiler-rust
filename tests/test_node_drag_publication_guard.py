@@ -24,6 +24,7 @@ def test_guard_exposes_fail_closed_publication_capability() -> None:
     assert 'stage.dataset.transitionIoCollisionSolved = "transaction-pending"' in html
     assert 'stage.dataset.layoutCertificateRequestState = "invalidated"' in html
     assert 'window.glyphTransitionLayoutTransaction?.schedule?.(reason, 0)' in html
+    assert 'interactionOwner: "glyph-transition-node-position-adapter-v7"' in html
     assert "ownsPointerEvents: false" in html
     assert "ownsKeyboardEvents: false" in html
     assert "version: 3" in html
