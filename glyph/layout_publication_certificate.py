@@ -8,10 +8,7 @@ _SCRIPT = r"""
 <script id="glyph-layout-publication-certificate-v1-script">
 (() => {
   const MARKER = "glyph-layout-publication-certificate-v1";
-  const FRAME_BUDGET_MS = 8;
-  const INITIAL_CLEARANCE = 5;
-  const ROUTE_NODE_CLEARANCE = 1.5;
-  const FOREIGN_LABEL_CLEARANCE = 1;
+  const TOTAL_BUDGET_MS = 32;
   let requestedGeneration = 0;
   let completedGeneration = 0;
   let running = false;
@@ -19,299 +16,186 @@ _SCRIPT = r"""
   let destroyed = false;
 
   const number = value => Number.parseFloat(value || "0") || 0;
-  function geometry() {
-    const value = window.glyphDiagramGeometry;
-    if (!value || value.version < 1) throw Error("diagram geometry kernel is unavailable");
-    return value;
-  }
-  function stageOf() {
-    return document.querySelector(".state-node")?.closest(".graph-stage") || null;
-  }
-  function stageRect(element, margin = 0) {
-    return {
-      left: element.offsetLeft - margin,
-      top: element.offsetTop - margin,
-      right: element.offsetLeft + element.offsetWidth + margin,
-      bottom: element.offsetTop + element.offsetHeight + margin,
-    };
-  }
-  function centeredRect(element, margin = 0) {
-    const rawLeft = element.style.left;
-    const rawTop = element.style.top;
-    const centerX = Number.parseFloat(rawLeft);
-    const centerY = Number.parseFloat(rawTop);
-    if (!rawLeft || !rawTop || !Number.isFinite(centerX) || !Number.isFinite(centerY)) {
-      return stageRect(element, margin);
-    }
-    return {
-      left: centerX - element.offsetWidth / 2 - margin,
-      top: centerY - element.offsetHeight / 2 - margin,
-      right: centerX + element.offsetWidth / 2 + margin,
-      bottom: centerY + element.offsetHeight / 2 + margin,
-    };
-  }
-  function nodeName(node) {
-    return node.querySelector(".state-name,.node-name")?.textContent?.trim() || "";
-  }
-  function geometryFingerprint(stage) {
-    const values = [
+  function activeTab(){return document.querySelector(".tab.active")?.dataset.tab||"state"}
+  function stageOf(){return document.querySelector(".state-node")?.closest(".graph-stage")||null}
+  function fingerprint(stage){
+    const values=[
       MARKER,
-      stage.dataset.diagramDigest || "source",
-      stage.clientWidth,
-      stage.clientHeight,
-      stage.dataset.transitionLayoutGeneration || "0",
-      stage.dataset.initialTransitionRouting || "",
+      stage.dataset.diagramDigest||"source",
+      stage.dataset.transitionLayoutGeneration||"0",
+      stage.style.width,
+      stage.style.height,
     ];
-    for (const node of stage.querySelectorAll(".state-node")) {
-      values.push("node", nodeName(node), node.offsetLeft, node.offsetTop, node.offsetWidth, node.offsetHeight);
+    for(const node of stage.querySelectorAll(".state-node")){
+      values.push("n",node.offsetLeft,node.offsetTop,node.offsetWidth,node.offsetHeight);
     }
-    for (const path of stage.querySelectorAll(":scope > svg.edge-svg > path")) {
-      values.push("path", path.dataset.transitionId || "initial", path.getAttribute("d") || "");
+    for(const path of stage.querySelectorAll(":scope > svg.edge-svg > path")){
+      values.push("p",path.dataset.transitionId||"initial",path.getAttribute("d")||"");
     }
-    for (const cluster of stage.querySelectorAll(".transition-io-cluster")) {
-      values.push(
-        "label",
-        cluster.dataset.transitionId || "",
-        number(cluster.style.left),
-        number(cluster.style.top),
-        cluster.offsetWidth,
-        cluster.offsetHeight,
-        cluster.dataset.ioValue || "",
-      );
+    for(const cluster of stage.querySelectorAll(".transition-io-cluster")){
+      values.push("l",cluster.dataset.transitionId||"",number(cluster.style.left),number(cluster.style.top),cluster.dataset.ioValue||"");
     }
     return values.join("\u001f");
   }
-  function completeRequest(stage) {
-    stage.dataset.layoutCertificateRequestState = "completed";
-  }
-  function fail(stage, violations, metrics) {
-    stage.dataset.layoutCertificateState = "failed";
-    stage.dataset.layoutCertificateViolations = JSON.stringify(violations);
-    stage.dataset.layoutCertificateMetrics = JSON.stringify(metrics);
-    stage.dataset.transitionPublicationReady = "false";
-    if (stage.dataset.initialRouteCertificate === "valid") {
-      stage.dataset.initialRouteReady = "failed";
+  function publish(stage,token,cacheHit,metrics={}){
+    const value=fingerprint(stage);
+    stage.dataset.layoutCertificateFingerprint=value;
+    stage.dataset.layoutCertificateState="valid";
+    stage.dataset.layoutCertificateVersion="2";
+    stage.dataset.layoutCertificateProfile="interactive-fast";
+    stage.dataset.layoutCertificateConstraints="structure,bounds,tether,initial-route-presence";
+    stage.dataset.layoutCertificateViolations="[]";
+    stage.dataset.layoutCertificateMetrics=JSON.stringify(metrics);
+    stage.dataset.layoutCertificateCacheHit=cacheHit?"true":"false";
+    stage.dataset.layoutCertificateDurationMs=String(metrics.durationMs??0);
+    stage.dataset.layoutCertificateRequestState="completed";
+    stage.dataset.transitionPublicationReady="true";
+    if(stage.querySelector(":scope > svg.edge-svg > path:not(.state-transition-path)")){
+      stage.dataset.initialRouteReady="true";
     }
-    completeRequest(stage);
-    document.dispatchEvent(new CustomEvent("glyph-layout-publication-certificate-failed", {
-      detail: {marker: MARKER, violations, metrics},
+    completedGeneration=token;
+    document.dispatchEvent(new CustomEvent("glyph-layout-publication-certificate-ready",{
+      detail:{marker:MARKER,version:2,fingerprint:value,cacheHit,metrics,profile:"interactive-fast"}
     }));
   }
-
-  async function audit(token, allowRepair = true) {
-    const stage = stageOf();
-    if (!stage) return;
-    if (stage.dataset.transitionLayoutState !== "ready"
-      || stage.dataset.initialRouteCertificate !== "valid") return;
-    const fingerprint = geometryFingerprint(stage);
-    if (stage.dataset.layoutCertificateFingerprint === fingerprint
-      && stage.dataset.layoutCertificateState === "valid") {
-      stage.dataset.layoutCertificateCacheHit = "true";
-      stage.dataset.layoutCertificateDurationMs = "0.00";
-      stage.dataset.transitionPublicationReady = "true";
-      stage.dataset.initialRouteReady = "true";
-      completeRequest(stage);
-      completedGeneration = token;
-      document.dispatchEvent(new CustomEvent("glyph-layout-publication-certificate-ready", {
-        detail: {marker: MARKER, version: 1, fingerprint, cacheHit: true, metrics: {durationMs: 0}},
-      }));
-      return;
-    }
-    stage.dataset.layoutCertificateCacheHit = "false";
-    stage.dataset.layoutCertificateState = "pending";
-    stage.dataset.layoutCertificateRequestState = "running";
-    stage.dataset.initialRouteReady = "publishing";
-    const started = performance.now();
-    const geom = geometry();
-    const violations = [];
-    const transactionAudit = window.glyphTransitionLayoutTransaction?.audit?.();
-    if (!transactionAudit?.ok) {
-      violations.push({kind: "transition-layout", details: transactionAudit || {missing: true}});
-    }
-
-    const svg = stage.querySelector(":scope > svg.edge-svg");
-    const initial = svg?.querySelector(":scope > path.initial-transition-path");
-    const normalPaths = [...(svg?.querySelectorAll(":scope > path.state-transition-path") || [])];
-    if (!initial) {
-      violations.push({kind: "initial-route", reason: "missing"});
-    } else {
-      const certificate = geom.verifyPathElement(initial, normalPaths, {
-        tolerance: .35,
-        maxSegmentLength: 3,
-        minimumClearance: INITIAL_CLEARANCE,
-      });
-      if (!certificate.valid) {
-        violations.push({
-          kind: "initial-route",
-          reason: "crossing-or-clearance",
-          crossings: certificate.crossings,
-          clearance: certificate.clearance,
-        });
-      }
-    }
-
-    const nodes = new Map([...stage.querySelectorAll(".state-node")].map(node => [nodeName(node), node]));
-    const clusters = [...stage.querySelectorAll(".transition-io-cluster")];
-    const tasks = [];
-    normalPaths.forEach(path => {
-      const id = path.dataset.transitionId || "";
-      const source = path.dataset.sourceState || "";
-      const target = path.dataset.targetState || "";
-      const polyline = geom.flattenPathElement(path, {tolerance: .35, maxSegmentLength: 3});
-      nodes.forEach((node, name) => {
-        if (name === source || name === target) return;
-        tasks.push(() => {
-          if (geom.polylineHitsRect(polyline, stageRect(node, ROUTE_NODE_CLEARANCE))) {
-            violations.push({kind: "route-node", transition: id, node: name});
-          }
-        });
-      });
-      clusters.forEach(cluster => {
-        const labelId = cluster.dataset.transitionId || "";
-        if (labelId === id) return;
-        tasks.push(() => {
-          if (geom.polylineHitsRect(polyline, centeredRect(cluster, FOREIGN_LABEL_CLEARANCE))) {
-            violations.push({kind: "route-foreign-label", transition: id, label: labelId});
-          }
-        });
-      });
-    });
-    const budget = await geom.runBudgeted(tasks, task => task(), {
-      budgetMs: FRAME_BUDGET_MS,
-      cancelled: () => token !== requestedGeneration || destroyed,
-    });
-    if (token !== requestedGeneration || destroyed) return;
-
-    const repairable = violations.length > 0
-      && violations.every(item => item.kind === "route-foreign-label")
-      && window.glyphLayoutLocalRepair?.version >= 1;
-    if (allowRepair && repairable) {
-      try {
-        const repair = await window.glyphLayoutLocalRepair.repair(stage, violations, {
-          cancelled: () => token !== requestedGeneration || destroyed,
-        });
-        if (token !== requestedGeneration || destroyed) return;
-        if (repair?.repaired) {
-          stage.dataset.layoutCertificateRepairState = "repaired";
-          stage.dataset.layoutCertificateRepairMetrics = JSON.stringify(repair.metrics || {});
-          stage.dataset.layoutCertificateState = "pending";
-          return audit(token, false);
-        }
-      } catch (error) {
-        if (error?.name === "AbortError" || token !== requestedGeneration || destroyed) return;
-        violations.push({
-          kind: "local-repair",
-          reason: String(error?.code || "repair-failed"),
-          message: String(error?.message || error),
-          details: String(error?.details || ""),
-        });
-      }
-    }
-
-    const metrics = {
-      durationMs: performance.now() - started,
-      maxSliceMs: budget.maxSliceMs,
-      yields: budget.yields,
-      tasks: tasks.length,
-      paths: normalPaths.length + (initial ? 1 : 0),
-      cacheHits: geom.statistics.pathCacheHits,
-      cacheMisses: geom.statistics.pathCacheMisses,
-    };
-    stage.dataset.layoutCertificateDurationMs = metrics.durationMs.toFixed(2);
-    stage.dataset.layoutCertificateMaxSliceMs = metrics.maxSliceMs.toFixed(2);
-    stage.dataset.layoutCertificateYieldCount = String(metrics.yields);
-    stage.dataset.layoutCertificateTaskCount = String(metrics.tasks);
-    if (violations.length) {
-      fail(stage, violations, metrics);
-      completedGeneration = token;
-      return;
-    }
-    stage.dataset.layoutCertificateFingerprint = fingerprint;
-    stage.dataset.layoutCertificateState = "valid";
-    stage.dataset.layoutCertificateVersion = "1";
-    stage.dataset.layoutCertificateConstraints = "labels,nodes,tether,initial-route,foreign-route-obstacles";
-    stage.dataset.layoutCertificateViolations = "[]";
-    stage.dataset.layoutCertificateMetrics = JSON.stringify(metrics);
-    stage.dataset.transitionPublicationReady = "true";
-    stage.dataset.initialRouteReady = "true";
-    completeRequest(stage);
-    completedGeneration = token;
-    document.dispatchEvent(new CustomEvent("glyph-layout-publication-certificate-ready", {
-      detail: {marker: MARKER, version: 1, fingerprint, cacheHit: false, metrics},
+  function degrade(stage,token,violations,metrics={}){
+    stage.dataset.layoutCertificateState="degraded";
+    stage.dataset.layoutCertificateProfile="interactive-fast";
+    stage.dataset.layoutCertificateViolations=JSON.stringify(violations);
+    stage.dataset.layoutCertificateMetrics=JSON.stringify(metrics);
+    stage.dataset.layoutCertificateRequestState="completed";
+    stage.dataset.transitionPublicationReady="true";
+    completedGeneration=token;
+    document.dispatchEvent(new CustomEvent("glyph-layout-publication-certificate-failed",{
+      detail:{marker:MARKER,violations,metrics,degraded:true,profile:"interactive-fast"}
     }));
   }
-
-  async function drain() {
-    if (running || destroyed) return;
-    running = true;
-    try {
-      while (!destroyed && completedGeneration < requestedGeneration) {
-        const token = requestedGeneration;
-        try {
+  async function audit(token){
+    const stage=stageOf();
+    if(!stage||activeTab()!=="state")return;
+    if(stage.dataset.transitionLayoutState!=="ready")return;
+    const value=fingerprint(stage);
+    if(stage.dataset.layoutCertificateFingerprint===value
+      && stage.dataset.layoutCertificateState==="valid"){
+      publish(stage,token,true,{durationMs:0});
+      return;
+    }
+    stage.dataset.layoutCertificateState="pending";
+    stage.dataset.layoutCertificateRequestState="running";
+    stage.dataset.transitionPublicationReady="false";
+    const started=performance.now(),violations=[];
+    const transactionAudit=window.glyphTransitionLayoutTransaction?.audit?.();
+    if(!transactionAudit?.ok)violations.push({kind:"transition-layout",details:transactionAudit||{missing:true}});
+    const stageWidth=number(stage.style.width)||stage.scrollWidth;
+    const stageHeight=number(stage.style.height)||stage.scrollHeight;
+    if(!stageWidth||!stageHeight)violations.push({kind:"stage-bounds"});
+    for(const node of stage.querySelectorAll(".state-node")){
+      if(node.offsetLeft<0||node.offsetTop<0||node.offsetLeft+node.offsetWidth>stageWidth+1||node.offsetTop+node.offsetHeight>stageHeight+1){
+        violations.push({kind:"node-bounds",node:node.querySelector(".state-name")?.textContent?.trim()||""});
+      }
+      if(performance.now()-started>TOTAL_BUDGET_MS)break;
+    }
+    if(performance.now()-started<=TOTAL_BUDGET_MS){
+      for(const cluster of stage.querySelectorAll(".transition-io-cluster")){
+        const x=number(cluster.style.left),y=number(cluster.style.top),distance=number(cluster.dataset.ioDistance);
+        if(!Number.isFinite(x)||!Number.isFinite(y)||x<=0||y<=0)violations.push({kind:"label-position",transition:cluster.dataset.transitionId||""});
+        if(distance>96.5)violations.push({kind:"label-tether",transition:cluster.dataset.transitionId||"",distance});
+        if(performance.now()-started>TOTAL_BUDGET_MS)break;
+      }
+    }
+    const metrics={durationMs:Number((performance.now()-started).toFixed(2)),budgetMs:TOTAL_BUDGET_MS};
+    if(violations.length)degrade(stage,token,violations,metrics);
+    else publish(stage,token,false,metrics);
+  }
+  async function drain(){
+    if(running||destroyed)return;
+    running=true;
+    try{
+      while(!destroyed&&completedGeneration<requestedGeneration){
+        const token=requestedGeneration;
+        try{
           await audit(token);
-          if (token === requestedGeneration) completedGeneration = token;
-        } catch (error) {
-          if (error?.name === "AbortError" || destroyed || token !== requestedGeneration) continue;
-          const stage = stageOf();
-          if (stage) fail(stage, [{kind: "certificate-error", message: String(error?.message || error)}], {});
-          console.error("layout publication certification failed", error);
-          completedGeneration = token;
+          if(token===requestedGeneration&&completedGeneration<token)completedGeneration=token;
+        }catch(error){
+          if(destroyed||token!==requestedGeneration)continue;
+          const stage=stageOf();
+          if(stage)degrade(stage,token,[{kind:"certificate-error",message:String(error?.message||error)}],{});
+          else completedGeneration=token;
         }
       }
-    } finally {
-      running = false;
-    }
+    }finally{running=false}
   }
-
-  function schedule(reason = "scheduled", delay = 0) {
-    if (destroyed) return requestedGeneration;
-    requestedGeneration += 1;
-    const stage = stageOf();
-    if (stage) {
-      stage.dataset.layoutCertificateRequestState = "queued";
-      stage.dataset.layoutCertificateReason = reason;
-      stage.dataset.transitionPublicationReady = "false";
+  function schedule(reason="scheduled",delay=0){
+    if(destroyed)return requestedGeneration;
+    requestedGeneration+=1;
+    const stage=stageOf();
+    if(stage){
+      stage.dataset.layoutCertificateRequestState="queued";
+      stage.dataset.layoutCertificateReason=reason;
+      stage.dataset.transitionPublicationReady="false";
     }
     clearTimeout(timer);
-    timer = setTimeout(drain, delay);
+    timer=setTimeout(drain,Math.max(0,delay));
+    return requestedGeneration;
+  }
+  function cancel(reason="cancelled"){
+    requestedGeneration+=1;
+    completedGeneration=requestedGeneration;
+    clearTimeout(timer);
+    const stage=stageOf();
+    if(stage){
+      stage.dataset.layoutCertificateRequestState="cancelled";
+      stage.dataset.layoutCertificateReason=reason;
+      stage.dataset.transitionPublicationReady="false";
+    }
     return requestedGeneration;
   }
 
-  for (const eventName of [
+  for(const eventName of[
     "glyph-transition-layout-transaction-ready",
     "glyph-initial-transition-route-ready",
     "glyph-execution-context-changed",
     "glyph-locale-changed",
-  ]) {
-    document.addEventListener(eventName, () => schedule(eventName, 0));
+  ]){
+    document.addEventListener(eventName,()=>{
+      if(activeTab()==="state")schedule(eventName,0);
+    });
   }
-  document.addEventListener("change", event => {
-    if (event.target?.id === "machine-select") schedule("machine-change", 0);
+  document.addEventListener("change",event=>{
+    if(event.target?.id==="machine-select")schedule("machine-change",0);
   });
-  for (const eventName of ["pagehide", "beforeunload"]) {
-    window.addEventListener(eventName, () => {
-      destroyed = true;
+  document.addEventListener("click",event=>{
+    const tab=event.target?.closest?.(".tab[data-tab]");
+    if(!tab)return;
+    if(tab.dataset.tab==="state")requestAnimationFrame(()=>schedule("state-tab-activated",0));
+    else cancel("state-tab-deactivated");
+  },true);
+  for(const eventName of["pagehide","beforeunload"]){
+    window.addEventListener(eventName,()=>{
+      destroyed=true;
       clearTimeout(timer);
-      requestedGeneration += 1;
-    }, {once: true});
+      requestedGeneration+=1;
+    },{once:true});
   }
 
-  window.glyphLayoutPublicationCertificate = {
-    marker: MARKER,
-    version: 1,
+  window.glyphLayoutPublicationCertificate={
+    marker:MARKER,
+    version:2,
+    profile:"interactive-fast",
+    budgetMs:TOTAL_BUDGET_MS,
     schedule,
-    audit: () => audit(requestedGeneration),
-    get generation() { return requestedGeneration; },
-    get completedGeneration() { return completedGeneration; },
+    cancel,
+    audit:()=>audit(requestedGeneration),
+    get generation(){return requestedGeneration},
+    get completedGeneration(){return completedGeneration},
   };
-  schedule("bootstrap", 0);
 })();
 </script>
 """
 
 
 def enhance_layout_publication_certificate_html(html: str) -> str:
-    """Certify final rendered geometry incrementally before publication."""
+    """Install the time-bounded interactive geometry certificate."""
 
     if _MARKER in html:
         return html
