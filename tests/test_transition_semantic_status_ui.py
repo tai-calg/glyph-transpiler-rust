@@ -37,16 +37,17 @@ class TransitionSemanticStatusUiTests(unittest.TestCase):
         self.assertIn("text(machine?.analysis?.evidence_projection_mode)", html)
         self.assertIn("signatureOf(machine,projectionMode)", html)
 
-    def test_ready_state_requires_final_layout_publication(self) -> None:
+    def test_ready_state_requires_bounded_layout_publication(self) -> None:
         html = enhance_transition_semantic_status_ui_html(DIAGRAM_HTML)
 
         self.assertIn("function publicationReady(stage)", html)
         self.assertIn('stage.dataset.transitionPublicationReady==="true"', html)
-        self.assertIn('stage.dataset.layoutCertificateState==="valid"', html)
+        self.assertIn('stage.dataset.transitionLayoutReady==="true"', html)
         self.assertIn('stage.dataset.rtaiSemanticStatusReady=published?"true":"pending"', html)
         self.assertIn("glyph-transition-layout-transaction-ready", html)
-        self.assertIn("glyph-layout-publication-certificate-ready", html)
-        self.assertIn("glyph-layout-publication-certificate-failed", html)
+        self.assertNotIn("glyph-layout-publication-certificate-ready", html)
+        self.assertNotIn("glyph-layout-publication-certificate-failed", html)
+        self.assertIn("STATE_REQUEST_TIMEOUT_MS=48", html)
 
     def test_enhancer_is_idempotent(self) -> None:
         once = enhance_transition_semantic_status_ui_html(DIAGRAM_HTML)
