@@ -11,6 +11,7 @@ const STATE_REQUEST_TIMEOUT_MS=48;
 let cache=null,timer=0,running=false,queued=false,disposed=false,controller=null;
 const text=value=>String(value??"").trim();
 const activeTab=()=>document.querySelector(".tab.active")?.dataset.tab||"state";
+const stageOf=()=>document.querySelector(".state-node")?.closest(".graph-stage")||null;
 async function state(){
   const live=typeof snapshot==="object"&&snapshot?snapshot:null;
   if(live){cache=live;return live}
@@ -51,7 +52,8 @@ function update(cluster,transition){
   const value=cluster.querySelector(".transition-io-value");
   if(!value)return false;
   const signature=JSON.stringify([cases,action,window.GlyphExecutionContext?.signature?.()||""]);
-  if(cluster.dataset.enablingCaseSignature===signature)return false;
+  if(cluster.dataset.enablingCaseSignature===signature
+    &&cluster.dataset.ioValue===lines.join(" || "))return false;
   value.replaceChildren(...lines.map(line=>{
     const span=document.createElement("span");
     span.className="transition-semantic-line transition-role-line enabling-case-line";
@@ -76,7 +78,7 @@ function update(cluster,transition){
 async function apply(){
   if(disposed||activeTab()!=="state")return{ok:false,skipped:true};
   if(running){queued=true;return{ok:false,queued:true}}
-  const stage=document.querySelector(".state-node")?.closest(".graph-stage");
+  const stage=stageOf();
   if(!stage||stage.dataset.transitionIoClustersReady!=="true")return{ok:false,missingStage:true};
   running=true;
   try{
@@ -91,16 +93,17 @@ async function apply(){
       const cluster=stage.querySelector(`.transition-io-cluster[data-transition-id="${escaped}"]`);
       if(cluster&&update(cluster,transition))changed+=1;
     });
-    const firstReady=stage.dataset.transitionEnablingCasesReady!=="true";
     stage.dataset.transitionEnablingCasesReady="true";
-    if(changed||firstReady){
-      document.dispatchEvent(new CustomEvent("glyph-transition-enabling-cases-ready",{detail:{marker:MARKER,changed}}));
-    }
+    document.dispatchEvent(new CustomEvent("glyph-transition-enabling-cases-ready",{detail:{marker:MARKER,changed}}));
     return{ok:true,changed};
   }finally{
     running=false;
     if(queued){queued=false;schedule(0)}
   }
+}
+function markPending(){
+  const stage=stageOf();
+  if(stage)stage.dataset.transitionEnablingCasesReady="pending";
 }
 function schedule(delay=0){
   if(disposed)return;
@@ -110,21 +113,20 @@ function schedule(delay=0){
   }),Math.max(0,Math.min(Number(delay)||0,STATE_REQUEST_TIMEOUT_MS)));
 }
 for(const event of["glyph-transition-io-clusters-ready","glyph-locale-changed","glyph-state-transition-ir-v3-labels-ready","glyph-execution-context-changed"]){
-  document.addEventListener(event,()=>{cache=null;schedule(0)});
+  document.addEventListener(event,()=>{cache=null;markPending();schedule(0)});
 }
 document.addEventListener("change",event=>{
   if(event.target?.id!=="machine-select")return;
   cache=null;
-  const stage=document.querySelector(".state-node")?.closest(".graph-stage");
-  if(stage)delete stage.dataset.transitionEnablingCasesReady;
+  markPending();
   schedule(0);
 });
 const view=document.getElementById("view");
-if(view)new MutationObserver(()=>{if(activeTab()==="state")schedule(0)}).observe(view,{childList:true});
+if(view)new MutationObserver(()=>{if(activeTab()==="state"){markPending();schedule(0)}}).observe(view,{childList:true});
 function dispose(){disposed=true;clearTimeout(timer);controller?.abort()}
 window.addEventListener("pagehide",dispose,{once:true});
 window.addEventListener("beforeunload",dispose,{once:true});
-window.glyphTransitionEnablingCases={marker:MARKER,version:3,apply};
+window.glyphTransitionEnablingCases={marker:MARKER,version:4,apply};
 schedule(0);
 })();
 </script>
