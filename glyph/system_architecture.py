@@ -26,7 +26,7 @@ from .schema import ARCHITECTURE_IR_SCHEMA, versioned_payload
 
 @dataclass(frozen=True)
 class SystemEdgeDecl:
-    """Deprecated system flow assertion retained for source compatibility."""
+    """Derived compatibility fact for internal provenance consumers."""
 
     source_name: str
     target_name: str
@@ -35,7 +35,7 @@ class SystemEdgeDecl:
 
 @dataclass(frozen=True)
 class SystemPortDecl:
-    """Deprecated system value port retained for source compatibility."""
+    """Derived compatibility fact for internal provenance consumers."""
 
     name: str
     direction: str
@@ -43,7 +43,7 @@ class SystemPortDecl:
     line: int
 
 
-@dataclass(frozen=True)
+@dataclass
 class SystemDecl:
     """A complete executable system boundary.
 
@@ -60,6 +60,11 @@ class SystemDecl:
     ``sink`` names a ``!`` function that the system calls to cause an external
     effect. Values and types are derived from the function signatures and are
     never redeclared in the system block.
+
+    ``ports`` and ``edges`` are not source syntax in the canonical form. They are
+    populated from checked function signatures after parsing so existing semantic
+    provenance consumers can use the same derived facts without reintroducing
+    hand-authored value-flow declarations.
 
     Legacy ``in``, ``out`` and ``a -> b`` items are parsed only so existing
     source files can be migrated without losing data. They no longer define the
@@ -522,6 +527,66 @@ def _canonical_type_ref(ty: TypeRef) -> str:
     return f"{name}<{','.join(_canonical_type_ref(arg) for arg in ty.args)}>"
 
 
+def _success_type_ref(ty: TypeRef) -> TypeRef:
+    if ty.name in {"Result", "R"} and len(ty.args) == 2:
+        return ty.args[0]
+    return ty
+
+
+def _bind_derived_wiring_metadata(
+    system: SystemDecl,
+    entry: FunctionDecl,
+    bindings: dict[str, tuple[str, FunctionDecl | ExternDecl]],
+    declared_sources: set[str],
+) -> None:
+    """Publish signature-derived provenance facts for downstream analysis.
+
+    This is deliberately not part of the rendered architecture. It replaces the
+    facts that old sources had to repeat with ``in`` and ``a -> entry`` lines.
+    """
+
+    if system.syntax != "entry-source-sink":
+        return
+
+    ports: list[SystemPortDecl] = []
+    edges: list[SystemEdgeDecl] = []
+    used_names: set[str] = set()
+    for parameter in entry.params:
+        ports.append(
+            SystemPortDecl(
+                parameter.name,
+                "input",
+                _canonical_type_ref(parameter.ty),
+                entry.line,
+            )
+        )
+        edges.append(SystemEdgeDecl(parameter.name, system.entry_name, entry.line))
+        used_names.add(parameter.name)
+
+    for source_name in sorted(declared_sources):
+        if source_name in used_names:
+            raise GlyphError(
+                f"{system.line}行目: system source '{source_name}' はentry引数名と"
+                "衝突する。関数境界と値を区別できる名前に変更する"
+            )
+        source_decl = bindings[source_name][1]
+        assert isinstance(source_decl, ExternDecl)
+        ports.append(
+            SystemPortDecl(
+                source_name,
+                "input",
+                _canonical_type_ref(_success_type_ref(source_decl.return_type)),
+                source_decl.line,
+            )
+        )
+        edges.append(
+            SystemEdgeDecl(source_name, system.entry_name, source_decl.line)
+        )
+
+    system.ports = tuple(ports)
+    system.edges = tuple(edges)
+
+
 def _direct_calls(
     functions: dict[str, FunctionDecl],
     bindings: dict[str, tuple[str, FunctionDecl | ExternDecl]],
@@ -649,6 +714,8 @@ def build_architecture_ir(
                 f"{system.line}行目: system entry '{system.entry_name}' は"
                 "本体を持つ `>` 関数にする"
             )
+        entry_declaration = entry_binding[1]
+        assert isinstance(entry_declaration, FunctionDecl)
 
         graph = _direct_calls(
             functions,
@@ -710,6 +777,13 @@ def build_architecture_ir(
                     f"到達する外部作用 {missing_sinks} をsinkとして"
                     "宣言していない"
                 )
+
+        _bind_derived_wiring_metadata(
+            system,
+            entry_declaration,
+            bindings,
+            declared_sources,
+        )
 
         for name in reachable:
             declaration = functions.get(name)
