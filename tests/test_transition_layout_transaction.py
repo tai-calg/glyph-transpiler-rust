@@ -31,62 +31,45 @@ def test_bootstrap_precedes_transaction_owner() -> None:
     assert "control.ownsScheduling=true" in html
 
 
-def test_transaction_contains_publication_grade_layout_phases() -> None:
+def test_transaction_is_time_bounded_and_uses_ordinary_layout() -> None:
     html = enhance_transition_layout_transaction_html(
         "<html><head></head><body></body></html>"
     )
 
     for required in (
-        "waitForPrerequisites(token)",
-        "waitForFonts(token)",
-        "ensureCanvas(stage",
-        "arrangeInitialDenseNodes(stage",
+        "TOTAL_BUDGET_MS=120",
+        "PREREQUISITE_BUDGET_MS=180",
+        "CLUSTER_BUDGET_MS=80",
+        "standardCanvas(stage)",
+        "stateCurve(source,target,same,lane,laneCount)",
         "reroute(stage,machine)",
-        "ensureClusters(stage,machine,token)",
-        "formatLabels(stage,strategy.maxLineWidth)",
-        "layoutEntries(stage,data,machine)",
-        "greedyEntries(entries)",
-        "solveEntries(entries,token)",
-        "applyAssignment(stage,data,entries,solver.assignment)",
+        "ensureClusters(stage,machine,token,deadline)",
+        "positionLabels(stage,data,machine)",
         "const result=audit(stage)",
+        'stage.dataset.transitionLayoutProfile="interactive-fast"',
         'stage.dataset.transitionLayoutState="ready"',
-        'stage.dataset.transitionPublicationReady="true"',
+        'stage.dataset.transitionPublicationReady="false"',
+        'stage.dataset.transitionDenseCanvas="disabled"',
+        'cancel("state-tab-deactivated")',
     ):
         assert required in html
 
-    assert "SEARCH_BUDGET_MS=450" in html
-    assert "SEARCH_STEPS=220000" in html
-    assert "LABEL_TIGHT_WIDTH=86" in html
-    assert "{maxLineWidth:LABEL_TIGHT_WIDTH,growth:1.32}" in html
-    assert "splitByWidth" in html
-    assert "renderedCanonical" in html
-    assert "feasiblePoint" in html
-    assert "ResizeObserver" in html
-    assert "AbortController" in html
-    assert "transitionLayoutFailureCode" in html
-    assert "transition-count:" in html
-    assert "missing-accessible-label" in html
-    assert "writeStored(labelStorageKey(data),saved)" in html
+    for removed in (
+        "SEARCH_STEPS",
+        "SEARCH_BUDGET_MS",
+        "solveEntries",
+        "greedyEntries",
+        "arrangeInitialDenseNodes",
+        "candidatePoints",
+        "layout-assignment-unsatisfied",
+    ):
+        assert removed not in html
+
+    assert "visibility:visible!important" in html
+    assert "pointer-events:auto!important" in html
     assert "window.glyphDiagramViewport?.fitInitial?.()" in html
-    assert "await window.glyphTransitionIoClusters?.render?.()" in html
-    assert "await window.glyphTransitionEnablingCases?.apply?.()" in html
-    assert "manual-edit" not in html
-
-
-def test_automatic_labels_use_alternate_arrow_anchors_only_as_fallback() -> None:
-    html = enhance_transition_layout_transaction_html(
-        "<html><head></head><body></body></html>"
-    )
-
-    assert "function anchorFractions(preferred)" in html
-    assert "const routeAnchors=anchorFractions(routeFraction).map(value=>anchorFor(stage,id,index,value))" in html
-    assert "const primary=optionsAtAnchor(entry,entry.anchor,entry.preferred,stage,nodes,pathSamples)" in html
-    assert "if(primary.length||entry.manual)return primary" in html
-    assert "for(const anchor of entry.anchors.slice(1))" in html
-    assert "if(values.length)return values" in html
-    assert "const point=option.point,anchor=option.anchor||entry.anchor" in html
-    assert "entry.cluster.dataset.ioDistance=String(Math.hypot(point.x-anchor.x,point.y-anchor.y))" in html
-    assert "const MAX_DISTANCE=96" in html
+    assert "await nextFrame()" in html
+    assert "new MutationObserver(synchronizeStage)" in html
 
 
 def test_manual_labels_restore_against_the_saved_arrow_anchor() -> None:
@@ -97,12 +80,12 @@ def test_manual_labels_restore_against_the_saved_arrow_anchor() -> None:
         "<html><head></head><body></body></html>"
     )
 
-    assert "function storedAnchorFraction(record,anchors)" in transaction_html
     assert "finite(record?.anchorFraction)" in transaction_html
-    assert "x:record.x-record.dx,y:record.y-record.dy" in transaction_html
-    assert "const fraction=storedAnchorFraction(record,routeAnchors)" in transaction_html
-    assert "entry.cluster.dataset.anchorFraction=String(anchorFraction)" in transaction_html
-    assert "dy:point.y-anchor.y,anchorFraction" in transaction_html
+    assert "anchorFor(path,fraction)" in transaction_html
+    assert "x:anchor.x+record.dx,y:anchor.y+record.dy" in transaction_html
+    assert "cluster.dataset.anchorFraction=String(anchor.fraction)" in transaction_html
+    assert "cluster.dataset.ioDistance=String(Math.hypot(point.x-anchor.x,point.y-anchor.y))" in transaction_html
+    assert "const MAX_DISTANCE=96" in transaction_html
 
     assert "anchorFraction:clamp(num(cluster.dataset.anchorFraction)||.5,.18,.82)" in interaction_html
     assert "anchorFraction:record.anchorFraction" in interaction_html
@@ -149,7 +132,6 @@ def test_interaction_adapters_persist_only_real_drags() -> None:
     assert "releasePointerCapture?.(event.pointerId)" in label_html
     assert 'publicationGuard()?.invalidate?.(active.stage,"manual-label-drag")' in label_html
     assert "nearestCertifiablePoint(record,requested)" in label_html
-    assert "Math.hypot(next.x-anchor.x,next.y-anchor.y)<=MAX_DISTANCE+.25?next:null" in label_html
     assert "pointerDistance(active,event)<DRAG_THRESHOLD" in node_html
     assert "if(!record.moved)" in node_html
     assert "restorePositionStorageState(record.storageBefore)" in node_html
@@ -168,7 +150,7 @@ def test_viewport_is_source_scoped_and_initially_fits_completed_layout() -> None
     assert "version:2" in html
 
 
-def test_diagram_app_installs_transaction_layers() -> None:
+def test_diagram_app_installs_lightweight_transaction_layers() -> None:
     prepare_diagram_app()
 
     from glyph import diagram_app
@@ -181,3 +163,6 @@ def test_diagram_app_installs_transaction_layers() -> None:
 
     assert bootstrap < clusters < transaction
     assert viewport < transaction
+    assert "glyph-transition-dense-canvas-dimensions-v1-script" not in html
+    assert "glyph-transition-io-collision-solver-v1-script" not in html
+    assert "glyph-transition-label-readability-v1-script" not in html
