@@ -15,7 +15,7 @@ from glyph.transition_layout_interaction_adapter import (
 
 
 class DiagramEditorClickDragBoundaryTests(unittest.TestCase):
-    def test_state_node_click_does_not_persist_or_reroute(self) -> None:
+    def test_graph_node_click_does_not_persist_or_reroute(self) -> None:
         html = enhance_diagram_editor_exports_html(DIAGRAM_HTML)
 
         self.assertIn("DRAG_THRESHOLD=3", html)
@@ -30,9 +30,12 @@ class DiagramEditorClickDragBoundaryTests(unittest.TestCase):
 
         self.assertIn("DRAG_THRESHOLD=3", html)
         self.assertIn("dragged:false", html)
+        self.assertIn("finalPoint:null", html)
         self.assertIn("pointerDistance(active,event)<DRAG_THRESHOLD", html)
-        self.assertIn("active.dragged=true", html)
-        self.assertIn("if(!record.dragged)return", html)
+        self.assertIn("active.dragged=true;active.finalPoint=point", html)
+        self.assertIn("if(!record.dragged||!record.finalPoint)return", html)
+        self.assertIn("setPointerCapture?.(event.pointerId)", html)
+        self.assertIn("releasePointerCapture?.(event.pointerId)", html)
         self.assertIn("manual-label-persisted", html)
 
     def test_manual_label_is_snapped_before_canonical_persistence(self) -> None:
