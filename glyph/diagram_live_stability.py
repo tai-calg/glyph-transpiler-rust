@@ -14,10 +14,23 @@ _PATCHED = False
 _STYLE = r"""
 <style id="glyph-diagram-live-stability-v2-style">
 .canvas-shell.diagram-render-pending{position:relative}
-.canvas-shell.diagram-render-pending>.graph-stage{visibility:hidden!important}
-.canvas-shell.diagram-render-pending::after{content:"Rendering state diagram…";position:absolute;inset:0;display:grid;place-items:center;color:var(--muted);background:var(--panel);font-size:12px;pointer-events:none}
-.canvas-shell.diagram-render-pending+.transition-index{visibility:hidden!important}
-.canvas-shell.diagram-render-failed::after{content:"State diagram certification failed";color:var(--red)}
+.canvas-shell.diagram-render-pending>.graph-stage,
+.canvas-shell.diagram-render-failed>.graph-stage{
+  visibility:visible!important;
+  opacity:1!important;
+}
+.canvas-shell.diagram-render-pending::after{
+  content:"";
+  display:none!important;
+}
+.canvas-shell.diagram-render-failed::after{
+  content:"";
+  display:none!important;
+}
+.canvas-shell.diagram-render-pending+.transition-index,
+.canvas-shell.diagram-render-failed+.transition-index{
+  visibility:visible!important;
+}
 </style>
 """
 
@@ -26,10 +39,9 @@ _SCRIPT = r"""
 <script id="glyph-diagram-live-stability-v2-script">
 (() => {
   const MARKER = "glyph-diagram-live-stability-v2";
-  const RENDER_TIMEOUT_MS = 12000;
-  const REQUEST_TIMEOUT_MS = 30000;
+  const RENDER_BUDGET_MS = 180;
+  const REQUEST_TIMEOUT_MS = 10000;
   const POLL_INTERVAL_MS = 3000;
-  const REQUIRED_FLAGS = ["labelLayoutReady", "umlTransitionReady", "transitionInputActionLabelsReady", "stateTransitionIRV2LabelsReady"];
   let renderGeneration = 0;
   let requestGeneration = 0;
   let previewController = null;
@@ -38,16 +50,14 @@ _SCRIPT = r"""
 
   function stateStage(){return document.querySelector(".state-node")?.closest(".graph-stage")||null}
   function renderKey(){try{return JSON.stringify([snapshot?.version??null,snapshot?.digest??"",snapshot?.status??"",activeTab,systemIndex,machineIndex])}catch{return ""}}
-  function initialRouteReady(stage){const raw=stage?.querySelector(":scope > svg.edge-svg > path:not(.state-transition-path)");if(!raw)return true;return stage.dataset.initialRouteReady==="true"&&raw.classList.contains("initial-transition-path")}
-  function publicationReady(stage){return stage?.dataset.transitionPublicationReady==="true"&&stage.dataset.layoutCertificateState==="valid"}
-  function fullyAdjusted(stage){
-    if(!stage?.querySelector(".state-node"))return true;
-    if(window.glyphLayoutPublicationCertificate)return publicationReady(stage)&&initialRouteReady(stage);
-    return REQUIRED_FLAGS.every(name=>stage.dataset[name]==="true")&&initialRouteReady(stage);
-  }
   function clearTimer(stage){const timer=fallbackTimers.get(stage);if(timer)clearTimeout(timer);fallbackTimers.delete(stage)}
+  function layoutUsable(stage){
+    if(!stage?.querySelector(".state-node"))return true;
+    return stage.dataset.transitionLayoutState==="ready"
+      || stage.dataset.transitionLayoutProfile==="interactive-fast";
+  }
   function reveal(stage,state="ready"){
-    if(!stage?.isConnected||!fullyAdjusted(stage))return false;
+    if(!stage?.isConnected)return false;
     clearTimer(stage);
     stage.dataset.renderStable="true";
     stage.dataset.renderStableState=state;
@@ -56,83 +66,167 @@ _SCRIPT = r"""
     document.dispatchEvent(new CustomEvent("glyph-diagram-render-stable",{detail:{marker:MARKER,state}}));
     return true;
   }
-  function certificationFailure(stage,reason,eventDetail=null){
-    let violations=[];
-    try{violations=JSON.parse(stage?.dataset.layoutCertificateViolations||"[]")}catch{}
-    return{
-      reason,
-      layoutState:stage?.dataset.transitionLayoutState||"",
-      layoutGeneration:stage?.dataset.transitionLayoutGeneration||"",
-      layoutReason:stage?.dataset.transitionLayoutReason||"",
-      initialRouteReady:stage?.dataset.initialRouteReady||"",
-      initialRouteCertificate:stage?.dataset.initialRouteCertificate||"",
-      initialRouteFailure:stage?.dataset.initialRouteFailure||"",
-      certificateState:stage?.dataset.layoutCertificateState||"",
-      certificateReason:stage?.dataset.layoutCertificateReason||"",
-      violations,
-      eventDetail,
-    };
-  }
-  function failClosed(stage,generation,reason="certification-timeout",eventDetail=null){
-    if(generation!==renderGeneration||!stage?.isConnected||fullyAdjusted(stage))return;
-    clearTimer(stage);
-    stage.dataset.renderStable="false";
-    stage.dataset.renderStableState=reason;
-    const shell=stage.closest(".canvas-shell");
-    shell?.classList.add("diagram-render-pending","diagram-render-failed");
-    console.error(`state diagram publication ${reason}; diagram remains hidden: ${JSON.stringify(certificationFailure(stage,reason,eventDetail))}`);
-    document.dispatchEvent(new CustomEvent("glyph-diagram-render-failed",{detail:{marker:MARKER,state:reason}}));
-  }
   function settle(stage=stateStage(),generation=renderGeneration){
-    if(!stage?.querySelector(".state-node")||!fullyAdjusted(stage))return;
-    requestAnimationFrame(()=>requestAnimationFrame(()=>{
+    if(!stage?.querySelector(".state-node"))return;
+    if(!layoutUsable(stage))return;
+    requestAnimationFrame(()=>{
       if(generation!==renderGeneration||stage!==stateStage())return;
-      reveal(stage,"certified");
-    }));
+      const certificate=stage.dataset.layoutCertificateState;
+      reveal(stage,certificate==="valid"?"certified":"interactive");
+    });
   }
   function markPending(stage=stateStage()){
     if(!stage?.querySelector(".state-node"))return;
     const generation=++renderGeneration;
     clearTimer(stage);
-    delete stage.dataset.renderStable;
+    stage.dataset.renderStable="false";
     stage.dataset.renderStableState="pending";
     const shell=stage.closest(".canvas-shell");
     shell?.classList.remove("diagram-render-failed");
     shell?.classList.add("diagram-render-pending");
-    fallbackTimers.set(stage,setTimeout(()=>failClosed(stage,generation),RENDER_TIMEOUT_MS));
+    fallbackTimers.set(stage,setTimeout(()=>{
+      if(generation!==renderGeneration||!stage.isConnected)return;
+      reveal(stage,"interactive-budget");
+    },RENDER_BUDGET_MS));
     settle(stage,generation);
   }
-  function selectDefaultStateTab(){activeTab="state";document.querySelectorAll(".tab").forEach(button=>button.classList.toggle("active",button.dataset.tab==="state"))}
-  function applySnapshot(next,{initial=false,updateEditor=false}={}){const currentVersion=Number(snapshot?.version??-1),nextVersion=Number(next?.version??-1);if(!initial&&nextVersion<currentVersion)return false;snapshot=next;if((initial||updateEditor)&&!dirty){editor.value=next.source||"";dirty=false;syncLines()}render();window.GlyphExecutionContext?.refresh?.();return true}
-  function abortPreview(){requestGeneration+=1;if(previewController)previewController.abort();previewController=null}
-  async function guardedRequest(path,options={},controller=null){const owned=controller||new AbortController();const timeout=setTimeout(()=>owned.abort(),REQUEST_TIMEOUT_MS);try{return await request(path,{...options,signal:owned.signal})}finally{clearTimeout(timeout)}}
+  function selectDefaultStateTab(){
+    activeTab="state";
+    document.querySelectorAll(".tab").forEach(button=>button.classList.toggle("active",button.dataset.tab==="state"));
+  }
+  function applySnapshot(next,{initial=false,updateEditor=false}={}){
+    const currentVersion=Number(snapshot?.version??-1),nextVersion=Number(next?.version??-1);
+    if(!initial&&nextVersion<currentVersion)return false;
+    snapshot=next;
+    if((initial||updateEditor)&&!dirty){
+      editor.value=next.source||"";
+      dirty=false;
+      syncLines();
+    }
+    render();
+    window.GlyphExecutionContext?.refresh?.();
+    return true;
+  }
+  function abortPreview(){
+    requestGeneration+=1;
+    previewController?.abort();
+    previewController=null;
+  }
+  async function guardedRequest(path,options={},controller=null){
+    const owned=controller||new AbortController();
+    const timeout=setTimeout(()=>owned.abort(),REQUEST_TIMEOUT_MS);
+    try{return await request(path,{...options,signal:owned.signal})}
+    finally{clearTimeout(timeout)}
+  }
 
   const originalRender=window.render;
   if(typeof originalRender==="function"){
-    window.render=function stableRender(...arguments_){const key=renderKey();if(key&&view.dataset.renderKey===key&&view.childElementCount){setStatus(snapshot?.status||"starting");renderSummary();renderDiagnostics();return}const result=originalRender.apply(this,arguments_);view.dataset.renderKey=key;if(activeTab==="state")markPending();return result};
+    window.render=function stableRender(...arguments_){
+      const key=renderKey();
+      if(key&&view.dataset.renderKey===key&&view.childElementCount){
+        setStatus(snapshot?.status||"starting");
+        renderSummary();
+        renderDiagnostics();
+        return;
+      }
+      const result=originalRender.apply(this,arguments_);
+      view.dataset.renderKey=key;
+      if(activeTab==="state")markPending();
+      return result;
+    };
     render=window.render;
   }
   const originalRenderState=window.renderState;
   if(typeof originalRenderState==="function"){
-    window.renderState=function stableRenderState(...arguments_){const result=originalRenderState.apply(this,arguments_);view.dataset.renderKey=renderKey();markPending();return result};
+    window.renderState=function stableRenderState(...arguments_){
+      const result=originalRenderState.apply(this,arguments_);
+      view.dataset.renderKey=renderKey();
+      markPending();
+      return result;
+    };
     renderState=window.renderState;
   }
   const originalRenderIo=window.renderIo;
   if(typeof originalRenderIo==="function"){
-    window.renderIo=function stableRenderIo(...arguments_){const result=originalRenderIo.apply(this,arguments_);view.dataset.renderKey=renderKey();return result};
+    window.renderIo=function stableRenderIo(...arguments_){
+      const result=originalRenderIo.apply(this,arguments_);
+      view.dataset.renderKey=renderKey();
+      return result;
+    };
     renderIo=window.renderIo;
   }
 
-  compile=async function stableCompile(){clearTimeout(previewTimer);previewTimer=null;const generation=++requestGeneration;if(previewController)previewController.abort();const controller=new AbortController();previewController=controller;setStatus("busy");try{const next=await guardedRequest("/api/preview",{method:"POST",body:JSON.stringify({source:editor.value})},controller);if(generation!==requestGeneration)return;applySnapshot(next)}catch(error){if(generation!==requestGeneration)return;setStatus("error");const message=error?.name==="AbortError"?"Compilation request timed out":error.message;diagnostics.innerHTML=`<div class="diagnostic">${esc(message)}</div>`}finally{if(generation===requestGeneration)previewController=null}};
-  save=async function stableSave(){abortPreview();const generation=requestGeneration;setStatus("busy");try{const next=await guardedRequest("/api/save",{method:"POST",body:JSON.stringify({source:editor.value})});if(generation!==requestGeneration)return;dirty=false;applySnapshot(next)}catch(error){if(generation!==requestGeneration)return;setStatus("error");diagnostics.innerHTML=`<div class="diagnostic">${esc(error.message)}</div>`}};
-  load=async function stableLoad(initial=false){const now=Date.now();if(!initial&&now-lastPollAt<POLL_INTERVAL_MS)return;lastPollAt=now;const generation=requestGeneration;try{const next=await guardedRequest("/api/state");if(generation!==requestGeneration||(!initial&&dirty))return;applySnapshot(next,{initial,updateEditor:initial})}catch(error){if(generation!==requestGeneration||error?.name==="AbortError")return;setStatus("error");diagnostics.innerHTML=`<div class="diagnostic">${esc(error.message)}</div>`}};
+  compile=async function stableCompile(){
+    clearTimeout(previewTimer);
+    previewTimer=null;
+    const generation=++requestGeneration;
+    previewController?.abort();
+    const controller=new AbortController();
+    previewController=controller;
+    setStatus("busy");
+    try{
+      const next=await guardedRequest("/api/preview",{method:"POST",body:JSON.stringify({source:editor.value})},controller);
+      if(generation!==requestGeneration)return;
+      applySnapshot(next);
+    }catch(error){
+      if(generation!==requestGeneration)return;
+      setStatus("error");
+      const message=error?.name==="AbortError"?"Compilation request timed out":error.message;
+      diagnostics.innerHTML=`<div class="diagnostic">${esc(message)}</div>`;
+    }finally{
+      if(generation===requestGeneration)previewController=null;
+    }
+  };
+  save=async function stableSave(){
+    abortPreview();
+    const generation=requestGeneration;
+    setStatus("busy");
+    try{
+      const next=await guardedRequest("/api/save",{method:"POST",body:JSON.stringify({source:editor.value})});
+      if(generation!==requestGeneration)return;
+      dirty=false;
+      applySnapshot(next);
+    }catch(error){
+      if(generation!==requestGeneration)return;
+      setStatus("error");
+      diagnostics.innerHTML=`<div class="diagnostic">${esc(error.message)}</div>`;
+    }
+  };
+  load=async function stableLoad(initial=false){
+    const now=Date.now();
+    if(!initial&&now-lastPollAt<POLL_INTERVAL_MS)return;
+    lastPollAt=now;
+    const generation=requestGeneration;
+    try{
+      const next=await guardedRequest("/api/state");
+      if(generation!==requestGeneration||(!initial&&dirty))return;
+      applySnapshot(next,{initial,updateEditor:initial});
+    }catch(error){
+      if(generation!==requestGeneration||error?.name==="AbortError")return;
+      setStatus("error");
+      diagnostics.innerHTML=`<div class="diagnostic">${esc(error.message)}</div>`;
+    }
+  };
   document.getElementById("compile").onclick=()=>compile();
   document.getElementById("save").onclick=()=>save();
 
-  for(const eventName of ["glyph-transition-layout-ready","glyph-uml-transition-ready","glyph-transition-input-action-labels-ready","glyph-state-transition-ir-v2-labels-ready","glyph-initial-transition-route-ready","glyph-layout-publication-certificate-ready"]){document.addEventListener(eventName,()=>settle())}
-  document.addEventListener("glyph-layout-publication-certificate-failed",event=>failClosed(stateStage(),renderGeneration,"certificate-failed",event.detail||null));
+  for(const eventName of[
+    "glyph-transition-layout-transaction-ready",
+    "glyph-initial-transition-route-ready",
+    "glyph-layout-publication-certificate-ready",
+  ]){
+    document.addEventListener(eventName,()=>settle());
+  }
+  document.addEventListener("glyph-layout-publication-certificate-failed",()=>{
+    const stage=stateStage();
+    if(stage)reveal(stage,"certificate-degraded");
+  });
   const root=document.getElementById("view")||document.body;
-  new MutationObserver(()=>settle()).observe(root,{subtree:true,attributes:true,attributeFilter:["data-label-layout-ready","data-uml-transition-ready","data-transition-input-action-labels-ready","data-state-transition-ir-v2-labels-ready","data-initial-route-ready","data-transition-publication-ready","data-layout-certificate-state"]});
+  new MutationObserver(()=>settle()).observe(root,{
+    subtree:true,
+    attributes:true,
+    attributeFilter:["data-transition-layout-state","data-layout-certificate-state","data-transition-publication-ready"],
+  });
   selectDefaultStateTab();
   if(snapshot)render();
 })();
@@ -189,8 +283,10 @@ def install_serial_compilation() -> None:
 
 
 def enhance_diagram_live_stability_html(html: str) -> str:
-    """Use state-first, stale-safe, publication-certified rendering."""
+    """Keep the state diagram visible while bounded layout work completes."""
 
     if _MARKER in html:
         return html
-    return html.replace("</head>", _STYLE + "\n</head>").replace("</body>", _SCRIPT + "\n</body>")
+    return html.replace("</head>", _STYLE + "\n</head>").replace(
+        "</body>", _SCRIPT + "\n</body>"
+    )
