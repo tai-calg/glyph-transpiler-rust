@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from copy import deepcopy
 from dataclasses import dataclass
 from enum import Enum
@@ -10,7 +11,7 @@ from ..state_machine_source_map import canonical_machine_source_line
 from .machine_relation import EdgeSpec, MachineRelation, build_machine_relation
 
 
-VIEW_EDGE_SPECIALIZATION_VERSION = 2
+VIEW_EDGE_SPECIALIZATION_VERSION = 3
 
 
 class ViewEdgeBindingStatus(str, Enum):
@@ -53,15 +54,24 @@ def specialize_view_edges(
 ) -> tuple[ViewEdgeBinding, ...]:
     relation = build_machine_relation(model, str(machine_view.get("name") or ""))
     transitions = _mappings(machine_view.get("transitions"))
-    if relation is None:
-        return tuple(
-            _unmapped(model, index, transition)
-            for index, transition in enumerate(transitions)
-        )
-    return tuple(
-        _bind_transition(model, relation, index, transition)
+    view_ids = tuple(
+        _view_edge_id(index, transition)
         for index, transition in enumerate(transitions)
     )
+    duplicate_view_ids = {
+        view_id
+        for view_id, count in Counter(view_ids).items()
+        if count > 1
+    }
+    bindings: list[ViewEdgeBinding] = []
+    for index, transition in enumerate(transitions):
+        if view_ids[index] in duplicate_view_ids:
+            bindings.append(_ambiguous_identity(model, index, transition))
+        elif relation is None:
+            bindings.append(_unmapped(model, index, transition))
+        else:
+            bindings.append(_bind_transition(model, relation, index, transition))
+    return tuple(bindings)
 
 
 def attach_view_edge_specialization(
@@ -69,13 +79,11 @@ def attach_view_edge_specialization(
     machine_view: Mapping[str, object],
 ) -> dict[str, object]:
     result = deepcopy(dict(machine_view))
+    original_transitions = _mappings(result.get("transitions"))
     bindings = specialize_view_edges(model, result)
-    by_view_id = {item.view_edge_id: item for item in bindings}
     transitions: list[dict[str, object]] = []
-    for index, original in enumerate(_mappings(result.get("transitions"))):
+    for original, binding in zip(original_transitions, bindings, strict=True):
         transition = dict(original)
-        view_id = _view_edge_id(index, transition)
-        binding = by_view_id[view_id]
         transition["rtai_view_edge_specialization"] = binding.to_ir()
         transitions.append(transition)
 
@@ -178,6 +186,22 @@ def _target_matches(
     if edge.target_state == "__same__":
         return target_state == source_state
     return edge.target_state == target_state
+
+
+def _ambiguous_identity(
+    model: CompilationModel,
+    index: int,
+    transition: Mapping[str, object],
+) -> ViewEdgeBinding:
+    return ViewEdgeBinding(
+        _view_edge_id(index, transition),
+        None,
+        ViewEdgeBindingStatus.AMBIGUOUS,
+        str(transition.get("source_state") or ""),
+        str(transition.get("target_state") or ""),
+        canonical_machine_source_line(model, _source_line(transition)),
+        (),
+    )
 
 
 def _unmapped(
