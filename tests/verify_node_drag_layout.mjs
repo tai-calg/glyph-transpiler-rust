@@ -110,7 +110,7 @@ function ready(current, minimumGeneration = 0, requirePersisted = false) {
     && current.transactionGeneration === current.transactionCompletedGeneration
     && (!requirePersisted || current.persisted)
     && current.maximumLabelDistance <= current.labelDistanceLimit + 0.5
-    && current.workspaceVersion === 1
+    && current.workspaceVersion === 2
     && current.workspaceAudit?.ok === true
     && current.workspaceWidth >= 1600
     && current.workspaceHeight >= 960
@@ -181,7 +181,7 @@ try {
   await page.click('button[data-tab="state"]');
   const initial = await waitForReady(page, "initial");
 
-  assert.equal(initial.nodeAdapterVersion, 7, JSON.stringify(initial));
+  assert.equal(initial.nodeAdapterVersion, 8, JSON.stringify(initial));
   assert.equal(initial.nodeGuardVersion, 2, JSON.stringify(initial));
   assert.equal(initial.certificatePresent, false, JSON.stringify(initial));
   assert.equal(initial.routerPresent, false, JSON.stringify(initial));
