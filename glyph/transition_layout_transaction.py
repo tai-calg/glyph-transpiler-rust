@@ -74,14 +74,19 @@ async function run(token,reason){
     const stage=stageOf();
     if(stage&&stage.querySelector(".state-node")){
       window.glyphStateDiagramWorkspace?.prepare?.(stage);
-      window.glyphTransitionIoClusters?.reroute?.(stage);
-      return markReady(stage,token,reason,false);
+      const viewportReady=!window.glyphStateDiagramWorkspace
+        || stage.dataset.stateDiagramWorkspaceViewportReady==="true";
+      if(viewportReady){
+        window.glyphTransitionIoClusters?.reroute?.(stage);
+        return markReady(stage,token,reason,false);
+      }
     }
     if(frame<MAX_FRAME_BUDGET&&performance.now()<deadline)await nextFrame(deadline);
   }
   const stage=stageOf();
   if(stage){
     window.glyphStateDiagramWorkspace?.prepare?.(stage);
+    window.glyphTransitionIoClusters?.reroute?.(stage);
     return markReady(stage,token,reason,true);
   }
   completedGeneration=Math.max(completedGeneration,token);
