@@ -5,7 +5,6 @@ _MARKER = "glyph-transition-label-drag-guard-v2"
 
 _STYLE = r"""
 <style id="glyph-transition-label-drag-guard-v2-style">
-.graph-stage[data-transition-layout-state="pending"] .transition-io-cluster.dragging-io,
 .graph-stage[data-transition-publication-ready="false"] .transition-io-cluster.dragging-io{
   visibility:visible!important;
   pointer-events:auto!important;
@@ -21,10 +20,14 @@ if(window.glyphTransitionLabelDragGuard?.marker===MARKER)return;
 
 function invalidate(stage,reason){
   if(!stage||!stage.isConnected)return false;
-  stage.dataset.transitionLayoutState="pending";
+  // Keep the current layout generation alive for the duration of pointer capture.
+  // Only the published certificate becomes invalid; the transaction starts after
+  // the owner has captured and persisted the final point.
+  stage.dataset.manualLabelEditState="dragging";
   stage.dataset.transitionPublicationReady="false";
-  stage.dataset.transitionIoCollisionSolved="transaction-pending";
+  stage.dataset.transitionIoCollisionSolved="editing";
   stage.dataset.transitionIoCollisionCount="-1";
+  stage.dataset.layoutCertificateState="invalidated";
   stage.dataset.layoutCertificateRequestState="invalidated";
   stage.dataset.transitionLayoutReason=reason;
   return true;
@@ -37,7 +40,7 @@ function schedule(reason){
 // reset remain exclusively implemented by glyphTransitionLayoutInteractionAdapter.
 window.glyphTransitionLabelDragGuard=Object.freeze({
   marker:MARKER,
-  version:3,
+  version:4,
   interactionOwner:"glyph-transition-layout-interaction-adapter-v4",
   ownsPointerEvents:false,
   ownsPersistence:false,
@@ -50,7 +53,7 @@ window.glyphTransitionLabelDragGuard=Object.freeze({
 
 
 def enhance_transition_label_drag_guard_html(html: str) -> str:
-    """Expose fail-closed publication control to the unified label owner."""
+    """Invalidate publication without terminating the active label gesture."""
 
     if _MARKER in html:
         return html
