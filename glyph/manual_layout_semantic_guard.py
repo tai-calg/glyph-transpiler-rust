@@ -66,21 +66,6 @@ _SCRIPT = r"""
     }, 5000);
   }
 
-  function requestPublicationRecertification() {
-    const stage = stageOf();
-    const restoration = stage?.dataset.manualLayoutSemanticGuard || "";
-    if (!stage
-      || stage.dataset.transitionLayoutReason !== "manual-run"
-      || stage.dataset.transitionLayoutState !== "ready"
-      || stage.dataset.transitionPublicationReady === "true"
-      || !restoration.startsWith("restored:")) return false;
-    const router = window.glyphInitialTransitionRouter;
-    if (!router || typeof router.schedule !== "function") return false;
-    stage.dataset.manualLayoutSemanticGuard = `route-certification-requested:${restoration}`;
-    router.schedule("manual-layout-semantics-restored", 0);
-    return true;
-  }
-
   function install() {
     const transaction = window.glyphTransitionLayoutTransaction;
     const renderer = window.glyphTransitionIoClusters;
@@ -125,10 +110,7 @@ _SCRIPT = r"""
     return true;
   }
 
-  document.addEventListener("glyph-transition-layout-transaction-ready", () => {
-    install();
-    requestPublicationRecertification();
-  });
+  document.addEventListener("glyph-transition-layout-transaction-ready", install);
   document.addEventListener("glyph-transition-io-clusters-ready", install);
   new MutationObserver(install).observe(
     document.getElementById("view") || document.body,
@@ -144,9 +126,8 @@ _SCRIPT = r"""
 
   window.glyphManualLayoutSemanticGuard = {
     marker: MARKER,
-    version: 3,
+    version: 4,
     install,
-    requestPublicationRecertification,
     get armed() { return Boolean(pending) && !destroyed; },
   };
   install();
