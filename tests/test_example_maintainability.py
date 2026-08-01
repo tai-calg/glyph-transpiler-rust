@@ -4,7 +4,7 @@ from pathlib import Path
 import re
 import unittest
 
-from glyph import compile_outputs
+from glyph import compile_outputs, parse_compilation_model
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -20,18 +20,74 @@ OLD_SYSTEM_ENTRY = re.compile(r"(?m)^system\s+[A-Za-z_]\w*\s*=")
 
 
 class ExampleMaintainabilityTests(unittest.TestCase):
-    def test_maintained_examples_use_checked_system_context_and_compile(self) -> None:
+    def test_maintained_examples_use_executable_system_boundaries_and_compile(self) -> None:
         for path in MAINTAINED_EXAMPLES:
             with self.subTest(path=path.relative_to(ROOT)):
                 source = path.read_text(encoding="utf-8")
                 self.assertIsNone(OLD_SYSTEM_ENTRY.search(source))
                 self.assertRegex(source, r"(?m)^system\s+[A-Za-z_]\w*\s*$")
                 self.assertRegex(source, r"(?m)^\s+entry\s+[A-Za-z_]\w*\s*$")
-                self.assertRegex(source, r"(?m)^\s+in\s+[A-Za-z_]\w*:")
-                self.assertRegex(source, r"(?m)^\s+out\s+[A-Za-z_]\w*:")
+
+                model = parse_compilation_model(source, str(path.relative_to(ROOT)))
+                self.assertTrue(model.systems)
+                self.assertEqual(len(model.systems), len(model.architecture.systems))
+                for declaration, architecture in zip(
+                    model.systems,
+                    model.architecture.systems,
+                    strict=True,
+                ):
+                    self.assertEqual(architecture.entry, declaration.entry_name)
+                    self.assertEqual(architecture.ports, ())
+                    self.assertTrue(
+                        all(edge.kind == "call" for edge in architecture.edges)
+                    )
+
+                    roles = {
+                        component.name: component.role
+                        for component in architecture.components
+                    }
+                    self.assertEqual(roles[declaration.entry_name], "entry")
+                    self.assertEqual(
+                        {name for name, role in roles.items() if role == "source"},
+                        set(architecture.sources),
+                    )
+                    self.assertEqual(
+                        {name for name, role in roles.items() if role == "sink"},
+                        set(architecture.sinks),
+                    )
+                    self.assertTrue(
+                        all(
+                            role in {"entry", "source", "sink", "internal"}
+                            for role in roles.values()
+                        )
+                    )
+
+                    if declaration.syntax == "entry-source-sink":
+                        self.assertEqual(
+                            set(declaration.source_names),
+                            set(architecture.sources),
+                        )
+                        self.assertEqual(
+                            set(declaration.sink_names),
+                            set(architecture.sinks),
+                        )
+
                 outputs = compile_outputs(source, str(path.relative_to(ROOT)))
                 self.assertTrue(outputs.artifacts.logic)
                 self.assertTrue(outputs.diagrams.files["architecture-ir.json"])
+
+    def test_canonical_door_example_uses_only_entry_source_sink_syntax(self) -> None:
+        path = ROOT / "examples" / "acceptance" / "door_controller.glyph"
+        source = path.read_text(encoding="utf-8")
+        model = parse_compilation_model(source, str(path.relative_to(ROOT)))
+        self.assertEqual(len(model.systems), 1)
+        declaration = model.systems[0]
+        self.assertEqual(declaration.syntax, "entry-source-sink")
+        self.assertEqual(declaration.entry_name, "control")
+        self.assertEqual(declaration.source_names, ("sensor",))
+        self.assertEqual(set(declaration.sink_names), {"lock", "alarm"})
+        self.assertNotRegex(source, r"(?m)^\s+(?:in|out)\s+")
+        self.assertNotRegex(source, r"(?m)^\s+[A-Za-z_]\w*\s*->\s*[A-Za-z_]\w*\s*$")
 
     def test_example_names_match_their_design_responsibility(self) -> None:
         motor = (ROOT / "examples" / "acceptance" / "motor_safety.glyph").read_text(
