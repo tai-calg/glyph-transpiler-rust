@@ -67,14 +67,17 @@ def test_transaction_contains_publication_grade_layout_phases() -> None:
     assert "await window.glyphTransitionEnablingCases?.apply?.()" in html
 
 
-def test_automatic_labels_explore_multiple_arrow_anchors_without_relaxing_tether() -> None:
+def test_automatic_labels_use_alternate_arrow_anchors_only_as_fallback() -> None:
     html = enhance_transition_layout_transaction_html(
         "<html><head></head><body></body></html>"
     )
 
     assert "function anchorFractions(preferred)" in html
     assert "const anchors=anchorFractions(fraction).map(value=>anchorFor(stage,id,index,value))" in html
-    assert "const anchors=entry.manual?[entry.anchor]:entry.anchors" in html
+    assert "const primary=optionsAtAnchor(entry,entry.anchor,entry.preferred,stage,nodes,pathSamples)" in html
+    assert "if(primary.length||entry.manual)return primary" in html
+    assert "for(const anchor of entry.anchors.slice(1))" in html
+    assert "if(values.length)return values" in html
     assert "const point=option.point,anchor=option.anchor||entry.anchor" in html
     assert "entry.cluster.dataset.ioDistance=String(Math.hypot(point.x-anchor.x,point.y-anchor.y))" in html
     assert "const MAX_DISTANCE=96" in html
