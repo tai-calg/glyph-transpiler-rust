@@ -8,10 +8,10 @@ _STYLE = r"""
 .editor-wrap{position:relative}
 .identifier-highlight-surface{
   position:absolute;
-  z-index:0;
+  z-index:3;
   display:none;
   overflow:hidden;
-  background:#0b1018;
+  background:transparent;
   pointer-events:none;
 }
 .editor-wrap.identifier-highlight-active>.identifier-highlight-surface{display:block}
@@ -26,7 +26,7 @@ _STYLE = r"""
   border:0;
   white-space:pre;
   tab-size:2;
-  color:var(--text);
+  color:transparent;
   background:transparent;
   pointer-events:none;
   user-select:none;
@@ -36,30 +36,19 @@ _STYLE = r"""
   margin:0;
   padding:0;
   border-radius:3px;
-  color:var(--text);
+  color:transparent;
   background:rgba(148,163,184,.24);
   box-shadow:0 0 0 1px rgba(148,163,184,.13);
 }
 .editor-wrap>.lines{
   position:relative;
-  z-index:2;
+  z-index:4;
 }
-.editor-wrap.identifier-highlight-active>.editor{
+.editor-wrap>.editor{
   position:relative;
   z-index:1;
-  color:transparent!important;
-  background:transparent!important;
-  caret-color:var(--text);
 }
-.editor-wrap.identifier-highlight-active>.editor::selection{
-  color:transparent;
-  background:rgba(148,163,184,.30);
-}
-.theme-monochrome .identifier-highlight-surface{background:#fff!important}
-.theme-monochrome .identifier-highlight-layer,
-.theme-monochrome .identifier-highlight-layer mark{color:#111!important}
-.theme-monochrome .identifier-highlight-layer mark,
-.theme-monochrome .editor-wrap.identifier-highlight-active>.editor::selection{
+.theme-monochrome .identifier-highlight-layer mark{
   background:rgba(0,0,0,.12)!important;
   box-shadow:0 0 0 1px rgba(0,0,0,.14)!important;
 }
@@ -167,7 +156,7 @@ window.glyphEditorIdentifierHighlight={
 
 
 def enhance_editor_identifier_highlight_html(html: str) -> str:
-    """Highlight every exact lexical occurrence of the focused identifier."""
+    """Highlight every exact lexical occurrence without obscuring the editor."""
 
     if _MARKER in html:
         return html
