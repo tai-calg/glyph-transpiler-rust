@@ -17,6 +17,7 @@ def read(relative: str) -> str:
 def test_node_and_label_interactions_have_one_owner_each() -> None:
     node_guard = read("glyph/node_drag_publication_guard.py")
     node_owner = read("glyph/transition_node_position_adapter.py")
+    exports = read("glyph/diagram_editor_exports.py")
     label_guard = read("glyph/transition_label_drag_guard.py")
     label_owner = read("glyph/transition_layout_interaction_adapter.py")
 
@@ -26,6 +27,12 @@ def test_node_and_label_interactions_have_one_owner_each() -> None:
     assert "ownsKeyboardEvents: false" in node_guard
     assert 'invalidatePublication(active,"manual-node-drag")' in node_owner
     assert 'invalidatePublication(record,"manual-node-keyboard")' in node_owner
+
+    assert 'stage.querySelectorAll(".state-node,.graph-node")' not in exports
+    assert 'stage.querySelectorAll(".graph-node").forEach(node=>' in exports
+    assert '!selected.matches(".graph-node")' in exports
+    assert "function stateCurve(" not in exports
+    assert 'stateNodeInteractionOwner:"glyph-transition-node-position-adapter-v7"' in exports
 
     assert "ownsPointerEvents:false" in label_guard
     assert "ownsPersistence:false" in label_guard
@@ -38,6 +45,7 @@ def test_every_persisted_geometry_has_an_explicit_coordinate_frame() -> None:
     label_owner = read("glyph/transition_layout_interaction_adapter.py")
     transaction = read("glyph/transition_layout_transaction.py")
     node_owner = read("glyph/transition_node_position_adapter.py")
+    exports = read("glyph/diagram_editor_exports.py")
     viewport = read("glyph/diagram_canvas_viewport.py")
 
     assert "anchorFraction:record.anchorFraction" in label_owner
@@ -48,6 +56,9 @@ def test_every_persisted_geometry_has_an_explicit_coordinate_frame() -> None:
     assert "value[nodeName(node)]={x:num(node.style.left),y:num(node.style.top)}" in node_owner
     assert "ensureCanvas(stage" in transaction
     assert "nodes.right+CANVAS_PADDING" in transaction
+
+    assert '$("#diagram-reset").onclick=async()=>' in exports
+    assert "await state();localStorage.removeItem(key(stage))" in exports
 
     assert "const digest=activeStage()?.dataset.diagramDigest||\"source\"" in viewport
     assert "return `${digest}:${tab}:${index}`" in viewport
