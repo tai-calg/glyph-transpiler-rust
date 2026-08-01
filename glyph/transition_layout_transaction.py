@@ -275,8 +275,9 @@ function positionLabels(stage,data,machine){
     const key=`${transition.source_state||"?"}\u001f${transition.target_state||"?"}`;
     const rank=pairRanks.get(key)||0,count=pairCounts.get(key)||1;
     pairRanks.set(key,rank+1);
-    const fraction=count===1?.5:(rank+1)/(count+1);
-    const path=pathFor(stage,id,index),anchor=anchorFor(path,fraction),record=saved[id];
+    const autoFraction=count===1?.5:(rank+1)/(count+1),record=saved[id];
+    const fraction=finite(record?.anchorFraction)?clamp(record.anchorFraction,.2,.8):autoFraction;
+    const path=pathFor(stage,id,index),anchor=anchorFor(path,fraction);
     const centered=rank-(count-1)/2;
     const autoOffset=transition.source_state===transition.target_state
       ?{x:Math.sin(anchor.normal)*18+centered*18,y:-20-Math.abs(centered)*12}
