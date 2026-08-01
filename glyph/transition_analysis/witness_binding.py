@@ -225,13 +225,24 @@ def runtime_program_fingerprint(model: CompilationModel) -> str:
 
 
 def relation_edge_fingerprints(model: CompilationModel) -> dict[str, str]:
+    """Return only globally unambiguous MachineRelation edge fingerprints.
+
+    Edge IDs are authorization keys for native witnesses. If two relation edges ever
+    expose the same ID, neither may receive a fingerprint: omitting the ambiguous key
+    causes witness binding and native Exact projection to fail closed.
+    """
+
     result: dict[str, str] = {}
+    ambiguous: set[str] = set()
     for machine in sorted(model.machines, key=lambda item: item.name):
         relation = build_machine_relation(model, machine.name)
         if relation is None:
             continue
         for edge in relation.edges:
-            result[edge.edge_id] = canonical_digest(
+            edge_id = edge.edge_id
+            if edge_id in ambiguous:
+                continue
+            fingerprint = canonical_digest(
                 {
                     "machine": relation.machine_id,
                     "transition_function": relation.transition_function,
@@ -243,6 +254,11 @@ def relation_edge_fingerprints(model: CompilationModel) -> dict[str, str]:
                     "completion": edge.completion,
                 }
             )
+            if edge_id in result:
+                result.pop(edge_id, None)
+                ambiguous.add(edge_id)
+                continue
+            result[edge_id] = fingerprint
     return result
 
 
