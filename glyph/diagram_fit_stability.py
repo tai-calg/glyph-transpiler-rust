@@ -351,6 +351,7 @@ _SCRIPT = r"""
     "glyph-layout-shelf-viewport-ready",
     "glyph-layout-compact-shelf-repair-ready",
     "glyph-layout-shelf-repair-ready",
+    "glyph-diagram-viewport-change",
     "glyph-locale-changed",
   ]) {
     document.addEventListener(eventName, () => {
