@@ -80,6 +80,13 @@ async function state(page) {
   });
 }
 
+async function nodeStylePosition(node) {
+  return node.evaluate(element => ({
+    left: Number.parseFloat(element.style.left || "0") || 0,
+    top: Number.parseFloat(element.style.top || "0") || 0,
+  }));
+}
+
 async function dragOneNode(page) {
   const nodes = page.locator(".state-node");
   const deltas = [
@@ -88,21 +95,22 @@ async function dragOneNode(page) {
   for (let index = 0; index < await nodes.count(); index += 1) {
     const node = nodes.nth(index);
     for (const [dx, dy] of deltas) {
-      const before = await node.boundingBox();
-      if (!before) continue;
-      const x = before.x + before.width / 2;
-      const y = before.y + before.height / 2;
+      const box = await node.boundingBox();
+      if (!box) continue;
+      const before = await nodeStylePosition(node);
+      const x = box.x + box.width / 2;
+      const y = box.y + box.height / 2;
       await page.mouse.move(x, y);
       await page.mouse.down();
       await page.mouse.move(x + dx, y + dy, { steps: 8 });
       await page.mouse.up();
       await page.waitForTimeout(80);
-      const after = await node.boundingBox();
-      if (after && (Math.abs(after.x - before.x) > 4 || Math.abs(after.y - before.y) > 4)) {
-        await page.waitForFunction(() => Array.from(
-          { length: localStorage.length },
-          (_, storageIndex) => localStorage.key(storageIndex),
-        ).some(key => key?.startsWith("glyph.diagram.positions.v1:")));
+      const after = await nodeStylePosition(node);
+      if (Math.abs(after.left - before.left) > 4 || Math.abs(after.top - before.top) > 4) {
+        await page.waitForFunction(() => {
+          const stage = document.querySelector(".state-node")?.closest(".graph-stage");
+          return stage?.dataset.transitionNodePositions?.startsWith("saved:") === true;
+        });
         return;
       }
     }
