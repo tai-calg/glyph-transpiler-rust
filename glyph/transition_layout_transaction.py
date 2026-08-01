@@ -42,6 +42,7 @@ function markReady(stage,token,reason,degraded=false){
   stage.dataset.transitionLayoutMarker=MARKER;
   stage.dataset.transitionLayoutProfile="ordinary";
   stage.dataset.transitionLayoutMode="base";
+  stage.dataset.transitionDenseCanvas="disabled";
   stage.dataset.transitionLayoutBudgetMs=String(TRANSACTION_DEADLINE_MS);
   stage.dataset.transitionLayoutBudgetExceeded=degraded?"true":"false";
   stage.setAttribute("data-transition-layout-ready","true");
@@ -106,6 +107,7 @@ function cancel(reason="cancelled"){
     stage.dataset.transitionLayoutState="ready";
     stage.dataset.transitionLayoutReady="true";
     stage.dataset.transitionPublicationReady="true";
+    stage.dataset.transitionDenseCanvas="disabled";
   }
   return generation;
 }
