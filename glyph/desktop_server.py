@@ -5,12 +5,14 @@ from dataclasses import dataclass
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import os
 from pathlib import Path
 import secrets
 import signal
 import threading
 from typing import Any
 from urllib.parse import urlsplit
+import webbrowser
 
 from . import diagram_app
 from .diagram_app import GlyphDiagramApp, ViewBuilder
@@ -71,11 +73,10 @@ def create_desktop_server(
     token: str | None = None,
     view_builder: ViewBuilder = build_io_state_views,
 ) -> DesktopServer:
-    """Create a loopback-only authenticated server for the Tauri shell.
+    """Create the loopback-only authenticated Glyph Studio server.
 
-    ``view_builder`` allows a reviewed strict-exact Evidence configuration to be
-    exercised through the same authenticated desktop sidecar without changing the
-    default shadow-compatible application mode.
+    The Tauri shell and ``python3 glyph.py`` both use this function so they
+    cannot drift onto different HTML preparation or API paths.
     """
 
     prepare_diagram_app()
@@ -190,6 +191,45 @@ def create_desktop_server(
 
     server = ThreadingHTTPServer((host, port), Handler)
     return DesktopServer(app=app, server=server, token=session_token)
+
+
+def run_studio_app(
+    source_path: str | Path,
+    *,
+    host: str = "127.0.0.1",
+    port: int | None = None,
+    open_browser: bool | None = None,
+    view_builder: ViewBuilder = build_io_state_views,
+) -> int:
+    """Run the same authenticated Studio runtime used by the native app."""
+
+    selected_port = (
+        int(os.environ.get("GLYPH_DIAGRAM_PORT", "0")) if port is None else port
+    )
+    studio = create_desktop_server(
+        source_path,
+        host=host,
+        port=selected_port,
+        view_builder=view_builder,
+    )
+    should_open = (
+        os.environ.get("GLYPH_DIAGRAM_NO_BROWSER") != "1"
+        if open_browser is None
+        else open_browser
+    )
+    print(f"Glyph Studio: {studio.launch_url}")
+    print(f"Source: {studio.app.input_path}")
+    print("終了: Ctrl+C")
+    if should_open:
+        threading.Timer(0.15, lambda: webbrowser.open(studio.launch_url)).start()
+    try:
+        studio.server.serve_forever(poll_interval=0.25)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        studio.server.server_close()
+        studio.app.stop()
+    return 0
 
 
 def _parser() -> argparse.ArgumentParser:
