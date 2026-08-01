@@ -32,18 +32,18 @@ def test_guard_snapshots_and_restores_semantic_dataset_fields() -> None:
     assert 'stage.dataset.manualLayoutSemanticGuard = `restored:${restored}`' in html
 
 
-def test_guard_requests_one_router_generation_and_uses_shared_completion_event() -> None:
+def test_guard_only_preserves_semantics_and_does_not_own_recertification() -> None:
     html = enhance_manual_layout_semantic_guard_html(
         "<html><head></head><body></body></html>"
     )
 
-    assert "requestPublicationRecertification()" in html
-    assert 'router.schedule("manual-layout-semantics-restored", 0)' in html
-    assert 'stage.dataset.manualLayoutSemanticGuard = `route-certification-requested:${restoration}`' in html
-    assert "waitForRouteAndPublish" not in html
+    assert "requestPublicationRecertification" not in html
+    assert "glyphInitialTransitionRouter" not in html
+    assert "glyphLayoutPublicationCertificate" not in html
     assert "ROUTE_WAIT_LIMIT" not in html
     assert "ROUTE_WAIT_DELAY_MS" not in html
-    assert "glyphLayoutPublicationCertificate" not in html
+    assert 'document.addEventListener("glyph-transition-layout-transaction-ready", install)' in html
+    assert "version: 4" in html
 
 
 def test_guard_is_installed_after_transaction_and_before_interaction() -> None:
