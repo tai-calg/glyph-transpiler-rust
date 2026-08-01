@@ -4,7 +4,7 @@ from pathlib import Path
 import unittest
 
 from glyph.compilation import CompilationPipeline
-from glyph.default_workspace import DEFAULT_SOURCE
+from glyph.default_workspace import PREVIOUS_CLI_DEFAULT_SOURCE
 from glyph.io_state_views import build_io_state_views
 from glyph.transition_analysis.evidence_projection import EvidenceProjectionMode
 from glyph.transition_analysis.public_effect_contracts import (
@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def _builtin_default_source() -> str:
-    return DEFAULT_SOURCE
+    return PREVIOUS_CLI_DEFAULT_SOURCE
 
 
 def _program_source(source_id: str, source_path: str | None) -> str:
