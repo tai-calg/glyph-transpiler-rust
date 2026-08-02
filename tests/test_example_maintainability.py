@@ -76,12 +76,44 @@ class ExampleMaintainabilityTests(unittest.TestCase):
                     self.assertEqual(system.ports, ())
                     self.assertTrue(system.components)
                     self.assertTrue(
-                        all(component.role in {"entry", "source", "sink", "internal"}
-                            for component in system.components)
+                        all(
+                            component.role in {"entry", "source", "sink", "internal"}
+                            for component in system.components
+                        )
                     )
                     self.assertTrue(all(edge.kind == "call" for edge in system.edges))
-                    self.assertTrue(all(evidence.kind == "call" for evidence in system.evidence))
+                    self.assertTrue(
+                        all(evidence.kind == "call" for evidence in system.evidence)
+                    )
         self.assertGreaterEqual(checked, 9)
+
+    def test_public_documentation_teaches_the_canonical_system_boundary(self) -> None:
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        language = (ROOT / "docs" / "LANGUAGE.md").read_text(encoding="utf-8")
+        io_app = (ROOT / "docs" / "IO_STATE_APP.md").read_text(encoding="utf-8")
+
+        canonical = """system MotorSafety
+  entry cycle
+  source sensor
+  sink write_motor"""
+        self.assertIn("## 10. System境界", readme)
+        self.assertIn(canonical, readme)
+        self.assertIn("矢印は常に関数呼出しだけ", readme)
+        self.assertNotIn("## 10. System Context", readme)
+        self.assertNotIn("System Context: input ->", readme)
+        self.assertNotIn("| `->` | `system`内 | 公開境界上のflow |", readme)
+        self.assertNotIn("公開I/Oと作用flowを宣言する", readme)
+
+        self.assertIn("### System boundary", language)
+        self.assertIn('system               := "system" Name', language)
+        self.assertIn('system-entry         := "entry" Name', language)
+        self.assertIn('system-source        := "source" Name', language)
+        self.assertIn('system-sink          := "sink" Name', language)
+        self.assertIn("Reachable `>` and `~` functions are internal nodes", language)
+
+        self.assertIn("## Executable System boundary view", io_app)
+        self.assertIn("Function calls only", io_app)
+        self.assertIn("`~optimize`はHost側で実装する純粋関数", io_app)
 
     def test_example_names_match_their_design_responsibility(self) -> None:
         motor = (ROOT / "examples" / "acceptance" / "motor_safety.glyph").read_text(
@@ -129,9 +161,13 @@ class ExampleMaintainabilityTests(unittest.TestCase):
     def test_repository_contains_no_migration_or_packaging_residue(self) -> None:
         self.assertFalse((ROOT / ".github" / "refactor-payload").exists())
         self.assertFalse((ROOT / ".github" / "system-boundary-payload.txt").exists())
-        self.assertFalse(
-            (ROOT / ".github" / "workflows" / "apply-system-boundary-pr.yml").exists()
-        )
+        for path in (
+            ROOT / ".github" / "workflows" / "apply-system-boundary-pr.yml",
+            ROOT / ".github" / "workflows" / "update-readme-state-snapshot.yml",
+            ROOT / ".github" / "workflows" / "update-system-boundary-docs.yml",
+            ROOT / "scripts" / "migrate_system_boundary_docs_once.py",
+        ):
+            self.assertFalse(path.exists(), f"temporary migration file remains: {path}")
         self.assertFalse(list(ROOT.glob("*.egg-info")))
         gitignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
         self.assertIn("*.egg-info/", gitignore)
