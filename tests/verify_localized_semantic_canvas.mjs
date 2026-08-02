@@ -30,7 +30,10 @@ async function waitForServer(url, child, logs) {
     if (child.exitCode !== null) throw new Error(`Glyph process exited early\n${logs.join("")}`);
     try {
       const response = await fetch(`${url}/api/state`);
-      if (response.ok && (await response.json()).status === "ready") return;
+      if (response.ok) {
+        const state = await response.json();
+        if (state.status === "ready") return state;
+      }
     } catch {}
     await new Promise(resolve => setTimeout(resolve, 100));
   }
@@ -64,7 +67,12 @@ child.stderr.on("data", chunk => logs.push(chunk.toString()));
 const browser = await chromium.launch({ headless: true });
 try {
   const url = `http://127.0.0.1:${port}`;
-  await waitForServer(url, child, logs);
+  const apiState = await waitForServer(url, child, logs);
+  const machine = apiState.views.state.machines.find(item => item.name === "Demo");
+  assert(machine, "Demo machine missing from compiler-derived state view");
+  const expectedFailureTransitions = machine.transitions.filter(item => item.outcome === "failure").length;
+  assert(expectedFailureTransitions > 0, "fixture must contain failure-state transitions");
+
   const page = await browser.newPage({ viewport: { width: 1500, height: 900 } });
   await page.goto(url, { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => document.querySelector("#status")?.classList.contains("ready"));
@@ -143,7 +151,8 @@ try {
       inputCount: document.querySelectorAll('.transition-io-node[data-io-kind="input"]').length,
       outputCount: document.querySelectorAll('.transition-io-node[data-io-kind="output"]').length,
       guardNodeCount: document.querySelectorAll('.transition-io-node[data-io-kind="guard"]').length,
-      failureDecorationCount: document.querySelectorAll(".transition-io-cluster.failure-transition,.transition-io-cluster .transition-io-error").length,
+      failureClusterCount: document.querySelectorAll(".transition-io-cluster.failure-transition").length,
+      failureErrorCount: document.querySelectorAll(".transition-io-cluster .transition-io-error").length,
       combinedValues: clusters.map(cluster => cluster.querySelector('.transition-io-node[data-io-kind="io"] .transition-io-value')?.textContent || ""),
       semanticActions: clusters.map(cluster => cluster.dataset.actionValue || ""),
       visibleLegacyLabels: visibleLegacyLabels.length,
@@ -157,7 +166,8 @@ try {
   assert.equal(placement.inputCount, 0);
   assert.equal(placement.outputCount, 0);
   assert.equal(placement.guardNodeCount, 0);
-  assert.equal(placement.failureDecorationCount, 0);
+  assert.equal(placement.failureClusterCount, expectedFailureTransitions);
+  assert.equal(placement.failureErrorCount, 0);
   assert(placement.combinedValues.every(value => value.trim().length > 0));
   assert(placement.semanticActions.every(value => value.trim().length === 0), placement.semanticActions.join("\n"));
   assert(placement.combinedValues.every(value => !value.includes(" ➞ ")), placement.combinedValues.join("\n"));
