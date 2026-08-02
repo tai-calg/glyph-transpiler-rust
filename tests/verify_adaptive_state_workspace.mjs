@@ -82,10 +82,16 @@ try {
     const obstacles = [...(stage?.querySelectorAll(".state-node,.transition-io-cluster") || [])]
       .filter(element => element !== dot)
       .map(element => ({ kind: element.className, rect: rect(element) }));
-    const nodeRects = [...(stage?.querySelectorAll(".state-node") || [])].map(rect);
-    const centers = nodeRects.map(item => ({ x: (item.left + item.right) / 2, y: (item.top + item.bottom) / 2 }));
-    const spanX = centers.length ? Math.max(...centers.map(item => item.x)) - Math.min(...centers.map(item => item.x)) : 0;
-    const spanY = centers.length ? Math.max(...centers.map(item => item.y)) - Math.min(...centers.map(item => item.y)) : 0;
+    const logicalCenters = [...(stage?.querySelectorAll(".state-node") || [])].map(element => ({
+      x: element.offsetLeft + element.offsetWidth / 2,
+      y: element.offsetTop + element.offsetHeight / 2,
+    }));
+    const logicalSpanX = logicalCenters.length
+      ? Math.max(...logicalCenters.map(item => item.x)) - Math.min(...logicalCenters.map(item => item.x))
+      : 0;
+    const logicalSpanY = logicalCenters.length
+      ? Math.max(...logicalCenters.map(item => item.y)) - Math.min(...logicalCenters.map(item => item.y))
+      : 0;
     const stageRect = stage ? rect(stage) : null;
     return {
       present: Boolean(stage && dot && initialPath),
@@ -103,10 +109,13 @@ try {
       actualDotOverlaps: dotRect ? obstacles.filter(item => overlaps(dotRect, item.rect)).length : -1,
       dotInside: Boolean(dotRect && stageRect && dotRect.left >= stageRect.left && dotRect.top >= stageRect.top && dotRect.right <= stageRect.right && dotRect.bottom <= stageRect.bottom),
       pathData: initialPath?.getAttribute("d") || "",
-      spanX,
-      spanY,
+      logicalSpanX,
+      logicalSpanY,
     };
   });
+
+  await page.screenshot({ path: path.join(outputDirectory, "door-adaptive-layout.png"), fullPage: true });
+  await fs.writeFile(path.join(outputDirectory, "audit.json"), JSON.stringify(audit, null, 2));
 
   assert.equal(audit.present, true, JSON.stringify(audit));
   assert.equal(audit.adaptive, "true", JSON.stringify(audit));
@@ -114,8 +123,8 @@ try {
   assert(audit.spreadY >= 1.1, JSON.stringify(audit));
   assert(audit.contentWidth > audit.originalWidth * 1.3, JSON.stringify(audit));
   assert(audit.contentHeight > audit.originalHeight * 1.05, JSON.stringify(audit));
-  assert(audit.spanX >= 560, JSON.stringify(audit));
-  assert(audit.spanY >= 300, JSON.stringify(audit));
+  assert(audit.logicalSpanX >= 560, JSON.stringify(audit));
+  assert(audit.logicalSpanY >= 420, JSON.stringify(audit));
   assert.equal(audit.initialCertificate, "ordinary-obstacle-free", JSON.stringify(audit));
   assert.equal(audit.initialCollisions, 0, JSON.stringify(audit));
   assert.equal(audit.initialDotCollisions, 0, JSON.stringify(audit));
@@ -123,7 +132,6 @@ try {
   assert.equal(audit.actualDotOverlaps, 0, JSON.stringify(audit));
   assert.equal(audit.dotInside, true, JSON.stringify(audit));
   assert.match(audit.pathData, /^M\s/);
-  await page.screenshot({ path: path.join(outputDirectory, "door-adaptive-layout.png"), fullPage: true });
   assert.deepEqual(errors, [], errors.join("\n"));
   await page.close();
 } finally {
