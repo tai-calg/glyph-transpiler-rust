@@ -1,0 +1,32 @@
+name: Repair Transition Label Lines
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/fix-transition-label-lines.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'agent/system-entry-source-sink'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/system-entry-source-sink
+          fetch-depth: 0
+          token: ${{ github.token }}
+      - name: Apply semantic line repair
+        run: |
+          set -euo pipefail
+          python3 scripts/fix_transition_label_lines_once.py
+          python3 -m unittest tests.test_transition_io_clusters -v
+          git add -A glyph/transition_io_clusters.py tests/test_transition_io_clusters.py scripts/fix_transition_label_lines_once.py
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git commit -m "Split long transition labels by semantic role"
+          git push origin HEAD:agent/system-entry-source-sink
