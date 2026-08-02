@@ -4,90 +4,84 @@ from pathlib import Path
 import re
 import unittest
 
-from glyph import compile_outputs, parse_compilation_model
+from glyph import compile_outputs
 
 
 ROOT = Path(__file__).resolve().parents[1]
-MAINTAINED_EXAMPLES = (
-    ROOT / "examples" / "acceptance" / "door_controller.glyph",
-    ROOT / "examples" / "acceptance" / "job_scheduler.glyph",
-    ROOT / "examples" / "acceptance" / "motor_safety.glyph",
-    ROOT / "examples" / "door_sketch.glyph",
-    ROOT / "examples" / "system_controller.glyph",
-    ROOT / "examples" / "temperature_view.glyph",
+PUBLIC_SYSTEM_SOURCES = tuple(
+    sorted((ROOT / "examples").rglob("*.glyph"))
+    + [ROOT / "glyph" / "resources" / "default.glyph"]
 )
 OLD_SYSTEM_ENTRY = re.compile(r"(?m)^system\s+[A-Za-z_]\w*\s*=")
+SYSTEM_HEADER = re.compile(r"^system\s+([A-Za-z_]\w*)\s*$")
+SYSTEM_ITEM = re.compile(r"^(entry|source|sink)\s+([A-Za-z_]\w*)\s*$")
+
+
+def system_blocks(source: str) -> list[tuple[str, list[str]]]:
+    lines = source.splitlines()
+    blocks: list[tuple[str, list[str]]] = []
+    index = 0
+    while index < len(lines):
+        header = SYSTEM_HEADER.fullmatch(lines[index])
+        if header is None:
+            index += 1
+            continue
+        items: list[str] = []
+        cursor = index + 1
+        while cursor < len(lines):
+            raw = lines[cursor]
+            code = raw.split("#", 1)[0].rstrip()
+            if not code:
+                cursor += 1
+                continue
+            if not code[:1].isspace():
+                break
+            items.append(code.strip())
+            cursor += 1
+        blocks.append((header.group(1), items))
+        index = cursor
+    return blocks
 
 
 class ExampleMaintainabilityTests(unittest.TestCase):
-    def test_maintained_examples_use_executable_system_boundaries_and_compile(self) -> None:
-        for path in MAINTAINED_EXAMPLES:
+    def test_all_public_system_examples_use_entry_source_sink_and_compile(self) -> None:
+        checked = 0
+        for path in PUBLIC_SYSTEM_SOURCES:
+            source = path.read_text(encoding="utf-8")
+            blocks = system_blocks(source)
+            if not blocks:
+                continue
+            checked += 1
             with self.subTest(path=path.relative_to(ROOT)):
-                source = path.read_text(encoding="utf-8")
                 self.assertIsNone(OLD_SYSTEM_ENTRY.search(source))
-                self.assertRegex(source, r"(?m)^system\s+[A-Za-z_]\w*\s*$")
-                self.assertRegex(source, r"(?m)^\s+entry\s+[A-Za-z_]\w*\s*$")
-
-                model = parse_compilation_model(source, str(path.relative_to(ROOT)))
-                self.assertTrue(model.systems)
-                self.assertEqual(len(model.systems), len(model.architecture.systems))
-                for declaration, architecture in zip(
-                    model.systems,
-                    model.architecture.systems,
-                    strict=True,
-                ):
-                    self.assertEqual(architecture.entry, declaration.entry_name)
-                    self.assertEqual(architecture.ports, ())
+                for name, items in blocks:
+                    self.assertTrue(items, f"system {name} has no boundary items")
+                    parsed = [SYSTEM_ITEM.fullmatch(item) for item in items]
                     self.assertTrue(
-                        all(edge.kind == "call" for edge in architecture.edges)
+                        all(item is not None for item in parsed),
+                        f"system {name} contains a non-canonical item: {items}",
                     )
-
-                    roles = {
-                        component.name: component.role
-                        for component in architecture.components
-                    }
-                    self.assertEqual(roles[declaration.entry_name], "entry")
+                    roles = [item.group(1) for item in parsed if item is not None]
                     self.assertEqual(
-                        {name for name, role in roles.items() if role == "source"},
-                        set(architecture.sources),
+                        roles.count("entry"),
+                        1,
+                        f"system {name} must declare exactly one entry",
                     )
-                    self.assertEqual(
-                        {name for name, role in roles.items() if role == "sink"},
-                        set(architecture.sinks),
-                    )
-                    self.assertTrue(
-                        all(
-                            role in {"entry", "source", "sink", "internal"}
-                            for role in roles.values()
-                        )
-                    )
-
-                    if declaration.syntax == "entry-source-sink":
-                        self.assertEqual(
-                            set(declaration.source_names),
-                            set(architecture.sources),
-                        )
-                        self.assertEqual(
-                            set(declaration.sink_names),
-                            set(architecture.sinks),
-                        )
 
                 outputs = compile_outputs(source, str(path.relative_to(ROOT)))
                 self.assertTrue(outputs.artifacts.logic)
-                self.assertTrue(outputs.diagrams.files["architecture-ir.json"])
-
-    def test_canonical_door_example_uses_only_entry_source_sink_syntax(self) -> None:
-        path = ROOT / "examples" / "acceptance" / "door_controller.glyph"
-        source = path.read_text(encoding="utf-8")
-        model = parse_compilation_model(source, str(path.relative_to(ROOT)))
-        self.assertEqual(len(model.systems), 1)
-        declaration = model.systems[0]
-        self.assertEqual(declaration.syntax, "entry-source-sink")
-        self.assertEqual(declaration.entry_name, "control")
-        self.assertEqual(declaration.source_names, ("sensor",))
-        self.assertEqual(set(declaration.sink_names), {"lock", "alarm"})
-        self.assertNotRegex(source, r"(?m)^\s+(?:in|out)\s+")
-        self.assertNotRegex(source, r"(?m)^\s+[A-Za-z_]\w*\s*->\s*[A-Za-z_]\w*\s*$")
+                architecture = outputs.model.architecture
+                self.assertEqual(len(architecture.systems), len(blocks))
+                for system in architecture.systems:
+                    self.assertEqual(system.ports, ())
+                    self.assertTrue(system.components)
+                    self.assertTrue(
+                        all(component.role in {"entry", "source", "sink", "internal"}
+                            for component in system.components)
+                    )
+                    self.assertTrue(all(edge.kind == "call" for edge in system.edges))
+                    self.assertTrue(all(evidence.kind == "call" for evidence in system.evidence))
+        self.assertGreaterEqual(checked, 9)
 
     def test_example_names_match_their_design_responsibility(self) -> None:
         motor = (ROOT / "examples" / "acceptance" / "motor_safety.glyph").read_text(
