@@ -25,10 +25,7 @@ jobs:
           set -euo pipefail
           python3 scripts/fix_viewport_logical_size_once.py
           python3 -m unittest tests.test_diagram_canvas_viewport -v
-          git add glyph/diagram_canvas_viewport.py tests/test_diagram_canvas_viewport.py
-          git rm --cached --ignore-unmatch scripts/fix_viewport_logical_size_once.py || true
-          rm -f scripts/fix_viewport_logical_size_once.py
-          git add -A scripts/fix_viewport_logical_size_once.py
+          git add -A glyph/diagram_canvas_viewport.py tests/test_diagram_canvas_viewport.py scripts/fix_viewport_logical_size_once.py
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git commit -m "Keep viewport logical size independent of zoom"
