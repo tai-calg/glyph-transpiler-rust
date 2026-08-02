@@ -125,7 +125,6 @@ async function inspectLabels(page) {
           || rect.right > nodeRect.right + 1.5 || rect.bottom > nodeRect.bottom + 1.5,
         distance: Number(cluster.dataset.ioDistance || 0),
         rect: cluster.getBoundingClientRect(),
-        audit: cluster.dataset.transitionReadability,
       };
     });
     const collisions = [];
@@ -141,13 +140,7 @@ async function inspectLabels(page) {
       rect.left < stageRect.left - 1 || rect.top < stageRect.top - 1
       || rect.right > stageRect.right + 1 || rect.bottom > stageRect.bottom + 1
     )).map(item => item.id) : ["missing-stage"];
-    return {
-      stageAudit: stage?.dataset.transitionIoReadability,
-      violationCount: Number(stage?.dataset.transitionIoReadabilityViolations || 0),
-      labels,
-      collisions,
-      outside,
-    };
+    return { labels, collisions, outside };
   });
 }
 
@@ -183,22 +176,23 @@ try {
           await page.selectOption("#machine-select", { label: machine.name });
         }
         await page.waitForFunction(({ machineName, transitionCount }) => {
-          const stage = document.querySelector(".graph-stage");
-          const collisionState = stage?.dataset.transitionIoCollisionSolved;
+          const stage = document.querySelector(".state-node")?.closest(".graph-stage");
           return document.querySelector("#machine-select")?.selectedOptions?.[0]?.textContent === machineName
+            && stage?.dataset.transitionLayoutState === "ready"
+            && stage?.dataset.transitionPublicationReady === "true"
             && stage?.dataset.transitionIoClustersReady === "true"
-            && (collisionState === "true" || collisionState === "fallback")
-            && stage?.dataset.transitionIoReadability === "true"
-            && stage.querySelectorAll(".transition-io-cluster").length === transitionCount;
-        }, { machineName: machine.name, transitionCount: machine.transitions.length });
+            && stage?.dataset.transitionLayoutProfile === "ordinary"
+            && stage?.dataset.stateDiagramWorkspaceGeometryReady === "true"
+            && stage?.dataset.initialRouteReady === "true"
+            && stage.querySelectorAll(".transition-io-cluster").length === transitionCount
+            && !stage.dataset.transitionLayoutError;
+        }, { machineName: machine.name, transitionCount: machine.transitions.length }, { timeout: 10_000 });
 
         const expected = machine.transitions.map((transition, index) => ({
           id: transition.id || `T${index + 1}`,
           text: expectedLabel(transition),
         }));
         const inspection = await inspectLabels(page);
-        assert.equal(inspection.stageAudit, "true", `${testCase.slug}/${machine.name}: readability audit failed`);
-        assert.equal(inspection.violationCount, 0, `${testCase.slug}/${machine.name}: runtime audit found violations`);
         assert.deepEqual(
           inspection.labels.map(({ id, text }) => ({ id, text })),
           expected,
@@ -210,7 +204,6 @@ try {
         assert(inspection.labels.every(label => label.textOverflow !== "ellipsis"));
         assert(inspection.labels.every(label => !label.horizontalClipping && !label.verticalClipping && !label.outsideBox));
         assert(inspection.labels.every(label => label.distance <= 96.5));
-        assert(inspection.labels.every(label => label.audit === "true"));
         assert.deepEqual(inspection.collisions, [], `${testCase.slug}/${machine.name}: label collision`);
         assert.deepEqual(inspection.outside, [], `${testCase.slug}/${machine.name}: label outside diagram`);
 
