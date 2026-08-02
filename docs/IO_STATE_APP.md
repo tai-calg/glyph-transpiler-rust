@@ -4,7 +4,7 @@
 
 `python3 glyph.py <file.glyph>`は、一つのGlyph sourceから次の二つのcompiler-derived viewを表示する。
 
-1. Checked System Context / I/O topology
+1. Executable System boundary / function-call topology
 2. State transitions
 
 アプリケーションは設計対象を実行しない。PythonやJavaScript側でGlyphの業務ロジックを再実装せず、検証済みIRだけを表示する。
@@ -37,44 +37,62 @@ GLYPH_DIAGRAM_PORT=7860 python3 glyph.py design.glyph
 GLYPH_DIAGRAM_NO_BROWSER=1 python3 glyph.py design.glyph
 ```
 
-## Checked System Context view
+## Executable System boundary view
 
-正規の`system` declarationは、entry、typed port、主要なデータ・戻り値・作用flowを宣言する。
+正規の`system` declarationは、値や型や矢印を再宣言せず、外部境界となる関数だけを指定する。
 
 ```glyph
 system MotorSafety
   entry control
-
-  in state:MotorState
-  in sensor:Input
-  out receipt:Receipt
-
-  state -> control
-  sensor -> control
-  control -> receipt
-  control -> write_motor
+  source sensor
+  sink write_motor
 ```
 
-`system MotorSafety=control`は廃止されている。
+各役割は呼出しの主導方向で決まる。
 
-### System Flowとcall graph
+| item | declaration kind | meaning |
+|---|---|---|
+| `entry control` | `>control(...)` | outsideがSystem内部関数をinvokeする |
+| `source sensor` | `ext sensor(...)` | Systemが外部関数を呼び、値をpullする |
+| `sink write_motor` | `!write_motor(...)` | Systemが外部関数を呼び、作用を要求する |
 
-System Flowとcall graphは同一ではない。
+関数の引数型、正常戻り型、失敗型は各関数宣言から取得する。
+
+```glyph
+ext sensor():Input|SensorError
+!write_motor(command:Command):Receipt|MotorError
+
+>control(state:MotorState):Receipt|ControlError
+  input := sensor()?
+  command := decide(state,input)
+  write_motor(command)
+```
+
+`Receipt|ControlError`の失敗側をSystem境界から落としてはならない。entryの完全な関数シグネチャがSystemのrequest/response契約になる。
+
+`system MotorSafety=control`、`in`、`out`、System内の`a -> b`は正規記法ではない。
+
+### Function calls only
+
+System図のノードは関数だけ、矢印は実コードから導出した関数呼出しだけに限定する。
 
 ```text
-code call: control -> sensor
-data flow: sensor -> control
+[ENTRY] control(state: MotorState) -> Receipt | ControlError
+    calls -> [SOURCE] sensor() -> Input | SensorError
+    calls -> [INTERNAL] decide(state, input) -> Command
+    calls -> [SINK] write_motor(command) -> Receipt | MotorError
 ```
 
-明示`system`がある場合、I/O viewはSystem Contextを表示する。内部の`decide`や`step`をentry call graphから自動的に境界へ混入させない。
+`Input`、`MotorState`、`Receipt`などの値や型を独立ノードとして関数と同列に置かない。型は関数ノードの引数・戻り値欄に表示する。
 
-```text
-state  --data--> control --returns--> receipt
-sensor --data--> control
-control --effect--> write_motor
+entryから到達する通常関数と`~`関数は`INTERNAL`として自動収集する。Systemブロックへ列挙しない。
+
+```glyph
+~optimize(input:Input):Plan
+>decide(input:Input):Plan=optimize(input)
 ```
 
-call graphが必要な場合は別viewとして扱う。`system`宣言がないsourceに限り、whole-program call graphをfallback I/O viewとして表示する。
+`~optimize`はHost側で実装する純粋関数であり、外部作用ではないため`sink`にしない。
 
 ### Explicit external boundaries
 
@@ -86,68 +104,55 @@ ext panel():PanelInput
 ext database(query:Query):Record|DatabaseError
 ```
 
-`ext`はoutside → systemの極性を持つ。未宣言名をrendererがexternal componentとして補うことはない。
-
-```glyph
-system Broken
-  entry control
-  in sensor:Input
-  out result:Input
-  sensor -> control
-  control -> result
-
->control():Input=sensor()  # sensorが未宣言なのでコンパイルエラー
-```
-
-修正:
+正しいSystem宣言:
 
 ```glyph
 system Fixed
   entry control
-  in sensor:Input
-  out result:Input
-  sensor -> control
-  control -> result
+  source sensor
 
 ext sensor():Input
 >control():Input=sensor()
 ```
 
-`ext`と`!`はHostへ接続されるが、Architecture上の意味は異なる。
+未宣言の外部呼出しはコンパイルエラーになる。
 
-| declaration | polarity | role |
+```glyph
+system Broken
+  entry control
+
+>control():Input=sensor()
+```
+
+`ext`、`!`、`~`はHostへ接続されるが、System上の意味は異なる。
+
+| declaration | call direction | System role |
 |---|---|---|
-| `ext sensor():Input` | outside → system | external input / provider |
-| `!write_motor(command:Command):Receipt` | system → outside | effect boundary |
-| `~layout(input:Input):Layout` | system → manual Rust dependency | logically pure implementation contract |
+| `ext sensor():Input` | system -> outside -> value | `source` |
+| `!write_motor(command:Command):Receipt` | system -> outside effect | `sink` |
+| `~layout(input:Input):Layout` | system -> manual pure Rust | `internal` |
 
-### Checked flow evidence
+### Completeness checks
 
-System edgeはarrowを生成する命令ではない。Architecture assertionであり、コンパイラがtyped code evidenceを付与できる場合だけ受理する。
-
-| edge kind | browser label | evidence |
-|---|---|---|
-| input data | `data` | entry parameterまたはexternal input read |
-| successful return | `returns` | return typeとentryからの到達性 |
-| external effect | `effect` | effect boundaryへの到達path |
-| internal/manual responsibility | `flow` | declared call path |
+コンパイラはentryから実行可能なcall graphを辿り、System宣言と照合する。
 
 次はコンパイルエラーになる。
 
-- undeclared entry
-- undeclared endpoint
-- codeに存在しないflow edge
-- port型とfunction型の不一致
-- `ext`と`!`の極性逆転
-- reachable external boundaryのsystem記載漏れ
+- entryが未宣言、または`>`関数ではない
+- sourceが未宣言、または`ext`関数ではない
+- sinkが未宣言、または`!`関数ではない
+- 宣言したsource/sinkへentryから到達できない
+- entryから到達するsource/sinkの宣言漏れ
+- 同じ関数を複数の境界役割へ割り当てる
+- 未宣言関数への呼出し
 
-Glyph短縮型`U/B/F/I`と、正規化後の`u16/bool/f32/i16`は同じcanonical typeとして比較する。
+Glyph短縮型`U/B/F/I`と、正規化後の`u16/bool/f32/i32`は同じcanonical typeとして扱う。
 
-### Internal declarations
+### Internal and unconnected declarations
 
-明示systemに接続されていないhelperや別entryは、`Internal and unconnected declarations`へ分離する。これは未宣言という意味ではなく、選択中のpublic System Contextに含めていないという意味である。
+entryから到達する内部関数はSystem図へ含める。entryから到達しない別entry候補や無関係なhelperは、`Internal and unconnected declarations`へ分離する。
 
-完全な意味論は[`CODE_DERIVED_SYSTEMS.md`](CODE_DERIVED_SYSTEMS.md)を参照する。ファイル名は既存link互換のため維持している。
+完全な意味論は[`CODE_DERIVED_SYSTEMS.md`](CODE_DERIVED_SYSTEMS.md)を参照する。
 
 ## State-transition view
 
@@ -220,11 +225,11 @@ version: 2
 
 JSON modelには次を含む。
 
-- checked systems
-- typed ports
-- semantic edges and evidence
-- external/effect/manual boundary classification
-- fallback call graph
+- checked Systems
+- entry/source/sink/internal function classification
+- complete function signatures
+- derived call edges and evidence
+- fallback whole-program call graph
 - type declarations
 - normalized machines
 - concrete states and transitions
@@ -238,4 +243,4 @@ JSON modelには次を含む。
 - business-semantic inference
 - `machine`なしのstate-machine inference
 - undeclared external component inference
-- call edgeをphysical wireまたはSystem Contextとみなすこと
+- call edgeをphysical wireとみなすこと
