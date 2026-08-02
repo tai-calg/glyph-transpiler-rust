@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from . import diagram_app
+from .adaptive_state_focus import enhance_adaptive_state_focus_html
 from .code_derived_system_ui import enhance_code_derived_system_html
 from .diagnostic_i18n import localize_message_payload
 from .diagram_canvas_navigation import enhance_diagram_canvas_navigation_html
@@ -95,6 +96,7 @@ def _presentation_pipeline():
         enhance_transition_node_position_adapter_html,
         enhance_transition_layout_tab_guard_html,
         enhance_transition_semantic_status_ui_html,
+        enhance_adaptive_state_focus_html,
     )
 
 
