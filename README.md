@@ -1,17 +1,37 @@
 # Glyph
 
 Glyphは、ソフトウェア設計のうち、**型、判断、状態、外部境界、資源、安全条件**を短いコードへまとめ、同じ意味モデルから次を生成する設計DSLです。
+AIがコーディングをする時代を見据えて、「実装だけが先に進み開発後期で設計が破綻する、ないしは人間がコードを把握できなくなる」という課題意識から、実装前に大まかな振る舞いや境界や型を記述して設計できる言語が欲しいという動機で開発しました。
+10分程度のコーディングで状態遷移図などのシステム設計図をレンダリング可能なコンパイラ・トランスパイラアプリケーションを目指しています。Rustのtauriフレームワークを用い、WebアプリおよびMacデスクトップアプリを構成しており、型、条件分岐、状態遷移、外部入出力のcallee/caller関数名を一つのDSLに記述し、解析結果からIRを介して、主にRustコード、状態遷移図、I/O構成図を生成可能です。
 
-- Rustコード
-- I/O構成図
-- 状態遷移図
-- 処理フロー図
-- 時間制約の解析・監視情報
-- 機械処理用JSON / IR
-
-Glyphはアプリケーションの細部をすべて実装する言語ではありません。OS、デバイス、通信、実時計測、GPU処理などはHost実装へ残し、設計レビューで確認したい構造を明示します。
+Glyphはアプリケーションの細部をすべて実装する言語ではありません。OS、デバイス、通信、実時計測、GPU処理などはHost実装（トランスパイル後のモックのRustコード）へ残し、設計レビューで確認したい構造を明示します。
 
 > 現在のバージョンは`0.4.0`、開発段階はAlphaです。本番システムへ導入する場合は、生成コードとHost実装を必ずレビューしてください。
+
+## 目次
+
+1. [Glyph Studio](#1-glyph-studio)
+2. [Glyphで解決する問題](#2-glyphで解決する問題)
+3. [最短で試す](#3-最短で試す)
+4. [最初のGlyphコード](#4-最初のGlyphコード)
+5. [Glyph文法の全体像](#5-glyph文法の全体像)
+6. [型とデータ](#6-型とデータ)
+7. [記号を読むための補足](#7-記号を読むための補足)
+8. [関数、分岐、パイプライン](#8-関数分岐パイプライン)
+9. [Rust実装、外部入力、外部作用](#9-rust実装外部入力外部作用)
+10. [System境界](#10-system境界)
+11. [状態機械](#11-状態機械)
+12. [時間制約](#12-時間制約)
+13. [マクロ](#13-マクロ)
+14. [CapabilityとResource](#14-capabilityとresource)
+15. [Contract](#15-contract)
+16. [理論的基盤と保証範囲](#16-理論的基盤と保証範囲)
+17. [生成物](#17-生成物)
+18. [Glyph Studioの操作](#18-glyph-studioの操作)
+19. [よくある間違い](#19-よくある間違い)
+20. [開発とテスト](#20-開発とテスト)
+21. [文書一覧](#21-文書一覧)
+22. [ライセンス](#22-ライセンス)
 
 ---
 
@@ -23,21 +43,21 @@ Glyphはアプリケーションの細部をすべて実装する言語ではあ
 
 Motor Safetyの実入力条件、ガード、Action、遷移先状態を一画面へ表示しています。遷移ラベルは`Input [Guard] ➞ Action`の形で、状態名とは別に描画されます。
 
-![Glyph Studioの状態遷移図](docs/images/glyph-studio-state-transition.png)
+![Glyph Studioの状態遷移図](docs/images/top_layout.png)
 
 ### I/O構成図
 
 Door Controllerの入力、代表関数、戻り値、外部作用を、コード上の型と呼出し根拠に基づいて表示しています。
 
-![Glyph StudioのI/O構成図](docs/images/glyph-studio-io.png)
+![Glyph StudioのI/O構成図](docs/images/io_diagram_layout.png)
 
 ---
 
 ## 2. Glyphで解決する問題
 
-一般的な設計資料では、図、文章、実装コードが別々に管理されます。実装を変更しても図が更新されず、資料とコードが一致しなくなることがあります。
+背景として、一般的な設計資料では、図、文章、実装コードが別々に管理されます。実装を変更しても図が更新されず、資料とコードが一致しなくなることがあります。
 
-Glyphでは設計を一つの`.glyph`ファイルへまとめます。
+その問題意識に基づき、Glyphでは設計を一つの`.glyph`ファイルへまとめます。
 
 ```text
 Glyphソース
@@ -53,9 +73,9 @@ Glyphソース
    Rust / 図 / JSON / 診断 / witness
 ```
 
-**純粋な計算**は、ファイル書込み、ネットワーク通信、GPIO操作などを行わず、入力から出力を計算する処理です。
+**純粋な計算**: 外部への影響を与えずかつ受けず、入力のみから出力を計算する処理。ファイル書込み、ネットワーク通信、GPIO操作などを行わない関数が該当。
 
-**外部作用**は、プログラム外部の状態を変更し得る処理です。モーター駆動、ファイル保存、通信送信などが該当します。
+**外部作用**: プログラム外部の状態を変更し得る処理。モーター駆動、ファイル保存、通信送信などが該当。
 
 ---
 
@@ -133,9 +153,11 @@ macOSの配布用アプリをビルドする場合は、リポジトリ直下か
 
 >step(state:DoorState,input:Input):DoorState
   action := decide(input)
-  action == RaiseAlarm >> DoorState(Alarmed,RaiseAlarm)
-  action == Unlock >> DoorState(Unlocked,Unlock)
-  _ >> DoorState(Locked,KeepLocked)
+  next :=
+    action == RaiseAlarm >> DoorState(Alarmed,RaiseAlarm)
+    action == Unlock >> DoorState(Unlocked,Unlock)
+    _ >> DoorState(Locked,KeepLocked)
+  next
 ```
 
 読み方:
@@ -146,22 +168,123 @@ macOSの配布用アプリをビルドする場合は、リポジトリ直下か
 4. `>step(...)`で現在状態と入力から次状態を計算する
 5. ガード列は上から評価し、最初に成立した`条件 >> 値`を選ぶ
 6. `_`は、それまでの条件に一致しなかった場合を表す
+7. `:=`は一度だけ値を束縛するローカル定義、`==`は等値比較(詳細は8.1節)
 
 完全な例は[`examples/acceptance/door_controller.glyph`](examples/acceptance/door_controller.glyph)を参照してください。
 
 ---
 
-## 5. 文法を読むための基本規則
+## 5. Glyph文法の全体像
 
-Glyphはコード量を抑えるため、一部の記号を構文位置に応じて使い分けます。まず、次の三分類を区別してください。
+Glyphの文法は、設計対象を次の順序で記述するように構成されています。
 
-| 分類 | 例 | 誰が決めるか |
-|---|---|---|
-| 予約構文 | `?`, `*`, `>>`, `@A`, `@E` | Glyph言語 |
-| ユーザー定義名 | `Input`, `lock_deadline`, `forced_open` | 設計者 |
-| リテラル | `500ms`, `true`, `42` | ソースに直接書く値 |
+1. **型とデータ**で、システムが扱う値の形を定義する
+2. **関数と分岐**で、入力から出力を得る判断や変換を定義する
+3. **外部境界**で、システム外からの入力と外部への作用を分離する
+4. **SystemとMachine**で、処理全体と状態遷移の境界を定義する
+5. 必要に応じて、**時間制約、Resource、Contract**を追加する
 
-### 5.1 時間制約の分解
+最初にすべての記号を暗記する必要はありません。通常は`*`、`+`、`>`、`>>`、`:=`、`ext`、`!`、`system`、`machine`まで理解すれば、基本的な設計を記述できます。
+
+| 重要度 | 記法 | 名前 | 役割 | 導入目的 |
+|---:|---|---|---|---|
+| 1 | `*Name(...)` | 積型 | 複数の値を一つのデータへまとめる | Rustのstruct型と対応。入力、状態、結果を意味のある単位として扱うため |
+| 2 | `+Name=A\|B` | 直和型 | 値が取り得る選択肢を列挙する | RustのEnum型と対応。不正な状態や命令を型で排除するため |
+| 3 | `>name(...):T` | Glyph関数 | 入力から出力を計算する | 判断や変換を明示し、図とRustへ変換するため |
+| 4 | `condition >> value` | ordered guard | 条件に応じて返す値を選ぶ | if thenに対応。分岐規則を上から読める形で表すため |
+| 5 | `name := expression` | 不変束縛 | 中間値を一度だけ定義する | 可変代入を増やさず処理を段階化するため |
+| 6 | `T\|E` / `expression?` | 型付き失敗 | 成功値と失敗値、失敗伝播を表す | エラー経路を関数契約から落とさないため |
+| 7 | `ext name(...)` | 外部入力 | システム外から値を取得する | センサーやDBなど、外部依存を純粋計算から分離するため |
+| 8 | `!name(...)` | 外部作用 | システム外へ作用を要求する | 保存、送信、駆動などの作用点を特定するため |
+| 9 | `system Name` | System境界 | entry、source、sinkを宣言する | 実際のcall graphからシステム構成を導出するため |
+| 10 | `machine Name(...)` | 状態機械 | 初期状態と次状態計算を宣言する | 通常の関数変換と状態遷移を区別するため |
+| 11 | `?name(...)=...` | 時間制約 | 実行履歴に対する安全条件や期限を表す | 単一関数では表せない時間的要求を設計へ含めるため |
+| 12 | `resource Name[...]` | 状態付き資源 | 資源の所有形態と状態を表す | 二重使用や不正な状態遷移を静的に検査するため |
+| 13 | `'...` | Contract | 実行場所、通信手順、失敗処理、法則を付加する | 本体とは別の横断的要求を機械処理可能にするため |
+| 14 | `@NAME=...` / `@name(x)=...` | マクロ | 定型式や構文を再利用する | 重複を減らし、同じ設計規則を再利用するため |
+| 15 | `=Name=Type` | 型別名 | 既存型へ別名を付ける | 型表現へ設計上の名前を与えるため |
+| 16 | `~name(...)` | Rust実装関数 | 型契約だけGlyphへ置く | 既存ライブラリや複雑な処理をHost側へ残すため |
+
+以降では、この表の順序に沿って、まず型とデータから説明します。
+
+---
+
+## 6. 型とデータ
+
+### 6.1 基本型
+
+整数、浮動小数点数、真偽値、文字列はRustの型名をそのまま使用します。
+
+| Glyph | 意味 |
+|---|---|
+| `u8`, `u16`, `u32`, `u64` | 符号なし整数 |
+| `i8`, `i16`, `i32`, `i64` | 符号付き整数 |
+| `f32`, `f64` | 浮動小数点数 |
+| `bool` | 真偽値 |
+| `String` | 文字列 |
+
+コンテナ型は次の3つで、それぞれRustの`Result`、`Option`、`Vec`に相当します。
+
+| Glyph | Rust相当 |
+|---|---|
+| `R<T,E>` | `Result<T,E>` |
+| `O<T>` | `Option<T>` |
+| `V<T>` | `Vec<T>` |
+
+短縮型:
+
+| 短縮 | 正規型 |
+|---|---|
+| `U` | `u16` |
+| `I` | `i32` |
+| `F` | `f32` |
+| `D` | `f64` |
+| `B` | `bool` |
+| `S` | `String` |
+
+### 6.2 積型
+
+複数の値を一つの構造体としてまとめます。Rustでは概ね`struct`に対応します。
+
+```glyph
+*SensorInput(value:F,valid:B,count:U)
+*Point(x,y:F)
+```
+
+同じ型が続く場合は、`Point`のようにまとめて記述できます。
+
+関数引数ではfieldを展開できます。
+
+```glyph
+*Sample(value:F,valid:B)
+>check(*Sample):B=valid
+```
+
+### 6.3 直和型
+
+```glyph
++Mode=Idle|Running|Faulted
++Command=Stop|Run(U)
++Event=Started{time:U}|Failed{code:U,message:S}
+```
+
+### 6.4 Result短縮
+
+型シグネチャ最上位の`T|E`は`Result<T,E>`です。
+
+```glyph
+>parse(text:S):Value|ParseError
+```
+
+`T/E`と`T?E`は使用しません。
+
+---
+
+## 7. 記号を読むための補足
+
+Glyphでは、同じ記号が置かれた位置によって役割を変える場合があります。ただし、これは最初に理解すべき中心概念ではありません。型、関数、外部境界を理解した後で、コードを正確に読むための参照表として利用してください。
+
+### 7.1 時間制約の分解
 
 ```glyph
 ?lock_deadline(*Input) =
@@ -189,13 +312,13 @@ unlockedが観測されたなら、
 500ms以内にlockedが成立しなければならない。
 ```
 
-`unlocked`や`locked`は予約語ではありません。次の型で設計者が定義したfieldです。
+`unlocked`や`locked`は予約語ではありません。この例では、次の型で設計者が定義したfieldです。
 
 ```glyph
 *Input(unlocked,locked:B)
 ```
 
-### 5.2 `>>`の共通意味
+### 7.2 `>>`の共通意味
 
 `>>`は、どの文脈でも**左側が成立・完了した場合に右側へ進む**ことを表します。
 
@@ -220,7 +343,7 @@ send_request >> receive_response
 
 同じ記号を使う根拠は`if / then`または「次へ進む」という共通した読み方です。文法上の意味が完全に同一という主張ではありません。
 
-### 5.3 文脈で役割が決まる記号
+### 7.3 文脈で役割が決まる記号
 
 | 記号 | 使用位置 | 意味 |
 |---|---|---|
@@ -229,11 +352,11 @@ send_request >> receive_response
 | `*` | 行頭`*Input(...)` | 積型宣言 |
 | `*` | 引数位置`*Input` | 積型fieldの展開 |
 | `*` | Protocol内`*P` | 手順Pの繰返し |
-| `|` | `+Mode=A|B` | 直和variantの区切り |
-| `|` | 戻り値`T|E` | `Result<T,E>`の短縮 |
-| `|` | 式`P|Q` | 論理和 |
-| `|` | `|x| expr` | ラムダ引数の囲み |
-| `|` | Protocol内`P|Q` | 手順の選択 |
+| `\|` | `+Mode=A\|B` | 直和variantの区切り |
+| `\|` | 戻り値`T\|E` | `Result<T,E>`の短縮 |
+| `\|` | 式`P\|Q` | 論理和 |
+| `\|` | `\|x\| expr` | ラムダ引数の囲み |
+| `\|` | Protocol内`P\|Q` | 手順の選択 |
 | `=` | 宣言・定義位置 | 名前と定義の区切り |
 | `==` | 式 | 等値比較 |
 | `!` | 行頭`!write(...)` | 外部作用宣言 |
@@ -241,105 +364,12 @@ send_request >> receive_response
 | `'!` | Contract宣言 | Handler Contract |
 | `@` | `@MAX`, `@limit(...)` | raw / ASTマクロ宣言 |
 | `@A`, `@E` | 時間制約 | always / eventually |
-| `@{'Contract}` | 宣言への付加 | Contract適用 |
-| `-> T`, `<- T` | Protocol内 | 送信方向 / 受信方向 |
-| `'Name` | Contract位置 | Contract名 |
+| `@{'Contract}` | 宣言への付加 | Contract適用* |
+| `-> T`, `<- T` | Protocol内 | 送信方向 / 受信方向* |
+| `'Name` | Contract位置 | Contract名* |
 | `Name` | 通常位置 | 型・関数・値などのObject名 |
 
-コンパイラは構文位置から区別します。READMEの標準例では、複合演算子の前後に空白を入れ、境界を視認しやすくします。
-
-```glyph
-# 推奨
-@A(forced_open >> alarmed)
-input.valid & input.ready >> Accept
-
-# 読みにくいため標準例では使用しない
-@A(forced_open>>alarmed)
-input.valid&input.ready>>Accept
-```
-
----
-
-## 6. トップレベル文法
-
-| 記法 | 名前 | 目的 |
-|---|---|---|
-| `*Name(...)` | 積型 | 複数の項目を一つのデータへまとめる |
-| `+Name=A|B` | 直和型 | 値が取り得る選択肢を列挙する |
-| `=Name=Type` | 型別名 | 既存型表現へ別名を付ける |
-| `>name(...)` | 純粋関数 | 入力から出力を計算する |
-| `~name(...)` | Rust実装関数 | 型契約だけGlyphへ置く |
-| `ext name(...)` | 外部入力 | システム外から値を受け取る |
-| `!name(...)` | 外部作用 | システム外へ作用する |
-| `system Name` | システム境界 | `entry`、`source`、`sink`となる関数を宣言する |
-| `machine Name(...)` | 状態機械 | 初期状態と次状態計算を宣言する |
-| `?name(...)=...` | 時間制約 | 安全条件や期限を宣言する |
-| `resource Name[...]` | 状態付き資源 | 資源状態と能力を検査する |
-| `@NAME=...` | rawマクロ | 識別子単位の字句置換 |
-| `@name(x)=...` | ASTマクロ | 式構造を保った展開 |
-| `'...` | Contract | World、Protocol、Handler、Lawを付加する |
-
----
-
-## 7. 型とデータ
-
-### 7.1 基本型
-
-| Glyph | Rust相当 |
-|---|---|
-| `u8`, `u16`, `u32`, `u64` | 符号なし整数 |
-| `i8`, `i16`, `i32`, `i64` | 符号付き整数 |
-| `f32`, `f64` | 浮動小数点数 |
-| `bool` | 真偽値 |
-| `String` | 文字列 |
-| `R<T,E>` | `Result<T,E>` |
-| `O<T>` | `Option<T>` |
-| `V<T>` | `Vec<T>` |
-
-短縮型:
-
-| 短縮 | 正規型 |
-|---|---|
-| `F` | `f32` |
-| `D` | `f64` |
-| `U` | `u16` |
-| `I` | `i32` |
-| `B` | `bool` |
-| `S` | `String` |
-
-### 7.2 積型
-
-```glyph
-*SensorInput(value:F,valid:B,count:U)
-*Point(x,y:F)
-```
-
-関数引数ではfieldを展開できます。
-
-```glyph
-*Sample(value:F,valid:B)
->check(*Sample):B=valid
-```
-
-### 7.3 直和型
-
-```glyph
-+Mode=Idle|Running|Faulted
-+Command=Stop|Run(U)
-+Event=Started{time:U}|Failed{code:U,message:S}
-```
-
-### 7.4 Result短縮
-
-型シグネチャ最上位の`T|E`は`Result<T,E>`です。
-
-```glyph
->parse(text:S):Value|ParseError
-```
-
-`T/E`と`T?E`は使用しません。
-
----
+※ * は開発段階の追加機能のため、理解しなくても基本的なGlyphコードを記述できます。
 
 ## 8. 関数、分岐、パイプライン
 
@@ -370,7 +400,7 @@ input.valid&input.ready>>Accept
 
 1. 上から条件を評価する
 2. 最初に成立した行の値を返す
-3. `_`は明示的なfallback
+3. `_`はelseでの使用でもfallbackでの使用でも可
 4. `_`は最後に置く
 
 variantのpayloadも取り出せます。
@@ -422,14 +452,14 @@ input /> validate? /> decide
 ext sensor():Input
 ext database(query:Query):Record|DatabaseError
 
-!write_motor(command:Command):Receipt|ControlError
+!write_motor(command:Command):Receipt|MotorError
 !save_file(data:Data):Receipt|FileError
 ```
 
 | 記法 | 本体 | 契約 |
 |---|---|---|
 | `>` | Glyph | 純粋 |
-| `~` | `manual.rs` | 純粋であることをHost側が保証 |
+| `~` | `manual.rs` | 純粋であることをHost側（コンパイル後のRustコードを本実装する側）が保証 |
 | `ext` | Host | outside → system |
 | `!` | Host | system → outside、外部状態を変更し得る |
 
@@ -481,7 +511,7 @@ System図のノードは関数だけ、矢印は常に関数呼出しだけで�
     calls -> [SINK] write_motor(command) -> Receipt | MotorError
 ```
 
-旧`in`、`out`、System内の`a -> b`は移行用に読み込める場合がありますが、正規のArchitecture IRや図を定義しません。
+<!-- 旧`in`、`out`、System内の`a -> b`は移行用に読み込める場合がありますが、正規のArchitecture IRや図を定義しません。 -->
 
 ---
 
@@ -512,19 +542,17 @@ machine Motor(state:MotorState,input:Input)
 
 ## 12. 時間制約
 
-```glyph
-?forced_open_safe(*Input) =
-  @A(forced_open >> alarmed)
+この機能は現在開発中でありalpha版の機能です。時相論理をglyph上で組み込む目的で導入しています。現時点ではglyphコード上で時間制約を表現して設計のためのコードとしての完成度を上げるだけの文法に過ぎず、コンパイル後への反映が甘く、どのようにこの制約をRustコード上で保証させるかは未決定です。
 
-?lock_deadline(*Input) =
-  @A(unlocked >> @E 500ms locked)
-```
+時間制約は、「常に安全である」「ある事象の後、期限内に応答する」といった、単一の関数呼出しだけでは表せない実行履歴上の要求を記述するために導入されています。
+
+Glyphは対応する時相式を解析し、有限trace評価、streaming monitor、検証要求IRなどへ変換します。ただし、式を書くだけで実機のdeadlineが保証されるわけではありません。実時間の計測、イベント供給、monitorの実行、違反後の復旧はHost実装の責任です。対応する式と生成物もAlpha段階の部分集合であり、一般的な時相論理やWCET解析を完全に実装しているわけではありません。
 
 | 記法 | 意味 |
 |---|---|
 | `!P` | Pではない |
 | `P & Q` | PかつQ |
-| `P | Q` | PまたはQ |
+| `P \| Q` | PまたはQ |
 | `P >> Q` | PならばQ |
 | `@A P` | Pが常に成立する |
 | `@E P` | Pがいつか成立する |
@@ -534,9 +562,20 @@ machine Motor(state:MotorState,input:Input)
 | `@A@E 1s P` | 常に、1秒以内に再びPが成立する |
 | `@E@A P` | いつか以降、常にPが成立する |
 
-裸の`A`、`E`、`AE`、`EA`、旧記号`□`、`◇`は使用しません。
 
-実時計測、イベント供給、周期実行、違反後の復旧はHost側の責任です。
+実時計測、イベント供給、周期実行、違反後の復旧はHost側（コンパイル後のRustコードを本実装する側）の責任です。
+
+次の例では、ドアの物理状態を観測する`Input`に対する関数へ時間制約を与える記述を行います。
+
+```glyph
+*Input(forced_open,alarmed,unlocked,locked:B)
+
+?forced_open_safe(*Input) =
+  @A(forced_open >> alarmed)
+
+?lock_deadline(*Input) =
+  @A(unlocked >> @E 500ms locked)
+```
 
 ---
 
@@ -549,9 +588,17 @@ machine Motor(state:MotorState,input:Input)
 @CONTROL=write_motor(step(state,input).command)
 
 >cap(value:U):U=min(value,MAX)
+>run(state:MotorState,input:Input):Receipt|MotorError=CONTROL
 ```
 
-大文字名を完全な識別子単位で置換します。`IN`を定義しても`Input`や`MIN`の一部は置換しません。
+rawマクロは、マクロ名と一致する完全な識別子を、定義した式へ置換します。上の`run`はコンパイル前に次の式へ展開されます。
+
+```glyph
+>run(state:MotorState,input:Input):Receipt|MotorError=
+  write_motor(step(state,input).command)
+```
+
+`IN`というマクロを定義しても、`Input`や`MIN`の一部は置換しません。rawマクロは単純な定数や、引数を必要としない定型式に向いています。
 
 複数行:
 
@@ -560,20 +607,43 @@ machine Motor(state:MotorState,input:Input)
   normalized := input.raw
   normalized /> |x| min(x,MAX)
 @end
+
+>prepare(input:Input):U
+  NORMALIZE
 ```
 
+複数行rawマクロは、関数ブロック内へ複数の文を挿入する用途に使います。展開後も`:=`の一意束縛、最終式、型整合性など通常の関数ブロック規則に従います。
+
 ### ASTマクロ
+
+ASTマクロは、引数を受け取る式テンプレートです。
 
 ```glyph
 @limit(x,high)=min(x,high)
 >run(x:U):U=limit(x,100)
 ```
 
-循環参照はエラーです。`A`と`E`は時相演算子用のためrawマクロ名として予約されています。
+この例では、`limit(x,100)`を構文木上で`min(x,100)`へ展開します。rawマクロと異なり、引数へ渡した式の構造を保ったまま置換するため、演算子の結合順序を壊しにくい形式です。
+
+ASTマクロの基本規則:
+
+1. `@name(parameter,...)=expression`の形で定義する
+2. 呼出し側では通常の関数と同じく`name(argument,...)`と書く
+3. 引数の個数は定義と一致させる
+4. マクロ展開はコンパイル前に行われ、展開後の式を通常どおり型検査する
+5. 自分自身または相互参照による循環展開はエラーになる
+
+マクロはコード生成時の関数呼出しではありません。共通処理を独立した関数として残したい場合は、マクロではなく`>`関数を使用します。
 
 ---
 
 ## 14. CapabilityとResource
+
+CapabilityとResourceは、値の型だけでなく、**誰がその値を保持できるか**、**どの状態の資源へどの操作を許可するか**を設計へ含めるために導入されています。
+
+通常の型だけでは、同じバッファを二重に送信する、解放済みResourceを再利用する、排他操作中の値を別の処理から変更するといった誤りを十分に表現できません。Glyphでは所有形態をCapability、資源の状態をResourceとして分離し、対応範囲で静的に検査します。
+
+この機能はAlpha段階です。コンパイラはCapabilityの移動・借用、Resource状態、symbolic identityなどの構造を検査し、IRやRust型へ反映します。一方、実際のメモリ配置、thread間同期、device ownership、破棄処理、Rust borrow checkerとの完全な意味一致までは保証しません。実行時の資源管理は生成コードとHost実装で確認する必要があります。
 
 ### Capability
 
@@ -603,7 +673,7 @@ live := (&weak as share)?
 ### Resource
 
 ```glyph
-resource Buffer[Allocated|Ready|InFlight|Retired]
+resource Buffer[Allocated|Ready|InFlight|Used|Retired]
 
 !submit(buffer:own Buffer[Ready]):own Buffer[InFlight]
 ```
@@ -618,6 +688,12 @@ resource Buffer[Allocated|Ready|InFlight|Retired]
 ---
 
 ## 15. Contract
+
+Contractは、通常の関数本体だけでは表しにくい**実行場所、通信順序、timeout、retry、rollback、安全法則**などの横断的要求を、型や関数へ付加するために導入されています。
+
+これらを個別のキーワードや手書きの設計文書として増やすのではなく、World、Protocol、Handler、Lawという独立したContractとして定義し、必要な宣言へ組み合わせて適用します。これにより、処理本体を変更せず、同じ通信手順や失敗方針を複数の関数へ再利用できます。
+
+ContractはAlpha段階の上級機能です。現時点では構文、参照整合性、要求IR、monitor要求などを生成しますが、thread、executor、transport、timer、取消、retry、rollbackを自動実装するものではありません。Contractが要求する実行時挙動はHost側で実装し、その適合性を別途確認する必要があります。
 
 Contractは通常の型や関数へ、実行場所、通信手順、失敗処理、法則を付加する上級機能です。
 
@@ -732,7 +808,7 @@ Glyphは複数の理論を一つの設計体験へ接続しています。ただ
 
 ### 16.6 現在主張できないこと
 
-- システム全体にバグがない
+- Glyphコードのコンパイル後のシステム全体にバグがない
 - 全状態・全入力・全無限実行が検証済み
 - deadlineを実機で必ず守る
 - race、deadlock、starvationが存在しない
@@ -805,15 +881,6 @@ machine-scenarios.generated.rs
 
 倍率は25%から300%です。表示倍率はSVG、PNG、PDFの出力座標へ影響しません。
 
-### テーマと出力
-
-| 操作 | 結果 |
-|---|---|
-| `White` | 白基調 |
-| `Monochrome` | 提出資料向け白黒 |
-| `SVG` | ベクター画像 |
-| `PNG` | 2倍解像度 |
-| `PDF` | 横向きPDF |
 
 ---
 
@@ -845,6 +912,11 @@ x == 0  # 正しい
 ### ガードの最後の`_`を省略する
 
 ```glyph
+# 誤り: どの条件にも一致しない場合の返り値がない
+>sign(x:I):I
+  x < 0 >> -1
+
+# 正しい: `_`でfallbackを明示する
 >sign(x:I):I
   x < 0 >> -1
   _ >> 1
