@@ -8,7 +8,7 @@ _SCRIPT = r"""
 (()=>{
 const MARKER="glyph-adaptive-state-focus-v1";
 const MIN_STAGE_WIDTH=1600,MIN_STAGE_HEIGHT=960,HORIZONTAL_PADDING=500,VERTICAL_PADDING=420;
-const MIN_FOCUS_SCALE=.55,MAX_FOCUS_SCALE=.9,FOCUS_MARGIN=54;
+const MIN_FOCUS_SCALE=.55,MAX_FOCUS_SCALE=.9,FOCUS_MARGIN=54,MAX_STARTUP_ATTEMPTS=4;
 let timer=0,running=false,destroyed=false;
 const num=value=>Number.parseFloat(value||"0")||0;
 const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
@@ -108,7 +108,7 @@ function focusOccupied(stage,bounds){
   };
   position();requestAnimationFrame(()=>{position();requestAnimationFrame(position)});setTimeout(()=>requestAnimationFrame(position),24);
   Object.assign(stage.dataset,{
-    adaptiveStateFocusReady:"true",adaptiveStateFocusScale:String(scale),
+    adaptiveStateFocusReady:"true",adaptiveStateFocusPending:"false",adaptiveStateFocusScale:String(scale),
     adaptiveStateOccupiedLeft:bounds.left.toFixed(1),adaptiveStateOccupiedTop:bounds.top.toFixed(1),
     adaptiveStateOccupiedWidth:bounds.width.toFixed(1),adaptiveStateOccupiedHeight:bounds.height.toFixed(1),
     adaptiveStateOccupiedCount:String(bounds.count),
@@ -120,27 +120,29 @@ function run(reason="scheduled"){
   if(running||destroyed)return false;
   const stage=stageOf(),machine=selectedMachine();
   if(!stage||!machine||stage.dataset.transitionIoClustersReady!=="true"||stage.dataset.transitionPublicationReady!=="true")return false;
-  running=true;
+  if(stage.dataset.adaptiveStateFocusReady==="true"||stage.dataset.adaptiveStateFocusPending==="true")return true;
+  running=true;stage.dataset.adaptiveStateFocusPending="true";
   try{
     spreadAdaptiveNodes(stage,machine);
     window.glyphStateDiagramWorkspace?.prepare?.(stage,machine);
     const complete=()=>{
       window.glyphTransitionIoClusters?.reroute?.(stage);
-      const bounds=occupiedBounds(stage);if(bounds)focusOccupied(stage,bounds);
+      const bounds=occupiedBounds(stage);
+      if(bounds)focusOccupied(stage,bounds);else stage.dataset.adaptiveStateFocusPending="false";
       stage.dataset.adaptiveStateFocusReason=reason;
     };
     requestAnimationFrame(()=>requestAnimationFrame(()=>setTimeout(complete,0)));
     return true;
   }finally{running=false}
 }
-function schedule(reason="scheduled",delay=32){
-  if(destroyed)return;clearTimeout(timer);timer=setTimeout(()=>{if(!run(reason))schedule(reason,32)},Math.max(0,delay));
+function schedule(reason="scheduled",delay=32,attempt=0){
+  if(destroyed)return;clearTimeout(timer);timer=setTimeout(()=>{if(!run(reason)&&attempt<MAX_STARTUP_ATTEMPTS)schedule(reason,32,attempt+1)},Math.max(0,delay));
 }
-for(const event of["glyph-state-diagram-workspace-ready","glyph-transition-io-clusters-ready","glyph-transition-layout-transaction-ready","glyph-transition-enabling-cases-ready"]){document.addEventListener(event,()=>schedule(event,24))}
-document.addEventListener("change",event=>{if(event.target?.id==="machine-select")schedule("machine-change",0)});
+for(const event of["glyph-state-diagram-workspace-ready","glyph-transition-io-clusters-ready","glyph-transition-layout-transaction-ready","glyph-transition-enabling-cases-ready"]){document.addEventListener(event,()=>schedule(event,24,0))}
+document.addEventListener("change",event=>{if(event.target?.id==="machine-select")schedule("machine-change",0,0)});
 for(const event of["pagehide","beforeunload"]){window.addEventListener(event,()=>{destroyed=true;clearTimeout(timer)},{once:true})}
-window.glyphAdaptiveStateFocus={marker:MARKER,version:1,schedule,refresh:()=>schedule("api-refresh",0),audit:()=>{const stage=stageOf();return{ready:stage?.dataset.adaptiveStateFocusReady||"",scale:num(stage?.dataset.adaptiveStateFocusScale),occupiedWidth:num(stage?.dataset.adaptiveStateOccupiedWidth),occupiedHeight:num(stage?.dataset.adaptiveStateOccupiedHeight),factorX:num(stage?.dataset.adaptiveStateSpreadFactorX),factorY:num(stage?.dataset.adaptiveStateSpreadFactorY)}}};
-schedule("bootstrap",0);
+window.glyphAdaptiveStateFocus={marker:MARKER,version:1,schedule,refresh:()=>schedule("api-refresh",0,0),audit:()=>{const stage=stageOf();return{ready:stage?.dataset.adaptiveStateFocusReady||"",scale:num(stage?.dataset.adaptiveStateFocusScale),occupiedWidth:num(stage?.dataset.adaptiveStateOccupiedWidth),occupiedHeight:num(stage?.dataset.adaptiveStateOccupiedHeight),factorX:num(stage?.dataset.adaptiveStateSpreadFactorX),factorY:num(stage?.dataset.adaptiveStateSpreadFactorY)}}};
+schedule("bootstrap",0,0);
 })();
 </script>
 """
