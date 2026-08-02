@@ -83,7 +83,7 @@ function assertCommitted(current) {
   assert.equal(current.layoutState, "ready");
   assert.equal(current.publicationReady, "true");
   assert.equal(current.initialReady, "true");
-  assert.equal(current.initialCertificate, "ordinary-follow");
+  assert.equal(current.initialCertificate, "ordinary-obstacle-free");
   assert.equal(current.initialPath, true);
   assert(current.width >= 1600, `workspace width is ${current.width}`);
   assert(current.height >= 960, `workspace height is ${current.height}`);
