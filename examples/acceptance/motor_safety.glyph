@@ -1,14 +1,6 @@
 system MotorSafety
   entry cycle
-
-  in state:MotorState
-  in input:Input
-  out receipt:Receipt
-
-  state -> cycle
-  input -> cycle
-  cycle -> receipt
-  cycle -> write_motor
+  sink write_motor
 
 machine Motor(state:MotorState,input:Input)
   select=state.mode
