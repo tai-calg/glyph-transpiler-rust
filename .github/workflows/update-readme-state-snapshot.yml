@@ -1,0 +1,45 @@
+name: Refresh README State Snapshot
+
+on:
+  push:
+    branches:
+      - agent/system-entry-source-sink
+    paths:
+      - .github/workflows/update-readme-state-snapshot.yml
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/system-entry-source-sink
+          fetch-depth: 0
+
+      - name: Download compiler-derived rendering
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/state-diagram-regression
+          gh run download 30729938147 \
+            --repo tai-calg/glyph-transpiler-rust \
+            --name state-diagram-regression \
+            --dir /tmp/state-diagram-regression
+          test -f /tmp/state-diagram-regression/build/state-diagram-regression/motor-safety-motor.png
+          cp /tmp/state-diagram-regression/build/state-diagram-regression/motor-safety-motor.png \
+            docs/images/glyph-studio-state-transition.png
+
+      - name: Commit refreshed baseline and remove one-shot workflow
+        run: |
+          set -euo pipefail
+          git rm .github/workflows/update-readme-state-snapshot.yml
+          git add docs/images/glyph-studio-state-transition.png
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git commit -m "Refresh README state diagram baseline"
+          git push origin HEAD:agent/system-entry-source-sink
