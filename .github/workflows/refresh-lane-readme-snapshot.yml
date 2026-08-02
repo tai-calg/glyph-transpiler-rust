@@ -1,0 +1,44 @@
+name: Refresh Lane README Snapshot
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/refresh-lane-readme-snapshot.yml
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  refresh:
+    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'agent/system-entry-source-sink'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/system-entry-source-sink
+          fetch-depth: 0
+          token: ${{ github.token }}
+      - name: Download compiler-derived lane rendering
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/lane-state-diagram
+          gh run download 30733102018 \
+            --repo tai-calg/glyph-transpiler-rust \
+            --name state-diagram-regression \
+            --dir /tmp/lane-state-diagram
+          test -f /tmp/lane-state-diagram/build/state-diagram-regression/motor-safety-motor.png
+          cp /tmp/lane-state-diagram/build/state-diagram-regression/motor-safety-motor.png \
+            docs/images/glyph-studio-state-transition.png
+      - name: Commit refreshed baseline
+        run: |
+          set -euo pipefail
+          git add docs/images/glyph-studio-state-transition.png
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git commit -m "Refresh README state diagram for lane routing"
+          git push origin HEAD:agent/system-entry-source-sink
