@@ -56,7 +56,7 @@ function adaptiveLayoutMetrics(stage,machine){
   const semanticWeight=transitions.reduce((total,item)=>total+Math.min(180,transitionSummary(item).length),0)/44;
   const complexity=(transitions.length+selfLoops*1.35+semanticWeight)/stateCount;
   const manual=hasStoredPositions(stage);
-  const spreadX=manual?1:clamp(1+Math.max(0,complexity-2.4)*.46,1,2.9);
+  const spreadX=manual?1:clamp(1+Math.max(0,complexity-2.4)*.72,1,3.8);
   const spreadY=manual?1:clamp(1+Math.max(0,complexity-2.8)*.24,1,2.2);
   const contentWidth=Math.ceil(original.width*spreadX),contentHeight=Math.ceil(original.height*spreadY);
   const width=Math.max(MIN_WIDTH,contentWidth+HORIZONTAL_MARGIN*2),height=Math.max(MIN_HEIGHT,contentHeight+VERTICAL_MARGIN*2);
