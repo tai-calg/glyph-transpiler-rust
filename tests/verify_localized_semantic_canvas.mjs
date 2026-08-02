@@ -68,14 +68,20 @@ try {
   const page = await browser.newPage({ viewport: { width: 1500, height: 900 } });
   await page.goto(url, { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => document.querySelector("#status")?.classList.contains("ready"));
+  await page.click('button[data-tab="state"]');
   await page.waitForFunction(() => {
-    const stage = document.querySelector(".graph-stage");
-    const solved = stage?.dataset.transitionIoCollisionSolved;
-    return stage?.dataset.transitionIoClustersReady === "true"
-      && (solved === "true" || solved === "fallback")
-      && stage?.dataset.stateTransitionIRV3LabelsReady === "true"
-      && document.querySelector("#glyph-settings");
-  });
+    const stage = document.querySelector(".state-node")?.closest(".graph-stage");
+    return document.querySelector(".tab.active")?.dataset.tab === "state"
+      && stage?.dataset.transitionLayoutState === "ready"
+      && stage?.dataset.transitionPublicationReady === "true"
+      && stage?.dataset.transitionIoClustersReady === "true"
+      && stage?.dataset.transitionLayoutProfile === "ordinary"
+      && stage?.dataset.stateDiagramWorkspaceGeometryReady === "true"
+      && stage?.dataset.initialRouteReady === "true"
+      && document.querySelectorAll(".transition-index .transition-detail").length > 0
+      && document.querySelector("#glyph-settings")
+      && !stage?.dataset.transitionLayoutError;
+  }, null, { timeout: 10_000 });
 
   assert.equal((await page.locator("#compile").textContent()).trim(), "コンパイル");
   assert.equal(await page.locator("html").getAttribute("lang"), "ja");
