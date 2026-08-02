@@ -42,7 +42,11 @@ class TransitionNodePositionAdapterTests(unittest.TestCase):
         html = enhance_transition_node_position_adapter_html(DIAGRAM_HTML)
 
         self.assertIn("NODE_CLEARANCE=96", html)
+        self.assertIn("function clearancePenalty(record,left,top)", html)
         self.assertIn("function positionIsClear(record,left,top)", html)
+        self.assertIn("const baseline=clearancePenalty(record,record.startLeft,record.startTop)", html)
+        self.assertIn("requested===0||requested<=baseline", html)
+        self.assertIn("candidatePenalty<=baseline", html)
         self.assertIn("function constrainPosition(record,left,top)", html)
         self.assertIn("for(let step=23;step>=0;step-=1)", html)
         self.assertIn("const position=constrainPosition(active,requestedLeft,requestedTop)", html)
