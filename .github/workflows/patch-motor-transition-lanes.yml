@@ -1,0 +1,32 @@
+name: Patch Motor Transition Lanes
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/patch-motor-transition-lanes.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'agent/system-entry-source-sink'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/system-entry-source-sink
+          fetch-depth: 0
+          token: ${{ github.token }}
+      - name: Apply lane-aware transition routing
+        run: |
+          set -euo pipefail
+          python3 scripts/patch_motor_transition_lanes_once.py
+          python3 -m pytest -q tests/test_transition_layout_transaction.py tests/test_transition_semantic_status_ui.py
+          git add -A glyph/transition_io_clusters.py tests/test_transition_layout_transaction.py scripts/patch_motor_transition_lanes_once.py
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git commit -m "Route parallel state transitions by lane"
+          git push origin HEAD:agent/system-entry-source-sink
