@@ -356,7 +356,7 @@ function bindCluster(cluster){
 }
 function updateCluster(cluster,transition,id,line){
   const input=inputOf(transition),guard=guardsOf(transition).join(" & "),action=actionOf(transition),value=ioOf(transition);
-  if(cluster.dataset.ioValue!==value)cluster.innerHTML=clusterMarkup(value,input,guard,action);
+  if(cluster.dataset.ioValue!==value||!cluster.querySelector(".transition-semantic-line"))cluster.innerHTML=clusterMarkup(value,input,guard,action);
   const trigger=triggerOf(transition),unknown=unknownOf(transition).length>0,semantic=semanticOf(transition);
   const semanticLines=[...cluster.querySelectorAll(".transition-semantic-line")];
   cluster.dataset.transitionId=id;

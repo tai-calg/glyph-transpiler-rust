@@ -16,6 +16,7 @@ class TransitionIoClusterTests(unittest.TestCase):
         self.assertIn('data-io-kind="io"', html)
         self.assertIn("transition-semantic-line", html)
         self.assertIn("semanticLines(input,guard,action)", html)
+        self.assertIn('!cluster.querySelector(".transition-semantic-line")', html)
         self.assertIn('stage.dataset.transitionSemanticLinesReady="true"', html)
         self.assertIn('`${left?" ":""}➞ ${action}`', html)
         self.assertIn('guard?` [${guard}]`', html)
