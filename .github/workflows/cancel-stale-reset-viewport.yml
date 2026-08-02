@@ -1,0 +1,34 @@
+name: Cancel Stale Reset Viewport
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/cancel-stale-reset-viewport.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'agent/adaptive-state-layout-initial-node'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/adaptive-state-layout-initial-node
+          fetch-depth: 0
+          token: ${{ github.token }}
+      - name: Cancel stale reset callbacks
+        run: |
+          set -euo pipefail
+          python3 scripts/cancel_stale_reset_viewport_once.py
+          python3 -m py_compile glyph/diagram_canvas_viewport.py tests/test_diagram_canvas_viewport.py
+          python3 -m unittest tests.test_diagram_canvas_viewport
+          git diff --check
+          git add -A glyph/diagram_canvas_viewport.py tests/test_diagram_canvas_viewport.py scripts/cancel_stale_reset_viewport_once.py
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git commit -m "Cancel stale reset viewport callbacks"
+          git push origin HEAD:agent/adaptive-state-layout-initial-node
