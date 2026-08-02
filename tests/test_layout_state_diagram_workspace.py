@@ -14,6 +14,8 @@ def test_workspace_adapts_density_and_routes_initial_marker_around_obstacles() -
         "stateDiagramWorkspaceContentWidth",
         "stateDiagramWorkspaceSpreadX",
         "stateDiagramWorkspaceAdaptive",
+        "complexity-2.4)*.46",
+        "complexity-2.8)*.24",
         "function initialPlacementCandidates(",
         "function segmentHitsRect(",
         "function updateInitialTransition(",

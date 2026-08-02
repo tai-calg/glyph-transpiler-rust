@@ -105,8 +105,6 @@ try {
       adaptive: stage?.dataset.stateDiagramWorkspaceAdaptive || "",
       spreadX: Number(stage?.dataset.stateDiagramWorkspaceSpreadX || 0),
       spreadY: Number(stage?.dataset.stateDiagramWorkspaceSpreadY || 0),
-      adaptiveFactorX: Number(stage?.dataset.adaptiveStateSpreadFactorX || 0),
-      adaptiveFactorY: Number(stage?.dataset.adaptiveStateSpreadFactorY || 0),
       focusScale: Number(stage?.dataset.adaptiveStateFocusScale || 0),
       focusReady: stage?.dataset.adaptiveStateFocusReady || "",
       originalWidth: Number(stage?.dataset.stateDiagramWorkspaceOriginalWidth || 0),
@@ -140,8 +138,6 @@ try {
   assert.equal(audit.focusReady, "true", JSON.stringify(audit));
   assert(audit.spreadX >= 1.35, JSON.stringify(audit));
   assert(audit.spreadY >= 1.1, JSON.stringify(audit));
-  assert(audit.adaptiveFactorX > 1.1, JSON.stringify(audit));
-  assert(audit.adaptiveFactorY >= 1, JSON.stringify(audit));
   assert(audit.focusScale >= 0.55 && audit.focusScale <= 0.9, JSON.stringify(audit));
   assert(audit.contentWidth > audit.originalWidth * 1.3, JSON.stringify(audit));
   assert(audit.contentHeight > audit.originalHeight * 1.05, JSON.stringify(audit));

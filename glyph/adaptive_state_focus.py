@@ -123,10 +123,7 @@ function run(reason="scheduled"){
   if(stage.dataset.adaptiveStateFocusReady==="true"||stage.dataset.adaptiveStateFocusPending==="true")return true;
   running=true;stage.dataset.adaptiveStateFocusPending="true";
   try{
-    spreadAdaptiveNodes(stage,machine);
-    window.glyphStateDiagramWorkspace?.prepare?.(stage,machine);
     const complete=()=>{
-      window.glyphTransitionIoClusters?.reroute?.(stage);
       const bounds=occupiedBounds(stage);
       if(bounds)focusOccupied(stage,bounds);else stage.dataset.adaptiveStateFocusPending="false";
       stage.dataset.adaptiveStateFocusReason=reason;
