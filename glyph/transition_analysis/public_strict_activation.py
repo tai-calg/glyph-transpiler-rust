@@ -26,16 +26,16 @@ _REVIEWED_ARTIFACT_SHA256 = {
         "c9b1b541841a7ac50356a30de90331763f0b06379a0ebd3189cd5354c9943a58"
     ),
     "examples/acceptance/motor_safety.glyph": (
-        "51ecd7e333aa5abb14bc5e27fc7fec825587f4b66e1d703009aaecabf03a4c72"
+        "043180a509576d537f1f5cf20a574ed6da49f4e394ac832bfd83aa6dd1438901"
     ),
     "examples/acceptance/job_scheduler.glyph": (
-        "11e43c4d3cafbed8389b91b3f391aa466c021a40842ae6f5e7615082b0c64828"
+        "29650b2db962ca3a90ed4e4649850fb45a0eff6b1a8d72e79f2fddf2f2f89c56"
     ),
     "examples/door_sketch.glyph": (
-        "d9aba74fb19f34b3ff98f04be25c6d2ff2aaefe7dca69f4f07379bf670e0c027"
+        "80947305b1738fc99387b1f375e341c7073f8f427d42d21f102bb3820c3a079b"
     ),
     "examples/acceptance/rtai_strict_projection.glyph": (
-        "466a2efca1d0f3d6e30060837cbf828cd807042357c0be296c0aac901786692f"
+        "a428f58753156e3fe98bbe505139e189894ee0693be5965f09a2672ce806bf25"
     ),
 }
 
