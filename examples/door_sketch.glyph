@@ -1,15 +1,9 @@
 system Door
   entry control
-
-  in sensor:In
-  in panel:In
-  out result:B
-
-  sensor -> control
-  panel -> control
-  control -> result
-  control -> lock
-  control -> log
+  source sensor
+  source panel
+  sink lock
+  sink log
 
 @MAX=1000
 
