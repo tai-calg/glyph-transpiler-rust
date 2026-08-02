@@ -132,6 +132,7 @@ async function apply(){
     stage.dataset.transitionEnablingCasesReady="true";
     stage.dataset.transitionSemanticLinesReady="true";
     document.dispatchEvent(new CustomEvent("glyph-transition-enabling-cases-ready",{detail:{marker:MARKER,changed}}));
+    if(changed>0)requestAnimationFrame(()=>window.glyphTransitionLayoutTransaction?.schedule?.("enabling-case-lines",0));
     return{ok:true,changed};
   }finally{
     running=false;
