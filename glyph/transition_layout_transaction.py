@@ -23,10 +23,20 @@ const MARKER="glyph-transition-layout-transaction-v1";
 const TRANSACTION_DEADLINE_MS=48;
 const MAX_FRAME_BUDGET=2;
 const MAX_RETRIES=0;
-let generation=0,completedGeneration=0,destroyed=false,timer=0,lastPromise=Promise.resolve({ok:true,skipped:true});
+let generation=0,completedGeneration=0,destroyed=false,timer=0,lastPromise=Promise.resolve({ok:true,skipped:true}),waiters=[];
 const activeTab=()=>document.querySelector(".tab.active")?.dataset.tab||"state";
 const stageOf=()=>document.querySelector(".state-node")?.closest(".graph-stage")||null;
 
+function settleWaiters(result){
+  if(!waiters.length)return;
+  const pending=[];
+  for(const waiter of waiters){
+    if(destroyed||completedGeneration>=waiter.token){
+      waiter.resolve({...result,requestedGeneration:waiter.token,completedGeneration});
+    }else pending.push(waiter);
+  }
+  waiters=pending;
+}
 function clearFailure(stage){
   delete stage.dataset.transitionLayoutError;
   delete stage.dataset.transitionLayoutFailureCode;
@@ -48,10 +58,12 @@ function markReady(stage,token,reason,degraded=false){
   stage.setAttribute("data-transition-layout-ready","true");
   stage.setAttribute("data-transition-publication-ready","true");
   completedGeneration=Math.max(completedGeneration,token);
+  const result={ok:true,generation:token,reason,degraded};
+  settleWaiters(result);
   document.dispatchEvent(new CustomEvent("glyph-transition-layout-transaction-ready",{
     detail:{marker:MARKER,generation:token,reason,profile:"ordinary",degraded}
   }));
-  return {ok:true,generation:token,reason,degraded};
+  return result;
 }
 function nextFrame(deadline){
   return new Promise(resolve=>{
@@ -66,7 +78,9 @@ async function run(token,reason){
   if(destroyed||token!==generation)return{ok:false,cancelled:true,generation:token};
   if(activeTab()!=="state"){
     completedGeneration=Math.max(completedGeneration,token);
-    return{ok:true,skipped:true,generation:token,reason};
+    const result={ok:true,skipped:true,generation:token,reason};
+    settleWaiters(result);
+    return result;
   }
   const deadline=started+TRANSACTION_DEADLINE_MS;
   for(let frame=0;frame<=MAX_FRAME_BUDGET;frame+=1){
@@ -90,7 +104,9 @@ async function run(token,reason){
     return markReady(stage,token,reason,true);
   }
   completedGeneration=Math.max(completedGeneration,token);
-  return{ok:false,missingStage:true,generation:token,reason};
+  const result={ok:false,missingStage:true,generation:token,reason};
+  settleWaiters(result);
+  return result;
 }
 function schedule(reason="scheduled",delay=0){
   if(destroyed)return generation;
@@ -103,8 +119,9 @@ function schedule(reason="scheduled",delay=0){
   return token;
 }
 function requestAndWait(reason="requested"){
-  schedule(reason,0);
-  return lastPromise;
+  const token=schedule(reason,0);
+  if(completedGeneration>=token)return Promise.resolve({ok:true,skipped:true,requestedGeneration:token,completedGeneration});
+  return new Promise(resolve=>waiters.push({token,resolve}));
 }
 function cancel(reason="cancelled"){
   generation+=1;
@@ -118,6 +135,7 @@ function cancel(reason="cancelled"){
     stage.dataset.transitionPublicationReady="true";
     stage.dataset.transitionDenseCanvas="disabled";
   }
+  settleWaiters({ok:false,cancelled:true,generation,reason});
   return generation;
 }
 function audit(){
@@ -145,7 +163,13 @@ document.addEventListener("click",event=>{
   else cancel("state-tab-deactivated");
 },true);
 for(const eventName of["pagehide","beforeunload"]){
-  window.addEventListener(eventName,()=>{destroyed=true;clearTimeout(timer);generation+=1},{once:true});
+  window.addEventListener(eventName,()=>{
+    destroyed=true;
+    clearTimeout(timer);
+    generation+=1;
+    completedGeneration=generation;
+    settleWaiters({ok:false,cancelled:true,generation,reason:eventName});
+  },{once:true});
 }
 const control=window.glyphTransitionLegacyControl;
 if(control)control.ownsScheduling=true;
@@ -163,6 +187,7 @@ window.glyphTransitionLayoutTransaction={
   audit,
   get generation(){return generation},
   get completedGeneration(){return completedGeneration},
+  get waiterCount(){return waiters.length},
 };
 schedule("initial",0);
 })();
