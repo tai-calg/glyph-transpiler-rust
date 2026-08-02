@@ -66,11 +66,14 @@ try {
     return stage?.dataset.stateDiagramWorkspaceGeometryReady === "true"
       && stage?.dataset.transitionPublicationReady === "true"
       && stage?.dataset.initialRouteReady === "true"
+      && stage?.dataset.adaptiveStateFocusReady === "true"
       && stage?.querySelectorAll(".transition-io-cluster").length === expectedCount;
   }, machine.transitions.length, { timeout: 8000 });
+  await page.waitForTimeout(100);
 
   const audit = await page.evaluate(() => {
     const stage = document.querySelector(".state-node")?.closest(".graph-stage");
+    const shell = stage?.closest(".canvas-shell");
     const dot = stage?.querySelector(".initial-dot");
     const initialPath = stage?.querySelector("path.initial-transition-path");
     const rect = element => {
@@ -78,39 +81,54 @@ try {
       return { left: value.left, top: value.top, right: value.right, bottom: value.bottom, width: value.width, height: value.height };
     };
     const overlaps = (a, b) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+    const contains = (outer, inner) => inner.left >= outer.left && inner.top >= outer.top && inner.right <= outer.right && inner.bottom <= outer.bottom;
     const dotRect = dot ? rect(dot) : null;
+    const shellRect = shell ? rect(shell) : null;
     const obstacles = [...(stage?.querySelectorAll(".state-node,.transition-io-cluster") || [])]
       .filter(element => element !== dot)
       .map(element => ({ kind: element.className, rect: rect(element) }));
-    const logicalCenters = [...(stage?.querySelectorAll(".state-node") || [])].map(element => ({
+    const nodes = [...(stage?.querySelectorAll(".state-node") || [])];
+    const logicalCenters = nodes.map(element => ({
       x: element.offsetLeft + element.offsetWidth / 2,
       y: element.offsetTop + element.offsetHeight / 2,
     }));
-    const logicalSpanX = logicalCenters.length
-      ? Math.max(...logicalCenters.map(item => item.x)) - Math.min(...logicalCenters.map(item => item.x))
-      : 0;
-    const logicalSpanY = logicalCenters.length
-      ? Math.max(...logicalCenters.map(item => item.y)) - Math.min(...logicalCenters.map(item => item.y))
+    const renderedCenters = nodes.map(element => {
+      const value = rect(element);
+      return { x: (value.left + value.right) / 2, y: (value.top + value.bottom) / 2 };
+    });
+    const span = (centers, axis) => centers.length
+      ? Math.max(...centers.map(item => item[axis])) - Math.min(...centers.map(item => item[axis]))
       : 0;
     const stageRect = stage ? rect(stage) : null;
     return {
-      present: Boolean(stage && dot && initialPath),
+      present: Boolean(stage && shell && dot && initialPath),
       adaptive: stage?.dataset.stateDiagramWorkspaceAdaptive || "",
       spreadX: Number(stage?.dataset.stateDiagramWorkspaceSpreadX || 0),
       spreadY: Number(stage?.dataset.stateDiagramWorkspaceSpreadY || 0),
+      adaptiveFactorX: Number(stage?.dataset.adaptiveStateSpreadFactorX || 0),
+      adaptiveFactorY: Number(stage?.dataset.adaptiveStateSpreadFactorY || 0),
+      focusScale: Number(stage?.dataset.adaptiveStateFocusScale || 0),
+      focusReady: stage?.dataset.adaptiveStateFocusReady || "",
       originalWidth: Number(stage?.dataset.stateDiagramWorkspaceOriginalWidth || 0),
       contentWidth: Number(stage?.dataset.stateDiagramWorkspaceContentWidth || 0),
       originalHeight: Number(stage?.dataset.stateDiagramWorkspaceOriginalHeight || 0),
       contentHeight: Number(stage?.dataset.stateDiagramWorkspaceContentHeight || 0),
+      occupiedWidth: Number(stage?.dataset.adaptiveStateOccupiedWidth || 0),
+      occupiedHeight: Number(stage?.dataset.adaptiveStateOccupiedHeight || 0),
       initialCertificate: stage?.dataset.initialRouteCertificate || "",
       initialCollisions: Number(stage?.dataset.initialRouteCollisionCount || -1),
       initialDotCollisions: Number(stage?.dataset.initialRouteDotCollisionCount || -1),
       initialPathCollisions: Number(stage?.dataset.initialRoutePathCollisionCount || -1),
       actualDotOverlaps: dotRect ? obstacles.filter(item => overlaps(dotRect, item.rect)).length : -1,
-      dotInside: Boolean(dotRect && stageRect && dotRect.left >= stageRect.left && dotRect.top >= stageRect.top && dotRect.right <= stageRect.right && dotRect.bottom <= stageRect.bottom),
+      dotInsideStage: Boolean(dotRect && stageRect && contains(stageRect, dotRect)),
+      dotVisibleInViewport: Boolean(dotRect && shellRect && contains(shellRect, dotRect)),
       pathData: initialPath?.getAttribute("d") || "",
-      logicalSpanX,
-      logicalSpanY,
+      logicalSpanX: span(logicalCenters, "x"),
+      logicalSpanY: span(logicalCenters, "y"),
+      renderedSpanX: span(renderedCenters, "x"),
+      renderedSpanY: span(renderedCenters, "y"),
+      shellWidth: shellRect?.width || 0,
+      shellHeight: shellRect?.height || 0,
     };
   });
 
@@ -119,18 +137,25 @@ try {
 
   assert.equal(audit.present, true, JSON.stringify(audit));
   assert.equal(audit.adaptive, "true", JSON.stringify(audit));
+  assert.equal(audit.focusReady, "true", JSON.stringify(audit));
   assert(audit.spreadX >= 1.35, JSON.stringify(audit));
   assert(audit.spreadY >= 1.1, JSON.stringify(audit));
+  assert(audit.adaptiveFactorX > 1.1, JSON.stringify(audit));
+  assert(audit.adaptiveFactorY >= 1, JSON.stringify(audit));
+  assert(audit.focusScale >= 0.55 && audit.focusScale <= 0.9, JSON.stringify(audit));
   assert(audit.contentWidth > audit.originalWidth * 1.3, JSON.stringify(audit));
   assert(audit.contentHeight > audit.originalHeight * 1.05, JSON.stringify(audit));
-  assert(audit.logicalSpanX >= 560, JSON.stringify(audit));
-  assert(audit.logicalSpanY >= 420, JSON.stringify(audit));
+  assert(audit.logicalSpanX >= 900, JSON.stringify(audit));
+  assert(audit.logicalSpanY >= 600, JSON.stringify(audit));
+  assert(audit.renderedSpanX >= audit.shellWidth * 0.55, JSON.stringify(audit));
+  assert(audit.renderedSpanY >= audit.shellHeight * 0.55, JSON.stringify(audit));
   assert.equal(audit.initialCertificate, "ordinary-obstacle-free", JSON.stringify(audit));
   assert.equal(audit.initialCollisions, 0, JSON.stringify(audit));
   assert.equal(audit.initialDotCollisions, 0, JSON.stringify(audit));
   assert.equal(audit.initialPathCollisions, 0, JSON.stringify(audit));
   assert.equal(audit.actualDotOverlaps, 0, JSON.stringify(audit));
-  assert.equal(audit.dotInside, true, JSON.stringify(audit));
+  assert.equal(audit.dotInsideStage, true, JSON.stringify(audit));
+  assert.equal(audit.dotVisibleInViewport, true, JSON.stringify(audit));
   assert.match(audit.pathData, /^M\s/);
   assert.deepEqual(errors, [], errors.join("\n"));
   await page.close();
@@ -139,4 +164,4 @@ try {
   await stop(child);
 }
 
-console.log("verified adaptive dense-state spacing and collision-free initial marker routing");
+console.log("verified broad adaptive state focus and collision-free visible initial marker");
