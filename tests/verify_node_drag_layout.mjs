@@ -110,14 +110,14 @@ function ready(current, minimumGeneration = 0, requirePersisted = false) {
     && current.transactionGeneration === current.transactionCompletedGeneration
     && (!requirePersisted || current.persisted)
     && current.maximumLabelDistance <= current.labelDistanceLimit + 0.5
-    && current.workspaceVersion === 2
+    && current.workspaceVersion === 3
     && current.workspaceAudit?.ok === true
     && current.workspaceWidth >= 1600
     && current.workspaceHeight >= 960
     && current.workspaceOriginReady === "true"
     && current.workspaceGeometryReady === "true"
     && current.initialRouteReady === "true"
-    && current.initialRouteCertificate === "ordinary-follow"
+    && current.initialRouteCertificate === "ordinary-obstacle-free"
     && current.transitionDetails > 0;
 }
 

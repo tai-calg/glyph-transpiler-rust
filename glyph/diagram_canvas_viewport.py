@@ -66,6 +66,21 @@ function centerCoordinate(shell,surface,scale,clientX=shell.clientWidth/2,client
     y:(shell.scrollTop+clientY-surface.offsetTop)/scale,
   };
 }
+function occupiedCenter(stage,size){
+  const items=[...stage.querySelectorAll(".state-node,.transition-io-cluster,.initial-dot")]
+    .filter(item=>item.offsetWidth>0&&item.offsetHeight>0);
+  if(!items.length)return{x:size.width/2,y:size.height/2};
+  const boxes=items.map(item=>{
+    const centered=item.classList.contains("transition-io-cluster");
+    const left=item.offsetLeft-(centered?item.offsetWidth/2:0);
+    const top=item.offsetTop-(centered?item.offsetHeight/2:0);
+    return{left,top,right:left+item.offsetWidth,bottom:top+item.offsetHeight};
+  });
+  return{
+    x:(Math.min(...boxes.map(item=>item.left))+Math.max(...boxes.map(item=>item.right)))/2,
+    y:(Math.min(...boxes.map(item=>item.top))+Math.max(...boxes.map(item=>item.bottom)))/2,
+  };
+}
 function localPoint(shell,event){
   const rect=shell.getBoundingClientRect();
   const rawX=Number.isFinite(event?.clientX)?event.clientX-rect.left:shell.clientWidth/2;
@@ -108,9 +123,15 @@ function fitInitial(shell=activeShell||document.querySelector(".canvas-shell")){
 }
 function reset(shell){
   const stage=shell?.querySelector(".graph-stage");if(!stage)return;
-  viewportGeneration+=1;const {surface}=setRaw(shell,stage,1);saveScale(1,"reset");sessionStorage.removeItem(panKey());
+  const token=++viewportGeneration,{surface,size}=setRaw(shell,stage,1),center=occupiedCenter(stage,size);saveScale(1,"reset");sessionStorage.removeItem(panKey());
   requestAnimationFrame(()=>{
-    shell.scrollLeft=Math.max(0,surface.offsetLeft-24);shell.scrollTop=Math.max(0,surface.offsetTop-24);shell.dispatchEvent(new Event("scroll"));
+    const position=()=>{
+      if(token!==viewportGeneration||!shell.isConnected||!stage.isConnected||destroyed)return;
+      shell.scrollLeft=Math.max(0,surface.offsetLeft+center.x-shell.clientWidth/2);
+      shell.scrollTop=Math.max(0,surface.offsetTop+center.y-shell.clientHeight/2);
+    };
+    if(token!==viewportGeneration)return;
+    position();shell.dispatchEvent(new Event("scroll"));requestAnimationFrame(position);setTimeout(()=>requestAnimationFrame(position),0);
     document.dispatchEvent(new CustomEvent("glyph-diagram-viewport-change",{detail:{scale:1,mode:"reset",identity:diagramIdentity()}}));
   });
 }
