@@ -6,8 +6,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 README = ROOT / "README.md"
 LANGUAGE = ROOT / "docs" / "LANGUAGE.md"
-CI = ROOT / ".github" / "workflows" / "ci.yml"
-TEMP_WORKFLOW = ROOT / ".github" / "workflows" / "update-system-boundary-docs.yml"
 SELF = Path(__file__).resolve()
 
 
@@ -204,17 +202,4 @@ if language.count(old_grammar) != 1:
     raise SystemExit("LANGUAGE grammar section did not match")
 language = language.replace(old_grammar, new_grammar)
 LANGUAGE.write_text(language, encoding="utf-8")
-
-ci = CI.read_text(encoding="utf-8")
-start = "  # BEGIN ONE-SHOT SYSTEM DOC MIGRATION\n"
-end = "  # END ONE-SHOT SYSTEM DOC MIGRATION\n"
-if ci.count(start) != 1 or ci.count(end) != 1:
-    raise SystemExit("CI one-shot migration markers are missing")
-before, remainder = ci.split(start, 1)
-_, after = remainder.split(end, 1)
-ci = (before + after).replace("permissions:\n  contents: write\n", "permissions:\n  contents: read\n", 1)
-CI.write_text(ci, encoding="utf-8")
-
-if TEMP_WORKFLOW.exists():
-    TEMP_WORKFLOW.unlink()
 SELF.unlink()
