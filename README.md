@@ -242,7 +242,6 @@ send_request >> receive_response
 | `@` | `@MAX`, `@limit(...)` | raw / ASTマクロ宣言 |
 | `@A`, `@E` | 時間制約 | always / eventually |
 | `@{'Contract}` | 宣言への付加 | Contract適用 |
-| `->` | `system`内 | 公開境界上のflow |
 | `-> T`, `<- T` | Protocol内 | 送信方向 / 受信方向 |
 | `'Name` | Contract位置 | Contract名 |
 | `Name` | 通常位置 | 型・関数・値などのObject名 |
@@ -272,7 +271,7 @@ input.valid&input.ready>>Accept
 | `~name(...)` | Rust実装関数 | 型契約だけGlyphへ置く |
 | `ext name(...)` | 外部入力 | システム外から値を受け取る |
 | `!name(...)` | 外部作用 | システム外へ作用する |
-| `system Name` | システム境界 | 公開I/Oと作用flowを宣言する |
+| `system Name` | システム境界 | `entry`、`source`、`sink`となる関数を宣言する |
 | `machine Name(...)` | 状態機械 | 初期状態と次状態計算を宣言する |
 | `?name(...)=...` | 時間制約 | 安全条件や期限を宣言する |
 | `resource Name[...]` | 状態付き資源 | 資源状態と能力を検査する |
@@ -438,37 +437,51 @@ ext database(query:Query):Record|DatabaseError
 
 ---
 
-## 10. System Context
+## 10. System境界
 
-`system`は外部から見える入力、出力、作用の関係を宣言します。自由な作図命令ではありません。
+`system`は値や型や矢印を再宣言せず、外部境界となる関数名だけを宣言します。
 
 ```glyph
 system MotorSafety
   entry cycle
-
-  in state:MotorState
-  in input:Input
-  out receipt:Receipt
-
-  state -> cycle
-  input -> cycle
-  cycle -> receipt
-  cycle -> write_motor
+  source sensor
+  sink write_motor
 ```
 
-コンパイラは次を確認します。
+- `entry`は外部からinvokeされるSystem内部の`>`関数
+- `source`はSystemが呼び出して値を取得する`ext`関数
+- `sink`はSystemが呼び出して外部作用を要求する`!`関数
 
-- endpointが宣言済みの型・関数・作用へ解決される
-- port型が一致する
-- edgeにコード上の根拠がある
-- 到達可能な外部入力と作用が境界へ表れる
+関数の引数と完全な戻り型がSystemの入出力契約です。`Receipt|ControlError`の失敗側を境界から落としません。
 
-`System Context`と内部call graphは別の関係です。
+```glyph
+ext sensor():Input|SensorError
+!write_motor(command:Command):Receipt|MotorError
+
+>cycle(state:MotorState):Receipt|ControlError
+  input := sensor()?
+  command := decide(state,input)
+  write_motor(command)
+```
+
+コンパイラは`entry`から実コードのcall graphを辿り、次を検査します。
+
+- entry、source、sinkが宣言種別と一致する
+- 宣言したsourceとsinkへentryから到達できる
+- 到達可能なsourceとsinkの宣言漏れがない
+- 未宣言関数への呼出しがない
+- 正常型と失敗型を含む完全な関数シグネチャが保持される
+
+System図のノードは関数だけ、矢印は常に関数呼出しだけです。値と型は関数ノードの引数・戻り値として表示します。通常の`>`関数と`~`のRust実装純粋関数は、entryから到達すれば`INTERNAL`として自動収集されます。
 
 ```text
-System Context: input -> cycle -> receipt / write_motor
-Call graph:     cycle -> step -> decide -> normalize
+[ENTRY] cycle(state: MotorState) -> Receipt | ControlError
+    calls -> [SOURCE] sensor() -> Input | SensorError
+    calls -> [INTERNAL] decide(state, input) -> Command
+    calls -> [SINK] write_motor(command) -> Receipt | MotorError
 ```
+
+旧`in`、`out`、System内の`a -> b`は移行用に読み込める場合がありますが、正規のArchitecture IRや図を定義しません。
 
 ---
 
@@ -677,7 +690,7 @@ Glyphは複数の理論を一つの設計体験へ接続しています。ただ
 | Protocol | session type / communicating processの考え方 | 方向、順序、choice、parallel構造の検査・IR | transport実行、distributed conformance、通信障害の完全検証 |
 | Contract / Law | design by contract、runtime verification | 要求IR、静的整合性、monitor要求、verification strength | 一般Hoare logic、SMT証明、定理証明 |
 | モノイダル構造 | tensor、独立な合成 | 積構造、複数Capability、純粋で独立と判断できるlaneのIR | thread・async・GPU並列実行の保証、圏の法則の一般証明 |
-| System Context | typed architecture / data-flow | endpoint解決、型整合、code evidence、図生成 | 外部装置・network・driverの正しさ |
+| System境界 | typed call graph / effect boundary | entry/source/sink検査、到達可能call graph、完全な関数signature、図生成 | 外部装置・network・driverの正しさ |
 | Rust・図・IR生成 | 意味保存変換の工学的設計 | 同一validated modelからの決定的生成、回帰試験 | compiler correctnessや完全なsemantic preservationの形式証明 |
 
 ### 16.3 強く裏付けられている範囲
@@ -691,7 +704,7 @@ Glyphは複数の理論を一つの設計体験へ接続しています。ただ
 - 対応可能な有限・整数領域のcoverageと到達可能性
 - 有限trace上の一部時相式
 - Capability、Resource、Typestateの静的な構造検査
-- コード根拠を要求するSystem Context
+- entryから導出した完全な関数実行境界
 - 同一意味モデルからの決定的なRust・IR・図生成
 
 ### 16.4 部分対応またはHost依存の範囲
@@ -846,9 +859,26 @@ A safe        使用しない
 ◇ ready       使用しない
 ```
 
-### `system`の矢印を自由な作図として使う
+### `system`へ値や手書き矢印を書く
 
-`system`のedgeは、実際の型、戻り値、呼出し、外部作用と一致する必要があります。
+```glyph
+system Wrong
+  in input:Input
+  out receipt:Receipt
+  input -> control
+  control -> receipt
+```
+
+Systemには関数境界だけを書きます。
+
+```glyph
+system Correct
+  entry control
+  source sensor
+  sink actuator
+```
+
+値、型、正常・失敗戻り、関数呼出しは実コードから導出されます。
 
 ---
 

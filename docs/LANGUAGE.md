@@ -119,17 +119,29 @@ The final expression is the return value.
 
 The fallback `_` clause is explicit and last.
 
-### External effect boundary
+### External input and effect boundaries
 
 ```glyph
+ext sensor():Input|SensorError
 !send(x:u8):u8|Error
 ```
 
-A prototype implementation may be attached:
+`ext` is a pull-style external source called by the System. `!` is an outbound external effect. A prototype implementation may be attached to an effect:
 
 ```glyph
 !send(x:u8):u8|Error=Ok(x)
 ```
+
+### System boundary
+
+```glyph
+system Controller
+  entry control
+  source sensor
+  sink send
+```
+
+`entry` names a `>` function invoked from outside. `source` names a reachable `ext` function. `sink` names a reachable `!` function. Function signatures define all request, response, success, and failure types. System edges are derived calls; values and types are not System nodes. Reachable `>` and `~` functions are internal nodes and are not listed in the System block.
 
 ## 5. Plain types
 
@@ -527,21 +539,27 @@ Sources that do not use Glyph 0.4 syntax do not gain these keys or files.
 
 ## 17. Compatibility
 
-No file-level mode is introduced. Existing macros, types, functions, guards, effects, systems, machines, diagrams, and temporal syntax remain valid.
+No file-level mode is introduced. Existing macros, types, functions, guards, effects, machines, diagrams, and temporal syntax remain valid. Legacy System `in` / `out` / `->` blocks may be read during migration, but only `entry` / `source` / `sink` and the executable call graph define the canonical System architecture.
 
 The Glyph 0.4 stabilization gate compares legacy source outputs and diagnostics against `main` byte-for-byte. See `GLYPH04_COMPLIANCE.md`.
 
 ## 18. Grammar overview
 
 ```text
-program              := (macro | declaration | temporal-spec | resource | contract)*
+program              := (macro | declaration | system | temporal-spec | resource | contract)*
 macro                := "@" Name "=" expr
-declaration          := product | sum | alias | function | extern
+declaration          := product | sum | alias | function | opaque | source | effect
 product              := "*" Name "(" compact-fields? ")" contract-application?
 sum                  := "+" Name "=" variant ("|" variant)*
 alias                := "=" Name "=" compact-type
 function             := ">" signature ("=" expr | NEWLINE block) contract-application?
-extern               := "!" signature ("=" expr)? contract-application?
+opaque               := "~" signature
+source               := "ext" signature
+effect               := "!" signature ("=" expr)? contract-application?
+system               := "system" Name NEWLINE INDENT system-entry system-source* system-sink*
+system-entry         := "entry" Name
+system-source        := "source" Name
+system-sink          := "sink" Name
 resource             := "resource" Name "[" State ("|" State)* "]"
 capability-type      := ("own" | "share" | "link" | "&" | "&mut") type
 contract-definition  := "'" ("@" | ">" | "!" | "?")? Name "=" contract-body
