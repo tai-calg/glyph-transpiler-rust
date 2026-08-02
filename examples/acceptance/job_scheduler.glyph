@@ -1,13 +1,6 @@
 system BatchRuntime
   entry run
-
-  in input:BatchInput
-  out receipt:SubmitReceipt
-
-  input -> run
-  run -> receipt
-  run -> layout_lane
-  run -> submit_batch
+  sink submit_batch
 
 *Packet(count:U)
 *Lanes(free:U)
