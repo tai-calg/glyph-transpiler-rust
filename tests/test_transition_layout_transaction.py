@@ -61,6 +61,19 @@ def test_transaction_is_strictly_bounded_and_preserves_base_geometry() -> None:
         assert removed not in html
 
 
+def test_superseded_transaction_waiters_resolve_on_later_generation() -> None:
+    html = enhance_transition_layout_transaction_html(
+        "<html><head></head><body></body></html>"
+    )
+
+    assert "function settleWaiters(result)" in html
+    assert "completedGeneration>=waiter.token" in html
+    assert "waiters.push({token,resolve})" in html
+    assert "settleWaiters(result)" in html
+    assert "get waiterCount(){return waiters.length}" in html
+    assert 'schedule(reason,0);\n  return lastPromise;' not in html
+
+
 def test_io_clusters_use_bounded_ordinary_placement() -> None:
     html = enhance_transition_io_clusters_html(
         "<html><head></head><body><div id=\"view\"></div></body></html>"
