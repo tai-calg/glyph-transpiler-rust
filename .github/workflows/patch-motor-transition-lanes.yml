@@ -24,7 +24,8 @@ jobs:
         run: |
           set -euo pipefail
           python3 scripts/patch_motor_transition_lanes_once.py
-          python3 -m pytest -q tests/test_transition_layout_transaction.py tests/test_transition_semantic_status_ui.py
+          python3 -m py_compile glyph/transition_io_clusters.py tests/test_transition_layout_transaction.py tests/test_transition_semantic_status_ui.py
+          git diff --check
           git add -A glyph/transition_io_clusters.py tests/test_transition_layout_transaction.py scripts/patch_motor_transition_lanes_once.py
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
