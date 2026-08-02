@@ -1,26 +1,10 @@
 system DoorControl
   entry control
-
-  in state:DoorState
-  in input:Input
-  out receipt:Receipt
-
-  state -> control
-  input -> control
-  control -> receipt
-  control -> actuator
+  sink actuator
 
 system DoorAudit
   entry audit_control
-
-  in state:DoorState
-  in input:Input
-  out receipt:Receipt
-
-  state -> audit_control
-  input -> audit_control
-  audit_control -> receipt
-  audit_control -> audit
+  sink audit
 
 machine Door(state:DoorState,input:Input)
   select=state.mode

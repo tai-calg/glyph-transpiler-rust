@@ -70,31 +70,43 @@ try {
   const system = apiState.views.io.systems.find(item => item.name === "DoorController");
   assert(system, "DoorController system is missing");
   assert.equal(system.kind, "checked-system-context");
+  assert.equal(system.contract, "executable-function-boundary");
   assert.equal(system.entry, "control");
-
-  assert.deepEqual(
-    new Set(system.ports.map(port => `${port.direction}:${port.name}:${port.type}`)),
-    new Set([
-      "input:state:DoorState",
-      "input:sensor:Input",
-      "output:receipt:Receipt",
-    ]),
-  );
+  assert.deepEqual(system.sources, ["sensor"]);
+  assert.deepEqual(new Set(system.sinks), new Set(["lock", "alarm"]));
+  assert.deepEqual(system.ports, []);
 
   const nodes = new Map(system.nodes.map(node => [node.name, node]));
   assert.deepEqual(
     new Set(nodes.keys()),
-    new Set(["state", "sensor", "control", "receipt", "lock", "alarm"]),
+    new Set([
+      "control",
+      "sensor",
+      "step",
+      "decide",
+      "authenticate",
+      "apply",
+      "lock",
+      "alarm",
+    ]),
   );
-  assert.equal(nodes.get("state")?.kind, "input");
-  assert.equal(nodes.get("sensor")?.kind, "external");
-  assert.equal(nodes.get("sensor")?.declared_io, true);
-  assert.equal(nodes.get("sensor")?.port_type, "Input");
-  assert.equal(nodes.get("receipt")?.kind, "output");
-  assert.equal(nodes.get("receipt")?.port_type, "Receipt");
   assert.equal(nodes.get("control")?.kind, "function");
-  assert.equal(nodes.get("lock")?.kind, "effect");
-  assert.equal(nodes.get("alarm")?.kind, "effect");
+  assert.equal(nodes.get("control")?.boundary_role, "entry");
+  assert.deepEqual(nodes.get("control")?.inputs, [{ name: "state", type: "DoorState" }]);
+  assert.equal(nodes.get("control")?.output, "Receipt|ControlError");
+
+  assert.equal(nodes.get("sensor")?.kind, "external");
+  assert.equal(nodes.get("sensor")?.boundary_role, "source");
+  assert.equal(nodes.get("sensor")?.output, "Input|ControlError");
+
+  for (const name of ["lock", "alarm"]) {
+    assert.equal(nodes.get(name)?.kind, "effect");
+    assert.equal(nodes.get(name)?.boundary_role, "sink");
+    assert.equal(nodes.get(name)?.output, "Receipt|ControlError");
+  }
+  for (const name of ["step", "decide", "authenticate", "apply"]) {
+    assert.equal(nodes.get(name)?.boundary_role, "internal");
+  }
 
   const names = new Map(system.nodes.map(node => [node.id, node.name]));
   const edges = new Set(
@@ -103,18 +115,17 @@ try {
     ),
   );
   for (const expected of [
-    "state->control:data",
-    "sensor->control:data",
-    "control->receipt:returns",
-    "control->lock:effect",
-    "control->alarm:effect",
+    "control->sensor:calls",
+    "control->step:calls",
+    "control->apply:calls",
+    "step->decide:calls",
+    "decide->authenticate:calls",
+    "apply->lock:calls",
+    "apply->alarm:calls",
   ]) {
-    assert(edges.has(expected), `missing checked boundary edge ${expected}`);
+    assert(edges.has(expected), `missing executable call edge ${expected}`);
   }
-  assert.deepEqual(
-    new Set(system.evidence.map(item => item.kind)),
-    new Set(["entry-parameter", "external-input-read", "return-type", "effect-reachability"]),
-  );
+  assert.deepEqual(new Set(system.evidence.map(item => item.kind)), new Set(["call"]));
 
   const page = await browser.newPage({ viewport: { width: 1800, height: 1100 } });
   page.on("pageerror", error => console.error("diagram page error", error));
@@ -137,8 +148,10 @@ try {
     const selected = document.querySelector("#system-select")?.selectedOptions?.[0]?.textContent;
     return document.querySelector(".tab.active")?.dataset.tab === "io"
       && selected === "DoorController"
-      && document.body.textContent?.includes("Checked system context")
-      && document.body.textContent?.includes("Entry: control");
+      && document.body.textContent?.includes("Executable System boundary")
+      && document.body.textContent?.includes("Entry: control")
+      && document.body.textContent?.includes("Sources: sensor")
+      && document.body.textContent?.includes("Sinks:");
   });
 
   const result = await page.evaluate(() => ({
@@ -147,21 +160,25 @@ try {
     nodes: [...document.querySelectorAll(".graph-node")].map(item => ({
       name: item.querySelector(".node-name")?.textContent?.trim(),
       kind: item.querySelector(".node-kind")?.textContent?.trim(),
+      role: item.dataset.boundaryRole,
       input: item.querySelector(".port-group:first-child")?.textContent?.trim(),
       output: item.querySelector(".port-group:last-child")?.textContent?.trim(),
     })),
   }));
 
-  assert(result.note?.includes("call graphとは別のview"));
-  assert.deepEqual(new Set(result.edgeLabels), new Set(["data", "returns", "effect"]));
+  assert(result.note?.includes("完全な関数実行境界"));
+  assert.deepEqual(new Set(result.edgeLabels), new Set(["calls"]));
   assert.equal(
     result.nodes.some(node => node.input?.includes("undeclared") || node.output?.includes("undeclared")),
     false,
   );
-  assert(result.nodes.some(node => node.name === "sensor" && node.kind?.startsWith("external")));
+  assert(result.nodes.some(node => node.name === "control" && node.role === "entry"));
+  assert(result.nodes.some(node => node.name === "sensor" && node.role === "source"));
+  assert(result.nodes.some(node => node.name === "lock" && node.role === "sink"));
+  assert(result.nodes.some(node => node.name === "step" && node.role === "internal"));
 
   await page.screenshot({
-    path: path.join(outputDirectory, "door-controller-checked-system-context.png"),
+    path: path.join(outputDirectory, "door-controller-executable-system-boundary.png"),
     fullPage: true,
   });
   await page.close();
@@ -170,4 +187,4 @@ try {
   await stopProcess(child);
 }
 
-console.log("verified state-first startup and checked System Context boundaries");
+console.log("verified state-first startup and entry/source/sink executable System boundary");

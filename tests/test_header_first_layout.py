@@ -9,13 +9,8 @@ from glyph import compile_artifacts, parse_compilation_model
 
 SYSTEM_HEADER = """system MotorSafety
   entry cycle
-  in state:MotorState
-  in sensor:Input
-  out receipt:Receipt
-  state -> cycle
-  sensor -> cycle
-  cycle -> receipt
-  cycle -> write_motor
+  source sensor
+  sink write_motor
 """
 
 MACHINE_HEADER = """machine Motor(state:MotorState,input:Input)
@@ -59,17 +54,32 @@ class HeaderFirstLayoutTests(unittest.TestCase):
         model = parse_compilation_model(HEADER_FIRST, "motor.glyph")
         self.assertEqual([system.name for system in model.systems], ["MotorSafety"])
         self.assertEqual([machine.name for machine in model.machines], ["Motor"])
+        system = model.architecture.systems[0]
         components = {
-            component.name: component.kind
-            for component in model.architecture.systems[0].components
+            component.name: (component.kind, component.role)
+            for component in system.components
         }
-        self.assertEqual(components["sensor"], "external")
-        self.assertEqual(components["cycle"], "function")
-        self.assertEqual(components["write_motor"], "effect")
-        self.assertEqual(components["state"], "external")
-        self.assertEqual(components["receipt"], "data")
-        self.assertNotIn("decide", components)
-        self.assertNotIn("step", components)
+        self.assertEqual(components["sensor"], ("external", "source"))
+        self.assertEqual(components["cycle"], ("function", "entry"))
+        self.assertEqual(components["write_motor"], ("effect", "sink"))
+        self.assertEqual(components["step"], ("function", "internal"))
+        self.assertEqual(components["decide"], ("function", "internal"))
+        self.assertEqual(system.ports, ())
+
+        names = {component.id: component.name for component in system.components}
+        edges = {
+            (names[edge.source_id], names[edge.target_id], edge.kind)
+            for edge in system.edges
+        }
+        self.assertEqual(
+            edges,
+            {
+                ("cycle", "write_motor", "call"),
+                ("cycle", "step", "call"),
+                ("cycle", "sensor", "call"),
+                ("step", "decide", "call"),
+            },
+        )
 
     def test_tail_placement_remains_compatible(self) -> None:
         header = compile_artifacts(HEADER_FIRST)

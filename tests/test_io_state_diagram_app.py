@@ -19,15 +19,8 @@ from glyph.io_state_views import build_io_state_views
 MOTOR_SOURCE = """\
 system MotorSafety
   entry control
-
-  in state:MotorState
-  in sensor:Input
-  out receipt:Receipt
-
-  state -> control
-  sensor -> control
-  control -> receipt
-  control -> write_motor
+  source sensor
+  sink write_motor
 
 machine Motor(state:MotorState,input:Input)
   select=state.mode
@@ -102,34 +95,39 @@ class IoStateViewsTests(unittest.TestCase):
         output = CompilationPipeline().compile_text(source, source_name="test.glyph")
         return build_io_state_views(output.model, output.diagrams.ir)
 
-    def test_declared_system_projects_checked_boundary_flow(self) -> None:
+    def test_declared_system_projects_executable_function_boundary(self) -> None:
         views = self.compile_views(MOTOR_SOURCE)
         self.assertEqual(views["schema"], "glyph.io-state-views")
         self.assertEqual(views["version"], 2)
         systems = views["io"]["systems"]
         motor = next(item for item in systems if item["name"] == "MotorSafety")
         self.assertEqual(motor["kind"], "checked-system-context")
+        self.assertEqual(motor["contract"], "executable-function-boundary")
         self.assertEqual(motor["entry"], "control")
-        self.assertEqual(
-            {(item["name"], item["direction"], item["type"]) for item in motor["ports"]},
-            {
-                ("state", "input", "MotorState"),
-                ("sensor", "input", "Input"),
-                ("receipt", "output", "Receipt"),
-            },
-        )
+        self.assertEqual(motor["sources"], ["sensor"])
+        self.assertEqual(motor["sinks"], ["write_motor"])
+        self.assertEqual(motor["ports"], [])
 
         nodes = {item["name"]: item for item in motor["nodes"]}
-        self.assertEqual(set(nodes), {"state", "sensor", "control", "receipt", "write_motor"})
-        self.assertEqual(nodes["state"]["kind"], "input")
-        self.assertTrue(nodes["sensor"]["declared_io"])
-        self.assertEqual(nodes["sensor"]["kind"], "external")
-        self.assertEqual(nodes["sensor"]["output"], "Input")
-        self.assertEqual(nodes["receipt"]["kind"], "output")
-        self.assertEqual(nodes["receipt"]["port_type"], "Receipt")
-        self.assertEqual(nodes["write_motor"]["kind"], "effect")
-        self.assertEqual(nodes["write_motor"]["output"], "Receipt")
+        self.assertEqual(
+            set(nodes),
+            {"control", "sensor", "step", "decide", "write_motor"},
+        )
         self.assertEqual(nodes["control"]["kind"], "function")
+        self.assertEqual(nodes["control"]["boundary_role"], "entry")
+        self.assertEqual(
+            nodes["control"]["inputs"],
+            [{"name": "state", "type": "MotorState"}],
+        )
+        self.assertEqual(nodes["control"]["output"], "Receipt")
+        self.assertEqual(nodes["sensor"]["kind"], "external")
+        self.assertEqual(nodes["sensor"]["boundary_role"], "source")
+        self.assertEqual(nodes["sensor"]["output"], "Input")
+        self.assertEqual(nodes["write_motor"]["kind"], "effect")
+        self.assertEqual(nodes["write_motor"]["boundary_role"], "sink")
+        self.assertEqual(nodes["write_motor"]["output"], "Receipt")
+        self.assertEqual(nodes["step"]["boundary_role"], "internal")
+        self.assertEqual(nodes["decide"]["boundary_role"], "internal")
 
         by_id = {item["id"]: item["name"] for item in motor["nodes"]}
         edges = {
@@ -139,23 +137,23 @@ class IoStateViewsTests(unittest.TestCase):
         self.assertEqual(
             edges,
             {
-                ("state", "control", "data"),
-                ("sensor", "control", "data"),
-                ("control", "receipt", "returns"),
-                ("control", "write_motor", "effect"),
+                ("control", "sensor", "calls"),
+                ("control", "step", "calls"),
+                ("control", "write_motor", "calls"),
+                ("step", "decide", "calls"),
             },
         )
         self.assertEqual(
             {item["kind"] for item in motor["evidence"]},
-            {"entry-parameter", "external-input-read", "return-type", "effect-reachability"},
+            {"call"},
         )
 
-        internals = next(
-            item for item in systems if item["name"] == "Internal and unconnected declarations"
+        self.assertFalse(
+            any(
+                item["name"] == "Internal and unconnected declarations"
+                for item in systems
+            )
         )
-        internal_names = {item["name"] for item in internals["nodes"]}
-        self.assertIn("decide", internal_names)
-        self.assertIn("step", internal_names)
 
     def test_machine_normalization_expands_wildcards_and_reports_dead_logic(self) -> None:
         views = self.compile_views(MOTOR_SOURCE)

@@ -49,6 +49,15 @@ _STYLE = r"""
   overflow-wrap:anywhere!important;
   text-align:center;
 }
+.transition-io-value>.transition-semantic-line{
+  display:block;
+  max-width:264px;
+  white-space:pre;
+  overflow:visible;
+  text-overflow:clip;
+  overflow-wrap:normal;
+  word-break:normal;
+}
 .transition-io-cluster.provisional-trigger .transition-io-node.io{
   border-style:dashed;
   border-color:rgba(231,191,98,.86);
@@ -89,6 +98,33 @@ const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
 const finite=value=>Number.isFinite(value);
 const text=value=>String(value??"").trim();
 const esc=value=>String(value??"").replace(/[&<>\"']/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;",'\"':"&quot;","'":"&#39;"}[ch]));
+const SEMANTIC_LINE_LIMIT=42;
+function semanticCut(value,limit=SEMANTIC_LINE_LIMIT){
+  if(value.length<=limit)return value.length;
+  const separators=new Set([" ","&",",",".","_","(",")","[","]",";"]);
+  for(let index=limit;index>=Math.max(8,limit-14);index-=1){if(separators.has(value[index]))return index+1}
+  for(let index=limit+1;index<Math.min(value.length,limit+14);index+=1){if(separators.has(value[index]))return index+1}
+  return value.length;
+}
+function splitSemantic(value){
+  const lines=[];
+  let remaining=String(value??"");
+  while(remaining.length>SEMANTIC_LINE_LIMIT){
+    const cut=semanticCut(remaining);
+    if(cut>=remaining.length)break;
+    lines.push(remaining.slice(0,cut));
+    remaining=remaining.slice(cut);
+  }
+  if(remaining.length||!lines.length)lines.push(remaining);
+  return lines;
+}
+function semanticLines(input,guard,action){
+  const left=`${input}${guard?`${input?" ":""}[${guard}]`:""}`.trim(),lines=[];
+  if(left)lines.push(...splitSemantic(left));
+  if(action)lines.push(...splitSemantic(`${left?" ":""}➞ ${action}`));
+  if(!lines.length)lines.push("otherwise");
+  return lines;
+}
 const activeTab=()=>document.querySelector(".tab.active")?.dataset.tab||"state";
 const stageOf=()=>document.querySelector(".state-node")?.closest(".graph-stage")||null;
 
@@ -255,18 +291,32 @@ function nodeMap(stage){
     node,
   ]));
 }
-function ordinaryPath(source,target,same,index){
+function ordinaryPath(source,target,same,lane,stage){
   const x1=source.offsetLeft+source.offsetWidth/2,y1=source.offsetTop+source.offsetHeight/2;
   const x2=target.offsetLeft+target.offsetWidth/2,y2=target.offsetTop+target.offsetHeight/2;
+  const rank=Number(lane?.rank||0),centered=Number(lane?.centered||0);
   if(same){
-    const spread=58+index%3*14;
-    return`M ${x1-27} ${y1-34} C ${x1-spread} ${y1-98}, ${x1+spread} ${y1-98}, ${x1+27} ${y1-34}`;
+    const width=Math.max(stage.clientWidth,num(stage.style.width),stage.scrollWidth);
+    const height=Math.max(stage.clientHeight,num(stage.style.height),stage.scrollHeight);
+    let ox=x1-width/2,oy=y1-height/2,length=Math.hypot(ox,oy);
+    if(length<1){ox=0;oy=-1;length=1}
+    const nx=ox/length,ny=oy/length,tx=-ny,ty=nx;
+    const side=rank%2===0?1:-1;
+    const tangent=30+Math.floor(rank/2)*12;
+    const outward=76+Math.abs(centered)*30+Math.floor(rank/2)*18;
+    const sx=x1+tx*tangent*side+nx*10,sy=y1+ty*tangent*side+ny*10;
+    const ex=x1-tx*tangent*side+nx*10,ey=y1-ty*tangent*side+ny*10;
+    return`M ${sx} ${sy} C ${sx+nx*outward+tx*24*side} ${sy+ny*outward+ty*24*side}, ${ex+nx*outward-tx*24*side} ${ey+ny*outward-ty*24*side}, ${ex} ${ey}`;
   }
   const dx=x2-x1,dy=y2-y1,length=Math.max(1,Math.hypot(dx,dy));
-  const sx=x1+dx/length*(source.offsetWidth/2+1),sy=y1+dy/length*(source.offsetHeight/2);
-  const tx=x2-dx/length*(target.offsetWidth/2+1),ty=y2-dy/length*(target.offsetHeight/2);
-  const offset=(index%3-1)*22;
-  return`M ${sx} ${sy} Q ${(sx+tx)/2-dy*.1+offset} ${(sy+ty)/2+dx*.1+offset} ${tx} ${ty}`;
+  const ux=dx/length,uy=dy/length,nx=-uy,ny=ux;
+  const sourceRadius=Math.min(source.offsetWidth,source.offsetHeight)/2+1;
+  const targetRadius=Math.min(target.offsetWidth,target.offsetHeight)/2+1;
+  const sx=x1+ux*sourceRadius,sy=y1+uy*sourceRadius;
+  const ex=x2-ux*targetRadius,ey=y2-uy*targetRadius;
+  const directionalOffset=48,laneGap=28;
+  const curvature=directionalOffset+centered*laneGap;
+  return`M ${sx} ${sy} Q ${(sx+ex)/2+nx*curvature} ${(sy+ey)/2+ny*curvature} ${ex} ${ey}`;
 }
 function tagBaseGeometry(stage,transitions){
   const paths=[...stage.querySelectorAll(":scope > svg.edge-svg > path")];
@@ -293,18 +343,20 @@ function reroute(stage=stageOf(),machine=null){
   const data=typeof snapshot==="object"&&snapshot?snapshot:cache;
   const selected=machine||selectedMachine(data);
   if(!selected)return false;
-  const transitions=selected.transitions||[],nodes=nodeMap(stage);
+  const transitions=selected.transitions||[],nodes=nodeMap(stage),lanes=pairRanks(transitions);
   tagBaseGeometry(stage,transitions);
   transitions.forEach((transition,index)=>{
     const source=nodes.get(transition.source_state),target=nodes.get(transition.target_state);
     const path=pathFor(stage,transition.id||`T${index+1}`,index);
-    if(source&&target&&path)path.setAttribute("d",ordinaryPath(source,target,source===target,index));
+    if(source&&target&&path)path.setAttribute("d",ordinaryPath(source,target,source===target,lanes[index],stage));
   });
   arrange(stage,data,selected);
   return true;
 }
-function clusterMarkup(value){
-  return`<div class="transition-io-main"><div class="transition-io-node io" data-io-kind="io" title="${esc(value)}"><span class="transition-io-value">${esc(value)}</span></div></div>`;
+function clusterMarkup(value,input,guard,action){
+  const lines=semanticLines(input,guard,action);
+  const content=lines.map(line=>`<span class="transition-semantic-line">${esc(line)}</span>`).join("");
+  return`<div class="transition-io-main"><div class="transition-io-node io" data-io-kind="io" title="${esc(value)}"><span class="transition-io-value">${content}</span></div></div>`;
 }
 function focus(id,active){
   document.querySelectorAll(`[data-transition-id="${id}"]`).forEach(item=>item.classList.toggle("transition-focus",active));
@@ -317,17 +369,20 @@ function bindCluster(cluster){
   cluster.addEventListener("mouseleave",()=>focus(cluster.dataset.transitionId,false));
 }
 function updateCluster(cluster,transition,id,line){
-  const value=ioOf(transition);
-  if(cluster.dataset.ioValue!==value)cluster.innerHTML=clusterMarkup(value);
+  const input=inputOf(transition),guard=guardsOf(transition).join(" & "),action=actionOf(transition),value=ioOf(transition);
+  if(cluster.dataset.ioValue!==value||!cluster.querySelector(".transition-semantic-line"))cluster.innerHTML=clusterMarkup(value,input,guard,action);
   const trigger=triggerOf(transition),unknown=unknownOf(transition).length>0,semantic=semanticOf(transition);
+  const semanticLines=[...cluster.querySelectorAll(".transition-semantic-line")];
   cluster.dataset.transitionId=id;
   cluster.dataset.line=String(line||0);
-  cluster.dataset.inputValue=inputOf(transition);
-  cluster.dataset.guardValue=guardsOf(transition).join(" & ");
-  cluster.dataset.actionValue=actionOf(transition);
-  cluster.dataset.outputValue=actionOf(transition);
+  cluster.dataset.inputValue=input;
+  cluster.dataset.guardValue=guard;
+  cluster.dataset.actionValue=action;
+  cluster.dataset.outputValue=action;
   cluster.dataset.ioValue=value;
   cluster.dataset.fullLabel=value;
+  cluster.dataset.semanticLineCount=String(semanticLines.length);
+  cluster.dataset.semanticLongestLine=String(Math.max(0,...semanticLines.map(item=>(item.textContent||"").length)));
   cluster.dataset.rtaiSemanticStatus=semantic;
   cluster.classList.toggle("provisional-trigger",trigger?.role==="provisional-trigger");
   cluster.classList.toggle("unclassified-condition",unknown);
@@ -338,8 +393,109 @@ function updateCluster(cluster,transition,id,line){
   cluster.setAttribute("aria-label",value);
   bindCluster(cluster);
 }
+const COLLISION_GAP=4;
+const COLLISION_RINGS=[0,16,32,48,64,80,96];
+const COLLISION_ANGLES=24;
+const COLLISION_BUDGET_MS=10;
+function localRect(cluster,point){
+  return{x:point.x-cluster.offsetWidth/2,y:point.y-cluster.offsetHeight/2,width:cluster.offsetWidth,height:cluster.offsetHeight};
+}
+function intersects(left,right,gap=COLLISION_GAP){
+  return!(left.x+left.width+gap<=right.x||right.x+right.width+gap<=left.x||left.y+left.height+gap<=right.y||right.y+right.height+gap<=left.y);
+}
+function insideStage(rect,stage){
+  const width=Math.max(stage.clientWidth,num(stage.style.width),stage.scrollWidth),height=Math.max(stage.clientHeight,num(stage.style.height),stage.scrollHeight);
+  return rect.x>=8&&rect.y>=8&&rect.x+rect.width<=width-8&&rect.y+rect.height<=height-8;
+}
+function nodeObstacles(stage){
+  return[...stage.querySelectorAll(".state-node")].map(node=>({x:node.offsetLeft,y:node.offsetTop,width:node.offsetWidth,height:node.offsetHeight}));
+}
+function candidatePoints(entry,stage){
+  const points=[],seen=new Set(),add=point=>{
+    const bounded=constrain(project(point,entry.anchor),entry.cluster,stage);
+    const key=`${Math.round(bounded.x)}:${Math.round(bounded.y)}`;
+    if(seen.has(key))return;
+    seen.add(key);
+    points.push(bounded);
+  };
+  add(entry.preferred);
+  for(const radius of COLLISION_RINGS){
+    for(let index=0;index<COLLISION_ANGLES;index+=1){
+      const angle=2*Math.PI*index/COLLISION_ANGLES;
+      add({x:entry.anchor.x+Math.cos(angle)*radius,y:entry.anchor.y+Math.sin(angle)*radius});
+    }
+  }
+  return points.map(point=>({
+    point,
+    rect:localRect(entry.cluster,point),
+    score:Math.hypot(point.x-entry.preferred.x,point.y-entry.preferred.y)+Math.hypot(point.x-entry.anchor.x,point.y-entry.anchor.y)*.04,
+  })).sort((left,right)=>left.score-right.score);
+}
+function collisionCount(entries){
+  let count=0;
+  for(let index=0;index<entries.length;index+=1){
+    const left=localRect(entries[index].cluster,{x:num(entries[index].cluster.style.left),y:num(entries[index].cluster.style.top)});
+    for(let other=index+1;other<entries.length;other+=1){
+      const right=localRect(entries[other].cluster,{x:num(entries[other].cluster.style.left),y:num(entries[other].cluster.style.top)});
+      if(intersects(left,right,1))count+=1;
+    }
+  }
+  return count;
+}
+function repairCollisions(stage,entries){
+  const nodes=nodeObstacles(stage),fixed=[],movable=[];
+  for(const entry of entries){
+    const preferredRect=localRect(entry.cluster,entry.preferred);
+    if(entry.manual&&insideStage(preferredRect,stage)&&!nodes.some(node=>intersects(preferredRect,node))&&!fixed.some(rect=>intersects(preferredRect,rect))){
+      fixed.push(preferredRect);
+      continue;
+    }
+    entry.options=candidatePoints(entry,stage).filter(option=>insideStage(option.rect,stage)&&!nodes.some(node=>intersects(option.rect,node)));
+    movable.push(entry);
+  }
+  movable.sort((left,right)=>left.options.length-right.options.length||right.cluster.offsetWidth*right.cluster.offsetHeight-left.cluster.offsetWidth*left.cluster.offsetHeight||left.index-right.index);
+  const assignment=new Map(),deadline=performance.now()+COLLISION_BUDGET_MS;
+  function solve(index,placed){
+    if(index>=movable.length)return true;
+    if(performance.now()>deadline)return false;
+    const entry=movable[index];
+    for(const option of entry.options){
+      if(placed.some(rect=>intersects(option.rect,rect)))continue;
+      assignment.set(entry,option);
+      placed.push(option.rect);
+      if(solve(index+1,placed))return true;
+      placed.pop();
+      assignment.delete(entry);
+    }
+    return false;
+  }
+  let solved=movable.every(entry=>entry.options.length>0)&&solve(0,[...fixed]);
+  if(!solved){
+    assignment.clear();
+    const placed=[...fixed];
+    solved=true;
+    for(const entry of movable){
+      const option=entry.options.find(candidate=>!placed.some(rect=>intersects(candidate.rect,rect)));
+      if(!option){solved=false;break}
+      assignment.set(entry,option);
+      placed.push(option.rect);
+    }
+  }
+  if(solved){
+    for(const [entry,option] of assignment){
+      entry.cluster.style.left=`${option.point.x}px`;
+      entry.cluster.style.top=`${option.point.y}px`;
+      entry.cluster.dataset.ioDistance=String(Math.hypot(option.point.x-entry.anchor.x,option.point.y-entry.anchor.y));
+    }
+  }
+  const count=collisionCount(entries);
+  stage.dataset.transitionIoCollisionSolved=count===0?"true":"fallback";
+  stage.dataset.transitionIoCollisionCount=String(count);
+  stage.dataset.transitionIoCollisionBudgetMs=String(COLLISION_BUDGET_MS);
+  return count===0;
+}
 function arrange(stage,data,machine){
-  const transitions=machine?.transitions||[],lanes=pairRanks(transitions),saved=parseSaved(data);
+  const transitions=machine?.transitions||[],lanes=pairRanks(transitions),saved=parseSaved(data),entries=[];
   transitions.forEach((transition,index)=>{
     const id=transition.id||`T${index+1}`;
     const escaped=window.CSS?.escape?CSS.escape(id):id;
@@ -347,7 +503,9 @@ function arrange(stage,data,machine){
     if(!cluster)return;
     const anchor=anchorFor(pathFor(stage,id,index),stage);
     placeCluster(cluster,anchor,lanes[index],saved,id,stage);
+    entries.push({cluster,index,anchor,preferred:{x:num(cluster.style.left),y:num(cluster.style.top)},manual:cluster.dataset.manualIo==="true",options:[]});
   });
+  repairCollisions(stage,entries);
   stage.dataset.transitionIoClustersReady="true";
   stage.dataset.transitionIoMaxDistance=String(MAX_DISTANCE);
 }
@@ -392,6 +550,7 @@ async function render(stage=stageOf(),reason="scheduled"){
     stage.dataset.stateTransitionIRV4LabelsReady="true";
     stage.dataset.stateTransitionIRV3LabelsReady="true";
     stage.dataset.stateTransitionIRV2LabelsReady="true";
+    stage.dataset.transitionSemanticLinesReady="true";
     document.dispatchEvent(new CustomEvent("glyph-transition-input-action-labels-ready",{detail:{machine:machine.name,marker:MARKER}}));
     document.dispatchEvent(new CustomEvent("glyph-state-transition-ir-v4-labels-ready",{detail:{machine:machine.name,marker:MARKER}}));
     document.dispatchEvent(new CustomEvent("glyph-transition-io-clusters-ready",{detail:{machine:machine.name,transitions:transitions.length,marker:MARKER,durationMs:duration}}));

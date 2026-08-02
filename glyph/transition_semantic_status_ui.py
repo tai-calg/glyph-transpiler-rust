@@ -71,7 +71,12 @@ async function state(){
 }
 function selectedMachine(data){const machines=data?.views?.state?.machines||[],name=document.getElementById("machine-select")?.selectedOptions?.[0]?.textContent;return machines.find(machine=>machine.name===name)||machines[0]||null}
 function projectionModeOf(data,machine){return text(data?.views?.rtai_projection_mode)||text(machine?.analysis?.evidence_projection_mode)||"shadow"}
-function publicationReady(stage){return stage.dataset.transitionPublicationReady==="true"&&stage.dataset.transitionLayoutReady==="true"}
+function publicationReady(stage){
+  return stage.dataset.transitionPublicationReady==="true"
+    &&stage.dataset.transitionLayoutReady==="true"
+    &&stage.dataset.transitionEnablingCasesReady==="true"
+    &&stage.dataset.transitionIoCollisionCount==="0";
+}
 function semanticOf(transition){const raw=transition?.rtai_semantic_status||{},status=["exact","may","unknown"].includes(text(raw.status))?text(raw.status):"unknown";return{status,label:status==="exact"?"Exact":status==="may"?"May":"Unknown",reason:text(raw.reason)||"native Evidence status is unavailable"}}
 function escapeId(value){return window.CSS?.escape?CSS.escape(value):value.replace(/[^A-Za-z0-9_-]/g,"\\$&")}
 function setDataset(element,name,value){if(element.dataset[name]===value)return false;element.dataset[name]=value;return true}
@@ -127,7 +132,7 @@ function schedule(delay=0){
   timer=setTimeout(()=>render().catch(error=>{if(!expectedShutdown(error))console.error("transition semantic status rendering failed",error)}),delay)
 }
 function invalidate(){cache=null;schedule(0)}
-for(const event of["glyph-transition-io-clusters-ready","glyph-state-transition-ir-v4-labels-ready","glyph-execution-context-changed","glyph-locale-changed"]){document.addEventListener(event,invalidate)}
+for(const event of["glyph-transition-io-clusters-ready","glyph-state-transition-ir-v4-labels-ready","glyph-transition-enabling-cases-ready","glyph-execution-context-changed","glyph-locale-changed"]){document.addEventListener(event,invalidate)}
 document.addEventListener("glyph-transition-layout-transaction-ready",()=>schedule(0));
 document.addEventListener("change",event=>{if(event.target?.id==="machine-select"){cache=null;lastSignature="";schedule(0)}});
 function dispose(){disposed=true;clearTimeout(timer);controller?.abort()}

@@ -1,15 +1,8 @@
 system DoorController
   entry control
-
-  in state:DoorState
-  in sensor:Input
-  out receipt:Receipt
-
-  state -> control
-  sensor -> control
-  control -> receipt
-  control -> lock
-  control -> alarm
+  source sensor
+  sink lock
+  sink alarm
 
 machine Door(state:DoorState,input:Input)
   select=state.mode

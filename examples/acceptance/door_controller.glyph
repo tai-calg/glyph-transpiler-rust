@@ -1,15 +1,8 @@
 system DoorController
   entry control
-
-  in state:DoorState
-  in sensor:Input
-  out receipt:Receipt
-
-  state -> control
-  sensor -> control
-  control -> receipt
-  control -> lock
-  control -> alarm
+  source sensor
+  sink lock
+  sink alarm
 
 machine Door(state:DoorState,input:Input)
   select=state.mode
@@ -36,7 +29,7 @@ machine Door(state:DoorState,input:Input)
 # こじ開けが観測されたらalarm状態でなければならない。
 ?forced_open_safe(*Input)=@A(forced_open>>alarmed)
 
-# 外部所有の入力境界。未宣言名をsystemが補うことはない。
+# Systemが必要な時に値を取得する外部source。
 ext sensor():Input|ControlError
 
 >authenticate(input:Input):B=input.badge_valid&!input.forced_open
@@ -55,7 +48,7 @@ ext sensor():Input|ControlError
     _ >> DoorState(Faulted,state.failures+1,KeepLocked)
   next
 
-# Receiptは要求受付ではなく、Hostが外部作用の完了を確認した結果である。
+# Systemが外部作用を要求するsink。戻り値は完了確認または失敗を表す。
 !lock(state:DoorState):Receipt|ControlError
 !alarm(state:DoorState):Receipt|ControlError
 
@@ -63,7 +56,7 @@ ext sensor():Input|ControlError
   state.action==RaiseAlarm >> alarm(state)
   _ >> lock(state)
 
-# 一回の同期制御。正常経路はReceipt、失敗経路はControlErrorへ到達する。
+# 外部からinvokeされるentry。引数と戻り型がSystemの完全な同期境界になる。
 >control(state:DoorState):Receipt|ControlError
   input := sensor()?
   next := step(state,input)

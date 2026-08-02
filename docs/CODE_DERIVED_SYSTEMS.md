@@ -1,96 +1,68 @@
-# Checked System Context and explicit boundaries
+# Executable System boundary
 
-この文書は、Glyph 0.4における`system`、`ext`、`!`、通常関数、`machine`の責務を定義する。
-
-旧仕様の`system Name=entry`と、entryからcall graphを自動的にSystem Contextへ転用する設計は廃止された。
+この文書は、Glyphにおける`system`、`entry`、`source`、`sink`、`ext`、`!`、通常関数、`machine`の責務を定義する。
 
 ## 1. 基本原則
 
 ```text
-system   システム境界、公開port、主要なデータ・戻り値・作用flow
+system   外部から見える完全な関数実行境界
+entry    外部からinvokeされるSystem内の通常関数
+source   Systemが呼び出して外部から値を取得するext関数
+sink     Systemが呼び出して外部作用を要求する!関数
 machine  呼出しをまたいで意味を持つドメイン状態
->        一回の同期処理、純粋計算、分岐、処理順序
-ext      外部所有の入力・provider境界
-!        システムから外部へ要求する作用境界
+>        System内の通常関数、純粋計算、分岐、処理順序
+ext      外部所有のpull型入力関数
+!        外部作用関数
 ```
 
-System Flowとcall graphは同じではない。
+System図のノードは関数だけである。型、値、戻り値名を独立ノードへしない。
+
+System図の矢印は常に次の一義的な意味を持つ。
 
 ```text
-code call: control -> sensor
-data flow: sensor -> control
+caller ─calls→ callee
 ```
 
-`system`は前者を生成する命令ではなく、後者を含むArchitecture assertionである。コンパイラは、宣言された各edgeに型付きコード証拠を付与できる場合だけ受理する。
+データの向き、戻り値の向き、作用の向きを同じ矢印へ混在させない。引数型、正常戻り型、失敗型は関数ノードのシグネチャとして表示する。
 
 ## 2. 正規構文
 
 ```glyph
 system DoorController
   entry control
-
-  in state:DoorState
-  in sensor:Input
-  out receipt:Receipt
-
-  state -> control
-  sensor -> control
-  control -> receipt
-  control -> lock
-  control -> alarm
+  source sensor
+  sink lock
+  sink alarm
 ```
 
-必須要素:
+Systemブロックで宣言するのは関数名と境界上の役割だけである。
 
-1. `entry`は本体を持つ`>`関数である。
-2. 一つ以上の`in` portを持つ。
-3. R1では一つの`out` portを持つ。
-4. すべてのendpointはportまたは宣言済みsymbolへ解決される。
-5. すべてのedgeはコードから証明可能である。
+- `entry`は一つだけ必要
+- `source`と`sink`はゼロ個以上
+- `entry`は本体を持つ`>`関数
+- `source`は`ext`関数
+- `sink`は`!`関数
+- 型は各関数宣言から導出
+- 呼出し関係は関数本体から導出
 
-次は拒否される。
+次の値portと手書きedgeは正規構文では使用しない。
+
+```glyph
+in state:DoorState
+out receipt:Receipt
+state -> control
+control -> receipt
+```
+
+旧`in`、`out`、`->`は移行中のソースを読み込むためだけに残る。ArchitectureIRやStudio図の正当性を与える根拠にはならない。
+
+次も廃止されている。
 
 ```glyph
 system DoorController=control
 ```
 
-診断は、新しい`system` blockへの移行方法を示す。
-
-## 3. 境界の極性
-
-### 外部入力
-
-```glyph
-ext sensor():Input|ControlError
-```
-
-- 所有者はシステム外部である。
-- System Context上の主方向はoutside → systemである。
-- Glyph本体を持たない。
-- 未宣言名を`ext`として推定しない。
-
-### 外部作用
-
-```glyph
-!lock(state:DoorState):Receipt|ControlError
-!alarm(state:DoorState):Receipt|ControlError
-```
-
-- システムが外部へ作用を要求する境界である。
-- System Context上の主方向はsystem → outsideである。
-- Host adapterが実装を所有する。
-
-### 手書きRust依存
-
-```glyph
-~layout_lane(input:BatchInput):BatchLayout
-```
-
-`~`は論理上純粋だが、実装をRust側へ委譲する依存である。System Contextへ含める場合は明示edgeを宣言する。
-
-## 4. 一回の実行とReceipt
-
-新しい`runtime`宣言子は導入しない。一回の実行順序は通常関数で記述する。
+## 3. entry
 
 ```glyph
 >control(state:DoorState):Receipt|ControlError
@@ -100,108 +72,186 @@ ext sensor():Input|ControlError
 ```
 
 ```glyph
+system DoorController
+  entry control
+```
+
+`control`はSystem内部に実装され、外部へ公開されるinvoke点である。
+
+```text
+outside ─invoke→ control
+```
+
+`control`の引数がSystemへの同期入力、完全な戻り型がSystemの同期応答になる。
+
+```text
+input   state: DoorState
+output  Receipt | ControlError
+```
+
+正常型だけを取り出して失敗型を消してはならない。
+
+## 4. source
+
+```glyph
+ext sensor():Input|ControlError
+```
+
+```glyph
+system DoorController
+  source sensor
+```
+
+`source`はSystemが外部関数を呼び、値を取得するpull型境界である。
+
+```text
+control ─calls→ sensor
+sensor  ─returns→ Input | ControlError
+```
+
+ポーリング、センサー読出し、設定取得などが該当する。
+
+割り込み、コールバック、メッセージ受信ハンドラのように外部側がSystemをinvokeする入口は`source`ではない。同期的な公開入口として扱える場合は`entry`、非同期eventを独立分類する場合は将来の専用宣言で扱う。
+
+## 5. sink
+
+```glyph
+!lock(state:DoorState):Receipt|ControlError
+!alarm(state:DoorState):Receipt|ControlError
+```
+
+```glyph
+system DoorController
+  sink lock
+  sink alarm
+```
+
+`sink`はSystemが外部関数を呼び、外部作用を要求する境界である。
+
+```text
+apply ─calls→ lock
+apply ─calls→ alarm
+```
+
+戻り値が存在しても、呼出し主導権と作用方向がSystemから外部なので`sink`に分類する。
+
+`Receipt`は要求受付ではなく、Hostが外部作用の完了を確認した結果として設計する。受付だけを表す場合は`Acknowledgement`など別型を使用する。
+
+## 6. 導出される実行図
+
+次の実装を考える。
+
+```glyph
+>authenticate(input:Input):B=input.badge_valid&!input.forced_open
+
+>decide(input:Input):Action
+  input.forced_open >> RaiseAlarm
+  authenticate(input)&input.request_open >> Unlock
+  _ >> KeepLocked
+
+>step(state:DoorState,input:Input):DoorState
+  action := decide(input)
+  ...
+
 >apply(state:DoorState):Receipt|ControlError
   state.action==RaiseAlarm >> alarm(state)
   _ >> lock(state)
+
+>control(state:DoorState):Receipt|ControlError
+  input := sensor()?
+  next := step(state,input)
+  apply(next)
 ```
 
-意味:
+コンパイラは`entry control`から到達可能な呼出しを追跡し、次を導出する。
 
 ```text
-external input
-  -> pure decision and state transition
-  -> exactly one selected external effect
-  -> confirmed Receipt or typed ControlError
+control
+├── sensor          source
+├── step            internal
+│   └── decide      internal
+│       └── authenticate
+└── apply           internal
+    ├── alarm       sink
+    └── lock        sink
 ```
 
-`Receipt`は単なる要求受付ではなく、Hostが外部作用の完了を確認した結果として型設計する。受付だけを表す場合は`Acknowledgement`など別型を使用する。
+値型の`Input`、`DoorState`、`Receipt`、`ControlError`は関数ノードの入出力欄へ表示し、独立ノードにはしない。
 
-## 5. edgeと証拠
+## 7. 完全性検査
 
-ArchitectureIRはedgeごとに証拠を保存する。
-
-| edge | kind | 必要な証拠 |
-|---|---|---|
-| caller port → entry | `data` | entry parameter名と型 |
-| ext port → function | `data` | external input readへの到達pathと成功型 |
-| function → out port | `return` | 正常戻り型とentryからの到達性 |
-| function → `!` | `effect` | effect boundaryへの到達pathと引数型 |
-| function → function / `~` | `responsibility` | 宣言済みcall path |
-
-edgeは実行コードを生成しない。コードとArchitectureの整合性を要求する。
-
-## 6. 検査
-
-コンパイラは少なくとも次を拒否する。
+コンパイラは次を拒否する。
 
 - 未宣言entry
-- 未宣言endpoint
+- `entry`に`ext`または`!`を指定する
+- `source`に通常関数または`!`を指定する
+- `sink`に通常関数または`ext`を指定する
+- entryから到達不能なsourceまたはsink
+- entryから到達するのにSystemへ宣言されていないsource
+- entryから到達するのにSystemへ宣言されていないsink
 - 未宣言の到達可能call
-- `ext`を出力作用として使う極性逆転
-- `!`を入力providerとして使う極性逆転
-- port型と関数型の不一致
-- コードに存在しないedge
-- 到達可能な外部入力または作用境界の記載漏れ
-- 一つのguard branchから複数effectを実行する構造
-- output portへ到達しないentry
+- 同じ関数を複数の境界役割へ割り当てる
+- source名とentry引数名が衝突し、関数と値を区別できない構造
+- 一つのguard branchから複数の外部作用を実行する構造
 
-Glyphの短縮型`U/B/F/I`と正規化後の`u16/bool/f32/i16`は、System Context型検査で同じcanonical typeとして扱う。
+内部関数はSystemブロックへ列挙しない。entryからの実行経路として自動導出する。
 
-## 7. View分離
+## 8. ArchitectureIR
 
-Studioと生成artifactは次を分ける。
-
-```text
-Checked System Context
-  public boundary and semantic flow
-
-Call Graph
-  implementation call dependency
-
-Machine
-  persistent domain-state transition
-
-Outcome / Logic
-  one-call evaluation and failure paths
-```
-
-明示`system`がある場合、内部helperをSystem Contextへ自動混入させない。境界へ接続されていない宣言は別の`Internal and unconnected declarations` viewへ置く。
-
-I/O viewのsystem contract:
+ArchitectureIRは関数ノードとcall edgeだけを公開する。
 
 ```json
 {
-  "kind": "checked-system-context",
+  "name": "DoorController",
   "entry": "control",
+  "sources": ["sensor"],
+  "sinks": ["lock", "alarm"],
   "ports": [],
-  "nodes": [],
-  "edges": [],
-  "evidence": []
+  "components": [
+    {"name": "control", "kind": "function", "role": "entry"},
+    {"name": "sensor", "kind": "external", "role": "source"},
+    {"name": "lock", "kind": "effect", "role": "sink"}
+  ],
+  "edges": [
+    {"kind": "call"}
+  ]
 }
 ```
 
-edge labelは`data`、`returns`、`effect`、`flow`を使用する。`calls`はsystem宣言がない場合のderived call graphだけで使用する。
+各call edgeには、呼出し元、呼出し先、ソース行を示す証拠を付ける。
 
-## 8. 保守性規則
+旧port/edge相当の情報を必要とする内部意味解析には、関数シグネチャから導出したprovenance metadataを渡す。これはユーザーが手書きするArchitectureではなく、コンパイラ内部の証明事実である。
 
-- system blockはソース先頭へ置き、第三者が境界を先に読めるようにする。
-- 主実行経路をraw macroへ隠さない。
-- 永続状態だけを`machine` stateへ保持する。
-- 一時的な判断結果はlocal bindingまたは専用値型にする。
-- Host adapter、生成module、test controlsを無条件にpublicへしない。
-- public facadeは利用者が必要な型と操作だけを再公開する。
-- test専用の故障注入・観測関数はcrate内testへ閉じる。
-- Example名、内容、Acceptance testの目的を一致させる。
-- generated metadataや一時migration payloadをrepositoryへ残さない。
+## 9. Studio表示
 
-## 9. 非目標
+StudioのSystem viewは次の役割を明示する。
 
-`system` edgeは次を主張しない。
+```text
+ENTRY     外部からinvokeされる通常関数
+SOURCE    Systemが読むext関数
+SINK      Systemが呼ぶ!関数
+INTERNAL  entryから到達する内部関数
+```
+
+すべての矢印ラベルは`calls`になる。
+
+各関数ノードには次を表示する。
+
+- 関数名
+- 境界役割
+- 引数名と型
+- 正常型と失敗型を含む完全な戻り型
+- ソース行
+
+## 10. 非目標
+
+`system`は次を直接表さない。
 
 - schedulerやthread配置
-- async task lifecycle
 - process間transport
+- async task lifecycle
+- interrupt controllerの設定
 - branchが毎回実行されること
-- 物理装置の停止性の形式証明
+- Host実装や物理装置の正しさの形式証明
 
-これらは専用IRまたはHost契約で扱う。`system`の保証は、表示された境界とflowが宣言済みsymbol、型、到達pathに対応することである。
+これらは専用IRまたはHost契約で扱う。`system`が保証するのは、宣言した境界関数が正しい種類で存在し、entryからの完全な実行call graphと一致することである。

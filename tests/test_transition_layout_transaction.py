@@ -61,7 +61,20 @@ def test_transaction_is_strictly_bounded_and_preserves_base_geometry() -> None:
         assert removed not in html
 
 
-def test_io_clusters_use_linear_ordinary_placement() -> None:
+def test_superseded_transaction_waiters_resolve_on_later_generation() -> None:
+    html = enhance_transition_layout_transaction_html(
+        "<html><head></head><body></body></html>"
+    )
+
+    assert "function settleWaiters(result)" in html
+    assert "completedGeneration>=waiter.token" in html
+    assert "waiters.push({token,resolve})" in html
+    assert "settleWaiters(result)" in html
+    assert "get waiterCount(){return waiters.length}" in html
+    assert 'schedule(reason,0);\n  return lastPromise;' not in html
+
+
+def test_io_clusters_use_bounded_ordinary_placement() -> None:
     html = enhance_transition_io_clusters_html(
         "<html><head></head><body><div id=\"view\"></div></body></html>"
     )
@@ -71,24 +84,31 @@ def test_io_clusters_use_linear_ordinary_placement() -> None:
         "STATE_REQUEST_TIMEOUT_MS=48",
         "AUTO_OFFSET=18",
         "LANE_GAP=34",
+        "COLLISION_BUDGET_MS=10",
+        "COLLISION_RINGS=[0,16,32,48,64,80,96]",
+        "COLLISION_ANGLES=24",
         "function ordinaryPath(",
+        "directionalOffset=48",
+        "laneGap=28",
+        "ordinaryPath(source,target,source===target,lanes[index],stage)",
         "function reroute(",
         "function pairRanks(",
         "function placeCluster(",
+        "function repairCollisions(stage,entries)",
         'profile:"ordinary"',
         "transitionIoRenderBudgetExceeded",
+        "transitionIoCollisionBudgetMs",
         '.observe(view,{childList:true})',
     ):
         assert required in html
 
     for removed in (
-        "RINGS=[",
-        "ANGLES=",
-        "function candidates(",
-        "function collisionCount(",
         "for(let attempt=0;attempt<100",
         "setInterval(",
         "{childList:true,subtree:true}",
+        "nano-io",
+        "micro-io",
+        "compact-io",
     ):
         assert removed not in html
 

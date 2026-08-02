@@ -38,7 +38,12 @@ function panKey(){return `glyph.diagram.canvas-pan.v1:${diagramIdentity()}`}
 function scaleFor(stage){return Number.parseFloat(stage?.dataset.viewportScale||"1")||1}
 function stageSize(stage){
   const styledWidth=Number.parseFloat(stage.style.width||"0")||0,styledHeight=Number.parseFloat(stage.style.height||"0")||0;
-  return{width:Math.max(1,styledWidth,stage.scrollWidth),height:Math.max(1,styledHeight,stage.scrollHeight)};
+  const savedWidth=Number.parseFloat(stage.dataset.viewportLogicalWidth||"0")||0,savedHeight=Number.parseFloat(stage.dataset.viewportLogicalHeight||"0")||0;
+  const scale=Math.max(.0001,scaleFor(stage)),rect=stage.getBoundingClientRect(),atUnitScale=Math.abs(scale-1)<.001;
+  const width=styledWidth>0?styledWidth:Math.max(1,savedWidth,rect.width/scale,atUnitScale?stage.scrollWidth:0);
+  const height=styledHeight>0?styledHeight:Math.max(1,savedHeight,rect.height/scale,atUnitScale?stage.scrollHeight:0);
+  stage.dataset.viewportLogicalWidth=String(width);stage.dataset.viewportLogicalHeight=String(height);
+  return{width,height};
 }
 function surfaceFor(shell,stage){
   if(stage.parentElement?.classList.contains("glyph-zoom-surface"))return stage.parentElement;

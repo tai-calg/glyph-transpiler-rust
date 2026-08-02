@@ -237,9 +237,10 @@ try {
 
   const originalSource = await page.locator("#editor").inputValue();
   const actionlessSource = originalSource
-    .replace("  audit_control -> audit\n", "")
+    .replace("  sink audit\n", "")
     .replace("  audit(next)\n", "  Receipt(next)\n");
   assert.notEqual(actionlessSource, originalSource, "actionless route replacement did not match source");
+  assert(!actionlessSource.includes("  sink audit\n"), "actionless System still declares an unreachable sink");
   await compileSource(page, actionlessSource);
   await page.waitForFunction(() => (
     [...document.querySelectorAll("#execution-context-select option")]

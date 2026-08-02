@@ -11,24 +11,51 @@ class AcceptanceSystemTests(unittest.TestCase):
         outputs = compile_example("door")
         architecture = load(outputs, "architecture-ir.json")
         execution = load(outputs, "execution-ir.json")
-        self.assertEqual([item["name"] for item in architecture["systems"]], ["DoorController"])
+        self.assertEqual(
+            [item["name"] for item in architecture["systems"]],
+            ["DoorController"],
+        )
         system = architecture["systems"][0]
         self.assertEqual(system["entry"], "control")
-        self.assertEqual(
-            {(item["name"], item["direction"], item["type"]) for item in system["ports"]},
-            {
-                ("state", "input", "DoorState"),
-                ("sensor", "input", "Input"),
-                ("receipt", "output", "Receipt"),
-            },
-        )
+        self.assertEqual(system["ports"], [])
+        self.assertEqual(set(system["sources"]), {"sensor"})
+        self.assertEqual(set(system["sinks"]), {"lock", "alarm"})
+
+        components = {
+            item["name"]: (item["kind"], item["role"])
+            for item in system["components"]
+        }
+        self.assertEqual(components["control"], ("function", "entry"))
+        self.assertEqual(components["sensor"], ("external", "source"))
+        self.assertEqual(components["lock"], ("effect", "sink"))
+        self.assertEqual(components["alarm"], ("effect", "sink"))
+        self.assertEqual(components["step"], ("function", "internal"))
+        self.assertEqual(components["apply"], ("function", "internal"))
+
+        names = {item["id"]: item["name"] for item in system["components"]}
+        call_edges = {
+            (names[item["source_id"]], names[item["target_id"]])
+            for item in system["edges"]
+            if item["kind"] == "call"
+        }
+        self.assertIn(("control", "sensor"), call_edges)
+        self.assertIn(("control", "step"), call_edges)
+        self.assertIn(("control", "apply"), call_edges)
+        self.assertIn(("apply", "lock"), call_edges)
+        self.assertIn(("apply", "alarm"), call_edges)
+
         self.assertEqual([item["name"] for item in execution["machines"]], ["Door"])
         self.assertEqual(
             {item["name"] for item in execution["temporal"]},
             {"lock_deadline", "forced_open_safe"},
         )
         mapping = load(outputs, "preprocessor-map.json")
-        self.assertFalse(any("DOOR_FLOW" in item["macro_stack"] for item in mapping["expanded_lines"]))
+        self.assertFalse(
+            any(
+                "DOOR_FLOW" in item["macro_stack"]
+                for item in mapping["expanded_lines"]
+            )
+        )
 
     def test_batch_separates_rust_effect_and_error_paths(self) -> None:
         outputs = compile_example("batch")

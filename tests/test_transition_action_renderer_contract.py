@@ -12,7 +12,9 @@ class TransitionActionRendererContractTests(unittest.TestCase):
         self.assertNotIn("function outputOf(transition)", rendered)
         self.assertNotIn("||text(transition?.target_state)", rendered)
         self.assertNotIn("||text(transition?.target?.state)", rendered)
-        self.assertIn("cluster.dataset.actionValue=actionOf(transition)", rendered)
+        self.assertIn("action=actionOf(transition),value=ioOf(transition)", rendered)
+        self.assertIn("cluster.dataset.actionValue=action", rendered)
+        self.assertIn("cluster.dataset.outputValue=action", rendered)
 
 
 if __name__ == "__main__":

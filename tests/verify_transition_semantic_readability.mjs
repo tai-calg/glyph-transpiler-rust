@@ -9,20 +9,17 @@ const cases = [
     slug: "conveyor",
     file: "examples/state_diagrams/conveyor_control.glyph",
     machine: "Conveyor",
-    dense: true,
     required: "ConveyorStop ➞ set_conveyor(0.0)",
   },
   {
     slug: "traffic-light",
     file: "examples/state_diagrams/traffic_light.glyph",
     machine: "Traffic",
-    dense: true,
   },
   {
     slug: "session-protocol",
     file: "examples/state_diagrams/session_protocol.glyph",
     machine: "Session",
-    dense: true,
   },
 ];
 
@@ -102,9 +99,6 @@ async function inspect(page) {
     )).map(label => label.id) : ["missing-stage"];
     return {
       stageReady: stage?.dataset.transitionSemanticLinesReady,
-      denseLayout: stage?.dataset.semanticDenseLayout || "",
-      collisionState: stage?.dataset.transitionIoCollisionSolved || "",
-      collisionCount: Number(stage?.dataset.transitionIoCollisionCount || 0),
       labels,
       collisions,
       outside,
@@ -140,24 +134,24 @@ try {
       }
       await page.selectOption("#machine-select", { label: testCase.machine });
       await page.waitForFunction(machine => {
-        const stage = document.querySelector(".graph-stage");
-        const layout = stage?.dataset.transitionIoCollisionSolved;
+        const stage = document.querySelector(".state-node")?.closest(".graph-stage");
         return document.querySelector("#machine-select")?.selectedOptions?.[0]?.textContent === machine
+          && stage?.dataset.transitionLayoutState === "ready"
+          && stage?.dataset.transitionPublicationReady === "true"
           && stage?.dataset.transitionIoClustersReady === "true"
+          && stage?.dataset.transitionLayoutProfile === "ordinary"
+          && stage?.dataset.stateDiagramWorkspaceGeometryReady === "true"
+          && stage?.dataset.initialRouteReady === "true"
           && stage?.dataset.transitionSemanticLinesReady === "true"
-          && (layout === "true" || layout === "fallback")
-          && Number(stage.dataset.transitionIoCollisionCount || 0) === 0
           && [...stage.querySelectorAll(".transition-io-cluster")].every(cluster => (
             cluster.querySelectorAll(".transition-semantic-line").length > 0
-          ));
-      }, testCase.machine, { timeout: 15000 });
+          ))
+          && !stage.dataset.transitionLayoutError;
+      }, testCase.machine, { timeout: 10_000 });
       await page.waitForTimeout(300);
 
       const result = await inspect(page);
       assert.equal(result.stageReady, "true", `${testCase.slug}: semantic layout not ready`);
-      assert(["true", "fallback"].includes(result.collisionState), `${testCase.slug}: collision state ${result.collisionState}`);
-      assert.equal(result.collisionCount, 0, `${testCase.slug}: unresolved collision count`);
-      assert.equal(Boolean(result.denseLayout), testCase.dense, `${testCase.slug}: dense layout decision`);
       assert(result.labels.length > 0, `${testCase.slug}: no labels`);
       assert(result.labels.every(label => label.text === label.semantic), `${testCase.slug}: visible label differs from semantic value`);
       assert(

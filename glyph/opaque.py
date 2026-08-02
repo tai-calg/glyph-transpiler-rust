@@ -21,6 +21,9 @@ from .functional import FunctionalPatternRustGenerator
 from .semantic import SemanticModel
 
 
+_OPAQUE_MASK_MARKER = "__glyph_opaque_pure__"
+
+
 @dataclass(frozen=True)
 class OpaqueSeed:
     line: int
@@ -74,7 +77,7 @@ def _replace_marker(line: str, marker: str) -> str:
 
 
 def mask_opaque_as_effect(source: str) -> tuple[str, tuple[OpaqueSeed, ...]]:
-    """Temporarily map `~` to `!` so compact type syntax can be expanded."""
+    """Temporarily map `~` to `!` while retaining its pure-function identity."""
 
     lines = source.splitlines()
     output = list(lines)
@@ -88,7 +91,8 @@ def mask_opaque_as_effect(source: str) -> tuple[str, tuple[OpaqueSeed, ...]]:
         if stripped == "~":
             raise GlyphError(f"{line}行目: ~name(args):Type の形式が必要")
         seeds.append(OpaqueSeed(line, note))
-        output[index] = _replace_marker(original, "!")
+        masked_code, _ = _split_comment(_replace_marker(original, "!"))
+        output[index] = f"{masked_code} # {_OPAQUE_MASK_MARKER}"
     return (
         "\n".join(output) + ("\n" if source.endswith("\n") else ""),
         tuple(seeds),

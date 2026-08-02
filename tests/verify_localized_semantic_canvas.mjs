@@ -30,7 +30,10 @@ async function waitForServer(url, child, logs) {
     if (child.exitCode !== null) throw new Error(`Glyph process exited early\n${logs.join("")}`);
     try {
       const response = await fetch(`${url}/api/state`);
-      if (response.ok && (await response.json()).status === "ready") return;
+      if (response.ok) {
+        const state = await response.json();
+        if (state.status === "ready") return state;
+      }
     } catch {}
     await new Promise(resolve => setTimeout(resolve, 100));
   }
@@ -64,28 +67,68 @@ child.stderr.on("data", chunk => logs.push(chunk.toString()));
 const browser = await chromium.launch({ headless: true });
 try {
   const url = `http://127.0.0.1:${port}`;
-  await waitForServer(url, child, logs);
+  const apiState = await waitForServer(url, child, logs);
+  const machine = apiState.views.state.machines.find(item => item.name === "Demo");
+  assert(machine, "Demo machine missing from compiler-derived state view");
+  const expectedFailureTransitions = machine.transitions.filter(item => item.outcome === "failure").length;
+  assert(expectedFailureTransitions > 0, "fixture must contain failure-state transitions");
+
   const page = await browser.newPage({ viewport: { width: 1500, height: 900 } });
   await page.goto(url, { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => document.querySelector("#status")?.classList.contains("ready"));
+  await page.click('button[data-tab="state"]');
   await page.waitForFunction(() => {
-    const stage = document.querySelector(".graph-stage");
-    const solved = stage?.dataset.transitionIoCollisionSolved;
-    return stage?.dataset.transitionIoClustersReady === "true"
-      && (solved === "true" || solved === "fallback")
-      && stage?.dataset.stateTransitionIRV3LabelsReady === "true"
-      && document.querySelector("#glyph-settings");
-  });
+    const stage = document.querySelector(".state-node")?.closest(".graph-stage");
+    return document.querySelector(".tab.active")?.dataset.tab === "state"
+      && stage?.dataset.transitionLayoutState === "ready"
+      && stage?.dataset.transitionPublicationReady === "true"
+      && stage?.dataset.transitionIoClustersReady === "true"
+      && stage?.dataset.transitionLayoutProfile === "ordinary"
+      && stage?.dataset.stateDiagramWorkspaceGeometryReady === "true"
+      && stage?.dataset.initialRouteReady === "true"
+      && document.querySelectorAll(".transition-index .transition-detail").length > 0
+      && document.querySelector("#glyph-settings")
+      && !stage?.dataset.transitionLayoutError;
+  }, null, { timeout: 10_000 });
 
   assert.equal((await page.locator("#compile").textContent()).trim(), "コンパイル");
   assert.equal(await page.locator("html").getAttribute("lang"), "ja");
   const japaneseWarnings = await page.locator(".analysis-panel").textContent();
   assert(japaneseWarnings.includes("暫定的に入力"), japaneseWarnings);
 
-  const detailText = await page.locator(".transition-detail-id").allTextContents();
-  assert(detailText.some(value => value.includes("Start [input.allowed]")), detailText.join("\n"));
-  assert(detailText.some(value => value.includes("? input.legacy_alarm")), detailText.join("\n"));
-  assert(!detailText.some(value => value.includes("[input.legacy_alarm]")), detailText.join("\n"));
+  const semanticLabels = await page.locator(".transition-io-cluster").evaluateAll(elements => (
+    elements.map(element => ({
+      id: element.dataset.transitionId || "",
+      input: element.dataset.inputValue || "",
+      guard: element.dataset.guardValue || "",
+      action: element.dataset.actionValue || "",
+      value: element.dataset.ioValue || "",
+    }))
+  ));
+  assert(
+    semanticLabels.some(item => (
+      item.input === "Start"
+      && item.guard === "input.allowed"
+      && item.value === "Start [input.allowed]"
+    )),
+    JSON.stringify(semanticLabels),
+  );
+  assert(
+    semanticLabels.some(item => (
+      item.input === "? input.legacy_alarm"
+      && item.guard === ""
+      && item.value === "? input.legacy_alarm"
+    )),
+    JSON.stringify(semanticLabels),
+  );
+  assert(
+    semanticLabels.every(item => item.guard !== "input.legacy_alarm"),
+    JSON.stringify(semanticLabels),
+  );
+  assert(
+    semanticLabels.every(item => item.action === ""),
+    JSON.stringify(semanticLabels),
+  );
 
   const placement = await page.evaluate(() => {
     const clusters = [...document.querySelectorAll(".transition-io-cluster")];
@@ -108,7 +151,8 @@ try {
       inputCount: document.querySelectorAll('.transition-io-node[data-io-kind="input"]').length,
       outputCount: document.querySelectorAll('.transition-io-node[data-io-kind="output"]').length,
       guardNodeCount: document.querySelectorAll('.transition-io-node[data-io-kind="guard"]').length,
-      failureDecorationCount: document.querySelectorAll(".transition-io-cluster.failure-transition,.transition-io-cluster .transition-io-error").length,
+      failureClusterCount: document.querySelectorAll(".transition-io-cluster.failure-transition").length,
+      failureErrorCount: document.querySelectorAll(".transition-io-cluster .transition-io-error").length,
       combinedValues: clusters.map(cluster => cluster.querySelector('.transition-io-node[data-io-kind="io"] .transition-io-value')?.textContent || ""),
       semanticActions: clusters.map(cluster => cluster.dataset.actionValue || ""),
       visibleLegacyLabels: visibleLegacyLabels.length,
@@ -122,7 +166,8 @@ try {
   assert.equal(placement.inputCount, 0);
   assert.equal(placement.outputCount, 0);
   assert.equal(placement.guardNodeCount, 0);
-  assert.equal(placement.failureDecorationCount, 0);
+  assert.equal(placement.failureClusterCount, expectedFailureTransitions);
+  assert.equal(placement.failureErrorCount, 0);
   assert(placement.combinedValues.every(value => value.trim().length > 0));
   assert(placement.semanticActions.every(value => value.trim().length === 0), placement.semanticActions.join("\n"));
   assert(placement.combinedValues.every(value => !value.includes(" ➞ ")), placement.combinedValues.join("\n"));

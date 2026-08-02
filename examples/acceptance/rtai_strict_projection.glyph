@@ -1,14 +1,6 @@
 system DoorControl
   entry control
-
-  in state:DoorState
-  in input:Input
-  out state_out:DoorState
-
-  state -> control
-  input -> control
-  control -> state_out
-  control -> actuator
+  sink actuator
 
 machine Door(state:DoorState,input:Input)
   select=state.mode
