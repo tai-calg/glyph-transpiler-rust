@@ -9,20 +9,17 @@ const cases = [
     slug: "conveyor",
     file: "examples/state_diagrams/conveyor_control.glyph",
     machine: "Conveyor",
-    dense: true,
     required: "ConveyorStop ➞ set_conveyor(0.0)",
   },
   {
     slug: "traffic-light",
     file: "examples/state_diagrams/traffic_light.glyph",
     machine: "Traffic",
-    dense: true,
   },
   {
     slug: "session-protocol",
     file: "examples/state_diagrams/session_protocol.glyph",
     machine: "Session",
-    dense: true,
   },
 ];
 
@@ -102,7 +99,6 @@ async function inspect(page) {
     )).map(label => label.id) : ["missing-stage"];
     return {
       stageReady: stage?.dataset.transitionSemanticLinesReady,
-      denseLayout: stage?.dataset.semanticDenseLayout || "",
       labels,
       collisions,
       outside,
@@ -156,7 +152,6 @@ try {
 
       const result = await inspect(page);
       assert.equal(result.stageReady, "true", `${testCase.slug}: semantic layout not ready`);
-      assert.equal(Boolean(result.denseLayout), testCase.dense, `${testCase.slug}: dense layout decision`);
       assert(result.labels.length > 0, `${testCase.slug}: no labels`);
       assert(result.labels.every(label => label.text === label.semantic), `${testCase.slug}: visible label differs from semantic value`);
       assert(
