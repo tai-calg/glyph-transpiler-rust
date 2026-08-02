@@ -1,9 +1,9 @@
 """Compatibility facade for the canonical System architecture implementation.
 
 The core parser temporarily lowers both ``~`` pure Rust contracts and ``!``
-external effects to ``ExternDecl``.  System architecture must retain the source
+external effects to ``ExternDecl``. System architecture must retain the source
 kind distinction: ``~`` is an internal callable, while only ``!`` may be a
-``sink``.  This facade carries the opaque names across source-line remapping and
+``sink``. This facade carries opaque identity through the lowering pipeline and
 builds the architecture against an architecture-only pure-function view.
 """
 
@@ -29,16 +29,29 @@ from .system_architecture import (
 
 
 _OPAQUE_NAME_PREFIX = "__glyph_opaque_pure__:"
+_OPAQUE_MASK_MARKER = "__glyph_opaque_pure__"
 
 
 def _top_level_opaque_names(source: str) -> tuple[str, ...]:
     names: list[str] = []
     for original in source.splitlines():
-        code = original.split("#", 1)[0].rstrip()
+        code, marker, comment = original.partition("#")
+        code = code.rstrip()
         stripped = code.strip()
-        if not stripped or code[:1].isspace() or not stripped.startswith("~"):
+        if not stripped or code[:1].isspace():
             continue
-        signature = stripped[1:].strip()
+
+        if stripped.startswith("~"):
+            signature = stripped[1:].strip()
+        elif (
+            stripped.startswith("!")
+            and marker
+            and _OPAQUE_MASK_MARKER in comment
+        ):
+            signature = stripped[1:].strip()
+        else:
+            continue
+
         open_pos = signature.find("(")
         if open_pos <= 0:
             continue
@@ -51,9 +64,9 @@ def _top_level_opaque_names(source: str) -> tuple[str, ...]:
 def extract_systems(source: str) -> tuple[str, tuple[SystemDecl, ...]]:
     """Extract Systems while retaining source-only ``~`` function identity.
 
-    ``SystemDecl`` predates explicit opaque-function metadata.  A private marker
+    ``SystemDecl`` predates explicit opaque-function metadata. A private marker
     in ``external_names`` is used only to survive the generic dataclass line
-    remapper.  It is removed temporarily before the canonical architecture
+    remapper. It is removed temporarily before the canonical architecture
     builder classifies real ``ext`` declarations.
     """
 
@@ -126,8 +139,6 @@ def build_architecture_ir(
             systems,
         )
     finally:
-        # Preserve the marker until all generic remapping/build paths have run.
-        # It is private compiler metadata and is never projected into public IR.
         for system, names in zip(systems, saved_external_names, strict=True):
             system.external_names = names
 
