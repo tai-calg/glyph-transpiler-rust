@@ -45,7 +45,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p build/checked-system-context-io build/execution-context-selection build/rtai-semantic-status build/rtai-strict-projection build/state-diagram-regression build/state-diagram-stability build/diagram-editor-exports build/diagram-canvas-viewport build/localized-semantic-canvas build/transition-label-readability build/transition-layout-transaction build/transition-semantic-readability build/label-identifier-interactions
+          mkdir -p build/checked-system-context-io build/execution-context-selection build/rtai-semantic-status build/rtai-strict-projection build/state-diagram-regression build/state-diagram-stability build/adaptive-state-workspace build/diagram-editor-exports build/diagram-canvas-viewport build/localized-semantic-canvas build/transition-label-readability build/transition-layout-transaction build/transition-semantic-readability build/label-identifier-interactions
 
           run_node() {
             local script="$1"
@@ -76,6 +76,7 @@ jobs:
           run_node tests/verify_execution_context_selection.mjs build/execution-context-selection/verify.log
           run_node tests/verify_enabling_case_rendering.mjs build/state-diagram-regression/enabling-cases.log
           run_node tests/verify_state_diagram_rendering.mjs build/state-diagram-regression/verify.log
+          run_node tests/verify_adaptive_state_workspace.mjs build/adaptive-state-workspace/verify.log
           python tests/verify_readme_state_snapshot.py \
             2>&1 | tee -a build/state-diagram-regression/verify.log
           run_node tests/verify_state_diagram_stability.mjs build/state-diagram-stability/verify.log
@@ -105,6 +106,7 @@ jobs:
             build/rtai-strict-projection/**
             build/state-diagram-regression/**
             build/state-diagram-stability/**
+            build/adaptive-state-workspace/**
             build/diagram-editor-exports/**
             build/diagram-canvas-viewport/**
             build/localized-semantic-canvas/**
