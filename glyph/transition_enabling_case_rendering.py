@@ -8,6 +8,7 @@ _SCRIPT = r'''
 (()=>{
 const MARKER="glyph-transition-enabling-cases-v1";
 const STATE_REQUEST_TIMEOUT_MS=48;
+const SEMANTIC_LINE_LIMIT=42;
 let cache=null,timer=0,running=false,queued=false,disposed=false,controller=null;
 const text=value=>String(value??"").trim();
 const activeTab=()=>document.querySelector(".tab.active")?.dataset.tab||"state";
@@ -45,16 +46,49 @@ function lineOf(item,action){
   const input=inputOf(item),guard=guardOf(item),left=`${input}${guard?`${input?" ":""}[${guard}]`:""}`.trim();
   return`${left}${action?`${left?" ":""}➞ ${action}`:""}`.trim();
 }
+function semanticCut(value,limit=SEMANTIC_LINE_LIMIT){
+  if(value.length<=limit)return value.length;
+  const separators=new Set([" ","&",",",".","_","(",")","[","]",";"]);
+  for(let index=limit;index>=Math.max(8,limit-14);index-=1){if(separators.has(value[index]))return index+1}
+  for(let index=limit+1;index<Math.min(value.length,limit+14);index+=1){if(separators.has(value[index]))return index+1}
+  return value.length;
+}
+function splitSemantic(value){
+  const lines=[];
+  let remaining=String(value??"");
+  while(remaining.length>SEMANTIC_LINE_LIMIT){
+    const cut=semanticCut(remaining);
+    if(cut>=remaining.length)break;
+    lines.push(remaining.slice(0,cut));
+    remaining=remaining.slice(cut);
+  }
+  if(remaining.length||!lines.length)lines.push(remaining);
+  return lines;
+}
+function roleLines(item,action,prefix=""){
+  const input=inputOf(item),guard=guardOf(item),left=`${input}${guard?`${input?" ":""}[${guard}]`:""}`.trim(),lines=[];
+  if(left){
+    lines.push(...splitSemantic(`${prefix}${left}`));
+    if(action)lines.push(...splitSemantic(` ➞ ${action}`));
+  }else if(action){
+    lines.push(...splitSemantic(`${prefix}➞ ${action}`));
+  }
+  return lines;
+}
 function update(cluster,transition){
   const cases=casesOf(transition);
   if(!cases.length)return false;
   const action=actionOf(transition),lines=cases.map(item=>lineOf(item,action)).filter(Boolean);
+  const visualLines=cases.flatMap((item,index)=>roleLines(item,action,index?" || ":""));
   const value=cluster.querySelector(".transition-io-value");
   if(!value)return false;
   const signature=JSON.stringify([cases,action,window.GlyphExecutionContext?.signature?.()||""]);
+  const current=[...value.querySelectorAll(":scope > .transition-semantic-line")].map(item=>item.textContent||"");
   if(cluster.dataset.enablingCaseSignature===signature
-    &&cluster.dataset.ioValue===lines.join(" || "))return false;
-  value.replaceChildren(...lines.map(line=>{
+    &&cluster.dataset.ioValue===lines.join(" || ")
+    &&current.length===visualLines.length
+    &&current.every((line,index)=>line===visualLines[index]))return false;
+  value.replaceChildren(...visualLines.map(line=>{
     const span=document.createElement("span");
     span.className="transition-semantic-line transition-role-line enabling-case-line";
     span.textContent=line;
@@ -67,6 +101,8 @@ function update(cluster,transition){
   cluster.dataset.outputValue=action;
   cluster.dataset.ioValue=lines.join(" || ");
   cluster.dataset.fullLabel=lines.join("\n");
+  cluster.dataset.semanticLineCount=String(visualLines.length);
+  cluster.dataset.semanticLongestLine=String(Math.max(0,...visualLines.map(line=>line.length)));
   cluster.dataset.enablingCaseCount=String(cases.length);
   cluster.dataset.legacyProjectionLossy=String(Boolean(transition?.legacy_projection_lossy));
   cluster.dataset.enablingCaseSignature=signature;
@@ -94,6 +130,7 @@ async function apply(){
       if(cluster&&update(cluster,transition))changed+=1;
     });
     stage.dataset.transitionEnablingCasesReady="true";
+    stage.dataset.transitionSemanticLinesReady="true";
     document.dispatchEvent(new CustomEvent("glyph-transition-enabling-cases-ready",{detail:{marker:MARKER,changed}}));
     return{ok:true,changed};
   }finally{
@@ -126,7 +163,7 @@ if(view)new MutationObserver(()=>{if(activeTab()==="state"){markPending();schedu
 function dispose(){disposed=true;clearTimeout(timer);controller?.abort()}
 window.addEventListener("pagehide",dispose,{once:true});
 window.addEventListener("beforeunload",dispose,{once:true});
-window.glyphTransitionEnablingCases={marker:MARKER,version:4,apply};
+window.glyphTransitionEnablingCases={marker:MARKER,version:5,apply};
 schedule(0);
 })();
 </script>
