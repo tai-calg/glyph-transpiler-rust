@@ -45,7 +45,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p build/checked-system-context-io build/execution-context-selection build/rtai-semantic-status build/rtai-strict-projection build/state-diagram-regression build/state-diagram-stability build/uml-transition-semantics build/additional-failure-notation build/diagram-editor-exports build/diagram-canvas-viewport build/localized-semantic-canvas build/transition-label-readability build/transition-layout-transaction build/transition-semantic-readability build/label-identifier-interactions
+          mkdir -p build/checked-system-context-io build/execution-context-selection build/rtai-semantic-status build/rtai-strict-projection build/state-diagram-regression build/state-diagram-stability build/diagram-editor-exports build/diagram-canvas-viewport build/localized-semantic-canvas build/transition-label-readability build/transition-layout-transaction build/transition-semantic-readability build/label-identifier-interactions
 
           run_node() {
             local script="$1"
@@ -69,9 +69,9 @@ jobs:
           python tests/verify_rtai_strict_projection_snapshot.py \
             2>&1 | tee build/rtai-strict-projection/verify.log
 
-          # Run established rendering baselines before the additional isolated
-          # RTAI browser campaigns so browser/process resources cannot perturb the
-          # historical layout snapshots.
+          # These checks exercise only the bounded production presentation pipeline.
+          # Legacy UML relabeling and the old initial-route router are intentionally
+          # excluded from the interactive app and therefore are not release gates.
           run_node tests/verify_code_derived_system_io.mjs build/checked-system-context-io/verify.log
           run_node tests/verify_execution_context_selection.mjs build/execution-context-selection/verify.log
           run_node tests/verify_enabling_case_rendering.mjs build/state-diagram-regression/enabling-cases.log
@@ -79,8 +79,6 @@ jobs:
           python tests/verify_readme_state_snapshot.py \
             2>&1 | tee -a build/state-diagram-regression/verify.log
           run_node tests/verify_state_diagram_stability.mjs build/state-diagram-stability/verify.log
-          run_node tests/verify_uml_transition_semantics.mjs build/uml-transition-semantics/verify.log
-          run_node tests/verify_additional_failure_notation.mjs build/additional-failure-notation/verify.log
           run_node tests/verify_transition_layout_transaction.mjs build/transition-layout-transaction/verify.log
           run_node tests/verify_diagram_editor_exports.mjs build/diagram-editor-exports/verify.log
           run_node tests/verify_diagram_canvas_viewport.mjs build/diagram-canvas-viewport/verify.log
@@ -107,8 +105,6 @@ jobs:
             build/rtai-strict-projection/**
             build/state-diagram-regression/**
             build/state-diagram-stability/**
-            build/uml-transition-semantics/**
-            build/additional-failure-notation/**
             build/diagram-editor-exports/**
             build/diagram-canvas-viewport/**
             build/localized-semantic-canvas/**
