@@ -36,6 +36,8 @@ class DiagramCanvasViewportTests(unittest.TestCase):
         self.assertIn('.state-node,.transition-io-cluster,.initial-dot', html)
         self.assertIn("surface.offsetLeft+center.x-shell.clientWidth/2", html)
         self.assertIn("surface.offsetTop+center.y-shell.clientHeight/2", html)
+        self.assertIn("const token=++viewportGeneration", html)
+        self.assertIn("token!==viewportGeneration", html)
         self.assertNotIn("surface.offsetLeft-24", html)
         self.assertIn("全体表示", html)
         self.assertIn("表示を戻す", html)

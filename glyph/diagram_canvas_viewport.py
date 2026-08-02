@@ -123,13 +123,14 @@ function fitInitial(shell=activeShell||document.querySelector(".canvas-shell")){
 }
 function reset(shell){
   const stage=shell?.querySelector(".graph-stage");if(!stage)return;
-  viewportGeneration+=1;const {surface,size}=setRaw(shell,stage,1),center=occupiedCenter(stage,size);saveScale(1,"reset");sessionStorage.removeItem(panKey());
+  const token=++viewportGeneration,{surface,size}=setRaw(shell,stage,1),center=occupiedCenter(stage,size);saveScale(1,"reset");sessionStorage.removeItem(panKey());
   requestAnimationFrame(()=>{
     const position=()=>{
-      if(!shell.isConnected||!stage.isConnected||destroyed)return;
+      if(token!==viewportGeneration||!shell.isConnected||!stage.isConnected||destroyed)return;
       shell.scrollLeft=Math.max(0,surface.offsetLeft+center.x-shell.clientWidth/2);
       shell.scrollTop=Math.max(0,surface.offsetTop+center.y-shell.clientHeight/2);
     };
+    if(token!==viewportGeneration)return;
     position();shell.dispatchEvent(new Event("scroll"));requestAnimationFrame(position);setTimeout(()=>requestAnimationFrame(position),0);
     document.dispatchEvent(new CustomEvent("glyph-diagram-viewport-change",{detail:{scale:1,mode:"reset",identity:diagramIdentity()}}));
   });
