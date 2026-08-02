@@ -1,14 +1,6 @@
 system LargeControl
   entry control
-
-  in state:State
-  in input:Input
-  out state_out:State
-
-  state -> control
-  input -> control
-  control -> state_out
-  control -> actuator
+  sink actuator
 
 machine Large(state:State,input:Input)
   select=state.mode
