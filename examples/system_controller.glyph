@@ -1,14 +1,6 @@
 system ControllerService
   entry cycle
-
-  in system:System
-  in input:Input
-  out result:Cycle
-
-  system -> cycle
-  input -> cycle
-  cycle -> result
-  cycle -> write_actuator
+  sink write_actuator
 
 machine Controller(state:System,input:Input)
   select=state.mode
