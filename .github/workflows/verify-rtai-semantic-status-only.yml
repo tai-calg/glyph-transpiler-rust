@@ -1,0 +1,30 @@
+name: Verify RTAI Semantic Status Only
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/verify-rtai-semantic-status-only.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'agent/system-entry-source-sink'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install browser
+        run: |
+          npm install playwright@1.54.2
+          npx playwright install --with-deps chromium
+      - name: Verify RTAI semantic status UI
+        run: timeout 180s node tests/verify_rtai_semantic_status_ui.mjs
