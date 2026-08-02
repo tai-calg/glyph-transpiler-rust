@@ -1,0 +1,34 @@
+name: Update Workspace V3 Browser Contracts
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/update-workspace-v3-browser-contracts.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'agent/adaptive-state-layout-initial-node'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/adaptive-state-layout-initial-node
+          fetch-depth: 0
+          token: ${{ github.token }}
+      - name: Update browser expectations
+        run: |
+          set -euo pipefail
+          python3 scripts/update_workspace_v3_browser_contracts_once.py
+          node --check tests/verify_transition_layout_transaction.mjs
+          node --check tests/verify_node_drag_layout.mjs
+          git diff --check
+          git add -A tests/verify_transition_layout_transaction.mjs tests/verify_node_drag_layout.mjs scripts/update_workspace_v3_browser_contracts_once.py
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git commit -m "Update browser contracts for obstacle-aware workspace v3"
+          git push origin HEAD:agent/adaptive-state-layout-initial-node
