@@ -1,14 +1,6 @@
 system TemperatureViewService
   entry render
 
-  in input:TemperatureInput
-  in session:Session
-  out view:TemperatureView
-
-  input -> render
-  session -> render
-  render -> view
-
 *TemperatureInput(celsius:F)
 *TemperatureView(celsius:F,fahrenheit:F,kelvin:F,count:U,valid:B)
 *Session(count:U)
