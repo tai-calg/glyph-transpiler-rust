@@ -32,6 +32,11 @@ class DiagramCanvasViewportTests(unittest.TestCase):
         self.assertIn('shell.addEventListener("gesturechange"', html)
         self.assertIn("event.preventDefault()", html)
         self.assertIn("localPoint(shell,event)", html)
+        self.assertIn("function occupiedCenter(stage,size)", html)
+        self.assertIn('.state-node,.transition-io-cluster,.initial-dot', html)
+        self.assertIn("surface.offsetLeft+center.x-shell.clientWidth/2", html)
+        self.assertIn("surface.offsetTop+center.y-shell.clientHeight/2", html)
+        self.assertNotIn("surface.offsetLeft-24", html)
         self.assertIn("全体表示", html)
         self.assertIn("表示を戻す", html)
 
