@@ -49,6 +49,15 @@ _STYLE = r"""
   overflow-wrap:anywhere!important;
   text-align:center;
 }
+.transition-io-value>.transition-semantic-line{
+  display:block;
+  max-width:264px;
+  white-space:pre;
+  overflow:visible;
+  text-overflow:clip;
+  overflow-wrap:normal;
+  word-break:normal;
+}
 .transition-io-cluster.provisional-trigger .transition-io-node.io{
   border-style:dashed;
   border-color:rgba(231,191,98,.86);
@@ -89,6 +98,33 @@ const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
 const finite=value=>Number.isFinite(value);
 const text=value=>String(value??"").trim();
 const esc=value=>String(value??"").replace(/[&<>\"']/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;",'\"':"&quot;","'":"&#39;"}[ch]));
+const SEMANTIC_LINE_LIMIT=42;
+function semanticCut(value,limit=SEMANTIC_LINE_LIMIT){
+  if(value.length<=limit)return value.length;
+  const separators=new Set([" ","&",",",".","_","(",")","[","]",";"]);
+  for(let index=limit;index>=Math.max(8,limit-14);index-=1){if(separators.has(value[index]))return index+1}
+  for(let index=limit+1;index<Math.min(value.length,limit+14);index+=1){if(separators.has(value[index]))return index+1}
+  return value.length;
+}
+function splitSemantic(value){
+  const lines=[];
+  let remaining=String(value??"");
+  while(remaining.length>SEMANTIC_LINE_LIMIT){
+    const cut=semanticCut(remaining);
+    if(cut>=remaining.length)break;
+    lines.push(remaining.slice(0,cut));
+    remaining=remaining.slice(cut);
+  }
+  if(remaining.length||!lines.length)lines.push(remaining);
+  return lines;
+}
+function semanticLines(input,guard,action){
+  const left=`${input}${guard?`${input?" ":""}[${guard}]`:""}`.trim(),lines=[];
+  if(left)lines.push(...splitSemantic(left));
+  if(action)lines.push(...splitSemantic(`${left?" ":""}➞ ${action}`));
+  if(!lines.length)lines.push("otherwise");
+  return lines;
+}
 const activeTab=()=>document.querySelector(".tab.active")?.dataset.tab||"state";
 const stageOf=()=>document.querySelector(".state-node")?.closest(".graph-stage")||null;
 
@@ -303,8 +339,10 @@ function reroute(stage=stageOf(),machine=null){
   arrange(stage,data,selected);
   return true;
 }
-function clusterMarkup(value){
-  return`<div class="transition-io-main"><div class="transition-io-node io" data-io-kind="io" title="${esc(value)}"><span class="transition-io-value">${esc(value)}</span></div></div>`;
+function clusterMarkup(value,input,guard,action){
+  const lines=semanticLines(input,guard,action);
+  const content=lines.map(line=>`<span class="transition-semantic-line">${esc(line)}</span>`).join("");
+  return`<div class="transition-io-main"><div class="transition-io-node io" data-io-kind="io" title="${esc(value)}"><span class="transition-io-value">${content}</span></div></div>`;
 }
 function focus(id,active){
   document.querySelectorAll(`[data-transition-id="${id}"]`).forEach(item=>item.classList.toggle("transition-focus",active));
@@ -317,17 +355,20 @@ function bindCluster(cluster){
   cluster.addEventListener("mouseleave",()=>focus(cluster.dataset.transitionId,false));
 }
 function updateCluster(cluster,transition,id,line){
-  const value=ioOf(transition);
-  if(cluster.dataset.ioValue!==value)cluster.innerHTML=clusterMarkup(value);
+  const input=inputOf(transition),guard=guardsOf(transition).join(" & "),action=actionOf(transition),value=ioOf(transition);
+  if(cluster.dataset.ioValue!==value)cluster.innerHTML=clusterMarkup(value,input,guard,action);
   const trigger=triggerOf(transition),unknown=unknownOf(transition).length>0,semantic=semanticOf(transition);
+  const semanticLines=[...cluster.querySelectorAll(".transition-semantic-line")];
   cluster.dataset.transitionId=id;
   cluster.dataset.line=String(line||0);
-  cluster.dataset.inputValue=inputOf(transition);
-  cluster.dataset.guardValue=guardsOf(transition).join(" & ");
-  cluster.dataset.actionValue=actionOf(transition);
-  cluster.dataset.outputValue=actionOf(transition);
+  cluster.dataset.inputValue=input;
+  cluster.dataset.guardValue=guard;
+  cluster.dataset.actionValue=action;
+  cluster.dataset.outputValue=action;
   cluster.dataset.ioValue=value;
   cluster.dataset.fullLabel=value;
+  cluster.dataset.semanticLineCount=String(semanticLines.length);
+  cluster.dataset.semanticLongestLine=String(Math.max(0,...semanticLines.map(item=>(item.textContent||"").length)));
   cluster.dataset.rtaiSemanticStatus=semantic;
   cluster.classList.toggle("provisional-trigger",trigger?.role==="provisional-trigger");
   cluster.classList.toggle("unclassified-condition",unknown);
@@ -392,6 +433,7 @@ async function render(stage=stageOf(),reason="scheduled"){
     stage.dataset.stateTransitionIRV4LabelsReady="true";
     stage.dataset.stateTransitionIRV3LabelsReady="true";
     stage.dataset.stateTransitionIRV2LabelsReady="true";
+    stage.dataset.transitionSemanticLinesReady="true";
     document.dispatchEvent(new CustomEvent("glyph-transition-input-action-labels-ready",{detail:{machine:machine.name,marker:MARKER}}));
     document.dispatchEvent(new CustomEvent("glyph-state-transition-ir-v4-labels-ready",{detail:{machine:machine.name,marker:MARKER}}));
     document.dispatchEvent(new CustomEvent("glyph-transition-io-clusters-ready",{detail:{machine:machine.name,transitions:transitions.length,marker:MARKER,durationMs:duration}}));
