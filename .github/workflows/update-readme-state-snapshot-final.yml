@@ -1,0 +1,46 @@
+name: Refresh Final README State Snapshot
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/update-readme-state-snapshot-final.yml
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  refresh:
+    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'agent/system-entry-source-sink'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/system-entry-source-sink
+          fetch-depth: 0
+          token: ${{ github.token }}
+
+      - name: Download compiler-derived rendering
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/state-diagram-regression
+          gh run download 30732067762 \
+            --repo tai-calg/glyph-transpiler-rust \
+            --name state-diagram-regression \
+            --dir /tmp/state-diagram-regression
+          test -f /tmp/state-diagram-regression/build/state-diagram-regression/motor-safety-motor.png
+          cp /tmp/state-diagram-regression/build/state-diagram-regression/motor-safety-motor.png \
+            docs/images/glyph-studio-state-transition.png
+
+      - name: Commit refreshed baseline
+        run: |
+          set -euo pipefail
+          git add docs/images/glyph-studio-state-transition.png
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git commit -m "Refresh README state diagram for semantic labels"
+          git push origin HEAD:agent/system-entry-source-sink
