@@ -178,12 +178,43 @@ async function dragNode(page, deltaX, deltaY) {
   const before = await node.evaluate(element => Number.parseFloat(element.style.left));
   const startX = box.x + box.width / 2;
   const startY = box.y + box.height / 2;
+  const beforeAudit = await page.evaluate(({ x, y }) => {
+    const node = document.querySelector(".state-node");
+    const stage = node?.closest(".graph-stage");
+    const hit = document.elementFromPoint(x, y);
+    const rect = node?.getBoundingClientRect();
+    return {
+      hitTag: hit?.tagName || "",
+      hitClass: hit?.className?.baseVal || hit?.className || "",
+      hitText: hit?.textContent?.trim()?.slice(0, 80) || "",
+      hitNode: hit?.closest?.(".state-node")?.querySelector(".state-name")?.textContent?.trim() || "",
+      nodeName: node?.querySelector(".state-name")?.textContent?.trim() || "",
+      pointerEvents: node ? getComputedStyle(node).pointerEvents : "",
+      zIndex: node ? getComputedStyle(node).zIndex : "",
+      rect,
+      scale: Number.parseFloat(stage?.dataset.viewportScale || "1"),
+      layout: stage?.dataset.transitionLayoutState || "",
+      publication: stage?.dataset.transitionPublicationReady || "",
+      constrained: stage?.dataset.transitionNodeDragConstrained || "",
+    };
+  }, { x: startX, y: startY });
   await page.mouse.move(startX, startY);
   await page.mouse.down({ button: "left" });
   await page.mouse.move(startX + deltaX, startY + deltaY, { steps: 16 });
   await page.mouse.up({ button: "left" });
-  const after = await node.evaluate(element => Number.parseFloat(element.style.left));
-  return after - before;
+  const afterAudit = await node.evaluate(element => {
+    const stage = element.closest(".graph-stage");
+    return {
+      left: Number.parseFloat(element.style.left),
+      selected: element.classList.contains("selected-node"),
+      dragging: element.classList.contains("dragging"),
+      constrained: stage?.dataset.transitionNodeDragConstrained || "",
+      positions: stage?.dataset.transitionNodePositions || "",
+      publication: stage?.dataset.transitionPublicationReady || "",
+      layout: stage?.dataset.transitionLayoutState || "",
+    };
+  });
+  return { movement: afterAudit.left - before, before, beforeAudit, afterAudit };
 }
 
 async function verifyViewportControls(browser) {
@@ -216,8 +247,8 @@ async function verifyViewportControls(browser) {
     await page.click("#diagram-zoom-out");
     await page.waitForFunction(() => document.querySelector(".graph-stage")?.dataset.viewportScale === "0.8");
     assert.equal(await page.locator("#diagram-zoom-value").textContent(), "80%");
-    const movement = await dragNode(page, 80, 0);
-    assert(Math.abs(movement - 100) <= 10, `zoom-aware drag moved ${movement}px instead of about 100px`);
+    const drag = await dragNode(page, 80, 0);
+    assert(Math.abs(drag.movement - 100) <= 10, `zoom-aware drag diagnostics: ${JSON.stringify(drag)}`);
     await waitForStableGeometry(page);
 
     await page.click("#diagram-view-reset");
