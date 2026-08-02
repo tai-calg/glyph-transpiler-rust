@@ -88,10 +88,39 @@ try {
   const japaneseWarnings = await page.locator(".analysis-panel").textContent();
   assert(japaneseWarnings.includes("暫定的に入力"), japaneseWarnings);
 
-  const detailText = await page.locator(".transition-detail-id").allTextContents();
-  assert(detailText.some(value => value.includes("Start [input.allowed]")), detailText.join("\n"));
-  assert(detailText.some(value => value.includes("? input.legacy_alarm")), detailText.join("\n"));
-  assert(!detailText.some(value => value.includes("[input.legacy_alarm]")), detailText.join("\n"));
+  const semanticLabels = await page.locator(".transition-io-cluster").evaluateAll(elements => (
+    elements.map(element => ({
+      id: element.dataset.transitionId || "",
+      input: element.dataset.inputValue || "",
+      guard: element.dataset.guardValue || "",
+      action: element.dataset.actionValue || "",
+      value: element.dataset.ioValue || "",
+    }))
+  ));
+  assert(
+    semanticLabels.some(item => (
+      item.input === "Start"
+      && item.guard === "input.allowed"
+      && item.value === "Start [input.allowed]"
+    )),
+    JSON.stringify(semanticLabels),
+  );
+  assert(
+    semanticLabels.some(item => (
+      item.input === "? input.legacy_alarm"
+      && item.guard === ""
+      && item.value === "? input.legacy_alarm"
+    )),
+    JSON.stringify(semanticLabels),
+  );
+  assert(
+    semanticLabels.every(item => item.guard !== "input.legacy_alarm"),
+    JSON.stringify(semanticLabels),
+  );
+  assert(
+    semanticLabels.every(item => item.action === ""),
+    JSON.stringify(semanticLabels),
+  );
 
   const placement = await page.evaluate(() => {
     const clusters = [...document.querySelectorAll(".transition-io-cluster")];
