@@ -46,17 +46,16 @@ function startDiagram(file, port, logs) {
 
 async function waitForProductionViewport(page) {
   await page.waitForFunction(() => {
-    const stage = document.querySelector(".graph-stage");
-    const shell = document.querySelector(".canvas-shell");
-    const collision = stage?.dataset.transitionIoCollisionSolved;
-    return Boolean(
-      stage
-      && shell
-      && document.querySelector("#diagram-zoom-out")
-      && document.querySelector("#diagram-zoom-in")
-      && document.querySelector("#diagram-fit")
-      && document.querySelector("#diagram-view-reset")
-      && stage.dataset.viewportScale
+    const stage = document.querySelector(".state-node")?.closest(".graph-stage");
+    const shell = stage?.closest(".canvas-shell");
+    return document.querySelector(".tab.active")?.dataset.tab === "state"
+      && Boolean(stage)
+      && Boolean(shell)
+      && Boolean(document.querySelector("#diagram-zoom-out"))
+      && Boolean(document.querySelector("#diagram-zoom-in"))
+      && Boolean(document.querySelector("#diagram-fit"))
+      && Boolean(document.querySelector("#diagram-view-reset"))
+      && Boolean(stage.dataset.viewportScale)
       && shell.dataset.viewportReady === "true"
       && shell.dataset.touchpadZoomReady === "true"
       && window.glyphDiagramViewport?.version === 2
@@ -64,11 +63,12 @@ async function waitForProductionViewport(page) {
       && stage.dataset.transitionLayoutState === "ready"
       && stage.dataset.transitionPublicationReady === "true"
       && stage.dataset.transitionIoClustersReady === "true"
-      && (collision === "true" || collision === "fallback")
-      && Number(stage.dataset.transitionIoCollisionCount || 0) === 0
-      && !stage.dataset.transitionLayoutError
-    );
-  }, null, { timeout: 60_000 });
+      && stage.dataset.transitionLayoutProfile === "ordinary"
+      && stage.dataset.stateDiagramWorkspaceGeometryReady === "true"
+      && stage.dataset.initialRouteReady === "true"
+      && document.querySelectorAll(".transition-index .transition-detail").length > 0
+      && !stage.dataset.transitionLayoutError;
+  }, null, { timeout: 10_000 });
 }
 
 async function waitForStableGeometry(page, timeoutMs = 20_000) {
