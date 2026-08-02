@@ -28,9 +28,10 @@ def test_workspace_adapts_density_and_routes_initial_marker_around_obstacles() -
     ):
         assert required in html
 
-    assert html.index("window.glyphTransitionIoClusters?.reroute?.(stage)") < html.index(
-        "updateInitialTransition(stage,machine,paths,nodes)"
-    )
+    assert (
+        "window.glyphTransitionIoClusters?.reroute?.(stage);\n"
+        "  updateInitialTransition(stage,machine,paths,nodes);"
+    ) in html
 
     for forbidden in (
         "setInterval(",
