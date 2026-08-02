@@ -100,6 +100,14 @@ async function inspectLabels(page) {
     const stage = document.querySelector(".graph-stage");
     const stageRect = stage?.getBoundingClientRect();
     const nodes = [...document.querySelectorAll(".state-node")].map(node => node.getBoundingClientRect());
+    const rectValue = rect => ({
+      left: rect.left,
+      top: rect.top,
+      right: rect.right,
+      bottom: rect.bottom,
+      width: rect.width,
+      height: rect.height,
+    });
     const overlaps = (left, right, gap = 1) => !(
       left.right <= right.left + gap || right.right <= left.left + gap
       || left.bottom <= right.top + gap || right.bottom <= left.top + gap
@@ -119,10 +127,16 @@ async function inspectLabels(page) {
         textOverflow: style.textOverflow,
         overflowX: style.overflowX,
         overflowY: style.overflowY,
+        scrollWidth: value.scrollWidth,
+        clientWidth: value.clientWidth,
+        scrollHeight: value.scrollHeight,
+        clientHeight: value.clientHeight,
         horizontalClipping: value.scrollWidth > value.clientWidth + 1.5,
         verticalClipping: value.scrollHeight > value.clientHeight + 1.5,
         outsideBox: rect.left < nodeRect.left - 1.5 || rect.top < nodeRect.top - 1.5
           || rect.right > nodeRect.right + 1.5 || rect.bottom > nodeRect.bottom + 1.5,
+        valueRect: rectValue(rect),
+        nodeRect: rectValue(nodeRect),
         distance: Number(cluster.dataset.ioDistance || 0),
         rect: cluster.getBoundingClientRect(),
       };
@@ -202,7 +216,14 @@ try {
         assert(inspection.labels.every(label => label.fontSize >= 9));
         assert(inspection.labels.every(label => label.whiteSpace !== "nowrap"));
         assert(inspection.labels.every(label => label.textOverflow !== "ellipsis"));
-        assert(inspection.labels.every(label => !label.horizontalClipping && !label.verticalClipping && !label.outsideBox));
+        const clipped = inspection.labels.filter(label => (
+          label.horizontalClipping || label.verticalClipping || label.outsideBox
+        ));
+        assert.deepEqual(
+          clipped,
+          [],
+          `${testCase.slug}/${machine.name}: measured label clipping:\n${JSON.stringify(clipped, null, 2)}`,
+        );
         assert(inspection.labels.every(label => label.distance <= 96.5));
         assert.deepEqual(inspection.collisions, [], `${testCase.slug}/${machine.name}: label collision`);
         assert.deepEqual(inspection.outside, [], `${testCase.slug}/${machine.name}: label outside diagram`);
