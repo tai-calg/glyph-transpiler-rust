@@ -92,11 +92,11 @@ function assertOrdinary(current) {
   assert(current.maximumLabelDistance <= current.labelDistanceLimit + 0.5, JSON.stringify(current));
   assert.equal(current.transactionVersion, 8, JSON.stringify(current));
   assert(current.transactionGeneration >= current.completedGeneration, JSON.stringify(current));
-  assert.equal(current.workspaceVersion, 2, JSON.stringify(current));
+  assert.equal(current.workspaceVersion, 3, JSON.stringify(current));
   assert.equal(current.workspaceAudit?.ok, true, JSON.stringify(current));
   assert(current.detailCount > 0, JSON.stringify(current));
   assert.equal(current.initialReady, "true", JSON.stringify(current));
-  assert.equal(current.initialCertificate, "ordinary-follow", JSON.stringify(current));
+  assert.equal(current.initialCertificate, "ordinary-obstacle-free", JSON.stringify(current));
   assert.equal(current.hasCertificate, false, JSON.stringify(current));
   assert.equal(current.hasLegacyRouter, false, JSON.stringify(current));
 }
