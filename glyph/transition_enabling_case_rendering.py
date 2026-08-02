@@ -111,6 +111,15 @@ function update(cluster,transition){
   cluster.classList.toggle("multiple-enabling-cases",cases.length>1);
   return true;
 }
+function nextFrame(){return new Promise(resolve=>requestAnimationFrame(()=>resolve()))}
+async function settleLayout(stage){
+  stage.dataset.transitionEnablingCasesReady="pending";
+  stage.dataset.rtaiSemanticStatusReady="pending";
+  await nextFrame();
+  const transaction=window.glyphTransitionLayoutTransaction;
+  if(transaction?.requestAndWait)await transaction.requestAndWait("enabling-case-lines");
+  else if(transaction?.schedule)transaction.schedule("enabling-case-lines",0);
+}
 async function apply(){
   if(disposed||activeTab()!=="state")return{ok:false,skipped:true};
   if(running){queued=true;return{ok:false,queued:true}}
@@ -129,10 +138,11 @@ async function apply(){
       const cluster=stage.querySelector(`.transition-io-cluster[data-transition-id="${escaped}"]`);
       if(cluster&&update(cluster,transition))changed+=1;
     });
+    if(changed>0)await settleLayout(stage);
+    if(disposed||!stage.isConnected)return{ok:false,cancelled:true};
     stage.dataset.transitionEnablingCasesReady="true";
     stage.dataset.transitionSemanticLinesReady="true";
     document.dispatchEvent(new CustomEvent("glyph-transition-enabling-cases-ready",{detail:{marker:MARKER,changed}}));
-    if(changed>0)requestAnimationFrame(()=>window.glyphTransitionLayoutTransaction?.schedule?.("enabling-case-lines",0));
     return{ok:true,changed};
   }finally{
     running=false;
@@ -141,7 +151,10 @@ async function apply(){
 }
 function markPending(){
   const stage=stageOf();
-  if(stage)stage.dataset.transitionEnablingCasesReady="pending";
+  if(stage){
+    stage.dataset.transitionEnablingCasesReady="pending";
+    stage.dataset.rtaiSemanticStatusReady="pending";
+  }
 }
 function schedule(delay=0){
   if(disposed)return;
@@ -164,7 +177,7 @@ if(view)new MutationObserver(()=>{if(activeTab()==="state"){markPending();schedu
 function dispose(){disposed=true;clearTimeout(timer);controller?.abort()}
 window.addEventListener("pagehide",dispose,{once:true});
 window.addEventListener("beforeunload",dispose,{once:true});
-window.glyphTransitionEnablingCases={marker:MARKER,version:5,apply};
+window.glyphTransitionEnablingCases={marker:MARKER,version:6,apply};
 schedule(0);
 })();
 </script>
