@@ -8,7 +8,14 @@ Glyphの`@`には、役割の異なるマクロ構文と時相演算子がある
 | `@name(args) expression` | 式をASTへ変換した後 | 引数付きの式変換 |
 | `@A` / `@E` | 時相制約式 | Always / Eventually |
 
-マクロ定義では、名前と本体を空白で区切る。旧形式の`@NAME=text`と`@name(args)=expression`も移行互換として受理するが、新規コードでは使用しない。
+マクロ定義では、名前と本体を空白で区切る。
+
+```glyph
+@MAX 100
+@limit(x,high) min(x,high)
+```
+
+旧形式の`@NAME=text`と`@name(args)=expression`も移行互換として受理するが、新規コードでは使用しない。
 
 rawマクロはCプリプロセッサと同じく裸の識別子で呼び出す。`${NAME}`や`@define`は使わない。
 
@@ -24,27 +31,33 @@ rawマクロはCプリプロセッサと同じく裸の識別子で呼び出す�
 使用:
 
 ```glyph
-system Controller
-  EDGE
-
 DECL
 
->clamp(x:U):U
+>cap(x:U):U
   x>MAX >> MAX
   _ >> x
+
+system Controller
+  entry ctl
+  source sensor
+
+EDGE
 ```
 
-プリプロセス後:
+展開後:
 
 ```glyph
-system Controller
-  sensor -> ctl
-
 *SensorInput(value:U)
 
->clamp(x:U):U
+>cap(x:U):U
   x>100 >> 100
   _ >> x
+
+system Controller
+  entry ctl
+  source sensor
+
+sensor -> ctl
 ```
 
 置換対象は完全な識別子トークンだけになる。
@@ -64,19 +77,18 @@ MIN      # 展開しない
   positive :=
     x<0 >> -x
     _ >> x
-
   limited :=
     positive>MAX >> MAX
     _ >> positive
+  limited
 @end
 ```
 
 使用:
 
 ```glyph
->process(x:I):I
+>normalize(x:I):I
   NORMALIZE
-  limited
 ```
 
 呼出し行のインデントを本体全行へ加算する。複数行マクロは行へ単独で置く。
@@ -122,7 +134,7 @@ rawマクロ名は次の正規表現に一致しなければならない。
 ```text
 MAX
 INPUT_TYPE
-NORMALIZE_V2
+LIMIT_2
 ```
 
 無効:
@@ -152,6 +164,21 @@ ASTマクロは、それ以外の小文字名を使用できる。
 
 rawプリプロセッサが先に`MAX`を展開し、その後ASTマクロ`limit`を解析する。
 
+## 新旧構文の判定
+
+旧構文は、最初の空白より前に`=`がある場合だけ認識する。
+
+```glyph
+@EDGE=sensor -> ctl   # 旧構文: EDGE / sensor -> ctl
+@EXPR=x + y * z      # 旧構文: EXPR / x + y * z
+```
+
+新構文では最初の空白が名前と本体の境界になる。そのため、本体を`=`から始められる。
+
+```glyph
+@ALIAS =Count=U      # 新構文: ALIAS / =Count=U
+```
+
 ## 文字列置換の意味
 
 rawマクロは式マクロではなく、任意のソース断片を置換する。そのため括弧を自動追加しない。
@@ -161,7 +188,7 @@ rawマクロは式マクロではなく、任意のソース断片を置換す�
 >f(x:I):I=NEXT*2
 ```
 
-展開結果:
+展開後:
 
 ```glyph
 >f(x:I):I=x+1*2
@@ -184,7 +211,7 @@ rawマクロは式マクロではなく、任意のソース断片を置換す�
 >f():I=MAX # MAXは説明文として残る
 ```
 
-展開結果:
+展開後:
 
 ```glyph
 >f():I=100 # MAXは説明文として残る
@@ -213,19 +240,13 @@ raw macro cycle: X -> Y -> X
 ## コンパイル順序
 
 ```text
-original .glyph
-      ↓
-raw preprocessor
-      ├── preprocessed.glyph
-      └── preprocessor-map.json
-      ↓
-temporal sigil normalization (@A / @E)
-      ↓
-system / compact syntax / AST macro
-      ↓
-:= / pipeline / lambda lowering
-      ↓
-parse / type check / Rust / diagrams
+source
+  ↓
+raw macro collection and expansion
+  ↓
+system / compact syntax / AST macro extraction
+  ↓
+parse / type check / Rust / IR / diagrams
 ```
 
 rawマクロは最初に動くため、次を含む任意のGlyph構文を生成できる。
@@ -248,11 +269,27 @@ rawマクロは最初に動くため、次を含む任意のGlyph構文を生成
 ?deadline(done:B)=@E LIMIT done
 ```
 
-## Studioとホットリロード
+## Studioの保存と再構築
 
-Glyph Studioのプレビュー、保存後の再コンパイル、外部ファイル変更の監視は、すべて`IncrementalCompiler`から共通の`CompilationPipeline`へ入る。`CompilationPipeline`は構文解析より前にrawプリプロセッサを実行する。
+Glyph Studioでは、キー入力だけではプリプロセッサ、構文解析、型検査、IR生成、図のレイアウトを実行しない。入力はeditor bufferと`Unsaved`表示だけを更新する。
 
-したがって、アプリ上でマクロを追加または変更して保存すると、その保存内容を再プリプロセスした結果からRust、IR、I/O図、状態遷移図を再生成する。ホットリロード専用の別プリプロセッサは持たない。
+`Save & Render`または`Ctrl/Cmd + S`で次を順に実行する。
+
+```text
+editor source
+  -> atomic file save
+  -> IncrementalCompiler
+  -> CompilationPipeline
+  -> raw preprocessing
+  -> parse / type check / IR generation
+  -> I/O図・状態遷移図のrender
+```
+
+アプリ上でマクロを追加または変更して保存すると、その保存内容を再プリプロセスした結果からRust、IR、I/O図、状態遷移図を再生成する。
+
+外部エディタによるファイル保存もwatcherが検出し、同じコンパイル経路を通る。ホットリロード専用の別プリプロセッサは持たない。
+
+配信されるStudio HTMLには、Compileボタン、`/api/preview`呼出し、preview timer、`Ctrl/Cmd + Enter`によるコンパイル操作を含めない。
 
 ## Source map
 
@@ -263,11 +300,11 @@ Glyph Studioのプレビュー、保存後の再コンパイル、外部ファ�
   "expanded_line": 12,
   "source_line": 30,
   "macro_stack": ["NORMALIZE", "LIMIT_BRANCH"],
-  "definition_lines": [3, 15]
+  "definition_lines": [3, 10]
 }
 ```
 
-- `source_line`: マクロを呼び出した元ファイル行
+- `source_line`: 呼出し元の元ソース行
 - `macro_stack`: 展開に参加したrawマクロ
 - `definition_lines`: 各マクロの定義開始行
 
@@ -286,7 +323,8 @@ preprocessor-map.json
 
 ## 制限
 
-- 文字列リテラルはまだGlyphコア言語に存在しない
-- 複数行マクロは式の一部分へ埋め込めない
-- 条件付きコンパイル、`include`、トークン連結、可変長引数は未対応
-- rawマクロはhygienicではない。生成する識別子の責任は定義側にある
+- rawマクロはトークン単位の文字列置換であり、型安全ではない
+- ASTマクロは式だけを対象とする
+- rawマクロは文字列リテラルを特別扱いしない
+- 条件付き定義、可変長引数、ファイルincludeはない
+- 複数行rawマクロは行へ単独で置く
