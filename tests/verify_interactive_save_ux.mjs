@@ -261,7 +261,11 @@ try {
       && value.editorSource === localSource,
     "editing was not preserved during background compilation",
   );
-  assert.equal(dirtyDuringCompile.stageMarker, "precompile-committed-diagram");
+  assert(dirtyDuringCompile.stateNodeCount > 0, "state diagram disappeared after compile-time tab reconstruction");
+  assert.equal(dirtyDuringCompile.stageVisibility, "visible");
+  assert.equal(dirtyDuringCompile.staleVisible, true);
+  assert.equal(dirtyDuringCompile.layoutState, "ready");
+  assert.equal(dirtyDuringCompile.publicationReady, "true");
   await page.screenshot({
     path: path.join(outputDirectory, "interactive-during-compilation.png"),
     fullPage: false,
