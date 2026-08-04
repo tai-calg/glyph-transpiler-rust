@@ -16,7 +16,7 @@ _STYLE = r"""
 .glyph-save-state[data-render="error"] .glyph-render{color:var(--red)}
 .glyph-save-state[data-render="saving"] .glyph-render,.glyph-save-state[data-render="compiling"] .glyph-render{color:var(--amber)}
 .glyph-save-state:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-#save[disabled]{cursor:wait;opacity:.72}
+#save[data-save-pending="true"]{cursor:progress;opacity:.82}
 .glyph-stale-banner{display:flex;align-items:center;gap:9px;padding:9px 14px;border-bottom:1px solid rgba(231,191,98,.38);background:rgba(231,191,98,.1);color:var(--amber);font-size:12px}
 .glyph-stale-banner[hidden]{display:none}
 .glyph-conflict-dialog{width:min(560px,calc(100vw - 32px));border:1px solid var(--line);border-radius:14px;padding:0;background:var(--panel);color:var(--text);box-shadow:0 24px 70px rgba(0,0,0,.42)}
@@ -152,7 +152,8 @@ function updateUi(){
  }
  const button=document.getElementById("save");
  if(button){
-  button.disabled=saveInFlight;
+  button.disabled=false;
+  button.dataset.savePending=saveInFlight?"true":"false";
   button.title=t("saveTitle");
   button.setAttribute("aria-label",t("saveTitle"));
   button.setAttribute("aria-busy",saveInFlight?"true":"false");

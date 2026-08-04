@@ -192,6 +192,23 @@ class GlyphDiagramApp:
             diagnostics=(),
             views=empty_io_state_views(),
         )
+        self._cleanup_stale_temporary_files()
+
+    def _temporary_artifact_paths(self) -> tuple[Path, ...]:
+        candidates = {
+            self.input_path.with_name(self.input_path.name + ".tmp"),
+            self.output_path.with_name(self.output_path.name + ".tmp"),
+        }
+        candidates.update(
+            self.output_path.parent.glob(
+                f".{self.output_path.name}.*.tmp"
+            )
+        )
+        return tuple(candidates)
+
+    def _cleanup_stale_temporary_files(self) -> None:
+        for temporary in self._temporary_artifact_paths():
+            _discard_file(temporary)
 
     @property
     def snapshot(self) -> DiagramSnapshot:
@@ -331,7 +348,19 @@ class GlyphDiagramApp:
             if is_new:
                 self._save_operation_order.append(operation.request_id)
             while len(self._save_operation_order) > _MAX_SAVE_OPERATIONS:
-                expired = self._save_operation_order.pop(0)
+                expired_index = next(
+                    (
+                        index
+                        for index, request_id in enumerate(
+                            self._save_operation_order
+                        )
+                        if self._save_operations[request_id].status != "saving"
+                    ),
+                    None,
+                )
+                if expired_index is None:
+                    break
+                expired = self._save_operation_order.pop(expired_index)
                 self._save_operations.pop(expired, None)
 
     def _existing_save_operation(
@@ -361,59 +390,48 @@ class GlyphDiagramApp:
             updated_at=_utc_now(),
         )
 
-    def _publish_compiling(
+    def _publish_and_queue_compile(
         self,
         source: str,
         source_digest: str,
         operation_id: str,
     ) -> DiagramSnapshot:
-        with self._lock:
-            if self._stopping:
-                raise SaveWriteError(
-                    "server_stopping",
-                    "Glyph Studio is stopping",
-                    HTTPStatus.SERVICE_UNAVAILABLE,
+        request = CompileRequest(operation_id, source, source_digest)
+        with self._compile_condition:
+            with self._lock:
+                if self._stopping or self._stop.is_set():
+                    raise SaveWriteError(
+                        "server_stopping",
+                        "Glyph Studio is stopping",
+                        HTTPStatus.SERVICE_UNAVAILABLE,
+                    )
+                if (
+                    self._compile_worker is None
+                    or not self._compile_worker.is_alive()
+                ):
+                    self._compile_worker = threading.Thread(
+                        target=self._compile_loop,
+                        name="glyph-diagram-compile",
+                        daemon=True,
+                    )
+                    self._compile_worker.start()
+                previous = self._snapshot
+                snapshot = DiagramSnapshot(
+                    version=previous.version + 1,
+                    status="compiling",
+                    source=source,
+                    digest=source_digest,
+                    rendered_digest=previous.rendered_digest,
+                    last_successful_version=previous.last_successful_version,
+                    operation_id=operation_id,
+                    updated_at=_utc_now(),
+                    diagnostics=(),
+                    views=previous.views,
                 )
-            previous = self._snapshot
-            snapshot = DiagramSnapshot(
-                version=previous.version + 1,
-                status="compiling",
-                source=source,
-                digest=source_digest,
-                rendered_digest=previous.rendered_digest,
-                last_successful_version=previous.last_successful_version,
-                operation_id=operation_id,
-                updated_at=_utc_now(),
-                diagnostics=(),
-                views=previous.views,
-            )
-            self._snapshot = snapshot
-            return snapshot
-
-    def _ensure_compile_worker(self) -> None:
-        with self._lock:
-            if self._stopping:
-                return
-        with self._compile_condition:
-            if self._compile_worker is not None and self._compile_worker.is_alive():
-                return
-            self._compile_worker = threading.Thread(
-                target=self._compile_loop,
-                name="glyph-diagram-compile",
-                daemon=True,
-            )
-            self._compile_worker.start()
-
-    def _queue_compile(self, request: CompileRequest) -> None:
-        with self._lock:
-            if self._stopping:
-                return
-        self._ensure_compile_worker()
-        with self._compile_condition:
-            if self._stop.is_set():
-                return
-            self._pending_compile = request
-            self._compile_condition.notify_all()
+                self._snapshot = snapshot
+                self._pending_compile = request
+                self._compile_condition.notify_all()
+                return snapshot
 
     def _compile_loop(self) -> None:
         while True:
@@ -549,13 +567,11 @@ class GlyphDiagramApp:
         if current.digest == source_digest and current.status in {"ready", "compiling"}:
             return current
         operation_id = uuid.uuid4().hex
-        snapshot = self._publish_compiling(
+        return self._publish_and_queue_compile(
             source,
             source_digest,
             operation_id,
         )
-        self._queue_compile(CompileRequest(operation_id, source, source_digest))
-        return snapshot
 
     def submit_save(
         self,
@@ -600,6 +616,13 @@ class GlyphDiagramApp:
 
         try:
             with self._save_lock:
+                with self._lock:
+                    if self._stopping or self._stop.is_set():
+                        raise SaveWriteError(
+                            "server_stopping",
+                            "Glyph Studio is stopping",
+                            HTTPStatus.SERVICE_UNAVAILABLE,
+                        )
                 source_digest, _written = self._persist_source(
                     source,
                     base_digest=base_digest,
@@ -611,17 +634,10 @@ class GlyphDiagramApp:
                 ):
                     snapshot = current
                 else:
-                    snapshot = self._publish_compiling(
+                    snapshot = self._publish_and_queue_compile(
                         source,
                         source_digest,
                         selected_request_id,
-                    )
-                    self._queue_compile(
-                        CompileRequest(
-                            selected_request_id,
-                            source,
-                            source_digest,
-                        )
                     )
             accepted = replace(
                 saving,
@@ -654,6 +670,18 @@ class GlyphDiagramApp:
                 http_status=int(exc.status),
                 error=exc.code,
                 message=str(exc),
+                state=self.status_dict(),
+                updated_at=_utc_now(),
+            )
+            self._remember_save_operation(failed)
+            return failed
+        except Exception as exc:
+            failed = replace(
+                saving,
+                status="error",
+                http_status=int(HTTPStatus.INTERNAL_SERVER_ERROR),
+                error="internal_save_error",
+                message=f"{type(exc).__name__}: {exc}",
                 state=self.status_dict(),
                 updated_at=_utc_now(),
             )
@@ -735,7 +763,11 @@ class GlyphDiagramApp:
                 current = self.snapshot
                 if current.digest == current_digest and current.status == "compiling":
                     continue
-                self.rebuild_async(source)
+                try:
+                    self.rebuild_async(source)
+                except SaveWriteError:
+                    if self._stop.is_set():
+                        return
 
         self._watcher = threading.Thread(
             target=watch,
@@ -745,16 +777,38 @@ class GlyphDiagramApp:
         self._watcher.start()
 
     def stop(self) -> None:
-        with self._lock:
-            self._stopping = True
-        self._stop.set()
-        with self._compile_condition:
-            self._pending_compile = None
-            self._compile_condition.notify_all()
+        with self._save_lock:
+            with self._compile_condition:
+                with self._lock:
+                    self._stopping = True
+                    self._stop.set()
+                    self._pending_compile = None
+                    current = self._snapshot
+                    if current.status == "compiling":
+                        self._snapshot = DiagramSnapshot(
+                            version=current.version + 1,
+                            status="error",
+                            source=current.source,
+                            digest=current.digest,
+                            rendered_digest=current.rendered_digest,
+                            last_successful_version=current.last_successful_version,
+                            operation_id=current.operation_id,
+                            updated_at=_utc_now(),
+                            diagnostics=(
+                                {
+                                    "severity": "error",
+                                    "code": "server_stopping",
+                                    "message": "Glyph Studio stopped before compilation completed",
+                                },
+                            ),
+                            views=current.views,
+                        )
+                self._compile_condition.notify_all()
         if self._watcher is not None:
             self._watcher.join(timeout=1.0)
         if self._compile_worker is not None:
             self._compile_worker.join(timeout=1.0)
+        self._cleanup_stale_temporary_files()
 
     def create_server(
         self,
@@ -780,7 +834,14 @@ class GlyphDiagramApp:
                 self.send_header("Content-Length", str(len(payload)))
                 self.send_header("Cache-Control", "no-store")
                 self.end_headers()
-                self.wfile.write(payload)
+                try:
+                    self.wfile.write(payload)
+                except (
+                    BrokenPipeError,
+                    ConnectionResetError,
+                    ConnectionAbortedError,
+                ):
+                    pass
 
             def _body(self) -> dict[str, Any] | None:
                 try:

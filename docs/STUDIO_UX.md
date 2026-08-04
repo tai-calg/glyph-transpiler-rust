@@ -102,7 +102,7 @@ The browser can query it through:
 GET /api/save-status/<request_id>
 ```
 
-A network timeout therefore does not become an unknown final result. The browser continues tracking or resubmits the same idempotent request until the operation reaches a recorded result. The editor and Save shortcut remain available; later saves are queued against the latest buffer.
+A network timeout therefore does not become an unknown final result. The browser continues tracking or resubmits the same idempotent request until the operation reaches a recorded result. The editor, Save button, and Save shortcut remain available; later saves are queued against the latest buffer.
 
 ### Background compilation
 
@@ -187,7 +187,7 @@ Cancelling the dialog preserves `Conflict`. The Conflict indicator remains keybo
 
 Closing or reloading the window while the editor is unsaved, conflicted, or awaiting save confirmation invokes the browser's unsaved-change confirmation. A clean saved editor does not trigger the confirmation.
 
-When the application stops, it marks the server as stopping, clears pending compilation, and rejects publication from an already running operation. A late worker result cannot replace the artifact or snapshot after shutdown has started.
+When the application stops, it serializes shutdown with source persistence, marks the server as stopping, clears pending compilation, changes an unfinished snapshot from `Compiling` to `server_stopping`, and rejects publication from an already running operation. A late worker result cannot replace the artifact or snapshot after shutdown has started. Operation-specific and fixed atomic-write temporary files are removed on shutdown and again at the next startup after an abnormal process exit.
 
 ## 4. State communication
 

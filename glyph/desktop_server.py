@@ -125,7 +125,14 @@ def create_desktop_server(
             self.send_header("Content-Length", str(len(payload)))
             self._security_headers()
             self.end_headers()
-            self.wfile.write(payload)
+            try:
+                self.wfile.write(payload)
+            except (
+                BrokenPipeError,
+                ConnectionResetError,
+                ConnectionAbortedError,
+            ):
+                pass
 
         def _authorized(self) -> bool:
             if not require_auth:

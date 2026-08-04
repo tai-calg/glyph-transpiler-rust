@@ -12,7 +12,7 @@ from urllib.request import Request, urlopen
 import uuid
 
 from glyph.desktop_server import create_desktop_server
-from glyph.diagram_app import GlyphDiagramApp
+from glyph.diagram_app import GlyphDiagramApp, SaveOperation
 from glyph.io_state_views import build_io_state_views
 
 
@@ -587,7 +587,11 @@ class MacroStudioIntegrationTests(unittest.TestCase):
                 app.output_path.read_text(encoding="utf-8"),
                 initial_artifact,
             )
-            self.assertEqual(app.snapshot.status, "compiling")
+            self.assertEqual(app.snapshot.status, "error")
+            self.assertEqual(
+                app.snapshot.diagnostics[0]["code"],
+                "server_stopping",
+            )
             self.assertEqual(app.snapshot.rendered_digest, initial.rendered_digest)
             self.assertEqual(
                 list(app.output_path.parent.glob(".io-state-views.json.*.tmp")),
@@ -700,6 +704,94 @@ class MacroStudioIntegrationTests(unittest.TestCase):
                 desktop.close()
                 thread.join(timeout=2)
                 self.assertFalse(thread.is_alive())
+
+    def test_saving_operation_is_not_evicted_from_bounded_history(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            source_path = Path(directory) / "macro.glyph"
+            source_path.write_text(INITIAL_SOURCE, encoding="utf-8")
+            app = GlyphDiagramApp(source_path)
+            saving = SaveOperation(
+                request_id="active-saving",
+                status="saving",
+                source_digest="saving-digest",
+                base_digest=None,
+                http_status=202,
+                updated_at="now",
+            )
+            app._remember_save_operation(saving)
+            for index in range(256):
+                app._remember_save_operation(
+                    SaveOperation(
+                        request_id=f"terminal-{index}",
+                        status="accepted",
+                        source_digest=f"digest-{index}",
+                        base_digest=None,
+                        http_status=202,
+                        updated_at="now",
+                    )
+                )
+            self.assertEqual(
+                app.save_request_dict("active-saving")["status"],
+                "saving",
+            )
+            self.assertLessEqual(len(app._save_operations), 256)
+
+    def test_unexpected_save_exception_becomes_terminal_error(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            source_path = Path(directory) / "macro.glyph"
+            source_path.write_text(INITIAL_SOURCE, encoding="utf-8")
+            app = GlyphDiagramApp(source_path)
+            app.rebuild()
+            with patch.object(
+                app,
+                "_persist_source",
+                side_effect=RuntimeError("unexpected persistence failure"),
+            ):
+                operation = app.submit_save(
+                    "@MAX 81\n>value():I=MAX\n",
+                    base_digest=app.snapshot.digest,
+                    request_id="internal-save-error",
+                )
+            self.assertEqual(operation.status, "error")
+            self.assertEqual(operation.error, "internal_save_error")
+            self.assertIn("unexpected persistence failure", operation.message)
+            self.assertEqual(
+                app.save_request_dict("internal-save-error")["status"],
+                "error",
+            )
+
+    def test_stopped_app_rejects_new_save_without_rewriting_source(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            source_path = Path(directory) / "macro.glyph"
+            source_path.write_text(INITIAL_SOURCE, encoding="utf-8")
+            app = GlyphDiagramApp(source_path)
+            initial = app.rebuild()
+            app.stop()
+            operation = app.submit_save(
+                "@MAX 82\n>value():I=MAX\n",
+                base_digest=initial.digest,
+                request_id="save-after-stop",
+            )
+            self.assertEqual(operation.status, "error")
+            self.assertEqual(operation.error, "server_stopping")
+            self.assertEqual(
+                source_path.read_text(encoding="utf-8"),
+                INITIAL_SOURCE,
+            )
+
+    def test_startup_removes_stale_operation_temporary_files(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            source_path = Path(directory) / "macro.glyph"
+            source_path.write_text(INITIAL_SOURCE, encoding="utf-8")
+            output_dir = Path(directory) / ".glyph" / "macro"
+            output_dir.mkdir(parents=True)
+            stale = output_dir / ".io-state-views.json.crashed.tmp"
+            stale.write_text("partial", encoding="utf-8")
+            source_temporary = source_path.with_name(source_path.name + ".tmp")
+            source_temporary.write_text("partial", encoding="utf-8")
+            GlyphDiagramApp(source_path)
+            self.assertFalse(stale.exists())
+            self.assertFalse(source_temporary.exists())
 
 
 if __name__ == "__main__":

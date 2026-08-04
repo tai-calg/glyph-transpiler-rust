@@ -197,9 +197,10 @@ try {
   const queuedLatest = `${queuedFirst}# queued-latest\n`;
   await page.locator("#editor").fill(queuedFirst);
   await page.keyboard.press("Control+s");
-  await waitForAudit(page, value => value.saveInFlight === true, "queued save did not start");
+  const queuedSaving = await waitForAudit(page, value => value.saveInFlight === true, "queued save did not start");
+  assert.equal(queuedSaving.saveDisabled, false);
   await page.locator("#editor").fill(queuedLatest);
-  await page.keyboard.press("Control+s");
+  await page.click("#save");
   const queuedAudit = await waitForAudit(
     page,
     value => value.source === queuedLatest
