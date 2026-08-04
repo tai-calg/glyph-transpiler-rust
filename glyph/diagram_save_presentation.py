@@ -36,4 +36,10 @@ def enhance_save_presentation_html(html: str) -> str:
         '  button.setAttribute("aria-busy",saveInFlight?"true":"false");',
         "save accessibility",
     )
+    html = _replace_once(
+        html,
+        "load(true);setInterval(()=>{if(!dirty)load(false)},900);",
+        "",
+        "legacy polling loop",
+    )
     return html.replace("</body>", f"<!-- {_MARKER} -->\n</body>", 1)
