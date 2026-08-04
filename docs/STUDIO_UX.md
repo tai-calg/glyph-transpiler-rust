@@ -379,6 +379,22 @@ maximum animation-frame gap         <= 400 ms
 maximum browser long task           <= 250 ms
 ```
 
+Measured CI baseline from the first accepted campaign:
+
+```text
+save-state feedback                    33.7 ms
+input during save                       18.8 ms
+input during compile                    17.1 ms
+I/O / State switch during save     41.9 / 45.3 ms
+I/O / State switch during compile  41.5 / 34.3 ms
+Settings open during compile           282.3 ms
+compile-state acknowledgement          395.1 ms
+2500 ms delayed final save cycle          3046 ms
+requestAnimationFrame p95               16.7 ms
+maximum animation-frame gap             16.8 ms
+maximum browser long task                 88 ms
+```
+
 The test also rejects browser console errors, missing diagrams, hidden diagram stages, incomplete layout publication, lost editor changes, invalid state ordering, and stale-banner discontinuity. It emits a JSON measurement report and screenshots during compilation and after final publication as workflow artifacts.
 
 ## 13. Acceptance conditions
