@@ -9,8 +9,10 @@ import unittest
 from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
+import uuid
 
 from glyph.desktop_server import create_desktop_server
+from glyph.diagram_app import GlyphDiagramApp
 from glyph.io_state_views import build_io_state_views
 
 
@@ -50,10 +52,12 @@ def _save(
     source: str,
     *,
     base_digest: str | None = None,
+    request_id: str | None = None,
 ) -> tuple[int, dict[str, object]]:
     return _post_json(
         url,
         {
+            "request_id": request_id or uuid.uuid4().hex,
             "source": source,
             "base_digest": base_digest,
         },
@@ -91,6 +95,23 @@ def _wait_for_terminal_source(
     )
 
 
+def _wait_for_save_status(
+    origin: str,
+    request_id: str,
+    expected_status: str,
+    *,
+    timeout: float = 5.0,
+) -> dict[str, object]:
+    deadline = time.monotonic() + timeout
+    operation: dict[str, object] = {}
+    while time.monotonic() < deadline:
+        operation = _read_json(f"{origin}/api/save-status/{request_id}")
+        if operation.get("status") == expected_status:
+            return operation
+        time.sleep(0.03)
+    raise AssertionError(f"save operation did not converge: {operation}")
+
+
 class MacroStudioIntegrationTests(unittest.TestCase):
     def _start(self, source_path: Path, *, view_builder=build_io_state_views):
         desktop = create_desktop_server(
@@ -110,13 +131,15 @@ class MacroStudioIntegrationTests(unittest.TestCase):
             try:
                 with urlopen(desktop.launch_url, timeout=3) as response:
                     html = response.read().decode("utf-8")
-                self.assertIn("glyph-save-triggered-rendering-v3", html)
+                self.assertIn("glyph-save-triggered-rendering-v4", html)
                 self.assertIn('id="save"', html)
                 self.assertNotIn('id="compile"', html)
                 self.assertNotIn("/api/preview", html)
                 self.assertNotIn("previewTimer", html)
                 self.assertNotIn("previewController", html)
-                self.assertIn("base_digest:baseDigest||editorBaseDigest||null", html)
+                self.assertIn("request_id:activeSaveRequestId", html)
+                self.assertIn("/api/save-status/", html)
+                self.assertIn('fetchJson("/api/status")', html)
                 self.assertIn("glyph-stale-banner", html)
                 self.assertIn("glyph-conflict-dialog", html)
                 self.assertIn("beforeunload", html)
@@ -137,6 +160,22 @@ class MacroStudioIntegrationTests(unittest.TestCase):
                 thread.join(timeout=2)
                 self.assertFalse(thread.is_alive())
 
+    def test_status_endpoint_is_lightweight(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            source_path = Path(directory) / "macro.glyph"
+            source_path.write_text(INITIAL_SOURCE, encoding="utf-8")
+            desktop, thread = self._start(source_path)
+            try:
+                status = _read_json(f"{desktop.origin}/api/status")
+                self.assertEqual(status["status"], "ready")
+                self.assertNotIn("source", status)
+                self.assertNotIn("views", status)
+                self.assertNotIn("diagnostics", status)
+                self.assertIn("diagnostic_count", status)
+            finally:
+                desktop.close()
+                thread.join(timeout=2)
+
     def test_http_save_reprocesses_macros_and_recovers_after_error(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             source_path = Path(directory) / "macro.glyph"
@@ -151,8 +190,12 @@ class MacroStudioIntegrationTests(unittest.TestCase):
                     base_digest=str(initial["digest"]),
                 )
                 self.assertEqual(status, 202)
-                self.assertEqual(accepted["source"], legacy_source)
+                self.assertEqual(accepted["status"], "accepted")
                 self.assertIsNotNone(accepted["operation_id"])
+                self.assertEqual(
+                    accepted["state"]["operation_id"],
+                    accepted["operation_id"],
+                )
                 self.assertEqual(source_path.read_text(encoding="utf-8"), legacy_source)
 
                 saved = _wait_for_terminal_source(desktop.origin, legacy_source)
@@ -175,7 +218,7 @@ class MacroStudioIntegrationTests(unittest.TestCase):
                     base_digest=str(saved["digest"]),
                 )
                 self.assertEqual(status, 202)
-                self.assertEqual(accepted_broken["source"], broken_source)
+                self.assertEqual(accepted_broken["status"], "accepted")
                 self.assertEqual(
                     source_path.read_text(encoding="utf-8"),
                     broken_source,
@@ -249,10 +292,13 @@ class MacroStudioIntegrationTests(unittest.TestCase):
                 elapsed = time.monotonic() - started
                 self.assertEqual(status, 202)
                 self.assertLess(elapsed, 0.75)
-                self.assertEqual(accepted["status"], "compiling")
+                self.assertEqual(accepted["status"], "accepted")
+                self.assertEqual(accepted["state"]["status"], "compiling")
                 self.assertEqual(source_path.read_text(encoding="utf-8"), updated_source)
-                responsive = _read_json(f"{desktop.origin}/api/state")
-                self.assertEqual(responsive["source"], updated_source)
+                started = time.monotonic()
+                responsive = _read_json(f"{desktop.origin}/api/status")
+                self.assertLess(time.monotonic() - started, 0.3)
+                self.assertEqual(responsive["digest"], accepted["digest"])
                 final = _wait_for_terminal_source(
                     desktop.origin,
                     updated_source,
@@ -263,6 +309,74 @@ class MacroStudioIntegrationTests(unittest.TestCase):
                 desktop.close()
                 thread.join(timeout=2)
                 self.assertFalse(thread.is_alive())
+
+    def test_request_id_is_idempotent_while_file_write_is_slow(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            source_path = Path(directory) / "macro.glyph"
+            source_path.write_text(INITIAL_SOURCE, encoding="utf-8")
+            desktop, thread = self._start(source_path)
+            original_atomic_write = __import__(
+                "glyph.diagram_app", fromlist=["_atomic_write"]
+            )._atomic_write
+            entered = threading.Event()
+            results: list[tuple[int, dict[str, object]]] = []
+            request_id = "tracked-save-request"
+            updated_source = "@MAX 23\n>value():I=MAX\n"
+            initial = _read_json(f"{desktop.origin}/api/state")
+
+            def slow_atomic_write(path: Path, content: str) -> None:
+                if path == source_path:
+                    entered.set()
+                    time.sleep(0.45)
+                original_atomic_write(path, content)
+
+            def first_save() -> None:
+                results.append(
+                    _save(
+                        f"{desktop.origin}/api/save",
+                        updated_source,
+                        base_digest=str(initial["digest"]),
+                        request_id=request_id,
+                    )
+                )
+
+            try:
+                with patch("glyph.diagram_app._atomic_write", side_effect=slow_atomic_write):
+                    first = threading.Thread(target=first_save)
+                    first.start()
+                    self.assertTrue(entered.wait(timeout=1.0))
+                    started = time.monotonic()
+                    duplicate_status, duplicate = _save(
+                        f"{desktop.origin}/api/save",
+                        updated_source,
+                        base_digest=str(initial["digest"]),
+                        request_id=request_id,
+                    )
+                    self.assertLess(time.monotonic() - started, 0.25)
+                    self.assertEqual(duplicate_status, 202)
+                    self.assertEqual(duplicate["status"], "saving")
+                    first.join(timeout=2)
+                    self.assertFalse(first.is_alive())
+                self.assertEqual(results[0][0], 202)
+                self.assertEqual(results[0][1]["status"], "accepted")
+                tracked = _wait_for_save_status(
+                    desktop.origin,
+                    request_id,
+                    "accepted",
+                )
+                self.assertEqual(tracked["digest"], results[0][1]["digest"])
+
+                mismatch_status, mismatch = _save(
+                    f"{desktop.origin}/api/save",
+                    updated_source + "# different\n",
+                    base_digest=str(initial["digest"]),
+                    request_id=request_id,
+                )
+                self.assertEqual(mismatch_status, 409)
+                self.assertEqual(mismatch["error"], "save_request_mismatch")
+            finally:
+                desktop.close()
+                thread.join(timeout=2)
 
     def test_latest_save_supersedes_in_flight_compile_result(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -298,6 +412,14 @@ class MacroStudioIntegrationTests(unittest.TestCase):
                 )
                 self.assertEqual(status, 202)
                 self.assertNotEqual(first["operation_id"], second["operation_id"])
+                self.assertEqual(
+                    first["state"]["operation_id"],
+                    first["operation_id"],
+                )
+                self.assertEqual(
+                    second["state"]["operation_id"],
+                    second["operation_id"],
+                )
                 final = _wait_for_terminal_source(
                     desktop.origin,
                     second_source,
@@ -313,6 +435,164 @@ class MacroStudioIntegrationTests(unittest.TestCase):
                 desktop.close()
                 thread.join(timeout=2)
                 self.assertFalse(thread.is_alive())
+
+    def test_worker_unexpected_exception_becomes_error_and_worker_recovers(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            source_path = Path(directory) / "macro.glyph"
+            source_path.write_text(INITIAL_SOURCE, encoding="utf-8")
+            calls = 0
+
+            def failing_once_builder(model, ir):
+                nonlocal calls
+                calls += 1
+                if calls == 2:
+                    raise RuntimeError("unexpected layout failure")
+                return build_io_state_views(model, ir)
+
+            desktop, thread = self._start(
+                source_path,
+                view_builder=failing_once_builder,
+            )
+            try:
+                initial = _read_json(f"{desktop.origin}/api/state")
+                failing_source = "@MAX 55\n>value():I=MAX\n"
+                status, accepted = _save(
+                    f"{desktop.origin}/api/save",
+                    failing_source,
+                    base_digest=str(initial["digest"]),
+                )
+                self.assertEqual(status, 202)
+                failed = _wait_for_terminal_source(
+                    desktop.origin,
+                    failing_source,
+                    expected_status="error",
+                )
+                self.assertEqual(
+                    failed["diagnostics"][0]["code"],
+                    "internal_compile_error",
+                )
+                self.assertIn(
+                    "unexpected layout failure",
+                    failed["diagnostics"][0]["message"],
+                )
+
+                recovered_source = "@MAX 56\n>value():I=MAX\n"
+                status, recovered_operation = _save(
+                    f"{desktop.origin}/api/save",
+                    recovered_source,
+                    base_digest=str(accepted["digest"]),
+                )
+                self.assertEqual(status, 202)
+                recovered = _wait_for_terminal_source(
+                    desktop.origin,
+                    recovered_source,
+                )
+                self.assertEqual(
+                    recovered["operation_id"],
+                    recovered_operation["operation_id"],
+                )
+                self.assertTrue(desktop.app._compile_worker.is_alive())
+            finally:
+                desktop.close()
+                thread.join(timeout=2)
+
+    def test_artifact_serialization_does_not_block_status_or_new_save(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            source_path = Path(directory) / "macro.glyph"
+            source_path.write_text(INITIAL_SOURCE, encoding="utf-8")
+            desktop, thread = self._start(source_path)
+            original_write_text = Path.write_text
+            artifact_write_entered = threading.Event()
+
+            def slow_write_text(path: Path, data: str, *args, **kwargs):
+                if path.name.startswith(".io-state-views.json."):
+                    artifact_write_entered.set()
+                    time.sleep(0.45)
+                return original_write_text(path, data, *args, **kwargs)
+
+            try:
+                initial = _read_json(f"{desktop.origin}/api/state")
+                source = "@MAX 61\n>value():I=MAX\n"
+                with patch.object(Path, "write_text", new=slow_write_text):
+                    status, accepted = _save(
+                        f"{desktop.origin}/api/save",
+                        source,
+                        base_digest=str(initial["digest"]),
+                    )
+                    self.assertEqual(status, 202)
+                    self.assertTrue(artifact_write_entered.wait(timeout=2.0))
+                    started = time.monotonic()
+                    lightweight = _read_json(f"{desktop.origin}/api/status")
+                    self.assertLess(time.monotonic() - started, 0.25)
+                    self.assertEqual(lightweight["digest"], accepted["digest"])
+                final = _wait_for_terminal_source(desktop.origin, source)
+                self.assertEqual(final["status"], "ready")
+            finally:
+                desktop.close()
+                thread.join(timeout=2)
+
+    def test_same_clean_source_is_noop_while_ready_or_compiling(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            source_path = Path(directory) / "macro.glyph"
+            source_path.write_text(INITIAL_SOURCE, encoding="utf-8")
+            desktop, thread = self._start(source_path)
+            try:
+                initial = _read_json(f"{desktop.origin}/api/state")
+                with patch("glyph.diagram_app._atomic_write") as atomic_write:
+                    status, accepted = _save(
+                        f"{desktop.origin}/api/save",
+                        INITIAL_SOURCE,
+                        base_digest=str(initial["digest"]),
+                    )
+                self.assertEqual(status, 202)
+                self.assertEqual(accepted["status"], "accepted")
+                self.assertEqual(accepted["state"]["status"], "ready")
+                atomic_write.assert_not_called()
+                after = _read_json(f"{desktop.origin}/api/state")
+                self.assertEqual(after["version"], initial["version"])
+            finally:
+                desktop.close()
+                thread.join(timeout=2)
+
+    def test_stop_prevents_late_artifact_and_snapshot_publication(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            source_path = Path(directory) / "macro.glyph"
+            source_path.write_text(INITIAL_SOURCE, encoding="utf-8")
+            entered = threading.Event()
+            release = threading.Event()
+            calls = 0
+
+            def blocked_builder(model, ir):
+                nonlocal calls
+                calls += 1
+                if calls > 1:
+                    entered.set()
+                    release.wait(timeout=3.0)
+                return build_io_state_views(model, ir)
+
+            app = GlyphDiagramApp(source_path, view_builder=blocked_builder)
+            initial = app.rebuild()
+            initial_artifact = app.output_path.read_text(encoding="utf-8")
+            operation = app.submit_save(
+                "@MAX 70\n>value():I=MAX\n",
+                base_digest=initial.digest,
+                request_id="stop-publication",
+            )
+            self.assertEqual(operation.status, "accepted")
+            self.assertTrue(entered.wait(timeout=1.0))
+            app.stop()
+            release.set()
+            time.sleep(0.2)
+            self.assertEqual(
+                app.output_path.read_text(encoding="utf-8"),
+                initial_artifact,
+            )
+            self.assertEqual(app.snapshot.status, "compiling")
+            self.assertEqual(app.snapshot.rendered_digest, initial.rendered_digest)
+            self.assertEqual(
+                list(app.output_path.parent.glob(".io-state-views.json.*.tmp")),
+                [],
+            )
 
     def test_stale_base_digest_and_repeated_external_change_are_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -387,6 +667,7 @@ class MacroStudioIntegrationTests(unittest.TestCase):
                         base_digest=str(initial["digest"]),
                     )
                 self.assertEqual(status, 403)
+                self.assertEqual(payload["status"], "error")
                 self.assertEqual(payload["error"], "save_permission_denied")
                 self.assertEqual(source_path.read_text(encoding="utf-8"), INITIAL_SOURCE)
             finally:
