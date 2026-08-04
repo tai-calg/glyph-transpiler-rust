@@ -114,25 +114,22 @@ def _raw_name(name: str, line: int) -> str:
 
 
 def _function_like_name(body: str) -> str | None:
-    """Return the candidate AST-macro name independently of its delimiter."""
+    """Return an AST-macro name only when `(` immediately follows it."""
 
     open_pos = body.find("(")
     if open_pos <= 0:
         return None
-    name = body[:open_pos].strip()
+    name = body[:open_pos]
     return name if name.isidentifier() else None
 
 
 def _object_like_parts(body: str) -> tuple[str, str | None]:
-    """Split `NAME replacement`; retain `NAME=replacement` for migration."""
+    """Split canonical `NAME replacement`; retain `NAME=replacement` migration."""
 
     parts = body.split(None, 1)
     if len(parts) == 2:
         name, replacement = parts
-        replacement = replacement.strip()
-        if replacement.startswith("="):
-            replacement = replacement[1:].strip()
-        return name, replacement
+        return name, replacement.strip()
 
     equal = body.find("=")
     if equal >= 0:
