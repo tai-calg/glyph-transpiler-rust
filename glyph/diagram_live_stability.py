@@ -235,7 +235,7 @@ _SCRIPT = r"""
 
 
 def install_serial_compilation() -> None:
-    """Serialize compiler access and discard superseded preview requests."""
+    """Keep rebuild and save operations serialized in older app instances."""
 
     global _PATCHED
     with _PATCH_LOCK:
@@ -250,34 +250,30 @@ def install_serial_compilation() -> None:
         def stable_init(self, *args, **kwargs):
             original_init(self, *args, **kwargs)
             self._diagram_compile_lock = threading.RLock()
-            self._diagram_preview_lock = threading.Lock()
-            self._diagram_preview_ticket = 0
 
         @wraps(original_rebuild)
         def stable_rebuild(self, source=None):
             with self._diagram_compile_lock:
                 return original_rebuild(self, source)
 
-        def stable_preview(self, source: str):
-            with self._diagram_preview_lock:
-                self._diagram_preview_ticket += 1
-                ticket = self._diagram_preview_ticket
-            with self._diagram_compile_lock:
-                with self._diagram_preview_lock:
-                    if ticket != self._diagram_preview_ticket:
-                        return self.snapshot
-                return original_rebuild(self, source)
-
         @wraps(original_save)
-        def stable_save(self, source: str):
-            with self._diagram_preview_lock:
-                self._diagram_preview_ticket += 1
+        def stable_save(
+            self,
+            source: str,
+            *,
+            base_digest: str | None = None,
+            force: bool = False,
+        ):
             with self._diagram_compile_lock:
-                return original_save(self, source)
+                return original_save(
+                    self,
+                    source,
+                    base_digest=base_digest,
+                    force=force,
+                )
 
         app_type.__init__ = stable_init
         app_type.rebuild = stable_rebuild
-        app_type.preview_source = stable_preview
         app_type.save_source = stable_save
         _PATCHED = True
 
