@@ -21,12 +21,23 @@ from .io_state_views import build_io_state_views, empty_io_state_views
 ViewBuilder = Callable[[object, object], dict[str, object]]
 
 
+class SaveConflictError(RuntimeError):
+    """The source changed on disk after the editor loaded it."""
+
+    def __init__(self, current_source: str, current_digest: str):
+        super().__init__("source file changed outside Glyph Studio")
+        self.current_source = current_source
+        self.current_digest = current_digest
+
+
 @dataclass(frozen=True)
 class DiagramSnapshot:
     version: int
     status: str
     source: str
     digest: str
+    rendered_digest: str
+    last_successful_version: int
     updated_at: str
     diagnostics: tuple[dict[str, object], ...]
     views: dict[str, object]
@@ -39,6 +50,8 @@ class DiagramSnapshot:
             "source_path": str(source_path),
             "output_path": str(output_path),
             "digest": self.digest,
+            "rendered_digest": self.rendered_digest,
+            "last_successful_version": self.last_successful_version,
             "updated_at": self.updated_at,
             "diagnostics": list(self.diagnostics),
             "views": self.views,
@@ -79,6 +92,7 @@ class GlyphDiagramApp:
         self.compiler = IncrementalCompiler()
         self.view_builder = view_builder
         self._lock = threading.RLock()
+        self._operation_lock = threading.RLock()
         self._stop = threading.Event()
         self._watcher: threading.Thread | None = None
         self._snapshot = DiagramSnapshot(
@@ -86,6 +100,8 @@ class GlyphDiagramApp:
             status="starting",
             source="",
             digest="",
+            rendered_digest="",
+            last_successful_version=0,
             updated_at=_utc_now(),
             diagnostics=(),
             views=empty_io_state_views(),
@@ -101,58 +117,79 @@ class GlyphDiagramApp:
             return self._snapshot.to_dict(self.input_path, self.output_path)
 
     def rebuild(self, source: str | None = None) -> DiagramSnapshot:
-        if source is None:
-            source = self.input_path.read_text(encoding="utf-8")
-        source_digest = _digest(source)
-        previous = self.snapshot
-        if previous.status == "ready" and previous.digest == source_digest:
-            return previous
+        with self._operation_lock:
+            if source is None:
+                source = self.input_path.read_text(encoding="utf-8")
+            source_digest = _digest(source)
+            previous = self.snapshot
+            if previous.status == "ready" and previous.digest == source_digest:
+                return previous
 
-        try:
-            result = self.compiler.compile_text(
-                source,
-                source_name=str(self.input_path),
-                source_href=str(self.input_path),
-            )
-            compilation = result.snapshot
-            views = self.view_builder(
-                compilation.model,
-                compilation.diagrams.ir,
-            )
-            _atomic_write(
-                self.output_path,
-                json.dumps(views, ensure_ascii=False, indent=2) + "\n",
-            )
-            snapshot = DiagramSnapshot(
-                version=previous.version + 1,
-                status="ready",
-                source=source,
-                digest=source_digest,
-                updated_at=_utc_now(),
-                diagnostics=(),
-                views=views,
-            )
-        except (GlyphError, OSError, ValueError) as exc:
-            snapshot = DiagramSnapshot(
-                version=previous.version + 1,
-                status="error",
-                source=source,
-                digest=source_digest,
-                updated_at=_utc_now(),
-                diagnostics=({"severity": "error", "message": str(exc)},),
-                views=previous.views,
-            )
+            version = previous.version + 1
+            try:
+                result = self.compiler.compile_text(
+                    source,
+                    source_name=str(self.input_path),
+                    source_href=str(self.input_path),
+                )
+                compilation = result.snapshot
+                views = self.view_builder(
+                    compilation.model,
+                    compilation.diagrams.ir,
+                )
+                _atomic_write(
+                    self.output_path,
+                    json.dumps(views, ensure_ascii=False, indent=2) + "\n",
+                )
+                snapshot = DiagramSnapshot(
+                    version=version,
+                    status="ready",
+                    source=source,
+                    digest=source_digest,
+                    rendered_digest=source_digest,
+                    last_successful_version=version,
+                    updated_at=_utc_now(),
+                    diagnostics=(),
+                    views=views,
+                )
+            except (GlyphError, OSError, ValueError) as exc:
+                snapshot = DiagramSnapshot(
+                    version=version,
+                    status="error",
+                    source=source,
+                    digest=source_digest,
+                    rendered_digest=previous.rendered_digest,
+                    last_successful_version=previous.last_successful_version,
+                    updated_at=_utc_now(),
+                    diagnostics=({"severity": "error", "message": str(exc)},),
+                    views=previous.views,
+                )
 
-        with self._lock:
-            self._snapshot = snapshot
-        return snapshot
+            with self._lock:
+                self._snapshot = snapshot
+            return snapshot
 
-    def preview_source(self, source: str) -> DiagramSnapshot:
-        return self.rebuild(source)
-
-    def save_source(self, source: str) -> DiagramSnapshot:
-        _atomic_write(self.input_path, source)
-        return self.rebuild(source)
+    def save_source(
+        self,
+        source: str,
+        *,
+        base_digest: str | None = None,
+        force: bool = False,
+    ) -> DiagramSnapshot:
+        with self._operation_lock:
+            try:
+                current_source = self.input_path.read_text(encoding="utf-8")
+            except FileNotFoundError:
+                current_source = ""
+            current_digest = _digest(current_source)
+            if (
+                base_digest is not None
+                and not force
+                and current_digest != base_digest
+            ):
+                raise SaveConflictError(current_source, current_digest)
+            _atomic_write(self.input_path, source)
+            return self.rebuild(source)
 
     def start_watching(self, interval: float = 0.35) -> None:
         if self._watcher is not None and self._watcher.is_alive():
@@ -176,6 +213,8 @@ class GlyphDiagramApp:
                             status="error",
                             source=current.source,
                             digest=current.digest,
+                            rendered_digest=current.rendered_digest,
+                            last_successful_version=current.last_successful_version,
                             updated_at=_utc_now(),
                             diagnostics=(
                                 {"severity": "error", "message": str(exc)},
@@ -227,21 +266,20 @@ class GlyphDiagramApp:
                 self.end_headers()
                 self.wfile.write(payload)
 
-            def _source(self) -> str | None:
+            def _body(self) -> dict[str, Any] | None:
                 try:
                     length = int(self.headers.get("Content-Length", "0"))
                     raw = self.rfile.read(length) if length else b"{}"
-                    body = json.loads(raw.decode("utf-8"))
+                    body: Any = json.loads(raw.decode("utf-8"))
                 except (ValueError, UnicodeDecodeError, json.JSONDecodeError):
-                    body = {}
-                source = body.get("source") if isinstance(body, dict) else None
-                if not isinstance(source, str):
+                    body = None
+                if not isinstance(body, dict):
                     self._json(
-                        {"error": "source must be text"},
+                        {"error": "request body must be an object"},
                         HTTPStatus.BAD_REQUEST,
                     )
                     return None
-                return source
+                return body
 
             def do_GET(self) -> None:
                 if self.path == "/":
@@ -259,17 +297,50 @@ class GlyphDiagramApp:
                 self._json({"error": "not found"}, HTTPStatus.NOT_FOUND)
 
             def do_POST(self) -> None:
-                if self.path == "/api/preview":
-                    source = self._source()
-                    if source is not None:
-                        app.preview_source(source)
-                        self._json(app.state_dict())
-                    return
                 if self.path == "/api/save":
-                    source = self._source()
-                    if source is not None:
-                        app.save_source(source)
-                        self._json(app.state_dict())
+                    body = self._body()
+                    if body is None:
+                        return
+                    source = body.get("source")
+                    base_digest = body.get("base_digest")
+                    force = body.get("force", False)
+                    if not isinstance(source, str):
+                        self._json(
+                            {"error": "source must be text"},
+                            HTTPStatus.BAD_REQUEST,
+                        )
+                        return
+                    if base_digest is not None and not isinstance(base_digest, str):
+                        self._json(
+                            {"error": "base_digest must be text"},
+                            HTTPStatus.BAD_REQUEST,
+                        )
+                        return
+                    if not isinstance(force, bool):
+                        self._json(
+                            {"error": "force must be boolean"},
+                            HTTPStatus.BAD_REQUEST,
+                        )
+                        return
+                    try:
+                        app.save_source(
+                            source,
+                            base_digest=base_digest,
+                            force=force,
+                        )
+                    except SaveConflictError as exc:
+                        self._json(
+                            {
+                                "error": "save_conflict",
+                                "message": str(exc),
+                                "current_source": exc.current_source,
+                                "current_digest": exc.current_digest,
+                                "state": app.state_dict(),
+                            },
+                            HTTPStatus.CONFLICT,
+                        )
+                        return
+                    self._json(app.state_dict())
                     return
                 if self.path == "/api/rebuild":
                     app.rebuild()
