@@ -7,7 +7,7 @@ import { chromium } from "playwright";
 const outputDirectory = path.resolve("build/localized-semantic-canvas");
 await fs.mkdir(outputDirectory, { recursive: true });
 const sourcePath = path.join(outputDirectory, "provisional-trigger.glyph");
-await fs.writeFile(sourcePath, `+Mode=Idle|Active|Faulted
+const originalSource = `+Mode=Idle|Active|Faulted
 +Event=Start|Stop
 *Input(event:Event,legacy_alarm:B,allowed:B)
 *State(mode:Mode)
@@ -23,7 +23,8 @@ machine Demo(state:State,input:Input)
   state.mode==Idle&input.event==Start&input.allowed >> State(Active)
   state.mode==Active&input.legacy_alarm >> State(Faulted)
   _ >> state
-`, "utf8");
+`;
+await fs.writeFile(sourcePath, originalSource, "utf8");
 
 async function waitForServer(url, child, logs) {
   for (let attempt = 0; attempt < 160; attempt += 1) {
@@ -50,6 +51,20 @@ async function stopProcess(child) {
   if (child.exitCode === null) child.kill("SIGKILL");
 }
 
+async function waitForSavedSource(page, source, status = "ready") {
+  await page.waitForFunction(({ expected, expectedStatus }) => (
+    snapshot?.source === expected
+    && snapshot?.status === expectedStatus
+    && window.GlyphSaveTriggeredRendering?.saveInFlight === false
+  ), { expected: source, expectedStatus: status }, { timeout: 60_000 });
+}
+
+async function saveSource(page, source, status = "ready") {
+  await page.locator("#editor").fill(source);
+  await page.click("#save");
+  await waitForSavedSource(page, source, status);
+}
+
 const logs = [];
 const port = 8897;
 const child = spawn("python3", ["glyph.py", sourcePath], {
@@ -74,6 +89,11 @@ try {
   assert(expectedFailureTransitions > 0, "fixture must contain failure-state transitions");
 
   const page = await browser.newPage({ viewport: { width: 1500, height: 900 } });
+  const browserErrors = [];
+  page.on("pageerror", error => browserErrors.push(error.stack || error.message));
+  page.on("console", message => {
+    if (message.type() === "error") browserErrors.push(message.text());
+  });
   await page.goto(url, { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => document.querySelector("#status")?.classList.contains("ready"));
   await page.click('button[data-tab="state"]');
@@ -88,12 +108,17 @@ try {
       && stage?.dataset.initialRouteReady === "true"
       && document.querySelectorAll(".transition-index .transition-detail").length > 0
       && document.querySelector("#glyph-settings")
+      && document.querySelector("#glyph-save-state")
+      && window.GlyphSaveTriggeredRendering?.version === 2
       && !stage?.dataset.transitionLayoutError;
   }, null, { timeout: 10_000 });
 
   assert.equal(await page.locator("#compile").count(), 0);
-  assert.equal((await page.locator("#save").textContent()).trim(), "保存");
+  assert.equal((await page.locator("#save").textContent()).trim(), "保存して描画");
+  assert.equal(await page.locator("#save").getAttribute("aria-label"), "保存して描画 (Ctrl/Cmd+S)");
   assert.equal(await page.locator("html").getAttribute("lang"), "ja");
+  assert.equal(await page.locator("#glyph-save-state").getAttribute("data-persistence"), "saved");
+  assert.equal(await page.locator("#glyph-save-state").getAttribute("data-render"), "ready");
   const japaneseWarnings = await page.locator(".analysis-panel").textContent();
   assert(japaneseWarnings.includes("暫定的に入力"), japaneseWarnings);
 
@@ -176,10 +201,109 @@ try {
   assert(placement.combinedValues.some(value => value.startsWith("? input.legacy_alarm")), placement.combinedValues.join("\n"));
   assert.equal(placement.visibleLegacyLabels, 0);
 
+  // Editing only marks the buffer unsaved; it must not change the compiled snapshot.
+  const typedSource = `${originalSource}\n# local-unsaved\n`;
+  const beforeTyping = await page.evaluate(() => ({
+    source: snapshot.source,
+    version: snapshot.version,
+  }));
+  await page.locator("#editor").fill(typedSource);
+  await page.waitForFunction(() => document.querySelector("#glyph-save-state")?.dataset.persistence === "unsaved");
+  await page.waitForTimeout(500);
+  const afterTyping = await page.evaluate(() => ({
+    source: snapshot.source,
+    version: snapshot.version,
+  }));
+  assert.deepEqual(afterTyping, beforeTyping, "typing changed the compiled snapshot");
+  const unloadAudit = await page.evaluate(() => {
+    const event = new Event("beforeunload", { cancelable: true });
+    const dispatched = window.dispatchEvent(event);
+    return { dispatched, prevented: event.defaultPrevented };
+  });
+  assert.equal(unloadAudit.prevented, true);
+  assert.equal(unloadAudit.dispatched, false);
+
+  // An edit made while save is in flight remains unsaved after the submitted version completes.
+  let delayedSaves = 0;
+  await page.route("**/api/save", async route => {
+    delayedSaves += 1;
+    if (delayedSaves === 1) await new Promise(resolve => setTimeout(resolve, 500));
+    await route.continue();
+  });
+  const firstSubmitted = `${originalSource}\n# submitted-first\n`;
+  const laterEdit = `${firstSubmitted}# edited-during-save\n`;
+  await page.locator("#editor").fill(firstSubmitted);
+  await page.click("#save");
+  await page.waitForFunction(() => window.GlyphSaveTriggeredRendering?.saveInFlight === true);
+  await page.locator("#editor").fill(laterEdit);
+  await waitForSavedSource(page, firstSubmitted);
+  assert.equal(await page.locator("#editor").inputValue(), laterEdit);
+  assert.equal(await page.locator("#glyph-save-state").getAttribute("data-persistence"), "unsaved");
+  assert.equal(await fs.readFile(sourcePath, "utf8"), firstSubmitted);
+
+  // Repeated Ctrl+S keeps only the latest pending editor state and serializes requests.
+  const queuedFirst = `${laterEdit}# queued-first\n`;
+  const queuedLatest = `${queuedFirst}# queued-latest\n`;
+  await page.locator("#editor").fill(queuedFirst);
+  await page.keyboard.press("Control+s");
+  await page.waitForFunction(() => window.GlyphSaveTriggeredRendering?.saveInFlight === true);
+  await page.locator("#editor").fill(queuedLatest);
+  await page.keyboard.press("Control+s");
+  await waitForSavedSource(page, queuedLatest);
+  assert.equal(await fs.readFile(sourcePath, "utf8"), queuedLatest);
+  assert.equal(await page.locator("#glyph-save-state").getAttribute("data-persistence"), "saved");
+  await page.unroute("**/api/save");
+
+  // A clean editor follows an external file save and updates the rendered snapshot.
+  const externalClean = `${originalSource}\n# external-clean\n`;
+  await fs.writeFile(sourcePath, externalClean, "utf8");
+  await page.evaluate(() => load(false));
+  await page.waitForFunction(expected => (
+    document.querySelector("#editor")?.value === expected
+    && snapshot?.source === expected
+    && document.querySelector("#glyph-save-state")?.dataset.persistence === "saved"
+  ), externalClean, { timeout: 60_000 });
+
+  // A dirty editor does not overwrite an external change and exposes explicit resolution.
+  const localConflict = `${externalClean}# local-conflict\n`;
+  const externalConflict = `${originalSource}\n# external-conflict\n`;
+  await page.locator("#editor").fill(localConflict);
+  await fs.writeFile(sourcePath, externalConflict, "utf8");
+  await page.waitForFunction(() => document.querySelector("#glyph-save-state")?.dataset.persistence === "unsaved");
+  await page.waitForTimeout(500);
+  await page.evaluate(() => load(false));
+  await page.waitForFunction(() => (
+    document.querySelector("#glyph-conflict-dialog")?.open
+    && document.querySelector("#glyph-save-state")?.dataset.persistence === "conflict"
+  ), null, { timeout: 60_000 });
+  assert.equal(await page.locator("#editor").inputValue(), localConflict);
+  assert.equal(await fs.readFile(sourcePath, "utf8"), externalConflict);
+  await page.click('#glyph-conflict-dialog [data-action="load"]');
+  await page.waitForFunction(expected => (
+    document.querySelector("#editor")?.value === expected
+    && snapshot?.source === expected
+    && document.querySelector("#glyph-save-state")?.dataset.persistence === "saved"
+  ), externalConflict, { timeout: 60_000 });
+
+  // Saving an invalid source retains the last valid diagram and marks it stale.
+  const brokenSource = `@BROKEN\n${externalConflict}`;
+  await saveSource(page, brokenSource, "error");
+  await page.waitForFunction(() => (
+    document.querySelector("#glyph-stale-banner")?.hidden === false
+    && document.querySelector("#glyph-save-state")?.dataset.persistence === "saved"
+    && document.querySelector("#glyph-save-state")?.dataset.render === "error"
+    && snapshot?.digest !== snapshot?.rendered_digest
+  ));
+  const staleText = await page.locator("#glyph-stale-banner").textContent();
+  assert(staleText.includes("最後に正常コンパイル"), staleText);
+  await saveSource(page, originalSource);
+  await page.waitForFunction(() => document.querySelector("#glyph-stale-banner")?.hidden === true);
+
   await page.click("#glyph-settings");
   await page.selectOption("#glyph-language", "en");
   assert.equal(await page.locator("#compile").count(), 0);
-  assert.equal((await page.locator("#save").textContent()).trim(), "Save");
+  assert.equal((await page.locator("#save").textContent()).trim(), "Save & Render");
+  assert.equal(await page.locator("#save").getAttribute("aria-label"), "Save & Render (Ctrl/Cmd+S)");
   const englishWarnings = await page.locator(".analysis-panel").textContent();
   assert(englishWarnings.includes("provisionally"), englishWarnings);
   await page.waitForFunction(() => document.querySelectorAll('.transition-io-node[data-io-kind="io"]').length > 0);
@@ -210,14 +334,16 @@ try {
     `canvas drag did not move either scroll owner: ${JSON.stringify({ beforePan, afterPan })}`,
   );
 
+  assert.deepEqual(browserErrors, [], `browser errors:\n${browserErrors.join("\n")}`);
   await page.screenshot({
     path: path.join(outputDirectory, "localized-provisional-trigger.png"),
     fullPage: false,
   });
   await page.close();
 } finally {
+  await fs.writeFile(sourcePath, originalSource, "utf8");
   await browser.close();
   await stopProcess(child);
 }
 
-console.log("verified Japanese-first diagnostics, save-triggered controls, input/guard transition labels, proximity and canvas panning");
+console.log("verified localized save-render UX, serialized saves, external conflicts, stale diagrams, semantic labels, and canvas panning");
