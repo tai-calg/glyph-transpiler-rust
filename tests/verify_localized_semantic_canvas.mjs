@@ -52,11 +52,33 @@ async function stopProcess(child) {
 }
 
 async function waitForSavedSource(page, source, status = "ready") {
-  await page.waitForFunction(({ expected, expectedStatus }) => (
-    snapshot?.source === expected
-    && snapshot?.status === expectedStatus
-    && window.GlyphSaveTriggeredRendering?.saveInFlight === false
-  ), { expected: source, expectedStatus: status }, { timeout: 60_000 });
+  const deadline = Date.now() + 60_000;
+  let audit = null;
+  while (Date.now() < deadline) {
+    audit = await page.evaluate(() => ({
+      source: snapshot?.source ?? null,
+      snapshotStatus: snapshot?.status ?? null,
+      version: Number(snapshot?.version || 0),
+      digest: snapshot?.digest || "",
+      renderedDigest: snapshot?.rendered_digest || "",
+      editorSource: document.querySelector("#editor")?.value || "",
+      statusText: document.querySelector("#status")?.textContent || "",
+      persistence: document.querySelector("#glyph-save-state")?.dataset.persistence || "",
+      renderState: document.querySelector("#glyph-save-state")?.dataset.render || "",
+      saveInFlight: window.GlyphSaveTriggeredRendering?.saveInFlight ?? null,
+      baseDigest: window.GlyphSaveTriggeredRendering?.baseDigest || "",
+      conflict: window.GlyphSaveTriggeredRendering?.conflict || null,
+      saveDisabled: Boolean(document.querySelector("#save")?.disabled),
+      diagnostics: document.querySelector("#diagnostics")?.textContent || "",
+    }));
+    if (
+      audit.source === source
+      && audit.snapshotStatus === status
+      && audit.saveInFlight === false
+    ) return audit;
+    await page.waitForTimeout(100);
+  }
+  throw new Error(`save did not settle: ${JSON.stringify(audit)}`);
 }
 
 async function saveSource(page, source, status = "ready") {
@@ -224,10 +246,8 @@ try {
   assert.equal(unloadAudit.dispatched, false);
 
   // An edit made while save is in flight remains unsaved after the submitted version completes.
-  let delayedSaves = 0;
   await page.route("**/api/save", async route => {
-    delayedSaves += 1;
-    if (delayedSaves === 1) await new Promise(resolve => setTimeout(resolve, 500));
+    await new Promise(resolve => setTimeout(resolve, 450));
     await route.continue();
   });
   const firstSubmitted = `${originalSource}\n# submitted-first\n`;
