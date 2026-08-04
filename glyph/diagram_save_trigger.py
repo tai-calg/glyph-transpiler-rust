@@ -12,6 +12,24 @@ def _replace_once(html: str, old: str, new: str, label: str) -> str:
     return html.replace(old, new, 1)
 
 
+def _replace_pattern_once(
+    html: str,
+    pattern: str,
+    replacement: str,
+    label: str,
+) -> str:
+    result, count = re.subn(
+        pattern,
+        replacement,
+        html,
+        count=1,
+        flags=re.DOTALL,
+    )
+    if count != 1:
+        raise ValueError(f"save-triggered rendering anchor changed: {label}")
+    return result
+
+
 def enhance_save_triggered_rendering_html(html: str) -> str:
     """Make save the only editor action that compiles and redraws diagrams."""
 
@@ -45,9 +63,10 @@ def enhance_save_triggered_rendering_html(html: str) -> str:
         "document.getElementById('save').onclick=save;",
         "base compile button handler",
     )
-    html = _replace_once(
+    html = _replace_pattern_once(
         html,
-        "editor.addEventListener('input',()=>{dirty=true;syncLines();clearTimeout(previewTimer);previewTimer=setTimeout(()=>compile().catch(()=>{}),500});",
+        r"editor\.addEventListener\('input',\(\)=>\{.*?\}\);"
+        r"(?=editor\.addEventListener\('scroll')",
         "editor.addEventListener('input',()=>{dirty=true;syncLines()});",
         "editor input preview",
     )
@@ -58,15 +77,13 @@ def enhance_save_triggered_rendering_html(html: str) -> str:
         "compile keyboard shortcut",
     )
 
-    html, count = re.subn(
-        r"\n  compile=async function stableCompile\(\)\{.*?\n  \};\n  save=async function stableSave",
-        "\n  save=async function stableSave",
+    html = _replace_pattern_once(
         html,
-        count=1,
-        flags=re.DOTALL,
+        r"\n  compile=async function stableCompile\(\)\{.*?\n  \};\n"
+        r"  save=async function stableSave",
+        "\n  save=async function stableSave",
+        "stable preview",
     )
-    if count != 1:
-        raise ValueError("save-triggered rendering anchor changed: stable preview")
     html = _replace_once(
         html,
         '  document.getElementById("compile").onclick=()=>compile();\n',
