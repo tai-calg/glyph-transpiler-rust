@@ -95,10 +95,13 @@ jobs:
           run_node tests/verify_rtai_semantic_status_ui.mjs build/rtai-semantic-status/verify.log
 
       - name: Commit refreshed README snapshot and restore workflow
+        if: always()
         shell: bash
         run: |
           set -euo pipefail
-          git show HEAD^:.github/workflows/io-state-snapshot.yml > .github/workflows/io-state-snapshot.yml
+          test -f build/state-diagram-regression/motor-safety-motor.png
+          cp build/state-diagram-regression/motor-safety-motor.png docs/images/glyph-studio-state-transition.png
+          git show HEAD^^:.github/workflows/io-state-snapshot.yml > .github/workflows/io-state-snapshot.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add docs/images/glyph-studio-state-transition.png .github/workflows/io-state-snapshot.yml
