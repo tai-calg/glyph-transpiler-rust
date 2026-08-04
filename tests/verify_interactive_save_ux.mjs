@@ -126,7 +126,7 @@ const child = spawn(
       ...process.env,
       GLYPH_DIAGRAM_PORT: String(port),
       GLYPH_DIAGRAM_NO_BROWSER: "1",
-      GLYPH_UX_COMPILE_DELAY: "1.2",
+      GLYPH_UX_COMPILE_DELAY: "2.5",
       PYTHONUNBUFFERED: "1",
     },
     stdio: ["ignore", "pipe", "pipe"],
@@ -334,7 +334,7 @@ try {
   assert(stateSwitchDuringCompile <= 350, `State tab during compile took ${stateSwitchDuringCompile.toFixed(1)}ms`);
   assert(settingsOpenLatency <= 350, `Settings during compile took ${settingsOpenLatency.toFixed(1)}ms`);
   assert(finalCompileFeedback <= 750, `compile acknowledgement took ${finalCompileFeedback.toFixed(1)}ms`);
-  assert(finalSaveDuration <= 3500, `final save and compile took ${finalSaveDuration}ms`);
+  assert(finalSaveDuration <= 4500, `final save and compile took ${finalSaveDuration}ms`);
   assert(p95RafGap <= 120, `animation-frame p95 was ${p95RafGap.toFixed(1)}ms`);
   assert(maxRafGap <= 400, `maximum animation-frame gap was ${maxRafGap.toFixed(1)}ms`);
   assert(maxLongTask <= 250, `main-thread long task was ${maxLongTask.toFixed(1)}ms`);
@@ -346,7 +346,7 @@ try {
       input: 300,
       tabOrSettings: 350,
       compileAcknowledgement: 750,
-      finalSave: 3500,
+      finalSave: 4500,
       animationFrameP95: 120,
       animationFrameMaximum: 400,
       longTaskMaximum: 250,
