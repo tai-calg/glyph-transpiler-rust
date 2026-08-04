@@ -221,6 +221,10 @@ try {
   const inputLatencyDuringSave = await measuredFill(page, queuedSource);
   const ioSwitchDuringSave = await timedTabSwitch(page, "io");
   const stateSwitchDuringSave = await timedTabSwitch(page, "state");
+  await page.evaluate(() => {
+    const stage = document.querySelector(".state-node")?.closest(".graph-stage");
+    stage.dataset.uxIdentity = "precompile-committed-diagram";
+  });
   const stillSaving = await audit(page);
   assert.equal(stillSaving.saveInFlight, true, "save acknowledgement completed before interaction probe");
   await page.click("#save");
@@ -235,7 +239,7 @@ try {
   );
   await page.unroute("**/api/save");
   assert.equal(compiling.staleVisible, true, "compilation did not identify the visible diagram as stale");
-  assert.equal(compiling.stageMarker, "initial-committed-diagram", "compilation replaced the committed diagram");
+  assert.equal(compiling.stageMarker, "precompile-committed-diagram", "compilation replaced the committed diagram");
   assert.equal(compiling.stageVisibility, "visible");
   assert(compiling.stateNodeCount > 0, "state diagram disappeared during compilation");
 
@@ -257,7 +261,7 @@ try {
       && value.editorSource === localSource,
     "editing was not preserved during background compilation",
   );
-  assert.equal(dirtyDuringCompile.stageMarker, "initial-committed-diagram");
+  assert.equal(dirtyDuringCompile.stageMarker, "precompile-committed-diagram");
   await page.screenshot({
     path: path.join(outputDirectory, "interactive-during-compilation.png"),
     fullPage: false,
