@@ -43,6 +43,7 @@ async function audit(page) {
     source: snapshot?.source ?? null,
     snapshotStatus: snapshot?.status ?? null,
     version: Number(snapshot?.version || 0),
+    operationId: snapshot?.operation_id || "",
     digest: snapshot?.digest || "",
     renderedDigest: snapshot?.rendered_digest || "",
     editorSource: document.querySelector("#editor")?.value || "",
@@ -120,7 +121,7 @@ try {
   await page.goto(url, { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => (
     document.querySelector("#status")?.textContent === "ready"
-    && window.GlyphSaveTriggeredRendering?.version === 2
+    && window.GlyphSaveTriggeredRendering?.version === 3
     && document.querySelector("#glyph-save-state")
   ), null, { timeout: 10_000 });
 
@@ -129,6 +130,8 @@ try {
   assert.equal(await page.locator("#save").getAttribute("aria-label"), "保存して描画 (Ctrl/Cmd+S)");
   assert.equal(await page.locator("#glyph-save-state").getAttribute("data-persistence"), "saved");
   assert.equal(await page.locator("#glyph-save-state").getAttribute("data-render"), "ready");
+  assert.equal(await page.locator("#glyph-save-state").getAttribute("aria-live"), "polite");
+  assert.equal(await page.locator("#glyph-stale-banner").getAttribute("role"), "status");
 
   const beforeTyping = await audit(page);
   const typedSource = `${initialSource}# local-unsaved\n`;
@@ -159,8 +162,8 @@ try {
   await page.click("#save");
   await waitForAudit(
     page,
-    value => value.saveInFlight === true && value.renderState === "rendering",
-    "save did not enter the rendering state",
+    value => value.saveInFlight === true && value.renderState === "saving",
+    "save did not enter the acknowledgement state",
   );
   await page.locator("#editor").fill(editedDuringSave);
   const submittedAudit = await waitForAudit(
@@ -184,11 +187,12 @@ try {
     page,
     value => value.source === queuedLatest
       && value.editorSource === queuedLatest
+      && value.snapshotStatus === "ready"
       && value.saveInFlight === false
       && value.persistence === "saved",
     "repeated Ctrl+S did not converge on the latest buffer",
   );
-  assert.equal(queuedAudit.snapshotStatus, "ready");
+  assert(queuedAudit.operationId.length > 0);
   assert.equal(await fs.readFile(sourcePath, "utf8"), queuedLatest);
   await page.unroute("**/api/save");
 
@@ -198,33 +202,74 @@ try {
     page,
     value => value.source === externalClean
       && value.editorSource === externalClean
+      && value.snapshotStatus === "ready"
       && value.persistence === "saved",
     "clean editor did not adopt external save",
   );
-  assert.equal(cleanExternalAudit.snapshotStatus, "ready");
+  assert.equal(cleanExternalAudit.digest, cleanExternalAudit.renderedDigest);
 
   const localConflict = `${externalClean}# local-conflict\n`;
-  const externalConflict = `${initialSource}# external-conflict\n`;
+  const externalConflictA = `${initialSource}# external-conflict-a\n`;
   await page.locator("#editor").fill(localConflict);
   await waitForAudit(page, value => value.persistence === "unsaved", "local conflict source was not dirty");
-  await fs.writeFile(sourcePath, externalConflict, "utf8");
-  const conflictAudit = await refreshUntil(
+  await fs.writeFile(sourcePath, externalConflictA, "utf8");
+  const conflictA = await refreshUntil(
     page,
     value => value.persistence === "conflict" && value.conflictOpen,
     "dirty editor did not enter external-change conflict",
   );
-  assert.equal(conflictAudit.editorSource, localConflict);
-  assert.equal(await fs.readFile(sourcePath, "utf8"), externalConflict);
+  assert.equal(conflictA.editorSource, localConflict);
+  assert.equal(await fs.readFile(sourcePath, "utf8"), externalConflictA);
+
+  await page.click('#glyph-conflict-dialog [data-action="cancel"]');
+  await waitForAudit(page, value => value.persistence === "conflict" && !value.conflictOpen, "cancel did not preserve conflict");
+  await page.click("#glyph-save-state");
+  await waitForAudit(page, value => value.conflictOpen, "conflict badge did not reopen resolution dialog");
+
+  await page.route("**/api/rebuild", async route => {
+    await route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: JSON.stringify({ error: "simulated_rebuild_failure", message: "simulated rebuild failure" }),
+    });
+  });
   await page.click('#glyph-conflict-dialog [data-action="load"]');
-  const loadedExternalAudit = await waitForAudit(
+  const failedLoad = await waitForAudit(
     page,
-    value => value.source === externalConflict
-      && value.editorSource === externalConflict
+    value => value.persistence === "conflict" && !value.conflictOpen && value.diagnostics.includes("simulated rebuild failure"),
+    "failed external load incorrectly resolved conflict",
+  );
+  assert.equal(failedLoad.editorSource, localConflict);
+  await page.unroute("**/api/rebuild");
+
+  await page.click("#glyph-save-state");
+  await waitForAudit(page, value => value.conflictOpen, "conflict could not be reopened after load failure");
+  const externalConflictB = `${initialSource}# external-conflict-b\n`;
+  await fs.writeFile(sourcePath, externalConflictB, "utf8");
+  await page.waitForTimeout(60);
+  await page.click('#glyph-conflict-dialog [data-action="overwrite"]');
+  const repeatedConflict = await waitForAudit(
+    page,
+    value => value.persistence === "conflict"
+      && value.conflictOpen
+      && value.conflict?.source === externalConflictB,
+    "overwrite did not reject a newer external change",
+  );
+  assert.equal(repeatedConflict.editorSource, localConflict);
+  assert.equal(await fs.readFile(sourcePath, "utf8"), externalConflictB);
+
+  await page.click('#glyph-conflict-dialog [data-action="overwrite"]');
+  const overwritten = await waitForAudit(
+    page,
+    value => value.source === localConflict
+      && value.editorSource === localConflict
+      && value.snapshotStatus === "ready"
       && value.persistence === "saved"
       && !value.conflictOpen,
-    "external conflict resolution did not load disk source",
+    "explicit overwrite did not converge after refreshed conflict",
   );
-  assert.equal(loadedExternalAudit.snapshotStatus, "ready");
+  assert.equal(overwritten.digest, overwritten.renderedDigest);
+  assert.equal(await fs.readFile(sourcePath, "utf8"), localConflict);
 
   const brokenSource = "@MAX\n>value():I=MAX\n";
   const brokenAudit = await saveSource(page, brokenSource, "error");
@@ -256,4 +301,4 @@ try {
   await stopProcess(child);
 }
 
-console.log("verified save-only compilation, in-flight edits, queued saves, external conflicts, stale diagrams, and unload protection");
+console.log("verified asynchronous save acknowledgements, queued saves, repeated external conflicts, stale diagrams, and unload protection");
