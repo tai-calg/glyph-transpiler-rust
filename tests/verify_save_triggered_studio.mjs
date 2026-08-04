@@ -113,9 +113,16 @@ try {
   await waitForServer(child);
   const page = await browser.newPage({ viewport: { width: 1280, height: 760 } });
   const browserErrors = [];
+  let expectedHttpConsoleErrors = 0;
   page.on("pageerror", error => browserErrors.push(`pageerror: ${error.stack || error.message}`));
   page.on("console", message => {
-    if (message.type() === "error") browserErrors.push(`console: ${message.text()}`);
+    if (message.type() !== "error") return;
+    const text = message.text();
+    if (expectedHttpConsoleErrors > 0 && text.includes("Failed to load resource")) {
+      expectedHttpConsoleErrors -= 1;
+      return;
+    }
+    browserErrors.push(`console: ${text}`);
   });
 
   await page.goto(url, { waitUntil: "domcontentloaded" });
@@ -233,6 +240,7 @@ try {
       body: JSON.stringify({ error: "simulated_rebuild_failure", message: "simulated rebuild failure" }),
     });
   });
+  expectedHttpConsoleErrors += 1;
   await page.click('#glyph-conflict-dialog [data-action="load"]');
   const failedLoad = await waitForAudit(
     page,
@@ -247,6 +255,7 @@ try {
   const externalConflictB = `${initialSource}# external-conflict-b\n`;
   await fs.writeFile(sourcePath, externalConflictB, "utf8");
   await page.waitForTimeout(60);
+  expectedHttpConsoleErrors += 1;
   await page.click('#glyph-conflict-dialog [data-action="overwrite"]');
   const repeatedConflict = await waitForAudit(
     page,
@@ -289,6 +298,7 @@ try {
   assert.equal(await page.locator("#save").getAttribute("aria-label"), "Save & Render (Ctrl/Cmd+S)");
   await page.click("#glyph-settings-close");
 
+  assert.equal(expectedHttpConsoleErrors, 0, "expected HTTP console errors were not observed");
   assert.deepEqual(browserErrors, [], `save-triggered Studio emitted browser errors:\n${browserErrors.join("\n")}`);
   await page.screenshot({
     path: path.join(outputDirectory, "save-triggered-studio.png"),
