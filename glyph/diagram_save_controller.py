@@ -3,11 +3,11 @@ from __future__ import annotations
 import re
 
 
-_MARKER = "glyph-save-triggered-rendering-v3"
+_MARKER = "glyph-save-triggered-rendering-v4"
 
 
 _STYLE = r"""
-<style id="glyph-save-triggered-rendering-v3-style">
+<style id="glyph-save-triggered-rendering-v4-style">
 .glyph-save-state{display:flex;align-items:center;gap:6px;white-space:nowrap;font-size:11px;color:var(--muted)}
 .glyph-save-state strong{font-weight:750;color:var(--text)}
 .glyph-save-state[data-persistence="unsaved"] .glyph-persistence{color:var(--amber)}
@@ -36,42 +36,44 @@ _STYLE = r"""
 
 
 _SCRIPT = r"""
-<script id="glyph-save-triggered-rendering-v3-script">
+<script id="glyph-save-triggered-rendering-v4-script">
 (()=>{
-const MARKER="glyph-save-triggered-rendering-v3";
+const MARKER="glyph-save-triggered-rendering-v4";
 const STATE_REQUEST_TIMEOUT_MS=5000;
-const SAVE_ACK_TIMEOUT_MS=5000;
+const SAVE_ACK_TIMEOUT_MS=1500;
+const SAVE_STATUS_RETRY_MS=250;
 const POLL_INTERVAL_MS=3000;
 const ACTIVE_POLL_INTERVAL_MS=250;
 const COPY={
  ja:{
   saved:"保存済み",unsaved:"未保存",conflict:"競合",
-  ready:"描画済み",saving:"保存中",compiling:"コンパイル中",error:"コンパイルエラー",
+  ready:"描画済み",saving:"保存確認中",compiling:"コンパイル中",error:"コンパイルエラー",
   stale:"表示中の図は最後に正常コンパイルされた保存内容",
   compilingStale:"新しい保存内容をコンパイル中。図は最後の正常結果を表示中",
   noValid:"表示できる正常な図がまだない",
   conflictTitle:"外部変更を検出",
   conflictMessage:"編集中にファイルが外部で変更された。どちらを採用するか選択してください。",
   loadExternal:"外部版を読み込む",overwrite:"自分の版で上書き",cancel:"キャンセル",
-  requestFailed:"保存要求に失敗した",outcomeUnknown:"保存結果を確認できないため、ディスク状態を再確認してください",
+  requestFailed:"保存要求に失敗した",outcomeUnknown:"保存結果を追跡中。編集内容は保持されています",
   saveTitle:"保存して描画 (Ctrl/Cmd+S)",resolveConflict:"競合を解決"
  },
  en:{
   saved:"Saved",unsaved:"Unsaved",conflict:"Conflict",
-  ready:"Rendered",saving:"Saving",compiling:"Compiling",error:"Compile error",
+  ready:"Rendered",saving:"Confirming save",compiling:"Compiling",error:"Compile error",
   stale:"The diagram shows the last successfully compiled saved source",
   compilingStale:"Compiling the new saved source; the diagram still shows the last successful result",
   noValid:"No valid diagram is available yet",
   conflictTitle:"External change detected",
   conflictMessage:"The file changed outside Glyph Studio while you were editing. Choose which version to keep.",
   loadExternal:"Load external version",overwrite:"Overwrite with mine",cancel:"Cancel",
-  requestFailed:"Save request failed",outcomeUnknown:"The save result could not be confirmed. Recheck the disk state.",
+  requestFailed:"Save request failed",outcomeUnknown:"Tracking the save result; your editor content is preserved",
   saveTitle:"Save & Render (Ctrl/Cmd+S)",resolveConflict:"Resolve conflict"
  }
 };
 let editorBaseDigest="";
 let initialized=false;
 let saveInFlight=false;
+let activeSaveRequestId="";
 let queuedSave=null;
 let pollInFlight=false;
 let conflict=null;
@@ -81,6 +83,11 @@ let pollTimer=null;
 const language=()=>window.GlyphI18n?.locale==="en"||document.documentElement.lang==="en"?"en":"ja";
 const t=key=>COPY[language()][key]||key;
 const setText=(element,value)=>{if(element&&element.textContent!==value)element.textContent=value};
+const sleep=milliseconds=>new Promise(resolve=>setTimeout(resolve,milliseconds));
+const makeRequestId=()=>{
+ if(globalThis.crypto?.randomUUID)return globalThis.crypto.randomUUID();
+ return `save-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+};
 
 function ensureUi(){
  const header=document.querySelector("header");
@@ -210,6 +217,17 @@ async function fetchJson(path,options={},timeoutMs=STATE_REQUEST_TIMEOUT_MS){
  }finally{if(timeout!==null)clearTimeout(timeout)}
 }
 
+function applyStatus(next){
+ if(!next)return false;
+ const currentVersion=Number(snapshot?.version??-1);
+ const nextVersion=Number(next?.version??currentVersion);
+ if(nextVersion<currentVersion)return false;
+ snapshot={...(snapshot||{}),...next};
+ setStatus(next.status==="compiling"?"busy":next.status||"starting");
+ updateUi();
+ return true;
+}
+
 function applySnapshot(next,{updateEditor=false}={}){
  const currentVersion=Number(snapshot?.version??-1);
  const nextVersion=Number(next?.version??-1);
@@ -237,66 +255,114 @@ function applySnapshot(next,{updateEditor=false}={}){
  return true;
 }
 
-async function reconcileSubmittedSave(submittedSource){
- try{
-  const {response,payload}=await fetchJson("/api/state",{},STATE_REQUEST_TIMEOUT_MS);
-  if(!response.ok||String(payload?.source??"")!==submittedSource)return false;
-  editorBaseDigest=String(payload.digest||editorBaseDigest);
-  conflict=null;
-  conflictDialogShownFor="";
-  dirty=editor.value!==submittedSource;
-  applySnapshot(payload,{updateEditor:false});
-  return true;
- }catch{return false}
+async function fetchFullState(){
+ const {response,payload}=await fetchJson("/api/state");
+ if(!response.ok)throw new Error(payload?.message||payload?.error||`${response.status}`);
+ return payload;
+}
+
+function setConflictFromOperation(operation){
+ conflict={
+  source:String(operation.current_source??""),
+  digest:String(operation.current_digest??""),
+  state:operation.state||null,
+ };
+ dirty=true;
+ setStatus("error");
+ updateUi();
+ showConflictDialog();
+}
+
+async function postTrackedSave(savePayload){
+ let delay=SAVE_STATUS_RETRY_MS;
+ while(true){
+  try{
+   return await fetchJson("/api/save",{
+    method:"POST",
+    body:JSON.stringify(savePayload),
+   },SAVE_ACK_TIMEOUT_MS);
+  }catch(error){
+   if(error?.name!=="AbortError"){
+    diagnostics.innerHTML=`<div class="diagnostic">${esc(t("outcomeUnknown"))}</div>`;
+    updateUi();
+   }
+   await sleep(delay);
+   delay=Math.min(1000,Math.round(delay*1.5));
+  }
+ }
+}
+
+async function waitForSaveOperation(requestId,savePayload,initialOperation){
+ let operation=initialOperation;
+ while(true){
+  if(operation?.status&&operation.status!=="saving")return operation;
+  await sleep(SAVE_STATUS_RETRY_MS);
+  try{
+   const {response,payload}=await fetchJson(`/api/save-status/${encodeURIComponent(requestId)}`);
+   if(response.ok){
+    operation=payload;
+    continue;
+   }
+   if(response.status!==404)throw new Error(payload?.message||payload?.error||`${response.status}`);
+  }catch(error){
+   if(error?.name!=="AbortError"){
+    diagnostics.innerHTML=`<div class="diagnostic">${esc(t("outcomeUnknown"))}</div>`;
+    updateUi();
+   }
+  }
+  const retried=await postTrackedSave(savePayload);
+  operation=retried.payload;
+ }
 }
 
 async function performSave(source,{baseDigest=null}={}){
  saveInFlight=true;
+ activeSaveRequestId=makeRequestId();
  updateUi();
  setStatus("busy");
  const submittedSource=source;
+ const selectedBaseDigest=baseDigest||editorBaseDigest||null;
+ const savePayload={
+  request_id:activeSaveRequestId,
+  source:submittedSource,
+  base_digest:selectedBaseDigest,
+ };
  try{
-  const {response,payload}=await fetchJson("/api/save",{
-   method:"POST",
-   body:JSON.stringify({
-    source:submittedSource,
-    base_digest:baseDigest||editorBaseDigest||null,
-   }),
-  },SAVE_ACK_TIMEOUT_MS);
-  if(response.status===409&&payload?.error==="save_conflict"){
-   conflict={
-    source:String(payload.current_source??""),
-    digest:String(payload.current_digest??""),
-    state:payload.state||null,
-   };
-   dirty=true;
-   setStatus("error");
-   updateUi();
-   showConflictDialog();
+  const initial=await postTrackedSave(savePayload);
+  let operation=initial.payload;
+  if(operation?.status==="saving"){
+   operation=await waitForSaveOperation(activeSaveRequestId,savePayload,operation);
+  }
+  if(operation?.status==="conflict"||operation?.error==="save_conflict"){
+   setConflictFromOperation(operation);
    return false;
   }
-  if(!response.ok)throw new Error(payload?.message||payload?.error||`${response.status}`);
-  const next=payload;
-  editorBaseDigest=String(next.digest||editorBaseDigest);
+  if(operation?.status==="error"){
+   throw new Error(operation?.message||operation?.error||t("requestFailed"));
+  }
+  if(operation?.status!=="accepted"){
+   throw new Error(operation?.message||operation?.error||t("requestFailed"));
+  }
+  editorBaseDigest=String(operation.digest||editorBaseDigest);
   conflict=null;
   conflictDialogShownFor="";
   dirty=editor.value!==submittedSource;
-  applySnapshot(next,{updateEditor:false});
-  schedulePoll(50);
+  applyStatus(operation.state||{
+   status:"compiling",
+   digest:operation.digest,
+   operation_id:operation.operation_id,
+  });
+  schedulePoll(25);
   return true;
  }catch(error){
-  if(error?.name==="AbortError"&&await reconcileSubmittedSave(submittedSource)){
-   schedulePoll(50);
-   return true;
-  }
   setStatus("error");
-  const message=error?.name==="AbortError"?t("outcomeUnknown"):String(error?.message||error||t("requestFailed"));
-  diagnostics.innerHTML=`<div class="diagnostic">${esc(message)}</div>`;
+  diagnostics.innerHTML=`<div class="diagnostic">${esc(String(error?.message||error||t("requestFailed")))}</div>`;
   dirty=true;
   updateUi();
   return false;
  }finally{
   saveInFlight=false;
+  activeSaveRequestId="";
   updateUi();
  }
 }
@@ -312,6 +378,7 @@ async function drainSaveQueue(initialRequest){
 }
 
 save=async function saveAndRender(options={}){
+ if(!dirty&&!conflict&&snapshot?.status!=="error")return;
  const request={source:editor.value,baseDigest:options.baseDigest||null};
  if(saveInFlight){
   queuedSave=request;
@@ -322,42 +389,53 @@ save=async function saveAndRender(options={}){
  await drainSaveQueue(request);
 };
 
-load=async function loadSavedState(initial=false){
- if(pollInFlight||saveInFlight)return;
- pollInFlight=true;
- try{
-  const {response,payload:next}=await fetchJson("/api/state");
-  if(!response.ok)throw new Error(next?.error||`${response.status}`);
-  if(!initialized||initial){
-   initialized=true;
-   editorBaseDigest=String(next.digest||"");
-   conflict=null;
-   applySnapshot(next,{updateEditor:!dirty});
-   return;
-  }
-  const diskChanged=String(next.digest||"")!==editorBaseDigest;
-  if(diskChanged&&dirty){
+async function incorporateServerStatus(next,{initial=false}={}){
+ if(!initialized||initial){
+  const full=await fetchFullState();
+  initialized=true;
+  editorBaseDigest=String(full.digest||"");
+  conflict=null;
+  applySnapshot(full,{updateEditor:!dirty});
+  return;
+ }
+ const diskChanged=String(next.digest||"")!==editorBaseDigest;
+ if(diskChanged){
+  const full=await fetchFullState();
+  if(dirty){
    conflict={
-    source:String(next.source||""),
-    digest:String(next.digest||""),
-    state:next,
+    source:String(full.source||""),
+    digest:String(full.digest||""),
+    state:full,
    };
    updateUi();
    showConflictDialog();
    return;
   }
-  if(diskChanged){
-   editorBaseDigest=String(next.digest||"");
-   conflict=null;
-   conflictDialogShownFor="";
-   applySnapshot(next,{updateEditor:true});
-   return;
-  }
-  if(Number(next.version||0)>Number(snapshot?.version||0)){
-   applySnapshot(next,{updateEditor:false});
+  editorBaseDigest=String(full.digest||"");
+  conflict=null;
+  conflictDialogShownFor="";
+  applySnapshot(full,{updateEditor:true});
+  return;
+ }
+ if(Number(next.version||0)>Number(snapshot?.version||0)){
+  if(next.status==="compiling"){
+   applyStatus(next);
   }else{
-   updateUi();
+   const full=await fetchFullState();
+   applySnapshot(full,{updateEditor:false});
   }
+ }else{
+  applyStatus(next);
+ }
+}
+
+load=async function loadSavedState(initial=false){
+ if(pollInFlight||saveInFlight)return;
+ pollInFlight=true;
+ try{
+  const {response,payload:next}=await fetchJson("/api/status");
+  if(!response.ok)throw new Error(next?.message||next?.error||`${response.status}`);
+  await incorporateServerStatus(next,{initial});
  }catch(error){
   if(error?.name!=="AbortError"){
    setStatus("error");
@@ -374,11 +452,12 @@ async function loadExternalVersion(){
  try{
   const {response,payload}=await fetchJson("/api/rebuild",{method:"POST",body:"{}"});
   if(!response.ok)throw new Error(payload?.message||payload?.error||`${response.status}`);
-  editorBaseDigest=String(payload.digest||conflict.digest);
+  const full=await fetchFullState();
+  editorBaseDigest=String(full.digest||conflict.digest);
   conflict=null;
   conflictDialogShownFor="";
-  applySnapshot(payload,{updateEditor:true});
-  schedulePoll(50);
+  applySnapshot(full,{updateEditor:true});
+  schedulePoll(25);
  }catch(error){
   dirty=true;
   diagnostics.innerHTML=`<div class="diagnostic">${esc(String(error?.message||error))}</div>`;
@@ -410,7 +489,7 @@ editor.addEventListener("input",()=>{
  updateUi();
 });
 window.addEventListener("beforeunload",event=>{
- if(!dirty&&!conflict)return;
+ if(!dirty&&!conflict&&!saveInFlight)return;
  event.preventDefault();
  event.returnValue="";
 });
@@ -432,10 +511,11 @@ if(snapshot){
 schedulePoll();
 window.GlyphSaveTriggeredRendering={
  marker:MARKER,
- version:3,
+ version:4,
  get baseDigest(){return editorBaseDigest},
  get conflict(){return conflict},
  get saveInFlight(){return saveInFlight},
+ get activeSaveRequestId(){return activeSaveRequestId},
  refresh:updateUi,
  openConflict:()=>showConflictDialog({force:true}),
 };
