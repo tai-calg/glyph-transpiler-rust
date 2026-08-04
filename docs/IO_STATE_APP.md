@@ -199,14 +199,27 @@ machine Motor(state:MotorState,input:Input)
 
 `machine`がない場合、state machineを名前や型から推測しない。
 
-## Live editing
+## Editing and rebuild
 
-- editはdebounce付きcompile previewを開始する
-- `Compile`は保存せず即時previewする
-- `Save`はsourceを書き込み、再compileする
-- external file changeをwatchする
-- compile error時も最後のvalid diagramを保持する
+- キー入力はeditor bufferと`Unsaved`表示だけを更新する
+- キー入力ごとのpreprocess、compile、IR生成、graph layout、renderは行わない
+- `Save & Render`または`Ctrl/Cmd + S`でsourceを書き込み、その後にpreprocessとcompileを実行する
+- external file saveはwatcherが検出し、同じcompile pipelineで再構築する
+- compile error時も保存自体は成立し、最後のvalid diagramを保持できる
 - node、transition label、diagnosticからsource lineへ移動できる
+
+保存時の処理順序:
+
+```text
+editor source
+  -> atomic file save
+  -> raw macro preprocessing
+  -> parse / type check
+  -> IR and diagram generation
+  -> browser render
+```
+
+アプリが配信するHTMLには、Compileボタン、`/api/preview`呼出し、preview timer、`Ctrl/Cmd + Enter`によるcompile shortcutを含めない。
 
 ## Output artifact
 
