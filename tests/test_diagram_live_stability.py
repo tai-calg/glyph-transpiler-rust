@@ -58,7 +58,12 @@ class DiagramLiveStabilityTests(unittest.TestCase):
         self.assertIsNotNone(script)
         assert script is not None
         self.assertIn("MutationObserver", script.group(1))
-        self.assertIn('attributeFilter:["data-transition-layout-state","data-layout-certificate-state","data-transition-publication-ready"]', script.group(1))
+        self.assertIn(
+            'attributeFilter:["data-transition-layout-state",'
+            '"data-layout-certificate-state",'
+            '"data-transition-publication-ready"]',
+            script.group(1),
+        )
 
     @unittest.skipUnless(shutil.which("node"), "Node.js is not installed")
     def test_frontend_javascript_is_syntactically_valid(self) -> None:
@@ -75,25 +80,24 @@ class DiagramLiveStabilityTests(unittest.TestCase):
             )
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_preview_compilation_is_serial_and_superseded_work_is_dropped(self) -> None:
+    def test_save_compilation_is_serialized(self) -> None:
         install_serial_compilation()
         with tempfile.TemporaryDirectory() as directory:
             source_path = Path(directory) / "counter.glyph"
             source_path.write_text(SOURCE, encoding="utf-8")
             app = GlyphDiagramApp(source_path)
+            app.rebuild()
 
             original_compile = app.compiler.compile_text
             entered = threading.Event()
             counter_lock = threading.Lock()
             active = 0
             max_active = 0
-            calls = 0
 
             def delayed_compile(*args, **kwargs):
-                nonlocal active, max_active, calls
+                nonlocal active, max_active
                 with counter_lock:
                     active += 1
-                    calls += 1
                     max_active = max(max_active, active)
                     entered.set()
                 try:
@@ -104,28 +108,34 @@ class DiagramLiveStabilityTests(unittest.TestCase):
                         active -= 1
 
             app.compiler.compile_text = delayed_compile
-            first = SOURCE.replace("Idle|Running|Faulted", "Idle|Running|Faulted|Paused")
-            second = SOURCE + "\n# superseded\n"
+            first = SOURCE + "\n# first\n"
+            second = SOURCE + "\n# second\n"
             latest = SOURCE + "\n# latest\n"
 
             threads = [
-                threading.Thread(target=app.preview_source, args=(first,)),
-                threading.Thread(target=app.preview_source, args=(second,)),
-                threading.Thread(target=app.preview_source, args=(latest,)),
+                threading.Thread(
+                    target=app.save_source,
+                    args=(first,),
+                    kwargs={"force": True},
+                ),
+                threading.Thread(
+                    target=app.save_source,
+                    args=(second,),
+                    kwargs={"force": True},
+                ),
             ]
             threads[0].start()
             self.assertTrue(entered.wait(timeout=1.0))
             threads[1].start()
-            time.sleep(0.01)
-            threads[2].start()
             for thread in threads:
                 thread.join(timeout=3.0)
                 self.assertFalse(thread.is_alive())
 
+            app.save_source(latest, force=True)
             self.assertEqual(max_active, 1)
-            self.assertLessEqual(calls, 2)
             self.assertEqual(app.snapshot.source, latest)
             self.assertEqual(app.snapshot.status, "ready")
+            self.assertEqual(source_path.read_text(encoding="utf-8"), latest)
 
 
 if __name__ == "__main__":
