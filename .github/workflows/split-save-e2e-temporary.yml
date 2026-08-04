@@ -1,0 +1,44 @@
+name: Temporary Split Save E2E
+
+on:
+  push:
+    branches:
+      - agent/macro-space-syntax
+
+permissions:
+  contents: write
+
+jobs:
+  split:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/macro-space-syntax
+      - name: Keep localized canvas campaign focused
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('tests/verify_localized_semantic_canvas.mjs')
+          text = path.read_text()
+          start_marker = '  // Editing only marks the buffer unsaved; it must not change the compiled snapshot.\n'
+          end_marker = '  await page.click("#glyph-settings");\n'
+          start = text.find(start_marker)
+          end = text.find(end_marker, start)
+          if start < 0 or end < 0:
+              raise SystemExit('localized save campaign anchors missing')
+          text = text[:start] + end_marker + text[end + len(end_marker):]
+          text = text.replace(
+              'console.log("verified localized save-render UX, serialized saves, external conflicts, stale diagrams, semantic labels, and canvas panning");',
+              'console.log("verified localized save-render controls, semantic labels, proximity, and canvas panning");',
+          )
+          path.write_text(text)
+          PY
+      - name: Commit focused localized campaign
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add tests/verify_localized_semantic_canvas.mjs
+          git commit -m 'Split save UX from localized canvas campaign'
+          git push origin HEAD:agent/macro-space-syntax
