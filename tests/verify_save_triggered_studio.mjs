@@ -51,6 +51,7 @@ async function audit(page) {
     persistence: document.querySelector("#glyph-save-state")?.dataset.persistence || "",
     renderState: document.querySelector("#glyph-save-state")?.dataset.render || "",
     saveInFlight: window.GlyphSaveTriggeredRendering?.saveInFlight ?? null,
+    activeSaveRequestId: window.GlyphSaveTriggeredRendering?.activeSaveRequestId || "",
     baseDigest: window.GlyphSaveTriggeredRendering?.baseDigest || "",
     conflict: window.GlyphSaveTriggeredRendering?.conflict || null,
     conflictOpen: Boolean(document.querySelector("#glyph-conflict-dialog")?.open),
@@ -111,6 +112,12 @@ child.stderr.on("data", chunk => logs.push(chunk.toString()));
 const browser = await chromium.launch({ headless: true });
 try {
   await waitForServer(child);
+  const lightweightResponse = await fetch(`${url}/api/status`, { cache: "no-store" });
+  assert.equal(lightweightResponse.ok, true);
+  const lightweightStatus = await lightweightResponse.json();
+  assert.equal(Object.hasOwn(lightweightStatus, "source"), false);
+  assert.equal(Object.hasOwn(lightweightStatus, "views"), false);
+
   const page = await browser.newPage({ viewport: { width: 1280, height: 760 } });
   const browserErrors = [];
   let expectedHttpConsoleErrors = 0;
@@ -128,7 +135,7 @@ try {
   await page.goto(url, { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => (
     document.querySelector("#status")?.textContent === "ready"
-    && window.GlyphSaveTriggeredRendering?.version === 3
+    && window.GlyphSaveTriggeredRendering?.version === 4
     && document.querySelector("#glyph-save-state")
   ), null, { timeout: 10_000 });
 
@@ -167,11 +174,14 @@ try {
   const editedDuringSave = `${submittedSource}# edited-during-save\n`;
   await page.locator("#editor").fill(submittedSource);
   await page.click("#save");
-  await waitForAudit(
+  const savingAudit = await waitForAudit(
     page,
-    value => value.saveInFlight === true && value.renderState === "saving",
-    "save did not enter the acknowledgement state",
+    value => value.saveInFlight === true
+      && value.renderState === "saving"
+      && value.activeSaveRequestId.length > 0,
+    "save did not enter the tracked acknowledgement state",
   );
+  assert.match(savingAudit.activeSaveRequestId, /^[A-Za-z0-9._-]+$/);
   await page.locator("#editor").fill(editedDuringSave);
   const submittedAudit = await waitForAudit(
     page,
@@ -311,4 +321,4 @@ try {
   await stopProcess(child);
 }
 
-console.log("verified asynchronous save acknowledgements, queued saves, repeated external conflicts, stale diagrams, and unload protection");
+console.log("verified tracked saves, lightweight polling, queued saves, repeated conflicts, stale diagrams, and unload protection");
