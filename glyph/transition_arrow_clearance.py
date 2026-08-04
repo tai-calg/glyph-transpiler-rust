@@ -80,7 +80,7 @@ function applyGeometry(reason="scheduled",stage=stageOf(),machine=selectedMachin
 function installRerouteGuard(){
   const api=window.glyphTransitionIoClusters;if(!api||typeof api.reroute!=="function")return false;if(api.arrowClearanceWrapped===MARKER)return true;
   const original=api.reroute.bind(api);
-  api.reroute=(stage=null,machine=null)=>{const result=original(stage,machine);applyGeometry("transition-io-reroute",stage||stageOf(),machine||selectedMachine());return result};
+  api.reroute=(stage=null,machine=null)=>{const resolvedStage=stage||stageOf(),resolvedMachine=machine||selectedMachine();const result=original(resolvedStage,resolvedMachine);applyGeometry("transition-io-reroute",resolvedStage,resolvedMachine);return result};
   api.arrowClearanceWrapped=MARKER;return true;
 }
 function refresh(reason="scheduled"){
