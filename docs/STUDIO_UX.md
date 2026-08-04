@@ -59,7 +59,7 @@ Typing does not invoke the preprocessor, parser, type checker, IR builders, diag
 
 ### Save and render
 
-`Save & Render` atomically writes the editor contents to the source file and rebuilds the Studio snapshot.
+`保存して描画` / `Save & Render` atomically writes the editor contents to the source file and rebuilds the Studio snapshot.
 
 ```text
 editor text
@@ -81,37 +81,77 @@ Ctrl/Cmd + S
 
 Saving is the only editor action that starts compilation and diagram rendering. A compilation error does not undo a successful source-file write.
 
-### Reload
-
-`Reload` discards the current editor contents and rebuilds from the file on disk. When the editor is dirty, the UI asks before discarding changes.
+A save request captures the exact submitted source. If the user edits while that request is running, the newer editor buffer remains `Unsaved` after the submitted version completes. Repeated save shortcuts are serialized, and only the latest pending editor buffer is retained for the next request.
 
 ### External file changes
 
-The file watcher rebuilds only after the source file on disk changes. This supports saves made by an external editor without reintroducing compile-on-keystroke behavior inside Glyph Studio.
+Every editor session keeps the digest of the disk source from which it started editing. `/api/save` sends that value as `base_digest`.
+
+```text
+base_digest == current disk digest
+  -> save
+
+base_digest != current disk digest
+  -> HTTP 409 save_conflict
+```
+
+When the editor is clean, an external save updates both the editor and the rendered snapshot. When the editor is dirty, Studio keeps the local buffer and opens an explicit conflict dialog:
+
+- `外部版を読み込む` / `Load external version`
+- `自分の版で上書き` / `Overwrite with mine`
+- `キャンセル` / `Cancel`
+
+No external change is silently overwritten. Forced overwrite is available only through the explicit conflict action.
+
+### Leaving the page
+
+Closing or reloading the window while the editor is unsaved or conflicted invokes the browser's unsaved-change confirmation. A clean saved editor does not trigger the confirmation.
 
 ## 4. State communication
 
-The interface separates persistence and compilation state.
+Persistence and compilation are independent state axes.
 
 ### Persistence state
 
 ```text
 Saved
 Unsaved
+Conflict
 ```
 
-### Compilation state
+### Render state
 
 ```text
-starting
-ready
-error
-busy: saving / reloading / external-file rebuild
+Rendered
+Saving & rendering
+Compile error
+```
+
+The header displays both values, for example:
+
+```text
+Unsaved · Rendered
+Saved · Compile error
+Conflict · Rendered
 ```
 
 Compilation diagnostics are shown directly under the editor and in the current view. Diagnostics with a source line navigate to that line.
 
-When compilation fails, the saved source remains on disk. The viewer may retain the last valid diagram, but it must not present that diagram as the result of the invalid source.
+When compilation succeeds:
+
+```text
+source digest == rendered digest
+```
+
+When a saved source fails to compile, the source remains on disk while the last successful views remain available. The snapshot therefore exposes separate fields:
+
+```text
+digest
+rendered_digest
+last_successful_version
+```
+
+If `digest != rendered_digest`, the viewer displays a persistent stale banner stating that the diagram belongs to the last successfully compiled saved source. The old diagram is never presented as the result of the invalid source.
 
 ## 5. Workspace layout
 
@@ -178,19 +218,29 @@ Generated Rust, Host scaffold, Manual code, and typed design use a common code s
 
 ## 10. Watcher interaction
 
-The file watcher initializes its observed digest from the current disk file. Unsaved editor contents are not compilation input and are not replaced unless the user explicitly reloads or the disk file actually changes.
+The file watcher initializes its observed digest from the current disk file. Unsaved editor contents are not compilation input.
 
-A source file saved outside Glyph Studio enters the same preprocessing and compilation pipeline as `Save & Render`.
+A source file saved outside Glyph Studio enters the same preprocessing and compilation pipeline as `Save & Render`. Browser polling then compares the returned disk digest with the editor's `base_digest`:
+
+- clean editor: adopt the external source and snapshot,
+- dirty editor: preserve the local buffer and enter `Conflict`,
+- unchanged digest: do not rerender or replace editor text.
+
+The public Desktop API does not expose `/api/preview`. The only source-changing compile path is `/api/save`; `/api/rebuild` recompiles the file already present on disk.
 
 ## 11. Acceptance conditions
 
 - Typing does not change the active compiled snapshot or diagram version.
-- The delivered HTML contains no compile button, `/api/preview` request, preview timer, or Ctrl/Cmd+Enter compile shortcut.
-- Save and Ctrl/Cmd+S write the source before preprocessing, compilation, and diagram rendering.
+- The delivered HTML contains no compile button, `/api/preview` request, preview timer, preview controller, or Ctrl/Cmd+Enter compile shortcut.
+- `保存して描画` / `Save & Render` and Ctrl/Cmd+S write the source before preprocessing, compilation, and diagram rendering.
+- An edit made during an active save remains unsaved after the submitted source completes.
+- Repeated Ctrl/Cmd+S requests are serialized and converge on the latest editor buffer.
 - A macro changed through `/api/save` is reprocessed before the new diagram snapshot is published.
 - A syntax error can be saved, reported, corrected, and successfully rebuilt.
-- An external file save is detected and rebuilt through the same compilation pipeline.
-- Reload restores the disk source.
+- A failed compilation preserves the last valid views and exposes a visible stale banner.
+- A clean external save updates the editor and rendered snapshot.
+- A dirty external save produces HTTP 409 on normal save and requires explicit load or overwrite resolution.
+- Closing or reloading with unsaved or conflicted content invokes `beforeunload` protection.
 - Existing Studio views remain available.
 - View groups, filtering, resizing, editor toggle, theme toggle, and keyboard shortcuts are present.
 - Diagnostics navigate to source lines when a line can be identified.
@@ -207,4 +257,5 @@ This change does not implement:
 - runtime execution or simulation,
 - live runtime event streaming,
 - collaborative editing,
+- automatic three-way merging,
 - project-wide multi-file navigation.
