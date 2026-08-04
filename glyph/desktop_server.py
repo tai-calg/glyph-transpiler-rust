@@ -11,16 +11,11 @@ import secrets
 import signal
 import threading
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 import webbrowser
 
 from . import diagram_app
-from .diagram_app import (
-    GlyphDiagramApp,
-    SaveConflictError,
-    SaveWriteError,
-    ViewBuilder,
-)
+from .diagram_app import GlyphDiagramApp, SaveWriteError, ViewBuilder
 from .io_state_views import build_io_state_views
 from .readable_diagram_app import prepare_diagram_app
 
@@ -187,9 +182,24 @@ def create_desktop_server(
             ):
                 self._serve_app()
                 return
+            if not self._require_auth():
+                return
             if path == "/api/state":
-                if self._require_auth():
-                    self._json(app.state_dict())
+                self._json(app.state_dict())
+                return
+            if path == "/api/status":
+                self._json(app.status_dict())
+                return
+            if path.startswith("/api/save-status/"):
+                request_id = unquote(path.removeprefix("/api/save-status/"))
+                operation = app.save_request_dict(request_id)
+                if operation is None:
+                    self._json(
+                        {"error": "save_request_not_found"},
+                        HTTPStatus.NOT_FOUND,
+                    )
+                else:
+                    self._json(operation)
                 return
             self._json({"error": "not found"}, HTTPStatus.NOT_FOUND)
 
@@ -203,6 +213,7 @@ def create_desktop_server(
                     return
                 source = body.get("source")
                 base_digest = body.get("base_digest")
+                request_id = body.get("request_id")
                 if not isinstance(source, str):
                     self._json(
                         {"error": "source must be text"},
@@ -215,38 +226,32 @@ def create_desktop_server(
                         HTTPStatus.BAD_REQUEST,
                     )
                     return
-                try:
-                    app.save_source_async(source, base_digest=base_digest)
-                except SaveConflictError as exc:
+                if request_id is not None and not isinstance(request_id, str):
                     self._json(
-                        {
-                            "error": "save_conflict",
-                            "message": str(exc),
-                            "current_source": exc.current_source,
-                            "current_digest": exc.current_digest,
-                            "state": app.state_dict(),
-                        },
-                        HTTPStatus.CONFLICT,
+                        {"error": "request_id must be text"},
+                        HTTPStatus.BAD_REQUEST,
                     )
                     return
-                except SaveWriteError as exc:
-                    self._json(
-                        {"error": exc.code, "message": str(exc)},
-                        exc.status,
-                    )
-                    return
-                self._json(app.state_dict(), HTTPStatus.ACCEPTED)
+                operation = app.submit_save(
+                    source,
+                    base_digest=base_digest,
+                    request_id=request_id,
+                )
+                self._json(
+                    operation.to_dict(),
+                    HTTPStatus(operation.http_status),
+                )
                 return
             if path == "/api/rebuild":
                 try:
-                    app.rebuild_async()
+                    snapshot = app.rebuild_async()
                 except SaveWriteError as exc:
                     self._json(
                         {"error": exc.code, "message": str(exc)},
                         exc.status,
                     )
                     return
-                self._json(app.state_dict(), HTTPStatus.ACCEPTED)
+                self._json(snapshot.to_status_dict(), HTTPStatus.ACCEPTED)
                 return
             self._json({"error": "not found"}, HTTPStatus.NOT_FOUND)
 
