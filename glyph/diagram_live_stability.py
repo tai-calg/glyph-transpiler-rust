@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-from functools import wraps
 import threading
-
-from . import diagram_app
 
 
 _MARKER = "glyph-diagram-live-stability-v2"
@@ -40,12 +37,7 @@ _SCRIPT = r"""
 (() => {
   const MARKER = "glyph-diagram-live-stability-v2";
   const RENDER_BUDGET_MS = 180;
-  const REQUEST_TIMEOUT_MS = 10000;
-  const POLL_INTERVAL_MS = 3000;
   let renderGeneration = 0;
-  let requestGeneration = 0;
-  let previewController = null;
-  let lastPollAt = 0;
   const fallbackTimers = new WeakMap();
 
   function stateStage(){return document.querySelector(".state-node")?.closest(".graph-stage")||null}
@@ -94,30 +86,6 @@ _SCRIPT = r"""
     activeTab="state";
     document.querySelectorAll(".tab").forEach(button=>button.classList.toggle("active",button.dataset.tab==="state"));
   }
-  function applySnapshot(next,{initial=false,updateEditor=false}={}){
-    const currentVersion=Number(snapshot?.version??-1),nextVersion=Number(next?.version??-1);
-    if(!initial&&nextVersion<currentVersion)return false;
-    snapshot=next;
-    if((initial||updateEditor)&&!dirty){
-      editor.value=next.source||"";
-      dirty=false;
-      syncLines();
-    }
-    render();
-    window.GlyphExecutionContext?.refresh?.();
-    return true;
-  }
-  function abortPreview(){
-    requestGeneration+=1;
-    previewController?.abort();
-    previewController=null;
-  }
-  async function guardedRequest(path,options={},controller=null){
-    const owned=controller||new AbortController();
-    const timeout=setTimeout(()=>owned.abort(),REQUEST_TIMEOUT_MS);
-    try{return await request(path,{...options,signal:owned.signal})}
-    finally{clearTimeout(timeout)}
-  }
 
   const originalRender=window.render;
   if(typeof originalRender==="function"){
@@ -156,60 +124,6 @@ _SCRIPT = r"""
     renderIo=window.renderIo;
   }
 
-  compile=async function stableCompile(){
-    clearTimeout(previewTimer);
-    previewTimer=null;
-    const generation=++requestGeneration;
-    previewController?.abort();
-    const controller=new AbortController();
-    previewController=controller;
-    setStatus("busy");
-    try{
-      const next=await guardedRequest("/api/preview",{method:"POST",body:JSON.stringify({source:editor.value})},controller);
-      if(generation!==requestGeneration)return;
-      applySnapshot(next);
-    }catch(error){
-      if(generation!==requestGeneration)return;
-      setStatus("error");
-      const message=error?.name==="AbortError"?"Compilation request timed out":error.message;
-      diagnostics.innerHTML=`<div class="diagnostic">${esc(message)}</div>`;
-    }finally{
-      if(generation===requestGeneration)previewController=null;
-    }
-  };
-  save=async function stableSave(){
-    abortPreview();
-    const generation=requestGeneration;
-    setStatus("busy");
-    try{
-      const next=await guardedRequest("/api/save",{method:"POST",body:JSON.stringify({source:editor.value})});
-      if(generation!==requestGeneration)return;
-      dirty=false;
-      applySnapshot(next);
-    }catch(error){
-      if(generation!==requestGeneration)return;
-      setStatus("error");
-      diagnostics.innerHTML=`<div class="diagnostic">${esc(error.message)}</div>`;
-    }
-  };
-  load=async function stableLoad(initial=false){
-    const now=Date.now();
-    if(!initial&&now-lastPollAt<POLL_INTERVAL_MS)return;
-    lastPollAt=now;
-    const generation=requestGeneration;
-    try{
-      const next=await guardedRequest("/api/state");
-      if(generation!==requestGeneration||(!initial&&dirty))return;
-      applySnapshot(next,{initial,updateEditor:initial});
-    }catch(error){
-      if(generation!==requestGeneration||error?.name==="AbortError")return;
-      setStatus("error");
-      diagnostics.innerHTML=`<div class="diagnostic">${esc(error.message)}</div>`;
-    }
-  };
-  document.getElementById("compile").onclick=()=>compile();
-  document.getElementById("save").onclick=()=>save();
-
   for(const eventName of[
     "glyph-transition-layout-transaction-ready",
     "glyph-initial-transition-route-ready",
@@ -235,46 +149,10 @@ _SCRIPT = r"""
 
 
 def install_serial_compilation() -> None:
-    """Keep rebuild and save operations serialized in older app instances."""
+    """Compatibility hook; GlyphDiagramApp now owns operation serialization."""
 
     global _PATCHED
     with _PATCH_LOCK:
-        if _PATCHED:
-            return
-        app_type = diagram_app.GlyphDiagramApp
-        original_init = app_type.__init__
-        original_rebuild = app_type.rebuild
-        original_save = app_type.save_source
-
-        @wraps(original_init)
-        def stable_init(self, *args, **kwargs):
-            original_init(self, *args, **kwargs)
-            self._diagram_compile_lock = threading.RLock()
-
-        @wraps(original_rebuild)
-        def stable_rebuild(self, source=None):
-            with self._diagram_compile_lock:
-                return original_rebuild(self, source)
-
-        @wraps(original_save)
-        def stable_save(
-            self,
-            source: str,
-            *,
-            base_digest: str | None = None,
-            force: bool = False,
-        ):
-            with self._diagram_compile_lock:
-                return original_save(
-                    self,
-                    source,
-                    base_digest=base_digest,
-                    force=force,
-                )
-
-        app_type.__init__ = stable_init
-        app_type.rebuild = stable_rebuild
-        app_type.save_source = stable_save
         _PATCHED = True
 
 
