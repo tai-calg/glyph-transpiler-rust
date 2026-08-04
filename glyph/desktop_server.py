@@ -198,53 +198,56 @@ def create_desktop_server(
                 return
             path = urlsplit(self.path).path
             if path == "/api/save":
-        body = self._body()
-        if body is None:
-            return
-        source = body.get("source")
-        base_digest = body.get("base_digest")
-        if not isinstance(source, str):
-            self._json({"error": "source must be text"}, HTTPStatus.BAD_REQUEST)
-            return
-        if base_digest is not None and not isinstance(base_digest, str):
-            self._json(
-                {"error": "base_digest must be text"},
-                HTTPStatus.BAD_REQUEST,
-            )
-            return
-        try:
-            app.save_source_async(source, base_digest=base_digest)
-        except SaveConflictError as exc:
-            self._json(
-                {
-                    "error": "save_conflict",
-                    "message": str(exc),
-                    "current_source": exc.current_source,
-                    "current_digest": exc.current_digest,
-                    "state": app.state_dict(),
-                },
-                HTTPStatus.CONFLICT,
-            )
-            return
-        except SaveWriteError as exc:
-            self._json(
-                {"error": exc.code, "message": str(exc)},
-                exc.status,
-            )
-            return
-        self._json(app.state_dict(), HTTPStatus.ACCEPTED)
-        return
-    if path == "/api/rebuild":
-        try:
-            app.rebuild_async()
-        except SaveWriteError as exc:
-            self._json(
-                {"error": exc.code, "message": str(exc)},
-                exc.status,
-            )
-            return
-        self._json(app.state_dict(), HTTPStatus.ACCEPTED)
-        return
+                body = self._body()
+                if body is None:
+                    return
+                source = body.get("source")
+                base_digest = body.get("base_digest")
+                if not isinstance(source, str):
+                    self._json(
+                        {"error": "source must be text"},
+                        HTTPStatus.BAD_REQUEST,
+                    )
+                    return
+                if base_digest is not None and not isinstance(base_digest, str):
+                    self._json(
+                        {"error": "base_digest must be text"},
+                        HTTPStatus.BAD_REQUEST,
+                    )
+                    return
+                try:
+                    app.save_source_async(source, base_digest=base_digest)
+                except SaveConflictError as exc:
+                    self._json(
+                        {
+                            "error": "save_conflict",
+                            "message": str(exc),
+                            "current_source": exc.current_source,
+                            "current_digest": exc.current_digest,
+                            "state": app.state_dict(),
+                        },
+                        HTTPStatus.CONFLICT,
+                    )
+                    return
+                except SaveWriteError as exc:
+                    self._json(
+                        {"error": exc.code, "message": str(exc)},
+                        exc.status,
+                    )
+                    return
+                self._json(app.state_dict(), HTTPStatus.ACCEPTED)
+                return
+            if path == "/api/rebuild":
+                try:
+                    app.rebuild_async()
+                except SaveWriteError as exc:
+                    self._json(
+                        {"error": exc.code, "message": str(exc)},
+                        exc.status,
+                    )
+                    return
+                self._json(app.state_dict(), HTTPStatus.ACCEPTED)
+                return
             self._json({"error": "not found"}, HTTPStatus.NOT_FOUND)
 
     server = ThreadingHTTPServer((host, port), Handler)
