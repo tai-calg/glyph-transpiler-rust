@@ -45,7 +45,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p build/checked-system-context-io build/execution-context-selection build/rtai-semantic-status build/rtai-strict-projection build/state-diagram-regression build/state-diagram-stability build/adaptive-state-workspace build/diagram-editor-exports build/diagram-canvas-viewport build/localized-semantic-canvas build/transition-label-readability build/transition-layout-transaction build/transition-semantic-readability build/label-identifier-interactions
+          mkdir -p build/checked-system-context-io build/execution-context-selection build/rtai-semantic-status build/rtai-strict-projection build/state-diagram-regression build/state-diagram-stability build/adaptive-state-workspace build/diagram-editor-exports build/diagram-canvas-viewport build/localized-semantic-canvas build/save-triggered-studio build/transition-label-readability build/transition-layout-transaction build/transition-semantic-readability build/label-identifier-interactions
 
           run_node() {
             local script="$1"
@@ -84,6 +84,7 @@ jobs:
           run_node tests/verify_diagram_editor_exports.mjs build/diagram-editor-exports/verify.log
           run_node tests/verify_diagram_canvas_viewport.mjs build/diagram-canvas-viewport/verify.log
           run_node tests/verify_localized_semantic_canvas.mjs build/localized-semantic-canvas/verify.log
+          run_node tests/verify_save_triggered_studio.mjs build/save-triggered-studio/verify.log
           run_node tests/verify_transition_label_readability.mjs build/transition-label-readability/verify.log
           run_node tests/verify_transition_semantic_readability.mjs build/transition-semantic-readability/verify.log
           run_node tests/verify_label_and_identifier_interactions.mjs build/label-identifier-interactions/verify.log
@@ -110,6 +111,7 @@ jobs:
             build/diagram-editor-exports/**
             build/diagram-canvas-viewport/**
             build/localized-semantic-canvas/**
+            build/save-triggered-studio/**
             build/transition-label-readability/**
             build/transition-layout-transaction/**
             build/transition-semantic-readability/**
