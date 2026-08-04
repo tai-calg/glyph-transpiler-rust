@@ -91,7 +91,8 @@ try {
       && !stage?.dataset.transitionLayoutError;
   }, null, { timeout: 10_000 });
 
-  assert.equal((await page.locator("#compile").textContent()).trim(), "コンパイル");
+  assert.equal(await page.locator("#compile").count(), 0);
+  assert.equal((await page.locator("#save").textContent()).trim(), "保存");
   assert.equal(await page.locator("html").getAttribute("lang"), "ja");
   const japaneseWarnings = await page.locator(".analysis-panel").textContent();
   assert(japaneseWarnings.includes("暫定的に入力"), japaneseWarnings);
@@ -177,7 +178,8 @@ try {
 
   await page.click("#glyph-settings");
   await page.selectOption("#glyph-language", "en");
-  assert.equal((await page.locator("#compile").textContent()).trim(), "Compile");
+  assert.equal(await page.locator("#compile").count(), 0);
+  assert.equal((await page.locator("#save").textContent()).trim(), "Save");
   const englishWarnings = await page.locator(".analysis-panel").textContent();
   assert(englishWarnings.includes("provisionally"), englishWarnings);
   await page.waitForFunction(() => document.querySelectorAll('.transition-io-node[data-io-kind="io"]').length > 0);
@@ -218,4 +220,4 @@ try {
   await stopProcess(child);
 }
 
-console.log("verified Japanese-first diagnostics, input/guard transition labels, proximity and canvas panning");
+console.log("verified Japanese-first diagnostics, save-triggered controls, input/guard transition labels, proximity and canvas panning");
