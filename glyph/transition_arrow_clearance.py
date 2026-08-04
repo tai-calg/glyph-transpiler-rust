@@ -30,7 +30,7 @@ function boundaryDistance(node,direction){
   const horizontal=ay>epsilon?halfHeight/ay:Number.POSITIVE_INFINITY;
   if(Number.isFinite(horizontal)&&ax*horizontal<=halfWidth-radius+.01)return horizontal;
   if(radius<=epsilon)return Math.min(vertical,horizontal);
-  const cornerX=(ux<0?-1:1)*(halfWidth-radius),cornerY=(uy<0?-1:1)*(halfHeight-radius),projection=ux*cornerX+uy*cornerY;
+  const cornerX=(ux<0?-1:1)*(halfWidth-radius),cornerY=(uy<0?-1:1)*(halfHeight-radius-radius+radius),projection=ux*cornerX+uy*cornerY;
   const discriminant=Math.max(0,projection*projection-(cornerX*cornerX+cornerY*cornerY-radius*radius));
   return Math.max(0,projection+Math.sqrt(discriminant));
 }
@@ -90,10 +90,14 @@ function refresh(reason="scheduled"){
 function schedule(reason="scheduled",attempt=0){
   if(destroyed)return;cancelAnimationFrame(frame);clearTimeout(timer);frame=requestAnimationFrame(()=>{if(!refresh(reason)&&attempt<MAX_STARTUP_ATTEMPTS)timer=setTimeout(()=>schedule(reason,attempt+1),32)});
 }
-for(const eventName of["glyph-state-diagram-workspace-ready","glyph-transition-io-clusters-ready","glyph-transition-layout-transaction-ready"]){document.addEventListener(eventName,()=>schedule(eventName))}
+function refreshNow(reason){
+  if(destroyed)return false;
+  try{return refresh(reason)}catch(error){console.error("transition arrow clearance refresh failed",error);return false}
+}
+for(const eventName of["glyph-state-diagram-workspace-ready","glyph-transition-io-clusters-ready","glyph-transition-layout-transaction-ready"]){document.addEventListener(eventName,()=>refreshNow(eventName))}
 document.addEventListener("change",event=>{if(event.target?.id==="machine-select")schedule("machine-change")});
 for(const eventName of["pagehide","beforeunload"]){window.addEventListener(eventName,()=>{destroyed=true;cancelAnimationFrame(frame);clearTimeout(timer)},{once:true})}
-window.glyphTransitionArrowClearance={marker:MARKER,version:1,refresh:()=>schedule("api-refresh"),audit:()=>({...lastAudit})};
+window.glyphTransitionArrowClearance={marker:MARKER,version:1,refresh:()=>schedule("api-refresh"),refreshNow:()=>refreshNow("api-refresh-now"),audit:()=>({...lastAudit})};
 schedule("bootstrap");
 })();
 </script>
