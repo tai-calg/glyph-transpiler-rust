@@ -131,7 +131,7 @@ try {
       && document.querySelectorAll(".transition-index .transition-detail").length > 0
       && document.querySelector("#glyph-settings")
       && document.querySelector("#glyph-save-state")
-      && window.GlyphSaveTriggeredRendering?.version === 3
+      && window.GlyphSaveTriggeredRendering?.version === 4
       && !stage?.dataset.transitionLayoutError;
   }, null, { timeout: 10_000 });
 
