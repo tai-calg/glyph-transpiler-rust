@@ -24,7 +24,9 @@ permissions:
 
 jobs:
   repair-save-lifecycle:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/agent/macro-space-syntax'
+    if: >-
+      (github.event_name == 'pull_request' && github.head_ref == 'agent/macro-space-syntax') ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/agent/macro-space-syntax')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -62,7 +64,6 @@ jobs:
           git push origin HEAD:agent/macro-space-syntax
 
   test:
-    if: github.event_name != 'push' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
