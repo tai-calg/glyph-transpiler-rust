@@ -5,6 +5,10 @@ from pathlib import Path
 import sys
 import time
 
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+if str(REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPOSITORY_ROOT))
+
 from glyph.diagram_app import GlyphDiagramApp
 from glyph.io_state_views import build_io_state_views
 
