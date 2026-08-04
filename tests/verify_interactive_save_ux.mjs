@@ -227,10 +227,10 @@ try {
 
   const compiling = await waitForAudit(
     page,
-    value => value.source === queuedSource
-      && value.snapshotStatus === "compiling"
+    value => value.snapshotStatus === "compiling"
       && value.renderState === "compiling"
-      && value.saveInFlight === false,
+      && value.saveInFlight === false
+      && value.editorSource === queuedSource,
     "queued save did not enter background compilation",
   );
   await page.unroute("**/api/save");
@@ -280,9 +280,9 @@ try {
   await page.click("#save");
   await waitForAudit(
     page,
-    value => value.source === localSource
-      && value.snapshotStatus === "compiling"
-      && value.renderState === "compiling",
+    value => value.snapshotStatus === "compiling"
+      && value.renderState === "compiling"
+      && value.editorSource === localSource,
     "final save did not acknowledge and enter compilation",
   );
   const finalCompileFeedback = await page.evaluate(start => {
