@@ -20,7 +20,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   render:
@@ -28,8 +28,6 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: agent/macro-space-syntax
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -79,7 +77,7 @@ jobs:
           run_node tests/verify_enabling_case_rendering.mjs build/state-diagram-regression/enabling-cases.log
           run_node tests/verify_state_diagram_rendering.mjs build/state-diagram-regression/verify.log
           run_node tests/verify_adaptive_state_workspace.mjs build/adaptive-state-workspace/verify.log
-          UPDATE_README_STATE_DIAGRAM=1 python tests/verify_readme_state_snapshot.py \
+          python tests/verify_readme_state_snapshot.py \
             2>&1 | tee -a build/state-diagram-regression/verify.log
           run_node tests/verify_state_diagram_stability.mjs build/state-diagram-stability/verify.log
           run_node tests/verify_transition_layout_transaction.mjs build/transition-layout-transaction/verify.log
@@ -93,19 +91,6 @@ jobs:
           # Additional RTAI UI campaigns are independent end-of-job checks.
           run_node tests/verify_rtai_strict_projection_ui.mjs build/rtai-strict-projection/ui-verify.log
           run_node tests/verify_rtai_semantic_status_ui.mjs build/rtai-semantic-status/verify.log
-
-      - name: Commit refreshed README snapshot
-        if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -f build/state-diagram-regression/motor-safety-motor.png
-          cp build/state-diagram-regression/motor-safety-motor.png docs/images/glyph-studio-state-transition.png
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add docs/images/glyph-studio-state-transition.png
-          git commit -m "Update save-triggered Studio snapshot"
-          git push origin HEAD:agent/macro-space-syntax
 
       - name: Upload rendered diagrams
         if: always()
