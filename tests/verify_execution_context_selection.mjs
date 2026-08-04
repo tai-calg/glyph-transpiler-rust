@@ -58,49 +58,29 @@ async function waitForProjection(page, expectedById) {
   }, expectedById, { timeout: 60_000 });
 }
 
-async function compileSource(page, sourceText) {
+async function saveSource(page, sourceText) {
   await page.locator("#editor").fill(sourceText);
-  const outcome = await page.evaluate(async expected => {
-    clearTimeout(previewTimer);
-    previewTimer = null;
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 60_000);
-    try {
-      const response = await fetch("/api/preview", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ source: expected }),
-        signal: controller.signal,
-      });
-      const next = await response.json();
-      if (!response.ok) {
-        return { status: "error", source: null, diagnostics: JSON.stringify(next) };
-      }
-      snapshot = next;
-      render();
-      window.GlyphExecutionContext?.refresh?.();
-      return {
-        status: next.status || "",
-        source: next.source ?? null,
-        diagnostics: (next.diagnostics || []).map(item => item.message || String(item)).join("\n"),
-      };
-    } catch (error) {
-      return {
-        status: "error",
-        source: null,
-        diagnostics: error?.name === "AbortError" ? "Preview request timed out" : String(error),
-      };
-    } finally {
-      clearTimeout(timeout);
-    }
-  }, sourceText);
+  const previousVersion = await page.evaluate(() => Number(snapshot?.version || 0));
+  await page.click("#save");
+  await page.waitForFunction(({ expected, previous }) => (
+    snapshot?.source === expected
+    && Number(snapshot?.version || 0) > previous
+    && document.querySelector("#status")?.textContent === "ready"
+  ), { expected: sourceText, previous: previousVersion }, { timeout: 60_000 });
+  const outcome = await page.evaluate(() => ({
+    status: snapshot?.status || "",
+    source: snapshot?.source ?? null,
+    diagnostics: (snapshot?.diagnostics || [])
+      .map(item => item.message || String(item))
+      .join("\n"),
+  }));
   assert.notEqual(
     outcome.status,
     "error",
-    `Glyph compilation failed instead of updating the execution context:\n${outcome.diagnostics}`,
+    `Glyph save failed instead of updating the execution context:\n${outcome.diagnostics}`,
   );
-  assert.equal(outcome.status, "ready", `unexpected preview status: ${outcome.status}`);
-  assert.equal(outcome.source, sourceText, "compiled snapshot did not accept the requested source");
+  assert.equal(outcome.status, "ready", `unexpected save status: ${outcome.status}`);
+  assert.equal(outcome.source, sourceText, "saved snapshot did not accept the requested source");
 }
 
 function expectedActions(machine, system) {
@@ -241,7 +221,7 @@ try {
     .replace("  audit(next)\n", "  Receipt(next)\n");
   assert.notEqual(actionlessSource, originalSource, "actionless route replacement did not match source");
   assert(!actionlessSource.includes("  sink audit\n"), "actionless System still declares an unreachable sink");
-  await compileSource(page, actionlessSource);
+  await saveSource(page, actionlessSource);
   await page.waitForFunction(() => (
     [...document.querySelectorAll("#execution-context-select option")]
       .some(option => option.textContent === "DoorAudit / audit_control (no System Action)")
@@ -253,7 +233,7 @@ try {
 
   const renamedSource = actionlessSource.replace("system DoorAudit\n", "system DoorObserve\n");
   assert.notEqual(renamedSource, actionlessSource, "system rename did not match source");
-  await compileSource(page, renamedSource);
+  await saveSource(page, renamedSource);
   await page.waitForFunction(() => {
     const labels = [...document.querySelectorAll("#execution-context-select option")]
       .map(option => option.textContent);
@@ -262,29 +242,26 @@ try {
   }, null, { timeout: 60_000 });
   await waitForProjection(page, noActions);
 
-  let delayedSaveSeen = false;
-  await page.route("**/api/save", async route => {
-    delayedSaveSeen = true;
-    await new Promise(resolve => setTimeout(resolve, 500));
-    await route.fulfill({
-      status: 500,
-      contentType: "application/json",
-      body: JSON.stringify({ error: "stale save failure" }),
-    });
-  });
-  const raceSource = `${renamedSource}\n# stale-save-race\n`;
+  const raceSource = `${renamedSource}\n# save-trigger-only\n`;
+  const beforeInput = await page.evaluate(() => ({
+    source: snapshot?.source || "",
+    version: Number(snapshot?.version || 0),
+  }));
   await page.locator("#editor").fill(raceSource);
-  await page.click("#save");
-  await page.waitForFunction(() => document.querySelector("#status")?.textContent === "busy");
-  await page.click("#compile");
-  await page.waitForFunction(expected => (
-    snapshot?.source === expected
-    && document.querySelector("#status")?.textContent === "ready"
-  ), raceSource, { timeout: 60_000 });
-  await new Promise(resolve => setTimeout(resolve, 700));
-  assert.equal(delayedSaveSeen, true);
+  await new Promise(resolve => setTimeout(resolve, 800));
+  const afterInput = await page.evaluate(() => ({
+    source: snapshot?.source || "",
+    version: Number(snapshot?.version || 0),
+  }));
+  assert.deepEqual(
+    afterInput,
+    beforeInput,
+    "typing changed the rendered snapshot before Save",
+  );
+  await saveSource(page, raceSource);
   assert.equal(await page.locator("#status").textContent(), "ready");
-  await page.unroute("**/api/save");
+
+  await saveSource(page, originalSource);
 
   const expectedConsoleError = message => (
     message.startsWith("StateTransitionIR rendering failed TypeError: Failed to fetch")
@@ -309,4 +286,4 @@ try {
   await stopProcess();
 }
 
-console.log("verified complete, safe, live, localized execution-context selection and SVG projection");
+console.log("verified complete, safe, save-triggered, localized execution-context selection and SVG projection");
