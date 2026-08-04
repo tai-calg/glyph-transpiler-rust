@@ -45,7 +45,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p build/checked-system-context-io build/execution-context-selection build/rtai-semantic-status build/rtai-strict-projection build/state-diagram-regression build/state-diagram-stability build/adaptive-state-workspace build/diagram-editor-exports build/diagram-canvas-viewport build/localized-semantic-canvas build/transition-label-readability build/transition-layout-transaction build/transition-semantic-readability build/label-identifier-interactions
+          mkdir -p build/checked-system-context-io build/execution-context-selection build/rtai-semantic-status build/rtai-strict-projection build/state-diagram-regression build/state-diagram-stability build/adaptive-state-workspace build/transition-arrow-clearance build/diagram-editor-exports build/diagram-canvas-viewport build/localized-semantic-canvas build/transition-label-readability build/transition-layout-transaction build/transition-semantic-readability build/label-identifier-interactions
 
           run_node() {
             local script="$1"
@@ -60,6 +60,7 @@ jobs:
           python -m unittest discover -s tests -p 'test_rtai_targeted_witnesses.py'
           python -m unittest discover -s tests -p 'test_rtai_witness_generation.py'
           python -m unittest discover -s tests -p 'test_transition_action_target_independence.py'
+          python -m unittest discover -s tests -p 'test_transition_arrow_clearance.py'
           python -m unittest discover -s tests -p 'test_transition_enabling_cases.py'
           python -m unittest discover -s tests -p 'test_transition_execution_context_selector.py'
           python -m unittest discover -s tests -p 'test_transition_input_provenance.py'
@@ -77,6 +78,7 @@ jobs:
           run_node tests/verify_enabling_case_rendering.mjs build/state-diagram-regression/enabling-cases.log
           run_node tests/verify_state_diagram_rendering.mjs build/state-diagram-regression/verify.log
           run_node tests/verify_adaptive_state_workspace.mjs build/adaptive-state-workspace/verify.log
+          run_node tests/verify_transition_arrow_clearance.mjs build/transition-arrow-clearance/verify.log
           python tests/verify_readme_state_snapshot.py \
             2>&1 | tee -a build/state-diagram-regression/verify.log
           run_node tests/verify_state_diagram_stability.mjs build/state-diagram-stability/verify.log
@@ -107,6 +109,7 @@ jobs:
             build/state-diagram-regression/**
             build/state-diagram-stability/**
             build/adaptive-state-workspace/**
+            build/transition-arrow-clearance/**
             build/diagram-editor-exports/**
             build/diagram-canvas-viewport/**
             build/localized-semantic-canvas/**
