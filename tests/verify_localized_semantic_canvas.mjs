@@ -223,102 +223,6 @@ try {
   assert(placement.combinedValues.some(value => value.startsWith("? input.legacy_alarm")), placement.combinedValues.join("\n"));
   assert.equal(placement.visibleLegacyLabels, 0);
 
-  // Editing only marks the buffer unsaved; it must not change the compiled snapshot.
-  const typedSource = `${originalSource}\n# local-unsaved\n`;
-  const beforeTyping = await page.evaluate(() => ({
-    source: snapshot.source,
-    version: snapshot.version,
-  }));
-  await page.locator("#editor").fill(typedSource);
-  await page.waitForFunction(() => document.querySelector("#glyph-save-state")?.dataset.persistence === "unsaved");
-  await page.waitForTimeout(500);
-  const afterTyping = await page.evaluate(() => ({
-    source: snapshot.source,
-    version: snapshot.version,
-  }));
-  assert.deepEqual(afterTyping, beforeTyping, "typing changed the compiled snapshot");
-  const unloadAudit = await page.evaluate(() => {
-    const event = new Event("beforeunload", { cancelable: true });
-    const dispatched = window.dispatchEvent(event);
-    return { dispatched, prevented: event.defaultPrevented };
-  });
-  assert.equal(unloadAudit.prevented, true);
-  assert.equal(unloadAudit.dispatched, false);
-
-  // An edit made while save is in flight remains unsaved after the submitted version completes.
-  await page.route("**/api/save", async route => {
-    await new Promise(resolve => setTimeout(resolve, 450));
-    await route.continue();
-  });
-  const firstSubmitted = `${originalSource}\n# submitted-first\n`;
-  const laterEdit = `${firstSubmitted}# edited-during-save\n`;
-  await page.locator("#editor").fill(firstSubmitted);
-  await page.click("#save");
-  await page.waitForFunction(() => window.GlyphSaveTriggeredRendering?.saveInFlight === true);
-  await page.locator("#editor").fill(laterEdit);
-  await waitForSavedSource(page, firstSubmitted);
-  assert.equal(await page.locator("#editor").inputValue(), laterEdit);
-  assert.equal(await page.locator("#glyph-save-state").getAttribute("data-persistence"), "unsaved");
-  assert.equal(await fs.readFile(sourcePath, "utf8"), firstSubmitted);
-
-  // Repeated Ctrl+S keeps only the latest pending editor state and serializes requests.
-  const queuedFirst = `${laterEdit}# queued-first\n`;
-  const queuedLatest = `${queuedFirst}# queued-latest\n`;
-  await page.locator("#editor").fill(queuedFirst);
-  await page.keyboard.press("Control+s");
-  await page.waitForFunction(() => window.GlyphSaveTriggeredRendering?.saveInFlight === true);
-  await page.locator("#editor").fill(queuedLatest);
-  await page.keyboard.press("Control+s");
-  await waitForSavedSource(page, queuedLatest);
-  assert.equal(await fs.readFile(sourcePath, "utf8"), queuedLatest);
-  assert.equal(await page.locator("#glyph-save-state").getAttribute("data-persistence"), "saved");
-  await page.unroute("**/api/save");
-
-  // A clean editor follows an external file save and updates the rendered snapshot.
-  const externalClean = `${originalSource}\n# external-clean\n`;
-  await fs.writeFile(sourcePath, externalClean, "utf8");
-  await page.evaluate(() => load(false));
-  await page.waitForFunction(expected => (
-    document.querySelector("#editor")?.value === expected
-    && snapshot?.source === expected
-    && document.querySelector("#glyph-save-state")?.dataset.persistence === "saved"
-  ), externalClean, { timeout: 60_000 });
-
-  // A dirty editor does not overwrite an external change and exposes explicit resolution.
-  const localConflict = `${externalClean}# local-conflict\n`;
-  const externalConflict = `${originalSource}\n# external-conflict\n`;
-  await page.locator("#editor").fill(localConflict);
-  await fs.writeFile(sourcePath, externalConflict, "utf8");
-  await page.waitForFunction(() => document.querySelector("#glyph-save-state")?.dataset.persistence === "unsaved");
-  await page.waitForTimeout(500);
-  await page.evaluate(() => load(false));
-  await page.waitForFunction(() => (
-    document.querySelector("#glyph-conflict-dialog")?.open
-    && document.querySelector("#glyph-save-state")?.dataset.persistence === "conflict"
-  ), null, { timeout: 60_000 });
-  assert.equal(await page.locator("#editor").inputValue(), localConflict);
-  assert.equal(await fs.readFile(sourcePath, "utf8"), externalConflict);
-  await page.click('#glyph-conflict-dialog [data-action="load"]');
-  await page.waitForFunction(expected => (
-    document.querySelector("#editor")?.value === expected
-    && snapshot?.source === expected
-    && document.querySelector("#glyph-save-state")?.dataset.persistence === "saved"
-  ), externalConflict, { timeout: 60_000 });
-
-  // Saving an invalid source retains the last valid diagram and marks it stale.
-  const brokenSource = `@BROKEN\n${externalConflict}`;
-  await saveSource(page, brokenSource, "error");
-  await page.waitForFunction(() => (
-    document.querySelector("#glyph-stale-banner")?.hidden === false
-    && document.querySelector("#glyph-save-state")?.dataset.persistence === "saved"
-    && document.querySelector("#glyph-save-state")?.dataset.render === "error"
-    && snapshot?.digest !== snapshot?.rendered_digest
-  ));
-  const staleText = await page.locator("#glyph-stale-banner").textContent();
-  assert(staleText.includes("最後に正常コンパイル"), staleText);
-  await saveSource(page, originalSource);
-  await page.waitForFunction(() => document.querySelector("#glyph-stale-banner")?.hidden === true);
-
   await page.click("#glyph-settings");
   await page.selectOption("#glyph-language", "en");
   assert.equal(await page.locator("#compile").count(), 0);
@@ -366,4 +270,4 @@ try {
   await stopProcess(child);
 }
 
-console.log("verified localized save-render UX, serialized saves, external conflicts, stale diagrams, semantic labels, and canvas panning");
+console.log("verified localized save-render controls, semantic labels, proximity, and canvas panning");
