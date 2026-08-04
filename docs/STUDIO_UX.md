@@ -345,7 +345,43 @@ artifact_publish_failed
 
 If persistence fails, the source file is not reported as saved and no compile operation is queued.
 
-## 12. Acceptance conditions
+## 12. Interactive responsiveness gate
+
+The release workflow runs `tests/verify_interactive_save_ux.mjs` against the production Studio launch path with deliberately delayed work:
+
+```text
+save HTTP acknowledgement delay: 900 ms
+view/compile delay:             2500 ms
+```
+
+While those delays are active, the test performs all of the following rather than waiting passively:
+
+- edit the source during save acknowledgement,
+- switch between I/O and State views during save,
+- press Save again and verify latest-buffer queueing,
+- switch views during background compilation,
+- open and close Settings during compilation,
+- edit the source again during compilation,
+- verify the prior committed diagram remains visible with an explicit stale banner,
+- verify the newer unsaved editor buffer is not overwritten when the older compilation completes,
+- save the final editor buffer and reach `Saved · Rendered`.
+
+The browser gate rejects regressions beyond these bounds:
+
+```text
+save-state feedback                 <= 250 ms
+editor input during save/compile    <= 300 ms
+view/settings interaction           <= 350 ms
+compile-state acknowledgement       <= 750 ms
+2500 ms delayed final save cycle    <= 4500 ms
+requestAnimationFrame p95           <= 120 ms
+maximum animation-frame gap         <= 400 ms
+maximum browser long task           <= 250 ms
+```
+
+The test also rejects browser console errors, missing diagrams, hidden diagram stages, incomplete layout publication, lost editor changes, invalid state ordering, and stale-banner discontinuity. It emits a JSON measurement report and screenshots during compilation and after final publication as workflow artifacts.
+
+## 13. Acceptance conditions
 
 - Typing does not change the active compiled snapshot or diagram version.
 - The delivered HTML contains no compile button, `/api/preview` request, preview timer, preview controller, or Ctrl/Cmd+Enter compile shortcut.
@@ -375,10 +411,11 @@ If persistence fails, the source file is not reported as saved and no compile op
 - Existing Studio views remain available.
 - View groups, filtering, resizing, editor toggle, theme toggle, and keyboard shortcuts are present.
 - Diagnostics navigate to source lines when a line can be identified.
+- The interactive responsiveness gate passes under delayed save and compile work.
 - JavaScript passes `node --check`.
 - Python tests, Glyph 0.4 stabilization, legacy compatibility, Rust tests, demos, and Clippy pass.
 
-## 13. Non-goals
+## 14. Non-goals
 
 This change does not implement:
 
