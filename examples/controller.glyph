@@ -11,12 +11,12 @@
 # @A/@E = always/eventually
 # 式末尾の ? = 失敗伝播
 
-@LOW=10.0
-@HOT=80.0
-@MAX=1000
-@BAD=!finite(v)|!finite(t)|v<0.0
-@BLOCK=s.v<LOW|s.t>HOT|s.r==0
-@PIPE=exec(cmd(decode(v,t,r)?))
+@LOW 10.0
+@HOT 80.0
+@MAX 1000
+@BAD !finite(v)|!finite(t)|v<0.0
+@BLOCK s.v<LOW|s.t>HOT|s.r==0
+@PIPE exec(cmd(decode(v,t,r)?))
 
 *S(v,t:F,r:U)
 +C=Stop|Run(U)
