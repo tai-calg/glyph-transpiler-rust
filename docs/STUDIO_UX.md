@@ -2,10 +2,10 @@
 
 ## 1. Objective
 
-Glyph Studio is a design workspace, not only a generated-file viewer. The interface should keep three activities visible and distinct:
+Glyph Studio is a design workspace, not only a generated-file viewer. The interface keeps three activities visible and distinct:
 
 1. edit Glyph source,
-2. compile or preview the design,
+2. save and compile the design,
 3. inspect orthogonal design views.
 
 The UI must not derive new Glyph semantics. All design views continue to come from the validated typed design and `glyph.studio-views` projection.
@@ -45,29 +45,33 @@ Each view has a stable title, short purpose statement, item count, and local fil
 
 ## 3. Editing workflow
 
-### Preview
+### Edit
 
-`Preview` compiles the current editor contents without writing the Glyph source file.
+Typing changes only the editor buffer and its presentation state.
+
+```text
+editor input
+  -> mark Unsaved
+  -> update line numbers and lightweight editor presentation
+```
+
+Typing does not invoke the preprocessor, parser, type checker, IR builders, diagram layout, or browser rendering. There is no debounced compile preview and no compile-on-keystroke path.
+
+### Save and render
+
+`Save & Render` atomically writes the editor contents to the source file and rebuilds the Studio snapshot.
 
 ```text
 editor text
-    ↓ POST /api/preview
-GlyphStudio.preview_source
+    ↓ POST /api/save
+atomic source write
     ↓
-StudioSnapshot and generated artifacts
+raw macro preprocessing
+    ↓
+parse / type check / IR generation
+    ↓
+Studio snapshot and diagram rendering
 ```
-
-Preview changes the active Studio snapshot and generated outputs, but the source file remains unchanged.
-
-Keyboard shortcut:
-
-```text
-Ctrl/Cmd + Enter
-```
-
-### Save
-
-`Save` atomically writes the editor contents to the source file and rebuilds the Studio snapshot.
 
 Keyboard shortcut:
 
@@ -75,17 +79,19 @@ Keyboard shortcut:
 Ctrl/Cmd + S
 ```
 
+Saving is the only editor action that starts compilation and diagram rendering. A compilation error does not undo a successful source-file write.
+
 ### Reload
 
 `Reload` discards the current editor contents and rebuilds from the file on disk. When the editor is dirty, the UI asks before discarding changes.
 
-### Auto preview
+### External file changes
 
-Auto preview is opt-in. It debounces editor changes before invoking the same `/api/preview` endpoint. It never writes the source file.
+The file watcher rebuilds only after the source file on disk changes. This supports saves made by an external editor without reintroducing compile-on-keystroke behavior inside Glyph Studio.
 
 ## 4. State communication
 
-The interface separates two independent states.
+The interface separates persistence and compilation state.
 
 ### Persistence state
 
@@ -100,10 +106,12 @@ Unsaved
 starting
 ready
 error
-busy: previewing / saving / reloading
+busy: saving / reloading / external-file rebuild
 ```
 
 Compilation diagnostics are shown directly under the editor and in the current view. Diagnostics with a source line navigate to that line.
+
+When compilation fails, the saved source remains on disk. The viewer may retain the last valid diagram, but it must not present that diagram as the result of the invalid source.
 
 ## 5. Workspace layout
 
@@ -142,7 +150,8 @@ The source editor adds:
 - line and character count,
 - two-space Tab insertion,
 - clickable diagnostics,
-- source navigation from cards, rows, graph nodes, and obligations.
+- source navigation from cards, rows, graph nodes, and obligations,
+- exact identifier occurrence highlighting.
 
 The editor remains a plain text editor. Syntax highlighting, completion, and structural editing are separate future capabilities and should not be approximated with an independent source parser in the browser.
 
@@ -167,15 +176,21 @@ Generated Rust, Host scaffold, Manual code, and typed design use a common code s
 - `GlyphProjectStudio` creates the initial scaffold when absent,
 - subsequent contents remain user-owned.
 
-## 10. Watcher and preview interaction
+## 10. Watcher interaction
 
-The file watcher initializes its observed digest from the current disk file. An unsaved preview therefore remains active until the file actually changes, rather than being immediately replaced by the watcher's first polling iteration.
+The file watcher initializes its observed digest from the current disk file. Unsaved editor contents are not compilation input and are not replaced unless the user explicitly reloads or the disk file actually changes.
+
+A source file saved outside Glyph Studio enters the same preprocessing and compilation pipeline as `Save & Render`.
 
 ## 11. Acceptance conditions
 
-- Preview compiles unsaved source without changing the source file.
-- Reload restores the disk source after a preview.
-- The watcher does not replace a preview when the disk file is unchanged.
+- Typing does not change the active compiled snapshot or diagram version.
+- The delivered HTML contains no compile button, `/api/preview` request, preview timer, or Ctrl/Cmd+Enter compile shortcut.
+- Save and Ctrl/Cmd+S write the source before preprocessing, compilation, and diagram rendering.
+- A macro changed through `/api/save` is reprocessed before the new diagram snapshot is published.
+- A syntax error can be saved, reported, corrected, and successfully rebuilt.
+- An external file save is detected and rebuilt through the same compilation pipeline.
+- Reload restores the disk source.
 - Existing Studio views remain available.
 - View groups, filtering, resizing, editor toggle, theme toggle, and keyboard shortcuts are present.
 - Diagnostics navigate to source lines when a line can be identified.
