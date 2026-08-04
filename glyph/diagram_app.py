@@ -2,16 +2,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from http import HTTPStatus
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import errno
 import hashlib
+from http import HTTPStatus
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
 import threading
-import uuid
 from typing import Any, Callable
+import uuid
 import webbrowser
 
 from .compiler import GlyphError
@@ -147,6 +147,8 @@ class GlyphDiagramApp:
             return self._snapshot.to_dict(self.input_path, self.output_path)
 
     def rebuild(self, source: str | None = None) -> DiagramSnapshot:
+        """Synchronously rebuild for startup and non-interactive callers."""
+
         with self._compile_lock:
             if source is None:
                 source = self.input_path.read_text(encoding="utf-8")
@@ -202,18 +204,18 @@ class GlyphDiagramApp:
             return snapshot
 
     def _read_disk_source(self) -> str:
-    try:
-        return self.input_path.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        return ""
-    except PermissionError as exc:
-        raise SaveWriteError(
-            "source_read_permission_denied",
-            str(exc),
-            HTTPStatus.FORBIDDEN,
-        ) from exc
-    except OSError as exc:
-        raise SaveWriteError("source_read_failed", str(exc)) from exc
+        try:
+            return self.input_path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return ""
+        except PermissionError as exc:
+            raise SaveWriteError(
+                "source_read_permission_denied",
+                str(exc),
+                HTTPStatus.FORBIDDEN,
+            ) from exc
+        except OSError as exc:
+            raise SaveWriteError("source_read_failed", str(exc)) from exc
 
     def _persist_source(
         self,
@@ -322,8 +324,7 @@ class GlyphDiagramApp:
                 try:
                     _atomic_write(
                         self.output_path,
-                        json.dumps(views, ensure_ascii=False, indent=2) + "
-",
+                        json.dumps(views, ensure_ascii=False, indent=2) + "\n",
                     )
                 except OSError as exc:
                     views = None
@@ -373,9 +374,7 @@ class GlyphDiagramApp:
             source_digest,
             operation_id,
         )
-        self._queue_compile(
-            CompileRequest(operation_id, source, source_digest)
-        )
+        self._queue_compile(CompileRequest(operation_id, source, source_digest))
         return snapshot
 
     def save_source_async(
@@ -395,9 +394,7 @@ class GlyphDiagramApp:
                 source_digest,
                 operation_id,
             )
-            self._queue_compile(
-                CompileRequest(operation_id, source, source_digest)
-            )
+            self._queue_compile(CompileRequest(operation_id, source, source_digest))
             return snapshot
 
     def save_source(
@@ -407,6 +404,7 @@ class GlyphDiagramApp:
         base_digest: str | None = None,
     ) -> DiagramSnapshot:
         """Synchronous compatibility entrypoint for non-interactive callers."""
+
         with self._save_lock:
             self._persist_source(source, base_digest=base_digest)
             return self.rebuild(source)
@@ -526,56 +524,56 @@ class GlyphDiagramApp:
 
             def do_POST(self) -> None:
                 if self.path == "/api/save":
-            body = self._body()
-            if body is None:
-                return
-            source = body.get("source")
-            base_digest = body.get("base_digest")
-            if not isinstance(source, str):
-                self._json(
-                    {"error": "source must be text"},
-                    HTTPStatus.BAD_REQUEST,
-                )
-                return
-            if base_digest is not None and not isinstance(base_digest, str):
-                self._json(
-                    {"error": "base_digest must be text"},
-                    HTTPStatus.BAD_REQUEST,
-                )
-                return
-            try:
-                app.save_source_async(source, base_digest=base_digest)
-            except SaveConflictError as exc:
-                self._json(
-                    {
-                        "error": "save_conflict",
-                        "message": str(exc),
-                        "current_source": exc.current_source,
-                        "current_digest": exc.current_digest,
-                        "state": app.state_dict(),
-                    },
-                    HTTPStatus.CONFLICT,
-                )
-                return
-            except SaveWriteError as exc:
-                self._json(
-                    {"error": exc.code, "message": str(exc)},
-                    exc.status,
-                )
-                return
-            self._json(app.state_dict(), HTTPStatus.ACCEPTED)
-            return
-        if self.path == "/api/rebuild":
-            try:
-                app.rebuild_async()
-            except SaveWriteError as exc:
-                self._json(
-                    {"error": exc.code, "message": str(exc)},
-                    exc.status,
-                )
-                return
-            self._json(app.state_dict(), HTTPStatus.ACCEPTED)
-            return
+                    body = self._body()
+                    if body is None:
+                        return
+                    source = body.get("source")
+                    base_digest = body.get("base_digest")
+                    if not isinstance(source, str):
+                        self._json(
+                            {"error": "source must be text"},
+                            HTTPStatus.BAD_REQUEST,
+                        )
+                        return
+                    if base_digest is not None and not isinstance(base_digest, str):
+                        self._json(
+                            {"error": "base_digest must be text"},
+                            HTTPStatus.BAD_REQUEST,
+                        )
+                        return
+                    try:
+                        app.save_source_async(source, base_digest=base_digest)
+                    except SaveConflictError as exc:
+                        self._json(
+                            {
+                                "error": "save_conflict",
+                                "message": str(exc),
+                                "current_source": exc.current_source,
+                                "current_digest": exc.current_digest,
+                                "state": app.state_dict(),
+                            },
+                            HTTPStatus.CONFLICT,
+                        )
+                        return
+                    except SaveWriteError as exc:
+                        self._json(
+                            {"error": exc.code, "message": str(exc)},
+                            exc.status,
+                        )
+                        return
+                    self._json(app.state_dict(), HTTPStatus.ACCEPTED)
+                    return
+                if self.path == "/api/rebuild":
+                    try:
+                        app.rebuild_async()
+                    except SaveWriteError as exc:
+                        self._json(
+                            {"error": exc.code, "message": str(exc)},
+                            exc.status,
+                        )
+                        return
+                    self._json(app.state_dict(), HTTPStatus.ACCEPTED)
+                    return
                 self._json({"error": "not found"}, HTTPStatus.NOT_FOUND)
 
         return ThreadingHTTPServer((host, port), Handler)
