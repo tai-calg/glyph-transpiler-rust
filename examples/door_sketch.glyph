@@ -5,7 +5,7 @@ system Door
   sink lock
   sink log
 
-@MAX 1000
+@MAX=1000
 
 *In(open,auth,stop:B,value:U)
 +C=Stop|Run(U)
