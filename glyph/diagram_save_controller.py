@@ -8,10 +8,10 @@ _MARKER = "glyph-save-triggered-rendering-v3"
 
 _STYLE = r"""
 <style id="glyph-save-triggered-rendering-v3-style">
-.glyph-save-state{display:flex;align-items:center;gap:6px;white-space:nowrap;font-size:11px;color:var(--muted);border-radius:7px;padding:3px 6px}
+.glyph-save-state{display:flex;align-items:center;gap:6px;white-space:nowrap;font-size:11px;color:var(--muted)}
 .glyph-save-state strong{font-weight:750;color:var(--text)}
 .glyph-save-state[data-persistence="unsaved"] .glyph-persistence{color:var(--amber)}
-.glyph-save-state[data-persistence="conflict"]{cursor:pointer;outline:1px solid rgba(255,122,139,.38)}
+.glyph-save-state[data-persistence="conflict"]{cursor:pointer;outline:1px solid rgba(255,122,139,.38);border-radius:7px;padding:3px 6px}
 .glyph-save-state[data-persistence="conflict"] .glyph-persistence{color:var(--red)}
 .glyph-save-state[data-render="error"] .glyph-render{color:var(--red)}
 .glyph-save-state[data-render="saving"] .glyph-render,.glyph-save-state[data-render="compiling"] .glyph-render{color:var(--amber)}
