@@ -28,19 +28,40 @@ _SCRIPT = r"""
 <script id="glyph-state-node-interaction-layer-v1-script">
 (()=>{
 const MARKER="glyph-state-node-interaction-layer-v1";
+const VIEWPORT_SETTLE_MS=900;
+const MAX_TRANSIENT_DISTANCE=260;
+let recentViewportChange=0;
+const markViewportChange=()=>{recentViewportChange=performance.now()};
+function distanceToRect(rect,x,y){
+  const dx=x<rect.left?rect.left-x:x>rect.right?x-rect.right:0;
+  const dy=y<rect.top?rect.top-y:y>rect.bottom?y-rect.bottom:0;
+  return Math.hypot(dx,dy);
+}
 function stateNodeAt(stage,x,y){
   const nodes=[...stage.querySelectorAll(".state-node")];
-  const candidates=nodes.filter(node=>{
+  const exact=nodes.filter(node=>{
     const rect=node.getBoundingClientRect();
     return x>=rect.left&&x<=rect.right&&y>=rect.top&&y<=rect.bottom;
   });
-  candidates.sort((left,right)=>{
+  exact.sort((left,right)=>{
     const leftRect=left.getBoundingClientRect();
     const rightRect=right.getBoundingClientRect();
     return leftRect.width*leftRect.height-rightRect.width*rightRect.height;
   });
-  return candidates[0]||null;
+  if(exact[0])return exact[0];
+  if(performance.now()-recentViewportChange>VIEWPORT_SETTLE_MS)return null;
+  const nearest=nodes.map(node=>({
+    node,
+    distance:distanceToRect(node.getBoundingClientRect(),x,y),
+  })).sort((left,right)=>left.distance-right.distance)[0];
+  return nearest&&nearest.distance<=MAX_TRANSIENT_DISTANCE?nearest.node:null;
 }
+document.addEventListener("click",event=>{
+  if(event.target?.closest?.("#diagram-zoom-out,#diagram-zoom-in,#diagram-fit,#diagram-view-reset")){
+    markViewportChange();
+  }
+},true);
+document.addEventListener("glyph-diagram-viewport-change",markViewportChange,true);
 document.addEventListener("pointerdown",event=>{
   if(event.button!==0||event.target?.closest?.(".state-node"))return;
   const stage=event.target?.closest?.(".graph-stage");
@@ -69,7 +90,12 @@ document.addEventListener("pointerdown",event=>{
   if(redirected.defaultPrevented)event.preventDefault();
   event.stopImmediatePropagation();
 },true);
-window.glyphStateNodeInteractionLayer={marker:MARKER,version:1};
+window.glyphStateNodeInteractionLayer={
+  marker:MARKER,
+  version:2,
+  markViewportChange,
+  stateNodeAt,
+};
 })();
 </script>
 """
