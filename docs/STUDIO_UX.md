@@ -102,7 +102,7 @@ The browser can query it through:
 GET /api/save-status/<request_id>
 ```
 
-A network timeout therefore does not become an unknown final result. The browser continues tracking or resubmits the same idempotent request until the operation reaches a recorded result. The editor remains available and later save shortcuts are queued against the latest buffer.
+A network timeout therefore does not become an unknown final result. The browser continues tracking or resubmits the same idempotent request until the operation reaches a recorded result. The editor and Save shortcut remain available; later saves are queued against the latest buffer.
 
 ### Background compilation
 
