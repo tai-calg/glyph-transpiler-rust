@@ -154,6 +154,14 @@ BAD
         self.assertIn("x + 1 * 2", rust)
         self.assertNotIn("(x + 1) * 2", rust)
 
+    def test_space_raw_macro_body_can_start_with_parenthesis(self) -> None:
+        result = preprocess_source("@NEXT (x+1)\n>f(x:I):I=NEXT\n")
+        self.assertEqual(result.source, ">f(x:I):I=(x+1)\n")
+
+    def test_space_raw_macro_body_can_start_with_equals(self) -> None:
+        result = preprocess_source("@ALIAS =Count=U\nALIAS\n")
+        self.assertEqual(result.source, "=Count=U\n")
+
     def test_incremental_compiler_reprocesses_space_macro_changes(self) -> None:
         compiler = IncrementalCompiler()
         first = compiler.compile_text("@MAX 10\n>f():I=MAX\n", "macro.glyph")
