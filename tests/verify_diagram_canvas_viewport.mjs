@@ -171,91 +171,36 @@ async function assertAllDiagramElementsVisible(page, label) {
   return audit;
 }
 
-async function hitTestableStateNode(page) {
-  return page.evaluate(() => {
-    const nodes = [...document.querySelectorAll(".state-node")];
-    const fractions = [0.5, 0.35, 0.65, 0.2, 0.8];
-    const rejected = [];
-    for (let index = 0; index < nodes.length; index += 1) {
-      const node = nodes[index];
-      const rect = node.getBoundingClientRect();
-      for (const yFraction of fractions) {
-        for (const xFraction of fractions) {
-          const x = rect.left + rect.width * xFraction;
-          const y = rect.top + rect.height * yFraction;
-          const hit = document.elementFromPoint(x, y);
-          if (hit?.closest?.(".state-node") === node) {
-            return {
-              index,
-              x,
-              y,
-              nodeName: node.querySelector(".state-name")?.textContent?.trim() || "",
-              hitTag: hit.tagName,
-              hitClass: hit.className?.baseVal || hit.className || "",
-              rect: {
-                left: rect.left,
-                top: rect.top,
-                right: rect.right,
-                bottom: rect.bottom,
-                width: rect.width,
-                height: rect.height,
-              },
-            };
-          }
-        }
-      }
-      const center = document.elementFromPoint(
-        rect.left + rect.width / 2,
-        rect.top + rect.height / 2,
-      );
-      rejected.push({
-        index,
-        nodeName: node.querySelector(".state-name")?.textContent?.trim() || "",
-        centerTag: center?.tagName || "",
-        centerClass: center?.className?.baseVal || center?.className || "",
-        rect: {
-          left: rect.left,
-          top: rect.top,
-          right: rect.right,
-          bottom: rect.bottom,
-          width: rect.width,
-          height: rect.height,
-        },
-      });
-    }
-    return { rejected };
-  });
-}
-
 async function dragNode(page, deltaX, deltaY) {
-  const target = await hitTestableStateNode(page);
-  assert(
-    Number.isInteger(target?.index),
-    `no hit-testable state node: ${JSON.stringify(target)}`,
-  );
-  const node = page.locator(".state-node").nth(target.index);
+  const node = page.locator(".state-node").first();
+  const box = await node.boundingBox();
+  assert(box, "state node has no bounding box");
   const before = await node.evaluate(element => Number.parseFloat(element.style.left));
-  const beforeAudit = await node.evaluate((element, point) => {
-    const stage = element.closest(".graph-stage");
-    const hit = document.elementFromPoint(point.x, point.y);
+  const startX = box.x + box.width / 2;
+  const startY = box.y + box.height / 2;
+  const beforeAudit = await page.evaluate(({ x, y }) => {
+    const node = document.querySelector(".state-node");
+    const stage = node?.closest(".graph-stage");
+    const hit = document.elementFromPoint(x, y);
+    const rect = node?.getBoundingClientRect();
     return {
-      targetIndex: point.index,
-      targetName: point.nodeName,
       hitTag: hit?.tagName || "",
       hitClass: hit?.className?.baseVal || hit?.className || "",
+      hitText: hit?.textContent?.trim()?.slice(0, 80) || "",
       hitNode: hit?.closest?.(".state-node")?.querySelector(".state-name")?.textContent?.trim() || "",
-      pointerEvents: getComputedStyle(element).pointerEvents,
-      zIndex: getComputedStyle(element).zIndex,
-      rect: element.getBoundingClientRect(),
+      nodeName: node?.querySelector(".state-name")?.textContent?.trim() || "",
+      pointerEvents: node ? getComputedStyle(node).pointerEvents : "",
+      zIndex: node ? getComputedStyle(node).zIndex : "",
+      rect,
       scale: Number.parseFloat(stage?.dataset.viewportScale || "1"),
       layout: stage?.dataset.transitionLayoutState || "",
       publication: stage?.dataset.transitionPublicationReady || "",
       constrained: stage?.dataset.transitionNodeDragConstrained || "",
     };
-  }, target);
-  await page.mouse.move(target.x, target.y);
+  }, { x: startX, y: startY });
+  await page.mouse.move(startX, startY);
   await page.mouse.down({ button: "left" });
-  await page.mouse.move(target.x + deltaX, target.y + deltaY, { steps: 16 });
+  await page.mouse.move(startX + deltaX, startY + deltaY, { steps: 16 });
   await page.mouse.up({ button: "left" });
   const afterAudit = await node.evaluate(element => {
     const stage = element.closest(".graph-stage");
