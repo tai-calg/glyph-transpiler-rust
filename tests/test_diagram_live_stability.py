@@ -85,13 +85,13 @@ class DiagramLiveStabilityTests(unittest.TestCase):
             )
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_save_compilation_is_serialized_by_the_app(self) -> None:
+    def test_background_save_compilation_is_serialized_and_latest_wins(self) -> None:
         install_serial_compilation()
         with tempfile.TemporaryDirectory() as directory:
             source_path = Path(directory) / "counter.glyph"
             source_path.write_text(SOURCE, encoding="utf-8")
             app = GlyphDiagramApp(source_path)
-            app.rebuild()
+            initial = app.rebuild()
 
             original_compile = app.compiler.compile_text
             entered = threading.Event()
@@ -117,30 +117,38 @@ class DiagramLiveStabilityTests(unittest.TestCase):
             second = SOURCE + "\n# second\n"
             latest = SOURCE + "\n# latest\n"
 
-            threads = [
-                threading.Thread(
-                    target=app.save_source,
-                    args=(first,),
-                    kwargs={"force": True},
-                ),
-                threading.Thread(
-                    target=app.save_source,
-                    args=(second,),
-                    kwargs={"force": True},
-                ),
-            ]
-            threads[0].start()
+            first_snapshot = app.save_source_async(
+                first,
+                base_digest=initial.digest,
+            )
+            self.assertEqual(first_snapshot.status, "compiling")
             self.assertTrue(entered.wait(timeout=1.0))
-            threads[1].start()
-            for thread in threads:
-                thread.join(timeout=3.0)
-                self.assertFalse(thread.is_alive())
 
-            app.save_source(latest, force=True)
+            second_snapshot = app.save_source_async(
+                second,
+                base_digest=first_snapshot.digest,
+            )
+            latest_snapshot = app.save_source_async(
+                latest,
+                base_digest=second_snapshot.digest,
+            )
+            self.assertEqual(latest_snapshot.source, latest)
+
+            deadline = time.monotonic() + 3.0
+            while time.monotonic() < deadline:
+                snapshot = app.snapshot
+                if snapshot.source == latest and snapshot.status == "ready":
+                    break
+                time.sleep(0.02)
+            else:
+                self.fail(f"latest compilation did not complete: {app.snapshot}")
+
             self.assertEqual(max_active, 1)
             self.assertEqual(app.snapshot.source, latest)
             self.assertEqual(app.snapshot.status, "ready")
+            self.assertEqual(app.snapshot.digest, app.snapshot.rendered_digest)
             self.assertEqual(source_path.read_text(encoding="utf-8"), latest)
+            app.stop()
 
 
 if __name__ == "__main__":
