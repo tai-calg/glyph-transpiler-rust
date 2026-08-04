@@ -30,7 +30,7 @@ function boundaryDistance(node,direction){
   const horizontal=ay>epsilon?halfHeight/ay:Number.POSITIVE_INFINITY;
   if(Number.isFinite(horizontal)&&ax*horizontal<=halfWidth-radius+.01)return horizontal;
   if(radius<=epsilon)return Math.min(vertical,horizontal);
-  const cornerX=(ux<0?-1:1)*(halfWidth-radius),cornerY=(uy<0?-1:1)*(halfHeight-radius-radius+radius),projection=ux*cornerX+uy*cornerY;
+  const cornerX=(ux<0?-1:1)*(halfWidth-radius),cornerY=(uy<0?-1:1)*(halfHeight-radius),projection=ux*cornerX+uy*cornerY;
   const discriminant=Math.max(0,projection*projection-(cornerX*cornerX+cornerY*cornerY-radius*radius));
   return Math.max(0,projection+Math.sqrt(discriminant));
 }
