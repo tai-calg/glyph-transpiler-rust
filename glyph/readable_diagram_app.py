@@ -20,6 +20,7 @@ from .diagram_live_stability import (
 from .diagram_locale import enhance_diagram_locale_html
 from .diagram_middle_drag_zoom import enhance_diagram_middle_drag_zoom_html
 from .diagram_rendered_geometry_adapter import enhance_diagram_rendered_geometry_html
+from .diagram_save_trigger import enhance_save_triggered_rendering_html
 from .diagram_workspace_layout import enhance_workspace_layout_html
 from .editor_identifier_highlight import enhance_editor_identifier_highlight_html
 from .state_diagram_workspace import enhance_state_diagram_workspace_html
@@ -97,6 +98,7 @@ def _presentation_pipeline():
         enhance_transition_layout_tab_guard_html,
         enhance_transition_semantic_status_ui_html,
         enhance_adaptive_state_focus_html,
+        enhance_save_triggered_rendering_html,
     )
 
 
