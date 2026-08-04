@@ -203,21 +203,38 @@ machine Motor(state:MotorState,input:Input)
 
 - キー入力はeditor bufferと`Unsaved`表示だけを更新する
 - キー入力ごとのpreprocess、compile、IR生成、graph layout、renderは行わない
-- `Save & Render`または`Ctrl/Cmd + S`でsourceを書き込み、その後にpreprocessとcompileを実行する
-- external file saveはwatcherが検出し、同じcompile pipelineで再構築する
-- compile error時も保存自体は成立し、最後のvalid diagramを保持できる
+- `Save & Render`または`Ctrl/Cmd + S`は最初にsourceだけをatomic writeする
+- 保存成功後はHTTP 202と`status=compiling`、`operation_id`を即時返す
+- preprocess、compile、IR生成、graph layout、artifact writeは単一background workerで実行する
+- browserは`/api/state`をpollし、`compiling`から`ready`または`error`への遷移を受け取る
+- external file saveもwatcher経由で同じbackground workerへ投入する
+- compile error時も保存自体は成立し、最後のvalid diagramを保持する
 - node、transition label、diagnosticからsource lineへ移動できる
 
-保存時の処理順序:
+保存と生成の境界:
 
 ```text
 editor source
+  -> compare base digest
   -> atomic file save
+  -> publish Saved · Compiling + operation_id
+  -> HTTP 202 Accepted
+
+background worker
   -> raw macro preprocessing
   -> parse / type check
   -> IR and diagram generation
-  -> browser render
+  -> artifact write
+  -> publish Ready or Compile error
 ```
+
+workerは一度に一つのcompileだけを実行する。compile中に複数回保存された場合、未開始の古い要求は最新sourceへ集約する。実行中の古いcompileは内部的に完了しても、`operation_id`が現在値と一致しなければsnapshotやartifactを公開しない。
+
+現行`IncrementalCompiler`は同一source digestの完全cacheであり、編集範囲単位の差分compileではない。UI応答性はsaveとcompileの分離によって確保する。
+
+外部変更の上書きは無条件`force`ではない。競合画面で確認した外部digestを`base_digest`として再送し、その後さらに外部変更されていた場合は再度HTTP 409にする。
+
+source writeに失敗した場合は`save_permission_denied`、`save_no_space`、`save_io_error`などのstructured errorを返し、compileを開始しない。
 
 アプリが配信するHTMLには、Compileボタン、`/api/preview`呼出し、preview timer、`Ctrl/Cmd + Enter`によるcompile shortcutを含めない。
 
@@ -250,6 +267,7 @@ JSON modelには次を含む。
 
 ## Non-goals
 
+- edit-range / AST-node incremental compilation
 - runtime invocation
 - effect execution
 - scheduler / thread / process placement
