@@ -360,7 +360,6 @@ window.addEventListener("beforeunload",event=>{
  event.preventDefault();
  event.returnValue="";
 });
-document.addEventListener("glyph-locale-applied",updateUi);
 document.addEventListener("glyph-locale-changed",updateUi);
 document.addEventListener("visibilitychange",()=>{if(!document.hidden)load(false)});
 
