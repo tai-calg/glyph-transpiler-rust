@@ -15,7 +15,7 @@ from urllib.parse import urlsplit
 import webbrowser
 
 from . import diagram_app
-from .diagram_app import GlyphDiagramApp, ViewBuilder
+from .diagram_app import GlyphDiagramApp, SaveConflictError, ViewBuilder
 from .io_state_views import build_io_state_views
 from .readable_diagram_app import prepare_diagram_app
 
@@ -141,18 +141,20 @@ def create_desktop_server(
             self._json({"error": "desktop session required"}, HTTPStatus.FORBIDDEN)
             return False
 
-        def _source(self) -> str | None:
+        def _body(self) -> dict[str, Any] | None:
             try:
                 length = int(self.headers.get("Content-Length", "0"))
                 raw = self.rfile.read(length) if length else b"{}"
                 body: Any = json.loads(raw.decode("utf-8"))
             except (ValueError, UnicodeDecodeError, json.JSONDecodeError):
-                body = {}
-            source = body.get("source") if isinstance(body, dict) else None
-            if not isinstance(source, str):
-                self._json({"error": "source must be text"}, HTTPStatus.BAD_REQUEST)
+                body = None
+            if not isinstance(body, dict):
+                self._json(
+                    {"error": "request body must be an object"},
+                    HTTPStatus.BAD_REQUEST,
+                )
                 return None
-            return source
+            return body
 
         def _serve_app(self) -> None:
             html = (
@@ -190,17 +192,47 @@ def create_desktop_server(
             if not self._require_auth():
                 return
             path = urlsplit(self.path).path
-            if path == "/api/preview":
-                source = self._source()
-                if source is not None:
-                    app.preview_source(source)
-                    self._json(app.state_dict())
-                return
             if path == "/api/save":
-                source = self._source()
-                if source is not None:
-                    app.save_source(source)
-                    self._json(app.state_dict())
+                body = self._body()
+                if body is None:
+                    return
+                source = body.get("source")
+                base_digest = body.get("base_digest")
+                force = body.get("force", False)
+                if not isinstance(source, str):
+                    self._json({"error": "source must be text"}, HTTPStatus.BAD_REQUEST)
+                    return
+                if base_digest is not None and not isinstance(base_digest, str):
+                    self._json(
+                        {"error": "base_digest must be text"},
+                        HTTPStatus.BAD_REQUEST,
+                    )
+                    return
+                if not isinstance(force, bool):
+                    self._json(
+                        {"error": "force must be boolean"},
+                        HTTPStatus.BAD_REQUEST,
+                    )
+                    return
+                try:
+                    app.save_source(
+                        source,
+                        base_digest=base_digest,
+                        force=force,
+                    )
+                except SaveConflictError as exc:
+                    self._json(
+                        {
+                            "error": "save_conflict",
+                            "message": str(exc),
+                            "current_source": exc.current_source,
+                            "current_digest": exc.current_digest,
+                            "state": app.state_dict(),
+                        },
+                        HTTPStatus.CONFLICT,
+                    )
+                    return
+                self._json(app.state_dict())
                 return
             if path == "/api/rebuild":
                 app.rebuild()
