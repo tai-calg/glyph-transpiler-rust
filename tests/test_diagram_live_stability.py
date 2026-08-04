@@ -36,18 +36,21 @@ SOURCE = """machine Counter(state:State,input:Input)
 
 
 class DiagramLiveStabilityTests(unittest.TestCase):
-    def test_frontend_defaults_to_state_and_never_hides_bounded_rendering(self) -> None:
+    def test_frontend_defaults_to_state_and_only_manages_render_stability(self) -> None:
         html = enhance_diagram_live_stability_html(DIAGRAM_HTML)
         self.assertIn("glyph-diagram-live-stability-v2", html)
         self.assertIn('activeTab="state"', html)
-        self.assertIn("requestGeneration", html)
-        self.assertIn("previewController?.abort()", html)
-        self.assertIn("POLL_INTERVAL_MS = 3000", html)
         self.assertIn("RENDER_BUDGET_MS = 180", html)
         self.assertIn("glyph-layout-publication-certificate-ready", html)
         self.assertIn('reveal(stage,"interactive-budget")', html)
         self.assertIn("visibility:visible!important", html)
         self.assertIn("opacity:1!important", html)
+        self.assertNotIn("requestGeneration", html)
+        self.assertNotIn("previewController", html)
+        self.assertNotIn("/api/preview", html)
+        self.assertNotIn("stableCompile", html)
+        self.assertNotIn("stableSave", html)
+        self.assertNotIn("stableLoad", html)
         self.assertNotIn("State diagram certification failed", html)
         self.assertNotIn("diagram remains hidden", html)
         script = re.search(
@@ -80,7 +83,7 @@ class DiagramLiveStabilityTests(unittest.TestCase):
             )
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_save_compilation_is_serialized(self) -> None:
+    def test_save_compilation_is_serialized_by_the_app(self) -> None:
         install_serial_compilation()
         with tempfile.TemporaryDirectory() as directory:
             source_path = Path(directory) / "counter.glyph"
