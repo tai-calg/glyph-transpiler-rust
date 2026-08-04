@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 
-_MARKER = "glyph-save-presentation-v1"
+_MARKER = "glyph-save-presentation-v2"
 
 
 def _replace_once(html: str, old: str, new: str, label: str) -> str:
@@ -11,7 +11,7 @@ def _replace_once(html: str, old: str, new: str, label: str) -> str:
 
 
 def enhance_save_presentation_html(html: str) -> str:
-    """Finalize localized labels and accessibility for save-triggered rendering."""
+    """Finalize localized labels for save-triggered rendering."""
 
     if _MARKER in html:
         return html
@@ -26,15 +26,6 @@ def enhance_save_presentation_html(html: str) -> str:
         'save:"Save"',
         'save:"Save & Render"',
         "English save label",
-    )
-    html = _replace_once(
-        html,
-        '  button.title=t("saveTitle");\n'
-        '  button.setAttribute("aria-busy",saveInFlight?"true":"false");',
-        '  button.title=t("saveTitle");\n'
-        '  button.setAttribute("aria-label",t("saveTitle"));\n'
-        '  button.setAttribute("aria-busy",saveInFlight?"true":"false");',
-        "save accessibility",
     )
     html = _replace_once(
         html,
