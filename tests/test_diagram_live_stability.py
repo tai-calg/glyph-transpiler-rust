@@ -39,20 +39,11 @@ class DiagramLiveStabilityTests(unittest.TestCase):
     def test_frontend_defaults_to_state_and_only_manages_render_stability(self) -> None:
         html = enhance_diagram_live_stability_html(DIAGRAM_HTML)
         self.assertIn("glyph-diagram-live-stability-v2", html)
-        self.assertIn('activeTab="state"', html)
-        self.assertIn("RENDER_BUDGET_MS = 180", html)
-        self.assertIn("glyph-layout-publication-certificate-ready", html)
-        self.assertIn('reveal(stage,"interactive-budget")', html)
         self.assertIn("visibility:visible!important", html)
         self.assertIn("opacity:1!important", html)
-        self.assertNotIn("requestGeneration", html)
-        self.assertNotIn("previewController", html)
-        self.assertNotIn("/api/preview", html)
-        self.assertNotIn("stableCompile", html)
-        self.assertNotIn("stableSave", html)
-        self.assertNotIn("stableLoad", html)
         self.assertNotIn("State diagram certification failed", html)
         self.assertNotIn("diagram remains hidden", html)
+
         script = re.search(
             r'<script id="glyph-diagram-live-stability-v2-script">(.*?)</script>',
             html,
@@ -60,13 +51,24 @@ class DiagramLiveStabilityTests(unittest.TestCase):
         )
         self.assertIsNotNone(script)
         assert script is not None
-        self.assertIn("MutationObserver", script.group(1))
+        body = script.group(1)
+        self.assertIn('activeTab="state"', body)
+        self.assertIn("RENDER_BUDGET_MS = 180", body)
+        self.assertIn("glyph-layout-publication-certificate-ready", body)
+        self.assertIn('reveal(stage,"interactive-budget")', body)
+        self.assertIn("MutationObserver", body)
         self.assertIn(
             'attributeFilter:["data-transition-layout-state",'
             '"data-layout-certificate-state",'
             '"data-transition-publication-ready"]',
-            script.group(1),
+            body,
         )
+        self.assertNotIn("requestGeneration", body)
+        self.assertNotIn("previewController", body)
+        self.assertNotIn("/api/preview", body)
+        self.assertNotIn("stableCompile", body)
+        self.assertNotIn("stableSave", body)
+        self.assertNotIn("stableLoad", body)
 
     @unittest.skipUnless(shutil.which("node"), "Node.js is not installed")
     def test_frontend_javascript_is_syntactically_valid(self) -> None:
