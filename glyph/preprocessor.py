@@ -114,12 +114,30 @@ def _raw_name(name: str, line: int) -> str:
 
 
 def _function_like_name(body: str) -> str | None:
+    """Return the candidate AST-macro name independently of its delimiter."""
+
     open_pos = body.find("(")
-    eq_pos = body.find("=")
-    if open_pos <= 0 or eq_pos < open_pos:
+    if open_pos <= 0:
         return None
     name = body[:open_pos].strip()
     return name if name.isidentifier() else None
+
+
+def _object_like_parts(body: str) -> tuple[str, str | None]:
+    """Split `NAME replacement`; retain `NAME=replacement` for migration."""
+
+    parts = body.split(None, 1)
+    if len(parts) == 2:
+        name, replacement = parts
+        replacement = replacement.strip()
+        if replacement.startswith("="):
+            replacement = replacement[1:].strip()
+        return name, replacement
+
+    equal = body.find("=")
+    if equal >= 0:
+        return body[:equal].strip(), body[equal + 1 :].strip()
+    return body, None
 
 
 def _collect_definitions(source: str) -> tuple[dict[str, RawMacroDef], list[_SourceLine]]:
@@ -154,10 +172,9 @@ def _collect_definitions(source: str) -> tuple[dict[str, RawMacroDef], list[_Sou
             index += 1
             continue
 
-        equal = body.find("=")
-        if equal >= 0:
-            name = _raw_name(body[:equal].strip(), index + 1)
-            replacement = body[equal + 1 :].strip()
+        raw_name, replacement = _object_like_parts(body)
+        if replacement is not None:
+            name = _raw_name(raw_name, index + 1)
             if not replacement:
                 raise GlyphError(f"{index + 1}行目: rawマクロ '{name}' の置換文字列が空")
             if name in definitions:
@@ -176,7 +193,7 @@ def _collect_definitions(source: str) -> tuple[dict[str, RawMacroDef], list[_Sou
             index += 1
             continue
 
-        name = _raw_name(body, index + 1)
+        name = _raw_name(raw_name, index + 1)
         if name in definitions:
             raise GlyphError(
                 f"{index + 1}行目: rawマクロ '{name}' は"
