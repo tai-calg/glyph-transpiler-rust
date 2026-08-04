@@ -183,15 +183,25 @@ function applySnapshot(next,{updateEditor=false}={}){
  const currentVersion=Number(snapshot?.version??-1);
  const nextVersion=Number(next?.version??-1);
  if(nextVersion<currentVersion)return false;
+ const previousRenderedDigest=String(snapshot?.rendered_digest||"");
  snapshot=next;
  if(updateEditor){
   editor.value=String(next.source||"");
   dirty=false;
   syncLines();
  }
- render();
- window.GlyphExecutionContext?.refresh?.();
- setStatus(next.status||"starting");
+ const preservesCurrentDiagram=next?.status==="error"
+  && String(next?.rendered_digest||"")===previousRenderedDigest
+  && Boolean(view?.childElementCount);
+ if(preservesCurrentDiagram){
+  setStatus(next.status||"error");
+  renderSummary();
+  renderDiagnostics();
+ }else{
+  render();
+  window.GlyphExecutionContext?.refresh?.();
+  setStatus(next.status||"starting");
+ }
  updateUi();
  return true;
 }
