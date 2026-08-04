@@ -62,8 +62,8 @@ function configureMarker(stage){
   marker.setAttribute("refX","10");marker.setAttribute("refY","5");marker.setAttribute("markerUnits","userSpaceOnUse");marker.setAttribute("markerWidth",String(MARKER_SIZE));marker.setAttribute("markerHeight",String(MARKER_SIZE));marker.setAttribute("orient","auto");
   return true;
 }
-function refresh(reason="scheduled"){
-  const stage=stageOf(),machine=selectedMachine();if(!stage||!machine||!stage.isConnected)return false;
+function applyGeometry(reason="scheduled",stage=stageOf(),machine=selectedMachine()){
+  if(!stage||!machine||!stage.isConnected)return false;
   const nodes=nodesByName(stage),paths=directPaths(stage),transitions=machine.transitions||[];let updated=0,minClearance=Number.POSITIVE_INFINITY;
   configureMarker(stage);
   transitions.forEach((transition,index)=>{
@@ -74,14 +74,23 @@ function refresh(reason="scheduled"){
   if(!updated)return false;
   Object.assign(stage.dataset,{transitionArrowClearanceReady:"true",transitionArrowClearanceVersion:"1",transitionArrowClearanceMin:(Number.isFinite(minClearance)?minClearance:0).toFixed(1),transitionArrowClearancePathCount:String(updated),transitionArrowClearanceReason:reason});
   lastAudit={ready:true,paths:updated,minClearance:Number.isFinite(minClearance)?minClearance:0,reason};
-  window.glyphTransitionIoClusters?.reroute?.(stage);
   document.dispatchEvent(new CustomEvent("glyph-transition-arrow-clearance-ready",{detail:{marker:MARKER,paths:updated,minClearance:lastAudit.minClearance,reason}}));
   return true;
+}
+function installRerouteGuard(){
+  const api=window.glyphTransitionIoClusters;if(!api||typeof api.reroute!=="function")return false;if(api.arrowClearanceWrapped===MARKER)return true;
+  const original=api.reroute.bind(api);
+  api.reroute=(stage=null,machine=null)=>{const result=original(stage,machine);applyGeometry("transition-io-reroute",stage||stageOf(),machine||selectedMachine());return result};
+  api.arrowClearanceWrapped=MARKER;return true;
+}
+function refresh(reason="scheduled"){
+  installRerouteGuard();
+  return applyGeometry(reason);
 }
 function schedule(reason="scheduled",attempt=0){
   if(destroyed)return;cancelAnimationFrame(frame);clearTimeout(timer);frame=requestAnimationFrame(()=>{if(!refresh(reason)&&attempt<MAX_STARTUP_ATTEMPTS)timer=setTimeout(()=>schedule(reason,attempt+1),32)});
 }
-for(const eventName of["glyph-state-diagram-workspace-ready","glyph-transition-layout-transaction-ready"]){document.addEventListener(eventName,()=>schedule(eventName))}
+for(const eventName of["glyph-state-diagram-workspace-ready","glyph-transition-io-clusters-ready","glyph-transition-layout-transaction-ready"]){document.addEventListener(eventName,()=>schedule(eventName))}
 document.addEventListener("change",event=>{if(event.target?.id==="machine-select")schedule("machine-change")});
 for(const eventName of["pagehide","beforeunload"]){window.addEventListener(eventName,()=>{destroyed=true;cancelAnimationFrame(frame);clearTimeout(timer)},{once:true})}
 window.glyphTransitionArrowClearance={marker:MARKER,version:1,refresh:()=>schedule("api-refresh"),audit:()=>({...lastAudit})};
