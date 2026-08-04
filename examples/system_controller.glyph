@@ -12,11 +12,11 @@ machine Controller(state:System,input:Input)
 # 型・純粋関数・作用境界・variant pattern・時相制約を接続する完全例。
 # 時計、周期実行、I/O、違反後の復旧はRustホスト側が担当する。
 
-@LOW 10.0
-@HOT 80.0
-@MAX 1000
-@INVALID !finite(input.voltage)|!finite(input.temperature)|input.voltage<0.0
-@BLOCK input.voltage<LOW|input.temperature>HOT|!input.authorized|input.fault|input.requested==0
+@LOW=10.0
+@HOT=80.0
+@MAX=1000
+@INVALID=!finite(input.voltage)|!finite(input.temperature)|input.voltage<0.0
+@BLOCK=input.voltage<LOW|input.temperature>HOT|!input.authorized|input.fault|input.requested==0
 
 *Input(voltage,temperature:F,requested:U,authorized,emergency,fault,send,ack,heartbeat,closed,stable:B)
 +Mode=Idle|Running|Stopping|Faulted
