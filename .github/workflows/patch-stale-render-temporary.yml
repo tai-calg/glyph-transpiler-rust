@@ -1,0 +1,79 @@
+name: Temporary Stale Render Patch
+
+on:
+  push:
+    branches:
+      - agent/macro-space-syntax
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/macro-space-syntax
+      - name: Preserve the current diagram on compilation errors
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('glyph/diagram_save_controller.py')
+          text = path.read_text()
+          old = '''function applySnapshot(next,{updateEditor=false}={}){
+           const currentVersion=Number(snapshot?.version??-1);
+           const nextVersion=Number(next?.version??-1);
+           if(nextVersion<currentVersion)return false;
+           snapshot=next;
+           if(updateEditor){
+            editor.value=String(next.source||"");
+            dirty=false;
+            syncLines();
+           }
+           render();
+           window.GlyphExecutionContext?.refresh?.();
+           setStatus(next.status||"starting");
+           updateUi();
+           return true;
+          }
+          '''
+          new = '''function applySnapshot(next,{updateEditor=false}={}){
+           const currentVersion=Number(snapshot?.version??-1);
+           const nextVersion=Number(next?.version??-1);
+           if(nextVersion<currentVersion)return false;
+           const previousRenderedDigest=String(snapshot?.rendered_digest||"");
+           snapshot=next;
+           if(updateEditor){
+            editor.value=String(next.source||"");
+            dirty=false;
+            syncLines();
+           }
+           const preservesCurrentDiagram=next?.status==="error"
+            && String(next?.rendered_digest||"")===previousRenderedDigest
+            && Boolean(view?.childElementCount);
+           if(preservesCurrentDiagram){
+            setStatus(next.status||"error");
+            renderSummary();
+            renderDiagnostics();
+           }else{
+            render();
+            window.GlyphExecutionContext?.refresh?.();
+            setStatus(next.status||"starting");
+           }
+           updateUi();
+           return true;
+          }
+          '''
+          if old not in text:
+              raise SystemExit('applySnapshot anchor missing')
+          path.write_text(text.replace(old, new, 1))
+          PY
+      - name: Commit stale-render fix
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add glyph/diagram_save_controller.py
+          git commit -m 'Preserve the last diagram on compile errors'
+          git push origin HEAD:agent/macro-space-syntax
