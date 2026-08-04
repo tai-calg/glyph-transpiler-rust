@@ -126,14 +126,18 @@ def _function_like_name(body: str) -> str | None:
 def _object_like_parts(body: str) -> tuple[str, str | None]:
     """Split canonical `NAME replacement`; retain `NAME=replacement` migration."""
 
+    equal = body.find("=")
+    first_space = next(
+        (index for index, character in enumerate(body) if character.isspace()),
+        -1,
+    )
+    if equal >= 0 and (first_space < 0 or equal < first_space):
+        return body[:equal].strip(), body[equal + 1 :].strip()
+
     parts = body.split(None, 1)
     if len(parts) == 2:
         name, replacement = parts
         return name, replacement.strip()
-
-    equal = body.find("=")
-    if equal >= 0:
-        return body[:equal].strip(), body[equal + 1 :].strip()
     return body, None
 
 
