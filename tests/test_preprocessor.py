@@ -16,9 +16,9 @@ from glyph import (
 class RawPreprocessorTests(unittest.TestCase):
     def test_raw_macro_expands_across_declarations_types_and_expressions(self) -> None:
         source = """
-@TYPE=SensorInput
-@DECL=*TYPE(value:U)
-@LIMIT=100
+@TYPE SensorInput
+@DECL *TYPE(value:U)
+@LIMIT 100
 DECL
 >cap(x:U):U
   x>LIMIT >> LIMIT
@@ -32,7 +32,7 @@ DECL
 
     def test_raw_macro_expands_checked_system_flow_assertion(self) -> None:
         source = """
-@EDGE=sensor -> ctl
+@EDGE sensor -> ctl
 system Demo
   entry ctl
   in sensor:U
@@ -48,7 +48,7 @@ ext sensor():U
         self.assertEqual(edge.line, 7)
 
     def test_multiline_macro_expands_immutable_algorithm_block(self) -> None:
-        source = """@MAX=100
+        source = """@MAX 100
 @NORMALIZE
   positive :=
     x<0 >> -x
@@ -86,12 +86,12 @@ BLOCK BLOCK
 
     def test_raw_macro_names_are_uppercase_only(self) -> None:
         with self.assertRaisesRegex(GlyphError, "大文字"):
-            compile_source("@limit=10\n>f():I=1\n")
+            compile_source("@limit 10\n>f():I=1\n")
 
     def test_lowercase_function_like_ast_macro_remains_supported(self) -> None:
         source = """
-@MAX=10
-@limit(x)=min(x,MAX)
+@MAX 10
+@limit(x) min(x,MAX)
 >f(x:U):U=limit(x)
 """
         rust = compile_source(source)
@@ -101,19 +101,19 @@ BLOCK BLOCK
 
     def test_nested_raw_macros_are_resolved_without_substring_replacement(self) -> None:
         result = preprocess_source(
-            "@BASE=10\n@LIMIT=BASE+5\n@IN=Value\n*Input(IN:I)\n>f():I=LIMIT\n"
+            "@BASE 10\n@LIMIT BASE+5\n@IN Value\n*Input(IN:I)\n>f():I=LIMIT\n"
         )
         self.assertIn("*Input(Value:I)", result.source)
         self.assertIn(">f():I=10+5", result.source)
         self.assertNotIn("*Valueput", result.source)
 
     def test_comments_are_not_macro_expanded(self) -> None:
-        result = preprocess_source("@MAX=10\n>f():I=MAX # MAX remains documentation\n")
+        result = preprocess_source("@MAX 10\n>f():I=MAX # MAX remains documentation\n")
         self.assertIn(">f():I=10 # MAX remains documentation", result.source)
 
     def test_raw_macro_cycle_is_rejected_even_when_unused(self) -> None:
         with self.assertRaisesRegex(GlyphError, "raw macro cycle: X -> Y -> X"):
-            compile_source("@X=Y\n@Y=X\n>f():I=1\n")
+            compile_source("@X Y\n@Y X\n>f():I=1\n")
 
     def test_expanded_diagnostic_is_mapped_to_invocation_line(self) -> None:
         source = """@BAD
@@ -126,7 +126,7 @@ BAD
             compile_source(source)
 
     def test_preprocessed_source_and_mapping_are_artifacts(self) -> None:
-        source = "@TYPE=Point\n*TYPE(x:I)\n"
+        source = "@TYPE Point\n*TYPE(x:I)\n"
         bundle = compile_diagram_bundle(source, "macro.glyph")
         self.assertEqual(bundle.files["preprocessed.glyph"], "*Point(x:I)\n")
         mapping = json.loads(bundle.files["preprocessor-map.json"])
@@ -138,7 +138,7 @@ BAD
 
     def test_typed_design_json_contains_raw_macro_metadata(self) -> None:
         result = IncrementalCompiler().compile_text(
-            "@MAX=10\n@TYPE=Point\n*TYPE(x:I)\n",
+            "@MAX 10\n@TYPE Point\n*TYPE(x:I)\n",
             "macro.glyph",
         )
         payload = json.loads(result.snapshot.semantic_json)
@@ -150,9 +150,23 @@ BAD
         )
 
     def test_raw_substitution_is_intentionally_textual_not_parenthesized(self) -> None:
-        rust = compile_source("@NEXT=x+1\n>f(x:I):I=NEXT*2\n")
+        rust = compile_source("@NEXT x+1\n>f(x:I):I=NEXT*2\n")
         self.assertIn("x + 1 * 2", rust)
         self.assertNotIn("(x + 1) * 2", rust)
+
+    def test_incremental_compiler_reprocesses_space_macro_changes(self) -> None:
+        compiler = IncrementalCompiler()
+        first = compiler.compile_text("@MAX 10\n>f():I=MAX\n", "macro.glyph")
+        second = compiler.compile_text("@MAX 11\n>f():I=MAX\n", "macro.glyph")
+
+        self.assertTrue(first.changed)
+        self.assertTrue(second.changed)
+        self.assertIn("10", first.snapshot.artifacts.logic)
+        self.assertIn("11", second.snapshot.artifacts.logic)
+
+    def test_legacy_equals_macro_syntax_remains_accepted(self) -> None:
+        result = preprocess_source("@MAX=10\n>f():I=MAX\n")
+        self.assertEqual(result.source, ">f():I=10\n")
 
 
 if __name__ == "__main__":
