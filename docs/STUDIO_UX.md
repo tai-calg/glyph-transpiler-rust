@@ -379,7 +379,7 @@ maximum animation-frame gap         <= 400 ms
 maximum browser long task           <= 250 ms
 ```
 
-Measured CI baseline from the first accepted campaign:
+Measured CI baseline from the first accepted campaign on GitHub's Ubuntu runner; these values are a regression baseline, not a universal device-performance guarantee:
 
 ```text
 save-state feedback                    33.7 ms
