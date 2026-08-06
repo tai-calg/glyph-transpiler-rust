@@ -83,6 +83,18 @@ class MachineAssemblyRouteConstraintTests(unittest.TestCase):
         with self.assertRaisesRegex(GlyphError, "遷移Actionから到達できない"):
             parse_compilation_model(source)
 
+    def test_nested_inline_effect_remains_in_source_action_chain(self) -> None:
+        source = BASE.replace(
+            "!notify(event:TargetInput):TargetInput=event",
+            "!notify(event:TargetInput):TargetInput=event\n"
+            "!forward(event:TargetInput):TargetInput=notify(event)",
+        ).replace(
+            "notice := notify(Notice)",
+            "notice := forward(Notice)",
+        )
+        model = parse_compilation_model(source)
+        self.assertEqual(model.assembly_ir[0].routes[0]["effect"], "notify")
+
 
 if __name__ == "__main__":
     unittest.main()
