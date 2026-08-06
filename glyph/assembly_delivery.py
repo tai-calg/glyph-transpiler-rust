@@ -26,8 +26,8 @@ def install_machine_assembly_delivery() -> None:
 
     This is an integration shim for the first implementation slice. It leaves the
     established CompilationModel constructor untouched, preserves all source line
-    numbers by blanking assembly blocks, and attaches validated assembly data to
-    the returned model.
+    numbers by blanking assembly blocks, and attaches validated assembly data only
+    when the source opts into assembly syntax.
     """
 
     from . import artifacts as artifacts_module
@@ -43,11 +43,14 @@ def install_machine_assembly_delivery() -> None:
     ):
         parser_source, assemblies = extract_assemblies(source)
         model = original(parser_source, source_name)
+        if not assemblies:
+            return model
+
         assembly_ir = validate_assemblies(model.program, model.machines, assemblies)
 
         # CompilationModel is a frozen dataclass but intentionally has no slots.
         # The compatibility shim adds opt-in fields without changing legacy tuple
-        # construction or byte-for-byte behavior for sources without assembly.
+        # construction. Plain sources return the original model unchanged.
         object.__setattr__(model, "assemblies", assemblies)
         object.__setattr__(model, "assembly_ir", assembly_ir)
         object.__setattr__(model, "assembly_source", source)
