@@ -171,36 +171,57 @@ async function assertAllDiagramElementsVisible(page, label) {
   return audit;
 }
 
+async function directlyHittableStateNode(page) {
+  return page.evaluate(() => {
+    const nodes = [...document.querySelectorAll(".state-node")];
+    const fractions = [0.18, 0.34, 0.5, 0.66, 0.82];
+    for (let index = 0; index < nodes.length; index += 1) {
+      const node = nodes[index];
+      const rect = node.getBoundingClientRect();
+      for (const ry of fractions) {
+        for (const rx of fractions) {
+          const x = rect.left + rect.width * rx;
+          const y = rect.top + rect.height * ry;
+          const hit = document.elementFromPoint(x, y);
+          if (hit && (hit === node || node.contains(hit))) {
+            return {
+              index,
+              x,
+              y,
+              name: node.querySelector(".state-name")?.textContent?.trim() || "",
+            };
+          }
+        }
+      }
+    }
+    return null;
+  });
+}
+
 async function dragNode(page, deltaX, deltaY) {
-  const node = page.locator(".state-node").first();
-  const box = await node.boundingBox();
-  assert(box, "state node has no bounding box");
+  await waitForStableGeometry(page);
+  const point = await directlyHittableStateNode(page);
+  assert(point, "no state node exposes a directly hittable point");
+  const node = page.locator(".state-node").nth(point.index);
   const before = await node.evaluate(element => Number.parseFloat(element.style.left));
-  const startX = box.x + box.width / 2;
-  const startY = box.y + box.height / 2;
-  const beforeAudit = await page.evaluate(({ x, y }) => {
-    const node = document.querySelector(".state-node");
-    const stage = node?.closest(".graph-stage");
+  const beforeAudit = await page.evaluate(({ x, y, expectedName }) => {
     const hit = document.elementFromPoint(x, y);
-    const rect = node?.getBoundingClientRect();
+    const hitNode = hit?.closest?.(".state-node");
+    const stage = hitNode?.closest(".graph-stage");
     return {
       hitTag: hit?.tagName || "",
       hitClass: hit?.className?.baseVal || hit?.className || "",
-      hitText: hit?.textContent?.trim()?.slice(0, 80) || "",
-      hitNode: hit?.closest?.(".state-node")?.querySelector(".state-name")?.textContent?.trim() || "",
-      nodeName: node?.querySelector(".state-name")?.textContent?.trim() || "",
-      pointerEvents: node ? getComputedStyle(node).pointerEvents : "",
-      zIndex: node ? getComputedStyle(node).zIndex : "",
-      rect,
+      hitNode: hitNode?.querySelector(".state-name")?.textContent?.trim() || "",
+      expectedName,
       scale: Number.parseFloat(stage?.dataset.viewportScale || "1"),
       layout: stage?.dataset.transitionLayoutState || "",
       publication: stage?.dataset.transitionPublicationReady || "",
-      constrained: stage?.dataset.transitionNodeDragConstrained || "",
     };
-  }, { x: startX, y: startY });
-  await page.mouse.move(startX, startY);
+  }, { x: point.x, y: point.y, expectedName: point.name });
+  assert.equal(beforeAudit.hitNode, point.name, `state node hit-test changed: ${JSON.stringify(beforeAudit)}`);
+  await page.mouse.move(point.x, point.y);
   await page.mouse.down({ button: "left" });
-  await page.mouse.move(startX + deltaX, startY + deltaY, { steps: 16 });
+  await page.mouse.move(point.x + deltaX, point.y + deltaY, { steps: 16 });
   await page.mouse.up({ button: "left" });
   const afterAudit = await node.evaluate(element => {
     const stage = element.closest(".graph-stage");

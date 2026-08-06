@@ -61,6 +61,9 @@ class DiagramLocalizationNavigationTests(unittest.TestCase):
             status="error",
             source="",
             digest="digest",
+            rendered_digest="previous-digest",
+            last_successful_version=0,
+            operation_id="compile-1",
             updated_at="now",
             diagnostics=(
                 {"severity": "error", "message": "unexpected identifier"},
@@ -81,6 +84,8 @@ class DiagramLocalizationNavigationTests(unittest.TestCase):
             },
         )
         payload = snapshot.to_dict(Path("example.glyph"), Path("views.json"))
+        self.assertEqual(payload["rendered_digest"], "previous-digest")
+        self.assertEqual(payload["operation_id"], "compile-1")
         self.assertEqual(
             payload["diagnostics"][0]["message_ja"],
             "予期しない識別子",

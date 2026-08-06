@@ -2,10 +2,10 @@
 
 ## 1. Objective
 
-Glyph Studio is a design workspace, not only a generated-file viewer. The interface should keep three activities visible and distinct:
+Glyph Studio is a design workspace, not only a generated-file viewer. The interface keeps three activities visible and distinct:
 
 1. edit Glyph source,
-2. compile or preview the design,
+2. save and compile the design,
 3. inspect orthogonal design views.
 
 The UI must not derive new Glyph semantics. All design views continue to come from the validated typed design and `glyph.studio-views` projection.
@@ -45,29 +45,88 @@ Each view has a stable title, short purpose statement, item count, and local fil
 
 ## 3. Editing workflow
 
-### Preview
+### Edit
 
-`Preview` compiles the current editor contents without writing the Glyph source file.
-
-```text
-editor text
-    ↓ POST /api/preview
-GlyphStudio.preview_source
-    ↓
-StudioSnapshot and generated artifacts
-```
-
-Preview changes the active Studio snapshot and generated outputs, but the source file remains unchanged.
-
-Keyboard shortcut:
+Typing changes only the editor buffer and its presentation state.
 
 ```text
-Ctrl/Cmd + Enter
+editor input
+  -> mark Unsaved
+  -> update line numbers and lightweight editor presentation
 ```
 
-### Save
+Typing does not invoke the preprocessor, parser, type checker, IR builders, diagram layout, or browser rendering. There is no debounced compile preview and no compile-on-keystroke path.
 
-`Save` atomically writes the editor contents to the source file and rebuilds the Studio snapshot.
+### Tracked save acknowledgement
+
+`保存して描画` / `Save & Render` first submits the exact editor buffer together with a client-generated save request identifier.
+
+```text
+POST /api/save
+  request_id
+  source
+  base_digest
+```
+
+The synchronous server path performs only:
+
+```text
+validate request_id
+  -> detect duplicate request
+  -> compare observed base_digest with current disk digest
+  -> atomic source write when the content differs
+  -> publish status=compiling and operation_id
+  -> HTTP 202 Accepted
+```
+
+Preprocessing, compilation, diagram construction, layout, and artifact generation do not run in the save HTTP handler.
+
+`request_id` makes the save submission idempotent:
+
+- repeating the same `request_id`, source, and `base_digest` returns the existing operation,
+- reusing the identifier for different content returns `save_request_mismatch`,
+- a timed-out request can be retried without performing an ambiguous second write.
+
+The server keeps the operation result as one of:
+
+```text
+saving
+accepted
+conflict
+error
+```
+
+The browser can query it through:
+
+```text
+GET /api/save-status/<request_id>
+```
+
+A network timeout therefore does not become an unknown final result. The browser continues tracking or resubmits the same idempotent request until the operation reaches a recorded result. The editor, Save button, and Save shortcut remain available; later saves are queued against the latest buffer.
+
+### Background compilation
+
+A single server-side worker performs the heavy pipeline.
+
+```text
+saved source
+  -> raw macro preprocessing
+  -> parse / type check
+  -> IR generation
+  -> view construction and layout
+  -> serialize operation-specific temporary artifact
+  -> verify current operation and server state
+  -> atomically publish artifact
+  -> status=ready or status=error
+```
+
+Only one compilation runs at a time. If another save occurs during compilation, the newest pending source replaces older pending work. A completed result is published only when its `operation_id` still matches the current saved source.
+
+Artifact JSON serialization and temporary-file writing occur outside the shared snapshot lock. The worker then briefly acquires the lock, verifies that the operation is still current and the server is not stopping, renames the temporary artifact, and publishes the matching snapshot. An obsolete or stopped operation discards its temporary artifact.
+
+Expected compiler and artifact errors become structured diagnostics. An unexpected worker exception becomes `internal_compile_error`; it does not leave the snapshot permanently in `Compiling`, and the worker continues processing later requests.
+
+The existing `IncrementalCompiler` provides exact-content caching. This workflow does not claim edit-range or syntax-tree incremental compilation; responsiveness comes from separating persistence from background computation.
 
 Keyboard shortcut:
 
@@ -75,35 +134,109 @@ Keyboard shortcut:
 Ctrl/Cmd + S
 ```
 
-### Reload
+The shortcut is ignored while an IME composition is active.
 
-`Reload` discards the current editor contents and rebuilds from the file on disk. When the editor is dirty, the UI asks before discarding changes.
+A save request captures the exact submitted source. If the user edits while save confirmation is running, the newer editor buffer remains `Unsaved`. Repeated save shortcuts are serialized on the client and converge on the latest editor buffer.
 
-### Auto preview
+Saving a clean source that already matches a `ready` or `compiling` snapshot is a no-op. It does not rewrite the file, create a new diagram version, or restart compilation. An `error` snapshot may be retried with the same source.
 
-Auto preview is opt-in. It debounces editor changes before invoking the same `/api/preview` endpoint. It never writes the source file.
+### Lightweight compilation polling
+
+Active compilation is observed through:
+
+```text
+GET /api/status
+```
+
+This response contains only version, status, digests, operation identifier, update time, and diagnostic count. It does not contain source text, full diagnostics, or diagram views.
+
+The browser fetches full `/api/state` only when needed:
+
+- initial application load,
+- a clean external source change,
+- a transition from `compiling` to `ready` or `error`,
+- explicit external-version loading.
+
+This avoids serializing and transferring the entire diagram model four times per second during a long compilation.
+
+### External file changes
+
+Every editor session keeps the digest of the disk source from which it started editing. `/api/save` sends that value as `base_digest`.
+
+```text
+base_digest == observed current disk digest
+  -> continue save
+
+base_digest != observed current disk digest
+  -> HTTP 409 save_conflict
+```
+
+When the editor is clean, an external save updates both the editor and the compiled snapshot. When the editor is dirty, Studio keeps the local buffer and opens an explicit conflict dialog:
+
+- `外部版を読み込む` / `Load external version`
+- `自分の版で上書き` / `Overwrite with mine`
+- `キャンセル` / `Cancel`
+
+Overwrite resubmits the local source using the external digest displayed in the conflict dialog. If the external file changes again before the request reaches the server's digest check, the server returns another 409 and the newer external version must be reviewed.
+
+This is observed-revision conflict detection, not a cross-process filesystem transaction. An unrelated editor does not participate in Glyph Studio's lock, so a very small race remains between reading the file revision and replacing it. The UI and documentation must not describe this as strict filesystem compare-and-swap.
+
+Cancelling the dialog preserves `Conflict`. The Conflict indicator remains keyboard- and pointer-accessible so the resolution dialog can be reopened. Failure to reload the external version preserves both the local buffer and the unresolved conflict.
+
+### Leaving or stopping
+
+Closing or reloading the window while the editor is unsaved, conflicted, or awaiting save confirmation invokes the browser's unsaved-change confirmation. A clean saved editor does not trigger the confirmation.
+
+When the application stops, it serializes shutdown with source persistence, marks the server as stopping, clears pending compilation, changes an unfinished snapshot from `Compiling` to `server_stopping`, and rejects publication from an already running operation. A late worker result cannot replace the artifact or snapshot after shutdown has started. Operation-specific and fixed atomic-write temporary files are removed on shutdown and again at the next startup after an abnormal process exit.
 
 ## 4. State communication
 
-The interface separates two independent states.
+Persistence and compilation are independent state axes.
 
 ### Persistence state
 
 ```text
 Saved
 Unsaved
+Conflict
 ```
 
-### Compilation state
+### Render state
 
 ```text
-starting
-ready
-error
-busy: previewing / saving / reloading
+Rendered
+Confirming save
+Compiling
+Compile error
 ```
 
-Compilation diagnostics are shown directly under the editor and in the current view. Diagnostics with a source line navigate to that line.
+The header displays both values, for example:
+
+```text
+Unsaved · Rendered
+Saved · Compiling
+Saved · Compile error
+Conflict · Rendered
+```
+
+`Confirming save` covers source-write result tracking. `Compiling` begins after the source is known to be on disk. Compilation diagnostics are shown directly under the editor and in the current view. Diagnostics with a source line navigate to that line.
+
+When compilation succeeds:
+
+```text
+source digest == rendered digest
+```
+
+When a saved source is compiling or fails to compile, the last successful views remain available. The snapshot exposes:
+
+```text
+digest
+rendered_digest
+last_successful_version
+operation_id
+```
+
+If `digest != rendered_digest`, the viewer displays a persistent stale banner. During compilation it states that the new saved source is compiling and that the diagram still represents the previous successful source. After failure it states that the diagram is the last successfully compiled result. The old diagram is never presented as the result of the new source.
 
 ## 5. Workspace layout
 
@@ -114,6 +247,8 @@ source editor | draggable splitter | navigation | active view
 ```
 
 The editor width is resizable and remembered locally. The editor can be hidden to give diagrams and generated output the full workspace.
+
+On narrow windows, persistence state remains visible in a compact form rather than disappearing completely.
 
 Mobile layout:
 
@@ -142,11 +277,12 @@ The source editor adds:
 - line and character count,
 - two-space Tab insertion,
 - clickable diagnostics,
-- source navigation from cards, rows, graph nodes, and obligations.
+- source navigation from cards, rows, graph nodes, and obligations,
+- exact identifier occurrence highlighting.
 
 The editor remains a plain text editor. Syntax highlighting, completion, and structural editing are separate future capabilities and should not be approximated with an independent source parser in the browser.
 
-## 8. Appearance
+## 8. Appearance and accessibility
 
 The visual system uses semantic theme variables rather than hard-coded per-view colors.
 
@@ -156,6 +292,8 @@ The visual system uses semantic theme variables rather than hard-coded per-view 
 - responsive card grids,
 - readable code surfaces,
 - visible keyboard focus.
+
+Save state uses an `aria-live` region. The stale banner is a status region. Compilation errors are alerts. The conflict dialog has labelled title and description elements, and Conflict can be reopened with pointer, Enter, or Space.
 
 Theme, editor width, editor visibility, and active view are browser-local presentation preferences. They are not project configuration and do not alter Glyph source or compiler output.
 
@@ -167,29 +305,144 @@ Generated Rust, Host scaffold, Manual code, and typed design use a common code s
 - `GlyphProjectStudio` creates the initial scaffold when absent,
 - subsequent contents remain user-owned.
 
-## 10. Watcher and preview interaction
+## 10. Watcher interaction
 
-The file watcher initializes its observed digest from the current disk file. An unsaved preview therefore remains active until the file actually changes, rather than being immediately replaced by the watcher's first polling iteration.
+The file watcher initializes its observed digest from the current disk file. Unsaved editor contents are not compilation input.
 
-## 11. Acceptance conditions
+A source file saved outside Glyph Studio enters the same background compilation worker as `Save & Render`. Browser status polling compares the returned disk digest with the editor's `base_digest`:
 
-- Preview compiles unsaved source without changing the source file.
-- Reload restores the disk source after a preview.
-- The watcher does not replace a preview when the disk file is unchanged.
+- clean editor: fetch and adopt the external source and snapshot,
+- dirty editor: fetch the external source, preserve the local buffer, and enter `Conflict`,
+- unchanged digest: do not fetch full views, rerender, or replace editor text.
+
+The watcher does not enqueue a duplicate build for a digest already published as `compiling` by the application save path.
+
+The public Desktop API does not expose `/api/preview`. The only source-changing compile path is `/api/save`; `/api/rebuild` queues compilation of the file already present on disk.
+
+## 11. Structured errors
+
+Source persistence failures are separate from compiler diagnostics. The server returns structured error codes such as:
+
+```text
+source_read_permission_denied
+source_read_failed
+save_permission_denied
+save_no_space
+save_io_error
+server_stopping
+save_request_mismatch
+invalid_save_request_id
+```
+
+Compilation and publication may report:
+
+```text
+compile_error
+internal_compile_error
+artifact_write_failed
+artifact_publish_failed
+```
+
+If persistence fails, the source file is not reported as saved and no compile operation is queued.
+
+## 12. Interactive responsiveness gate
+
+The release workflow runs `tests/verify_interactive_save_ux.mjs` against the production Studio launch path with deliberately delayed work:
+
+```text
+save HTTP acknowledgement delay: 900 ms
+view/compile delay:             2500 ms
+```
+
+While those delays are active, the test performs all of the following rather than waiting passively:
+
+- edit the source during save acknowledgement,
+- switch between I/O and State views during save,
+- press Save again and verify latest-buffer queueing,
+- switch views during background compilation,
+- open and close Settings during compilation,
+- edit the source again during compilation,
+- verify the prior committed diagram remains visible with an explicit stale banner,
+- verify the newer unsaved editor buffer is not overwritten when the older compilation completes,
+- save the final editor buffer and reach `Saved · Rendered`.
+
+The browser gate rejects regressions beyond these bounds:
+
+```text
+save-state feedback                 <= 250 ms
+editor input during save/compile    <= 300 ms
+view/settings interaction           <= 350 ms
+compile-state acknowledgement       <= 750 ms
+2500 ms delayed final save cycle    <= 4500 ms
+requestAnimationFrame p95           <= 120 ms
+maximum animation-frame gap         <= 400 ms
+maximum browser long task           <= 250 ms
+```
+
+Measured CI baseline from the first accepted campaign on GitHub's Ubuntu runner; these values are a regression baseline, not a universal device-performance guarantee:
+
+```text
+save-state feedback                    33.7 ms
+input during save                       18.8 ms
+input during compile                    17.1 ms
+I/O / State switch during save     41.9 / 45.3 ms
+I/O / State switch during compile  41.5 / 34.3 ms
+Settings open during compile           282.3 ms
+compile-state acknowledgement          395.1 ms
+2500 ms delayed final save cycle          3046 ms
+requestAnimationFrame p95               16.7 ms
+maximum animation-frame gap             16.8 ms
+maximum browser long task                 88 ms
+```
+
+The test also rejects browser console errors, missing diagrams, hidden diagram stages, incomplete layout publication, lost editor changes, invalid state ordering, and stale-banner discontinuity. It emits a JSON measurement report and screenshots during compilation and after final publication as workflow artifacts.
+
+## 13. Acceptance conditions
+
+- Typing does not change the active compiled snapshot or diagram version.
+- The delivered HTML contains no compile button, `/api/preview` request, preview timer, preview controller, or Ctrl/Cmd+Enter compile shortcut.
+- `保存して描画` / `Save & Render` and Ctrl/Cmd+S submit an idempotent `request_id`, source, and base digest.
+- A duplicate request ID with identical content returns the existing save operation; different content returns `save_request_mismatch`.
+- `/api/save-status/<request_id>` resolves a timed-out save as saving, accepted, conflict, or error.
+- `/api/save` does not wait for heavy compilation.
+- `/api/status` remains responsive during deliberately slow compilation and artifact serialization and does not return source or full views.
+- A saved snapshot exposes `status=compiling` and an `operation_id` before the final result.
+- A newer save prevents an older in-flight compilation or temporary artifact from publishing stale views.
+- Artifact serialization and temporary-file writing do not hold the shared snapshot lock.
+- An unexpected view or layout exception becomes `internal_compile_error`; the worker remains alive and accepts a later valid save.
+- An edit made during save confirmation remains unsaved.
+- Repeated Ctrl/Cmd+S requests converge on the latest editor buffer.
+- Saving an unchanged clean source is a no-op while its snapshot is ready or compiling.
+- A macro changed through `/api/save` is reprocessed before the final diagram snapshot is published.
+- A syntax error can be saved, reported, retried, corrected, and successfully rebuilt.
+- A compiling or failed source preserves the last valid views and exposes a visible stale banner.
+- A clean external save updates the editor and rendered snapshot.
+- A dirty external save produces HTTP 409 and requires explicit load or observed-revision overwrite resolution.
+- An additional external change before overwrite produces another 409 rather than being destroyed.
+- Cancelling or failing external reload keeps the local buffer and Conflict state.
+- Persistence I/O failures return structured errors and leave the existing source unchanged.
+- Stopping during compilation prevents late artifact and snapshot publication and leaves no operation temporary file.
+- Closing or reloading with unsaved, conflicted, or save-pending content invokes `beforeunload` protection.
+- Save shortcuts do not fire during IME composition.
 - Existing Studio views remain available.
 - View groups, filtering, resizing, editor toggle, theme toggle, and keyboard shortcuts are present.
 - Diagnostics navigate to source lines when a line can be identified.
+- The interactive responsiveness gate passes under delayed save and compile work.
 - JavaScript passes `node --check`.
 - Python tests, Glyph 0.4 stabilization, legacy compatibility, Rust tests, demos, and Clippy pass.
 
-## 12. Non-goals
+## 14. Non-goals
 
 This change does not implement:
 
+- edit-range or AST-node incremental compilation,
+- cancellation inside a currently executing compiler call,
+- strict cross-process filesystem compare-and-swap,
 - a browser-side Glyph parser,
 - syntax highlighting or language-server completion,
 - source edits generated from diagrams,
 - runtime execution or simulation,
 - live runtime event streaming,
 - collaborative editing,
+- automatic three-way merging,
 - project-wide multi-file navigation.
