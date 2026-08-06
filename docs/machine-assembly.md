@@ -30,7 +30,8 @@ routed effect therefore requires an inline body so that its routed value is
 defined without requiring a Host implementation for that effect. Any other `!`
 effect called by the inline body keeps its own normal Assembly-or-Host resolution.
 The compiler requires the routed return type and target input type to match after
-alias resolution.
+alias and built-in short-name normalization. For example, `O<S>` and
+`Option<String>` are route-compatible.
 
 ## Immediate delivery
 
@@ -65,7 +66,7 @@ Assembly does not cause periodic evaluation or a no-op transition.
 - runtime re-entry into an already reacting instance is rejected
 - the source effect must be reachable from a normalized transition Action
 - an effect used only in a guard predicate cannot be routed
-- the effect return type equals the target input type after alias resolution
+- the effect return type equals the target input type after normalization
 - route cycles are reported because immediate propagation may attempt re-entry
 
 The single-input restriction prevents an immediate route from leaving additional
@@ -106,7 +107,21 @@ machine-assembly.mmd
 ```
 
 The Assembly IR is embedded into the typed design JSON under
-`machine_assemblies`. The initial integration attaches `assemblies` and
-`assembly_ir` to the existing `CompilationModel` without changing its constructor.
-Plain Glyph bypasses the Assembly integration and retains the exact legacy parsing
-and tooling paths.
+`machine_assemblies`.
+
+## Rust code generation status
+
+The legacy Rust generator lowers every `!` call to a global Host function and has
+no Machine-instance identity. Letting it process Assembly source unchanged would
+silently ignore internal routes. Until instance-aware Assembly lowering is added,
+Assembly-enabled generated logic therefore contains an explicit `compile_error!`.
+The design JSON reports:
+
+```text
+runtime_codegen.status = not-lowered
+runtime_codegen.fail_closed = true
+```
+
+The Python reference runtime remains executable for immediate-order and re-entry
+semantics. Plain Glyph bypasses every Assembly integration layer and retains the
+exact legacy parsing, Rust generation, and tooling paths.
