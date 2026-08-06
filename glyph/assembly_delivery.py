@@ -56,7 +56,12 @@ def install_machine_assembly_delivery() -> None:
 
         parser_source, assemblies = extract_assemblies(source)
         model = original(parser_source, source_name)
-        assembly_ir = validate_assemblies(model.program, model.machines, assemblies)
+        assembly_ir = validate_assemblies(
+            model.program,
+            model.machines,
+            assemblies,
+            model.inline_effects,
+        )
 
         # CompilationModel is a frozen dataclass but intentionally has no slots.
         # The compatibility shim adds opt-in fields without changing legacy tuple
