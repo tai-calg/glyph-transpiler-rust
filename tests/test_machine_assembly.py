@@ -29,7 +29,7 @@ VALID = """\
 !write_motor(command:MotorCommand):Receipt=Receipt(command)
 
 >door_fault(state:DoorState):DoorState
-  notify_safety(EmergencyDetected)
+  notice := notify_safety(EmergencyDetected)
   DoorState(DoorFaulted)
 
 >door_next(state:DoorState,input:DoorInput):DoorState
@@ -38,7 +38,7 @@ VALID = """\
   _>>state
 
 >safety_emergency(state:SafetyState):SafetyState
-  request_motor(StopRequested)
+  request := request_motor(StopRequested)
   SafetyState(SafetyEmergency)
 
 >safety_next(state:SafetyState,input:SafetyInput):SafetyState
@@ -46,7 +46,7 @@ VALID = """\
   _>>state
 
 >motor_stop(state:MotorState):MotorState
-  write_motor(DisableMotor)
+  receipt := write_motor(DisableMotor)
   MotorState(MotorStopped)
 
 >motor_next(state:MotorState,input:MotorInput):MotorState
