@@ -78,6 +78,13 @@ from .assembly_delivery import (
 _install_machine_assembly_delivery()
 del _install_machine_assembly_delivery
 
+from .assembly_tooling_delivery import (
+    install_machine_assembly_tooling_delivery as _install_machine_assembly_tooling_delivery,
+)
+
+_install_machine_assembly_tooling_delivery()
+del _install_machine_assembly_tooling_delivery
+
 
 # Keep the package root as the stable user-facing facade. Glyph 0.4 IR models,
 # semantic builders, validators, and code generators remain available from
