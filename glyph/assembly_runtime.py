@@ -40,10 +40,10 @@ ReactionHandler = Callable[[str, str, object], Iterable[EffectEmission]]
 class ImmediateAssemblyRuntime:
     """Reference executor for assembly v1 immediate causal propagation.
 
-    A reaction handler executes one local Machine reaction and returns its `!`
-    effects in source order. Routed effects recursively invoke the target Machine
-    before the source reaction continues to its next emitted effect. Unrouted
-    effects remain Host-facing external effects.
+    A reaction handler yields its `!` effects in execution order. Routed effects
+    recursively invoke the target Machine at the yield point; the target reaction
+    completes before iteration resumes in the source handler. Unrouted effects
+    remain Host-facing external effects.
     """
 
     def __init__(self, ir: MachineAssemblyIR):
@@ -87,8 +87,10 @@ class ImmediateAssemblyRuntime:
                 )
             )
             try:
-                emissions = tuple(handler(target, target_input, payload))
-                for emission in emissions:
+                # Do not materialize this iterable. A generator may yield exactly
+                # where the source `!` call occurs; routing must complete before
+                # that generator resumes.
+                for emission in handler(target, target_input, payload):
                     route = self._routes.get((target, emission.effect))
                     if route is None:
                         external.append(
