@@ -230,12 +230,19 @@ def _direct_calls(expr: Expr) -> tuple[str, ...]:
     return tuple(calls)
 
 
+def _value_expressions(function: FunctionDecl) -> tuple[Expr, ...]:
+    if function.expression is not None:
+        return (function.expression,)
+    return tuple(clause.value for clause in function.guards)
+
+
 def _reachable_effects(
     machine: MachineDecl,
     functions: Mapping[str, FunctionDecl],
     effects: Mapping[str, ExternDecl],
+    inline_effects: Mapping[str, FunctionDecl],
 ) -> set[str]:
-    """Find effects in transition value/action positions, never guard predicates."""
+    """Find effects in transition Action positions, including inline-effect bodies."""
 
     pending = list(_direct_calls(machine.next_expr))
     visited: set[str] = set()
@@ -248,17 +255,17 @@ def _reachable_effects(
         visited.add(name)
         if name in effects:
             reachable.add(name)
+            implementation = inline_effects.get(name)
+            if implementation is not None:
+                for expression in _value_expressions(implementation):
+                    pending.extend(_direct_calls(expression))
             continue
         function = functions.get(name)
         if function is None:
             continue
-        expressions: list[Expr] = []
-        if function.expression is not None:
-            expressions.append(function.expression)
         # A guard predicate enables a transition but is not its Action. Only the
         # selected branch value can contribute a routable `!` invocation.
-        expressions.extend(clause.value for clause in function.guards)
-        for expression in expressions:
+        for expression in _value_expressions(function):
             pending.extend(_direct_calls(expression))
 
     return reachable
@@ -332,7 +339,8 @@ def validate_assemblies(
         for declaration in program.declarations
         if isinstance(declaration, ExternDecl)
     }
-    inline_effect_names = {effect.name for effect in inline_effects}
+    inline_effect_by_name = {effect.name: effect for effect in inline_effects}
+    inline_effect_names = set(inline_effect_by_name)
     aliases = {
         declaration.name: declaration.target
         for declaration in program.declarations
@@ -359,7 +367,12 @@ def validate_assemblies(
             instance_machine[instance.name] = machine
 
         reachable_by_instance = {
-            instance_name: _reachable_effects(machine, functions, effects)
+            instance_name: _reachable_effects(
+                machine,
+                functions,
+                effects,
+                inline_effect_by_name,
+            )
             for instance_name, machine in instance_machine.items()
         }
         routed_sources: dict[tuple[str, str], int] = {}
