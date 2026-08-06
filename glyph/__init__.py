@@ -31,6 +31,22 @@ from .semantic import SemanticModel
 from .studio import GlyphStudio, StudioSnapshot, run_studio
 from .symbols import SymbolId, SymbolRecord
 from .temporal_sigils import reject_reserved_temporal_macro_names
+from .assembly import (
+    AssemblyDecl,
+    AssemblyDiagnostic,
+    AssemblyInstance,
+    AssemblyRoute,
+    MachineAssemblyIR,
+    extract_assemblies,
+    validate_assemblies,
+)
+from .assembly_runtime import (
+    EffectEmission,
+    ExternalEffect,
+    ImmediateAssemblyRuntime,
+    ImmediateReactionResult,
+    ReactionTraceEntry,
+)
 
 # Studio diagnostics retain their canonical message while exposing Japanese and
 # English variants to the browser. The HTML enhancer is applied here so every
@@ -68,21 +84,43 @@ def preprocess_source(source: str) -> PreprocessResult:
     return _preprocess_source(source)
 
 
+# Install after all public modules have imported their aliases of
+# parse_compilation_model. The installer patches those aliases in place, so
+# assembly syntax is accepted through the package root, frontend, incremental
+# compiler, and compilation pipeline without changing legacy model constructors.
+from .assembly_delivery import (
+    install_machine_assembly_delivery as _install_machine_assembly_delivery,
+)
+
+_install_machine_assembly_delivery()
+del _install_machine_assembly_delivery
+
+
 # Keep the package root as the stable user-facing facade. Glyph 0.4 IR models,
 # semantic builders, validators, and code generators remain available from
 # their responsibility-specific modules but are deliberately not re-exported.
 __all__ = [
+    "AssemblyDecl",
+    "AssemblyDiagnostic",
+    "AssemblyInstance",
+    "AssemblyRoute",
     "CompilationModel",
     "CompilationOutputs",
     "CompilationPipeline",
     "CompilationSnapshot",
     "DiagramBundle",
+    "EffectEmission",
+    "ExternalEffect",
     "GlyphError",
     "GlyphStudio",
+    "ImmediateAssemblyRuntime",
+    "ImmediateReactionResult",
     "IncrementalCompiler",
     "IncrementalResult",
+    "MachineAssemblyIR",
     "PreprocessResult",
     "RawMacroDef",
+    "ReactionTraceEntry",
     "RustArtifacts",
     "SemanticModel",
     "StudioSnapshot",
@@ -94,10 +132,12 @@ __all__ = [
     "compile_file",
     "compile_outputs",
     "compile_source",
+    "extract_assemblies",
     "parse_artifact_model",
     "parse_compilation_model",
     "parse_program",
     "preprocess_source",
     "run_studio",
+    "validate_assemblies",
     "write_diagram_bundle",
 ]
