@@ -1,0 +1,75 @@
++DoorInput=BadgeAccepted|ForcedOpen
++DoorMode=Locked|Unlocked|Faulted
+*DoorState(mode:DoorMode)
+
++SafetyInput=EmergencyDetected
++SafetyMode=Normal|Emergency|Faulted
+*SafetyState(mode:SafetyMode)
+
++MotorInput=StopRequested
++MotorMode=Running|Stopped|Faulted
+*MotorState(mode:MotorMode)
+
++MotorCommand=DisableMotor
+*Receipt(command:MotorCommand)
+
+# An effect connected by assembly becomes an internal immediate route.
+!notify_safety(event:SafetyInput):SafetyInput=event
+!request_motor(event:MotorInput):MotorInput=event
+
+# An effect without an assembly route remains a Host-facing effect.
+!write_motor(command:MotorCommand):Receipt=Receipt(command)
+
+>door_fault(state:DoorState):DoorState
+  notify_safety(EmergencyDetected)
+  DoorState(Faulted)
+
+>door_next(state:DoorState,input:DoorInput):DoorState
+  state.mode==Locked&input==ForcedOpen>>door_fault(state)
+  state.mode==Locked&input==BadgeAccepted>>DoorState(Unlocked)
+  _>>state
+
+>safety_emergency(state:SafetyState):SafetyState
+  request_motor(StopRequested)
+  SafetyState(Emergency)
+
+>safety_next(state:SafetyState,input:SafetyInput):SafetyState
+  input==EmergencyDetected>>safety_emergency(state)
+  _>>state
+
+>motor_stop(state:MotorState):MotorState
+  write_motor(DisableMotor)
+  MotorState(Stopped)
+
+>motor_next(state:MotorState,input:MotorInput):MotorState
+  input==StopRequested>>motor_stop(state)
+  _>>state
+
+machine Door(state:DoorState,input:DoorInput)
+  select=state.mode
+  init=DoorState(Locked)
+  next=door_next(state,input)
+  success=Unlocked
+  failure=Faulted
+
+machine Safety(state:SafetyState,input:SafetyInput)
+  select=state.mode
+  init=SafetyState(Normal)
+  next=safety_next(state,input)
+  success=Emergency
+  failure=Faulted
+
+machine Motor(state:MotorState,input:MotorInput)
+  select=state.mode
+  init=MotorState(Running)
+  next=motor_next(state,input)
+  success=Stopped
+  failure=Faulted
+
+assembly DoorControl
+  door=Door
+  safety=Safety
+  motor=Motor
+
+  door.notify_safety -> safety.input
+  safety.request_motor -> motor.input
