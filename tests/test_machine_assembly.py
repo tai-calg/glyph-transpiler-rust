@@ -127,7 +127,7 @@ class MachineAssemblyTests(unittest.TestCase):
             "door.notify_safety -> safety.input",
             "door.request_motor -> motor.input",
         ).replace("  safety.request_motor -> motor.input\n", "")
-        with self.assertRaisesRegex(GlyphError, "遷移から到達できない"):
+        with self.assertRaisesRegex(GlyphError, "遷移Actionから到達できない"):
             parse_compilation_model(source)
 
     def test_v1_rejects_fanout_from_one_effect(self) -> None:
