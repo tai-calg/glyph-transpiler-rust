@@ -43,10 +43,10 @@ def _strip_comment(line: str) -> str:
 
 
 def extract_ast_macros(source: str) -> tuple[str, tuple[AstMacroDef, ...]]:
-    """Extract `@name(x,y)=expr` without changing source line numbers.
+    """Extract `@name(x,y) expr` without changing source line numbers.
 
-    Object-like `@NAME=expr` macros remain in the source and keep the existing
-    token-macro behavior. Function-like macros are parsed into expression trees.
+    The former `@name(x,y)=expr` spelling remains accepted for migration.
+    Object-like raw macros are removed by the preprocessor before this pass.
     """
 
     raw_lines = source.splitlines()
@@ -60,8 +60,7 @@ def extract_ast_macros(source: str) -> tuple[str, tuple[AstMacroDef, ...]]:
             continue
         body = clean[1:].strip()
         open_pos = body.find("(")
-        eq_pos = body.find("=")
-        if open_pos <= 0 or (eq_pos >= 0 and eq_pos < open_pos):
+        if open_pos <= 0:
             continue
 
         line = index + 1
@@ -69,10 +68,15 @@ def extract_ast_macros(source: str) -> tuple[str, tuple[AstMacroDef, ...]]:
         if not name.isidentifier():
             raise GlyphError(f"{line}行目: 不正なASTマクロ名 '{name}'")
         close_pos = _find_matching(body, open_pos)
-        rest = body[close_pos + 1 :].strip()
-        if not rest.startswith("="):
-            raise GlyphError(f"{line}行目: @name(args)=expression の形式が必要")
-        expression = rest[1:].strip()
+        tail = body[close_pos + 1 :]
+        if tail.startswith("="):
+            expression = tail[1:].strip()
+        elif tail[:1].isspace():
+            expression = tail.strip()
+            if expression.startswith("="):
+                expression = expression[1:].strip()
+        else:
+            raise GlyphError(f"{line}行目: @name(args) expression の形式が必要")
         if not expression:
             raise GlyphError(f"{line}行目: ASTマクロ '{name}' の本体が空")
         if name in seen:

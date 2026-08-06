@@ -199,14 +199,75 @@ machine Motor(state:MotorState,input:Input)
 
 `machine`がない場合、state machineを名前や型から推測しない。
 
-## Live editing
+## Editing and rebuild
 
-- editはdebounce付きcompile previewを開始する
-- `Compile`は保存せず即時previewする
-- `Save`はsourceを書き込み、再compileする
-- external file changeをwatchする
-- compile error時も最後のvalid diagramを保持する
+- キー入力はeditor bufferと`Unsaved`表示だけを更新する
+- キー入力ごとのpreprocess、compile、IR生成、graph layout、renderは行わない
+- `Save & Render`または`Ctrl/Cmd + S`は`request_id`、source、`base_digest`を送る
+- 同じ`request_id`と内容の再送は同じ保存operationを返す
+- source保存後はHTTP 202と軽量なoperation状態を返す
+- preprocess、compile、IR生成、graph layout、artifact生成は単一background workerで実行する
+- browserは軽量`/api/status`をpollし、terminal transition時だけ完全な`/api/state`を取得する
+- timeoutした保存は`/api/save-status/<request_id>`で追跡し、同一IDで安全に再送できる
+- external file saveもwatcher経由で同じbackground workerへ投入する
+- compile error時も保存自体は成立し、最後のvalid diagramを保持する
 - node、transition label、diagnosticからsource lineへ移動できる
+
+保存と生成の境界:
+
+```text
+editor source
+  -> client request_id
+  -> observed base digest check
+  -> atomic source save when changed
+  -> publish Saved · Compiling + operation_id
+  -> record accepted/conflict/error result
+  -> HTTP response
+
+background worker
+  -> raw macro preprocessing
+  -> parse / type check
+  -> IR and diagram generation
+  -> serialize unique temporary artifact outside snapshot lock
+  -> recheck operation_id and stopping state
+  -> atomic artifact publication
+  -> publish Ready or Compile error
+```
+
+workerは一度に一つのcompileだけを実行する。compile中に複数回保存された場合、未開始の古い要求は最新sourceへ集約する。実行中の古いcompileは内部的に完了しても、`operation_id`が現在値と一致しなければsnapshotやartifactを公開しない。
+
+想定外のlayout/view例外は`internal_compile_error`として現在operationを`error`へ遷移させる。worker threadは終了せず、次の保存を処理する。
+
+停止開始後はpending compileを破棄し、実行中operationによるartifact renameとsnapshot更新を拒否する。operation固有の一時artifactは削除する。
+
+現行`IncrementalCompiler`は同一source digestの完全cacheであり、編集範囲単位の差分compileではない。UI応答性はsaveとcompileの分離によって確保する。
+
+clean editorのsourceが既に`ready`または`compiling`のdigestと一致する場合、保存はno-opになる。ファイル再書込み、version増加、compile再起動を行わない。`error`状態では同じsourceを再試行できる。
+
+外部変更の上書きは無条件`force`ではない。競合画面で確認した外部digestを`base_digest`として再送し、その後さらに外部変更されていた場合は再度HTTP 409にする。ただし、外部editorはGlyph Studioのlockへ協調しないため、これは観測revisionによる競合検出であり、厳密なcross-process filesystem CASではない。
+
+source writeに失敗した場合は`save_permission_denied`、`save_no_space`、`save_io_error`などのstructured errorを返し、compileを開始しない。
+
+アプリが配信するHTMLには、Compileボタン、`/api/preview`呼出し、preview timer、`Ctrl/Cmd + Enter`によるcompile shortcutを含めない。
+
+### HTTP endpoints
+
+```text
+POST /api/save
+  idempotent tracked source save
+
+GET /api/save-status/<request_id>
+  saving / accepted / conflict / error
+
+GET /api/status
+  lightweight version, status, digests, operation_id, diagnostic_count
+
+GET /api/state
+  source, complete diagnostics, and full diagram views
+
+POST /api/rebuild
+  queue compilation for source already present on disk
+```
 
 ## Output artifact
 
@@ -237,6 +298,9 @@ JSON modelには次を含む。
 
 ## Non-goals
 
+- edit-range / AST-node incremental compilation
+- running compiler-call cancellation
+- strict cross-process filesystem CAS
 - runtime invocation
 - effect execution
 - scheduler / thread / process placement

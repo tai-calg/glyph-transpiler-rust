@@ -11,11 +11,11 @@ import secrets
 import signal
 import threading
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 import webbrowser
 
 from . import diagram_app
-from .diagram_app import GlyphDiagramApp, ViewBuilder
+from .diagram_app import GlyphDiagramApp, SaveWriteError, ViewBuilder
 from .io_state_views import build_io_state_views
 from .readable_diagram_app import prepare_diagram_app
 
@@ -125,7 +125,14 @@ def create_desktop_server(
             self.send_header("Content-Length", str(len(payload)))
             self._security_headers()
             self.end_headers()
-            self.wfile.write(payload)
+            try:
+                self.wfile.write(payload)
+            except (
+                BrokenPipeError,
+                ConnectionResetError,
+                ConnectionAbortedError,
+            ):
+                pass
 
         def _authorized(self) -> bool:
             if not require_auth:
@@ -141,18 +148,20 @@ def create_desktop_server(
             self._json({"error": "desktop session required"}, HTTPStatus.FORBIDDEN)
             return False
 
-        def _source(self) -> str | None:
+        def _body(self) -> dict[str, Any] | None:
             try:
                 length = int(self.headers.get("Content-Length", "0"))
                 raw = self.rfile.read(length) if length else b"{}"
                 body: Any = json.loads(raw.decode("utf-8"))
             except (ValueError, UnicodeDecodeError, json.JSONDecodeError):
-                body = {}
-            source = body.get("source") if isinstance(body, dict) else None
-            if not isinstance(source, str):
-                self._json({"error": "source must be text"}, HTTPStatus.BAD_REQUEST)
+                body = None
+            if not isinstance(body, dict):
+                self._json(
+                    {"error": "request body must be an object"},
+                    HTTPStatus.BAD_REQUEST,
+                )
                 return None
-            return source
+            return body
 
         def _serve_app(self) -> None:
             html = (
@@ -180,9 +189,24 @@ def create_desktop_server(
             ):
                 self._serve_app()
                 return
+            if not self._require_auth():
+                return
             if path == "/api/state":
-                if self._require_auth():
-                    self._json(app.state_dict())
+                self._json(app.state_dict())
+                return
+            if path == "/api/status":
+                self._json(app.status_dict())
+                return
+            if path.startswith("/api/save-status/"):
+                request_id = unquote(path.removeprefix("/api/save-status/"))
+                operation = app.save_request_dict(request_id)
+                if operation is None:
+                    self._json(
+                        {"error": "save_request_not_found"},
+                        HTTPStatus.NOT_FOUND,
+                    )
+                else:
+                    self._json(operation)
                 return
             self._json({"error": "not found"}, HTTPStatus.NOT_FOUND)
 
@@ -190,21 +214,51 @@ def create_desktop_server(
             if not self._require_auth():
                 return
             path = urlsplit(self.path).path
-            if path == "/api/preview":
-                source = self._source()
-                if source is not None:
-                    app.preview_source(source)
-                    self._json(app.state_dict())
-                return
             if path == "/api/save":
-                source = self._source()
-                if source is not None:
-                    app.save_source(source)
-                    self._json(app.state_dict())
+                body = self._body()
+                if body is None:
+                    return
+                source = body.get("source")
+                base_digest = body.get("base_digest")
+                request_id = body.get("request_id")
+                if not isinstance(source, str):
+                    self._json(
+                        {"error": "source must be text"},
+                        HTTPStatus.BAD_REQUEST,
+                    )
+                    return
+                if base_digest is not None and not isinstance(base_digest, str):
+                    self._json(
+                        {"error": "base_digest must be text"},
+                        HTTPStatus.BAD_REQUEST,
+                    )
+                    return
+                if request_id is not None and not isinstance(request_id, str):
+                    self._json(
+                        {"error": "request_id must be text"},
+                        HTTPStatus.BAD_REQUEST,
+                    )
+                    return
+                operation = app.submit_save(
+                    source,
+                    base_digest=base_digest,
+                    request_id=request_id,
+                )
+                self._json(
+                    operation.to_dict(),
+                    HTTPStatus(operation.http_status),
+                )
                 return
             if path == "/api/rebuild":
-                app.rebuild()
-                self._json(app.state_dict())
+                try:
+                    snapshot = app.rebuild_async()
+                except SaveWriteError as exc:
+                    self._json(
+                        {"error": exc.code, "message": str(exc)},
+                        exc.status,
+                    )
+                    return
+                self._json(snapshot.to_status_dict(), HTTPStatus.ACCEPTED)
                 return
             self._json({"error": "not found"}, HTTPStatus.NOT_FOUND)
 

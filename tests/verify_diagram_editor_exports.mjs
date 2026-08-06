@@ -49,14 +49,33 @@ async function waitForOrdinaryLayout(page) {
   }, null, { timeout: 5000 });
 }
 
+async function directlyHittablePoint(locator) {
+  return locator.evaluate(element => {
+    const rect = element.getBoundingClientRect();
+    const candidates = [
+      [0.5, 0.5], [0.5, 0.25], [0.5, 0.75],
+      [0.25, 0.5], [0.75, 0.5],
+      [0.25, 0.25], [0.75, 0.25],
+      [0.25, 0.75], [0.75, 0.75],
+    ];
+    for (const [rx, ry] of candidates) {
+      const x = rect.left + rect.width * rx;
+      const y = rect.top + rect.height * ry;
+      const hit = document.elementFromPoint(x, y);
+      if (hit && (hit === element || element.contains(hit))) return { x, y };
+    }
+    return null;
+  });
+}
+
 async function drag(page, locator, dx, dy, name) {
   const before = await locator.boundingBox();
   assert(before, `${name} has no bounding box`);
-  const x = before.x + before.width / 2;
-  const y = before.y + before.height / 2;
-  await page.mouse.move(x, y);
+  const point = await directlyHittablePoint(locator);
+  if (!point) return false;
+  await page.mouse.move(point.x, point.y);
   await page.mouse.down();
-  await page.mouse.move(x + dx, y + dy, { steps: 10 });
+  await page.mouse.move(point.x + dx, point.y + dy, { steps: 10 });
   await page.mouse.up();
   const after = await locator.boundingBox();
   assert(after, `${name} disappeared after drag`);
