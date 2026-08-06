@@ -68,6 +68,21 @@ class MachineAssemblyRouteConstraintTests(unittest.TestCase):
         with self.assertRaisesRegex(GlyphError, "入力parameterを1つだけ"):
             parse_compilation_model(source)
 
+    def test_effect_used_only_in_guard_is_not_a_routable_transition_action(self) -> None:
+        source = BASE.replace(
+            "!notify(event:TargetInput):TargetInput=event",
+            "!notify(event:TargetInput):TargetInput=event\n"
+            "!probe(event:TargetInput):TargetInput=event",
+        ).replace(
+            "input==Trigger>>source_fire(state)",
+            "probe(Notice)==Notice>>source_fire(state)",
+        ).replace(
+            "source.notify -> target.input",
+            "source.probe -> target.input",
+        )
+        with self.assertRaisesRegex(GlyphError, "遷移Actionから到達できない"):
+            parse_compilation_model(source)
+
 
 if __name__ == "__main__":
     unittest.main()
