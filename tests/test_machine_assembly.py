@@ -10,15 +10,15 @@ from glyph.compiler import GlyphError
 
 VALID = """\
 +DoorInput=BadgeAccepted|ForcedOpen
-+DoorMode=Locked|Unlocked|Faulted
++DoorMode=DoorLocked|DoorUnlocked|DoorFaulted
 *DoorState(mode:DoorMode)
 
 +SafetyInput=EmergencyDetected
-+SafetyMode=Normal|Emergency|Faulted
++SafetyMode=SafetyNormal|SafetyEmergency|SafetyFaulted
 *SafetyState(mode:SafetyMode)
 
 +MotorInput=StopRequested
-+MotorMode=Running|Stopped|Faulted
++MotorMode=MotorRunning|MotorStopped|MotorFaulted
 *MotorState(mode:MotorMode)
 
 +MotorCommand=DisableMotor
@@ -30,16 +30,16 @@ VALID = """\
 
 >door_fault(state:DoorState):DoorState
   notify_safety(EmergencyDetected)
-  DoorState(Faulted)
+  DoorState(DoorFaulted)
 
 >door_next(state:DoorState,input:DoorInput):DoorState
-  state.mode==Locked&input==ForcedOpen>>door_fault(state)
-  state.mode==Locked&input==BadgeAccepted>>DoorState(Unlocked)
+  state.mode==DoorLocked&input==ForcedOpen>>door_fault(state)
+  state.mode==DoorLocked&input==BadgeAccepted>>DoorState(DoorUnlocked)
   _>>state
 
 >safety_emergency(state:SafetyState):SafetyState
   request_motor(StopRequested)
-  SafetyState(Emergency)
+  SafetyState(SafetyEmergency)
 
 >safety_next(state:SafetyState,input:SafetyInput):SafetyState
   input==EmergencyDetected>>safety_emergency(state)
@@ -47,7 +47,7 @@ VALID = """\
 
 >motor_stop(state:MotorState):MotorState
   write_motor(DisableMotor)
-  MotorState(Stopped)
+  MotorState(MotorStopped)
 
 >motor_next(state:MotorState,input:MotorInput):MotorState
   input==StopRequested>>motor_stop(state)
@@ -55,24 +55,24 @@ VALID = """\
 
 machine Door(state:DoorState,input:DoorInput)
   select=state.mode
-  init=DoorState(Locked)
+  init=DoorState(DoorLocked)
   next=door_next(state,input)
-  success=Unlocked
-  failure=Faulted
+  success=DoorUnlocked
+  failure=DoorFaulted
 
 machine Safety(state:SafetyState,input:SafetyInput)
   select=state.mode
-  init=SafetyState(Normal)
+  init=SafetyState(SafetyNormal)
   next=safety_next(state,input)
-  success=Emergency
-  failure=Faulted
+  success=SafetyEmergency
+  failure=SafetyFaulted
 
 machine Motor(state:MotorState,input:MotorInput)
   select=state.mode
-  init=MotorState(Running)
+  init=MotorState(MotorRunning)
   next=motor_next(state,input)
-  success=Stopped
-  failure=Faulted
+  success=MotorStopped
+  failure=MotorFaulted
 
 assembly DoorControl
   door=Door
