@@ -2,9 +2,14 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Callable
 
 from .assembly_delivery import _patch_function_references
+
+
+_RUNTIME_CODEGEN_MESSAGE = (
+    "Glyph Machine Assembly immediate routing has not yet been lowered into "
+    "generated Rust; use machine-assembly-ir.json and the reference runtime"
+)
 
 
 def _assembly_irs(model) -> tuple[object, ...]:
@@ -16,6 +21,10 @@ def machine_assembly_payload(model) -> dict[str, object]:
     return {
         "schema": "glyph.machine-assembly-set-ir",
         "version": 1,
+        "runtime_codegen": {
+            "status": "not-lowered",
+            "fail_closed": True,
+        },
         "assemblies": [item.to_dict() for item in _assembly_irs(model)],
     }
 
@@ -58,9 +67,33 @@ def render_machine_assembly_mermaid(model) -> str:
 
 
 def install_machine_assembly_tooling_delivery() -> None:
-    """Publish opt-in Assembly IR without changing plain Glyph artifacts."""
+    """Publish opt-in Assembly artifacts and fail closed in legacy Rust codegen."""
 
+    from . import artifacts as artifacts_module
     from . import compilation as compilation_module
+
+    current_rust = artifacts_module.build_rust_artifacts
+    if not getattr(current_rust, "__glyph_machine_assembly__", False):
+        original_rust = current_rust
+
+        def build_rust_artifacts_with_assembly_guard(model):
+            artifacts = original_rust(model)
+            if not _assembly_irs(model):
+                return artifacts
+            logic = artifacts.logic.rstrip() + (
+                "\n\ncompile_error!(\""
+                + _RUNTIME_CODEGEN_MESSAGE
+                + "\");\n"
+            )
+            return type(artifacts)(logic, artifacts.host, artifacts.manual_scaffold)
+
+        build_rust_artifacts_with_assembly_guard.__name__ = original_rust.__name__
+        build_rust_artifacts_with_assembly_guard.__qualname__ = original_rust.__qualname__
+        build_rust_artifacts_with_assembly_guard.__doc__ = original_rust.__doc__
+        build_rust_artifacts_with_assembly_guard.__glyph_machine_assembly__ = True
+        build_rust_artifacts_with_assembly_guard.__glyph_original__ = original_rust
+        _patch_function_references(original_rust, build_rust_artifacts_with_assembly_guard)
+        artifacts_module.build_rust_artifacts = build_rust_artifacts_with_assembly_guard
 
     current_design = compilation_module.build_design_json
     if not getattr(current_design, "__glyph_machine_assembly__", False):
