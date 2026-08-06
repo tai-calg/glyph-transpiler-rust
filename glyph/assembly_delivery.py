@@ -21,6 +21,14 @@ def _patch_function_references(
                 namespace[name] = replacement
 
 
+def _has_top_level_assembly(source: str) -> bool:
+    for original in source.splitlines():
+        clean = original.split("#", 1)[0].rstrip()
+        if clean and not original[0].isspace() and clean.startswith("assembly "):
+            return True
+    return False
+
+
 def install_machine_assembly_delivery() -> None:
     """Install assembly extraction ahead of the canonical compilation parser.
 
@@ -41,16 +49,18 @@ def install_machine_assembly_delivery() -> None:
         source: str,
         source_name: str = "input.glyph",
     ):
+        # Plain Glyph follows the exact original function with the exact original
+        # source string. No split/join normalization or model mutation occurs.
+        if not _has_top_level_assembly(source):
+            return original(source, source_name)
+
         parser_source, assemblies = extract_assemblies(source)
         model = original(parser_source, source_name)
-        if not assemblies:
-            return model
-
         assembly_ir = validate_assemblies(model.program, model.machines, assemblies)
 
         # CompilationModel is a frozen dataclass but intentionally has no slots.
         # The compatibility shim adds opt-in fields without changing legacy tuple
-        # construction. Plain sources return the original model unchanged.
+        # construction.
         object.__setattr__(model, "assemblies", assemblies)
         object.__setattr__(model, "assembly_ir", assembly_ir)
         object.__setattr__(model, "assembly_source", source)
