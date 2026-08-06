@@ -235,6 +235,8 @@ def _reachable_effects(
     functions: Mapping[str, FunctionDecl],
     effects: Mapping[str, ExternDecl],
 ) -> set[str]:
+    """Find effects in transition value/action positions, never guard predicates."""
+
     pending = list(_direct_calls(machine.next_expr))
     visited: set[str] = set()
     reachable: set[str] = set()
@@ -253,10 +255,9 @@ def _reachable_effects(
         expressions: list[Expr] = []
         if function.expression is not None:
             expressions.append(function.expression)
-        for clause in function.guards:
-            if clause.condition is not None:
-                expressions.append(clause.condition)
-            expressions.append(clause.value)
+        # A guard predicate enables a transition but is not its Action. Only the
+        # selected branch value can contribute a routable `!` invocation.
+        expressions.extend(clause.value for clause in function.guards)
         for expression in expressions:
             pending.extend(_direct_calls(expression))
 
@@ -393,7 +394,7 @@ def validate_assemblies(
             if route.effect not in reachable_by_instance[route.source_instance]:
                 raise GlyphError(
                     f"{route.line}行目: effect '{route.effect}' はMachine "
-                    f"'{source.machine}' の遷移から到達できない"
+                    f"'{source.machine}' の遷移Actionから到達できない"
                 )
 
             source_key = (route.source_instance, route.effect)
