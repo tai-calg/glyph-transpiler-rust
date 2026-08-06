@@ -3,7 +3,35 @@ from __future__ import annotations
 import sys
 from typing import Callable
 
+from . import assembly as _assembly_module
 from .assembly import extract_assemblies, validate_assemblies
+from .compiler import TypeRef
+
+
+_BUILTIN_TYPE_NAMES = {
+    "R": "Result",
+    "O": "Option",
+    "V": "Vec",
+    "S": "String",
+}
+
+
+def _install_assembly_type_canonicalization() -> None:
+    current = _assembly_module._resolve_alias
+    if getattr(current, "__glyph_assembly_type_canonical__", False):
+        return
+    original = current
+
+    def canonical_type(ty: TypeRef, aliases) -> TypeRef:
+        resolved = original(ty, aliases)
+        return TypeRef(
+            _BUILTIN_TYPE_NAMES.get(resolved.name, resolved.name),
+            tuple(canonical_type(argument, aliases) for argument in resolved.args),
+        )
+
+    canonical_type.__glyph_assembly_type_canonical__ = True
+    canonical_type.__glyph_original__ = original
+    _assembly_module._resolve_alias = canonical_type
 
 
 def _patch_function_references(
@@ -39,6 +67,8 @@ def install_machine_assembly_delivery() -> None:
     """
 
     from . import artifacts as artifacts_module
+
+    _install_assembly_type_canonicalization()
 
     current = artifacts_module.parse_compilation_model
     if getattr(current, "__glyph_machine_assembly__", False):
