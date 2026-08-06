@@ -26,24 +26,31 @@ An effect is resolved per Machine instance.
 - not connected: ordinary Host-facing external effect
 
 The effect return value is the value delivered to the target input. An internally
-routed effect therefore requires an inline body: it must compute the routed value
-without calling the Host. The compiler requires its return type and the target
-input type to match after alias resolution.
+routed effect therefore requires an inline body so that its routed value is
+defined without requiring a Host implementation for that effect. Any other `!`
+effect called by the inline body keeps its own normal Assembly-or-Host resolution.
+The compiler requires the routed return type and target input type to match after
+alias resolution.
 
 ## Immediate delivery
 
-A routed effect invokes the target Machine reaction immediately. The target
-reaction completes before the source reaction continues to its next effect.
+Delivery occurs at the connected `!` invocation point. The source reaction is
+suspended there, the target Machine reaction runs to completion, and execution
+then returns to the source immediately after that invocation. Effects are not
+collected and delivered after the source reaction finishes.
+
 This is causal, depth-first propagation rather than a queue or an implicit
 whole-Assembly synchronous step.
 
 ```text
 Door reaction
+  before notify_safety
   notify_safety(EmergencyDetected)
     Safety reaction
       request_motor(StopRequested)
         Motor reaction
           write_motor(DisableMotor)  # Host effect
+  after notify_safety
 ```
 
 Only Machines reached through an effect route react. Merely belonging to an
@@ -56,7 +63,8 @@ Assembly does not cause periodic evaluation or a no-op transition.
 - a route target Machine has exactly one non-state input parameter
 - a direct route back to the same instance is rejected
 - runtime re-entry into an already reacting instance is rejected
-- the source effect must be reachable from the source Machine transition logic
+- the source effect must be reachable from a normalized transition Action
+- an effect used only in a guard predicate cannot be routed
 - the effect return type equals the target input type after alias resolution
 - route cycles are reported because immediate propagation may attempt re-entry
 
@@ -68,7 +76,7 @@ Fan-out, queued delivery, synchronized groups, dynamic instances, and reentrant
 reactions are deferred. They must be explicit future delivery policies rather
 than silent reinterpretations of the v1 arrow.
 
-## IR
+## IR and tooling
 
 Validated declarations produce `glyph.machine-assembly-ir` version 1.
 
@@ -90,6 +98,15 @@ MachineAssemblyIR
     order
 ```
 
-The initial integration attaches `assemblies` and `assembly_ir` to the existing
-`CompilationModel` without changing its constructor. This keeps legacy parsing
-and generated Rust unchanged for sources that do not use `assembly`.
+Assembly-enabled compilations also publish:
+
+```text
+machine-assembly-ir.json
+machine-assembly.mmd
+```
+
+The Assembly IR is embedded into the typed design JSON under
+`machine_assemblies`. The initial integration attaches `assemblies` and
+`assembly_ir` to the existing `CompilationModel` without changing its constructor.
+Plain Glyph bypasses the Assembly integration and retains the exact legacy parsing
+and tooling paths.
