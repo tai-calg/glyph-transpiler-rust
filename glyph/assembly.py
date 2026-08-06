@@ -318,6 +318,7 @@ def validate_assemblies(
     program: Program,
     machines: Sequence[MachineDecl],
     assemblies: Sequence[AssemblyDecl],
+    inline_effects: Sequence[FunctionDecl] = (),
 ) -> tuple[MachineAssemblyIR, ...]:
     machine_by_name = {machine.name: machine for machine in machines}
     functions = {
@@ -330,6 +331,7 @@ def validate_assemblies(
         for declaration in program.declarations
         if isinstance(declaration, ExternDecl)
     }
+    inline_effect_names = {effect.name for effect in inline_effects}
     aliases = {
         declaration.name: declaration.target
         for declaration in program.declarations
@@ -383,6 +385,11 @@ def validate_assemblies(
                 raise GlyphError(
                     f"{route.line}行目: !effect '{route.effect}' が定義されていない"
                 )
+            if route.effect not in inline_effect_names:
+                raise GlyphError(
+                    f"{route.line}行目: 内部route化する !effect '{route.effect}' には"
+                    "本体が必要"
+                )
             if route.effect not in reachable_by_instance[route.source_instance]:
                 raise GlyphError(
                     f"{route.line}行目: effect '{route.effect}' はMachine "
@@ -399,15 +406,16 @@ def validate_assemblies(
             routed_sources[source_key] = route.line
 
             target_machine = instance_machine[route.target_instance]
-            target_param = next(
-                (param for param in target_machine.input_params if param.name == route.input),
-                None,
-            )
-            if target_param is None:
-                available = ", ".join(param.name for param in target_machine.input_params)
+            if len(target_machine.input_params) != 1:
+                raise GlyphError(
+                    f"{route.line}行目: v1の即時route先Machine '{target.machine}' は"
+                    "入力parameterを1つだけ持つ必要がある"
+                )
+            target_param = target_machine.input_params[0]
+            if target_param.name != route.input:
                 raise GlyphError(
                     f"{route.line}行目: Machine '{target.machine}' に入力 '{route.input}' がない"
-                    + (f"。使用可能: {available}" if available else "")
+                    f"。使用可能: {target_param.name}"
                 )
 
             source_type = _resolve_alias(effect.return_type, aliases)
