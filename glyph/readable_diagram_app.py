@@ -26,6 +26,7 @@ from .diagram_workspace_layout import enhance_workspace_layout_html
 from .editor_identifier_highlight import enhance_editor_identifier_highlight_html
 from .state_diagram_workspace import enhance_state_diagram_workspace_html
 from .state_viewport_reservation import enhance_state_viewport_reservation_html
+from .transition_arrow_clearance import enhance_transition_arrow_clearance_html
 from .transition_enabling_case_rendering import (
     enhance_transition_enabling_case_rendering_html,
 )
@@ -83,6 +84,7 @@ def _presentation_pipeline():
         enhance_diagram_canvas_viewport_html,
         enhance_diagram_middle_drag_zoom_html,
         enhance_state_diagram_workspace_html,
+        enhance_transition_arrow_clearance_html,
         enhance_diagram_locale_html,
         enhance_transition_execution_context_selector_html,
         enhance_transition_io_clusters_html,
