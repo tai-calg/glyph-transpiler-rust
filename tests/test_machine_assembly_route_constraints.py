@@ -51,6 +51,44 @@ assembly Connected
 """
 
 
+BUILTIN_TYPE_EQUIVALENCE = """\
++SourceMode=SourceIdle|SourceDone|SourceFault
+*SourceState(mode:SourceMode)
+
++TargetMode=TargetIdle|TargetDone|TargetFault
+*TargetState(mode:TargetMode)
+
+!notify(event:O<S>):O<S>=event
+
+>source_next(state:SourceState,input:O<S>):SourceState
+  value := notify(input)
+  SourceState(SourceDone)
+
+>target_next(state:TargetState,input:Option<String>):TargetState
+  TargetState(TargetDone)
+
+machine Source(state:SourceState,input:O<S>)
+  select=state.mode
+  init=SourceState(SourceIdle)
+  next=source_next(state,input)
+  success=SourceDone
+  failure=SourceFault
+
+machine Target(state:TargetState,input:Option<String>)
+  select=state.mode
+  init=TargetState(TargetIdle)
+  next=target_next(state,input)
+  success=TargetDone
+  failure=TargetFault
+
+assembly Connected
+  source=Source
+  target=Target
+
+  source.notify -> target.input
+"""
+
+
 class MachineAssemblyRouteConstraintTests(unittest.TestCase):
     def test_internal_route_requires_inline_effect_body(self) -> None:
         source = BASE.replace(
@@ -94,6 +132,12 @@ class MachineAssemblyRouteConstraintTests(unittest.TestCase):
         )
         model = parse_compilation_model(source)
         self.assertEqual(model.assembly_ir[0].routes[0]["effect"], "notify")
+
+    def test_builtin_short_and_long_type_names_are_route_equivalent(self) -> None:
+        model = parse_compilation_model(BUILTIN_TYPE_EQUIVALENCE)
+        route = model.assembly_ir[0].routes[0]
+        self.assertEqual(route["value_type"], "O<S>")
+        self.assertEqual(route["target_machine"], "Target")
 
 
 if __name__ == "__main__":
