@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, fields, replace
 from pathlib import Path
 
 from .assembly import (
     AssemblyDecl,
     MachineAssemblyIR,
-    _reachable_effects,
+    _direct_calls,
+    _value_expressions,
     extract_assemblies,
     has_top_level_assembly,
     validate_assemblies,
@@ -19,7 +20,10 @@ from .artifacts import (
     parse_compilation_model as _parse_legacy_compilation_model,
 )
 from .compiler import ExternDecl, FunctionDecl, GlyphError, Program
+from .execution_ir import build_execution_structure_ir
 from .machine import MachineDecl
+from .state_machine_analysis import analyze_machine
+from .state_transition_compiler import build_machine_state_transition_ir
 from .temporal import SpecDecl
 
 
@@ -53,49 +57,139 @@ def _field_values(value: object, model_type: type) -> dict[str, object]:
     return {field.name: getattr(value, field.name) for field in fields(model_type)}
 
 
-def _validate_route_sources_are_actions(
-    base: CompilationModel,
-    assemblies: tuple[AssemblyDecl, ...],
-) -> None:
-    """Report guard-only/non-action routes before payload signature diagnostics."""
+def _operation_name(call: str) -> str:
+    open_position = call.find("(")
+    return call[:open_position].strip() if open_position > 0 else call.strip()
 
-    machines = {machine.name: machine for machine in base.machines}
+
+def _expand_inline_effect_chain(
+    direct: set[str],
+    base: CompilationModel,
+) -> set[str]:
+    """Expand only from normalized reachable transition operations.
+
+    The normalized StateTransitionIR decides which operation call sites are real
+    transition Actions. Inline effect prototypes may then delegate to another
+    declared effect; that delegation remains part of the same Action chain.
+    """
+
     functions = {
         item.name: item
         for item in base.program.declarations
         if isinstance(item, FunctionDecl)
     }
-    effects = {
+    externs = {
         item.name: item
         for item in base.program.declarations
         if isinstance(item, ExternDecl)
     }
     inline_effects = {item.name: item for item in base.inline_effects}
+    result: set[str] = set()
+    pending = list(direct)
+    visited: set[str] = set()
+
+    while pending:
+        name = pending.pop()
+        if name in visited:
+            continue
+        visited.add(name)
+        if name in externs:
+            result.add(name)
+            implementation = inline_effects.get(name)
+            if implementation is not None:
+                for expression in _value_expressions(implementation):
+                    pending.extend(_direct_calls(expression))
+            continue
+        function = functions.get(name)
+        if function is not None:
+            for expression in _value_expressions(function):
+                pending.extend(_direct_calls(expression))
+    return result
+
+
+def _normalized_machine_actions(
+    base: CompilationModel,
+    source_name: str,
+) -> dict[str, set[str]]:
+    """Use the existing normalized StateTransitionIR as the Action authority."""
+
+    execution = build_execution_structure_ir(
+        base.preprocess.source,
+        source_name,
+        base.program,
+        base.specs,
+        base.machines,
+    )
+    actions: dict[str, set[str]] = {}
+    for machine_view in execution.machines:
+        analyzed = analyze_machine(base, machine_view)
+        normalized = build_machine_state_transition_ir(base, analyzed)
+        direct: set[str] = set()
+        for transition in normalized.get("transitions", []):
+            if not bool(transition.get("source_reachable", True)):
+                continue
+            action = str(transition.get("action") or "").strip()
+            if not action:
+                continue
+            direct.update(
+                name
+                for name in (
+                    _operation_name(item)
+                    for item in action.split("; ")
+                )
+                if name
+            )
+        actions[machine_view.name] = _expand_inline_effect_chain(direct, base)
+    return actions
+
+
+def _validate_route_sources_are_actions(
+    base: CompilationModel,
+    assemblies: tuple[AssemblyDecl, ...],
+    actions_by_machine: dict[str, set[str]],
+) -> None:
+    """Reject guard-only, unreachable and state-unreachable route sources."""
+
+    machines = {machine.name: machine for machine in base.machines}
+    effects = {
+        item.name
+        for item in base.program.declarations
+        if isinstance(item, ExternDecl)
+    }
 
     for assembly in assemblies:
         instance_machines = {
             instance.name: machines.get(instance.machine)
             for instance in assembly.instances
         }
-        reachable_cache: dict[str, set[str]] = {}
         for route in assembly.routes:
             machine = instance_machines.get(route.source_instance)
             if machine is None or route.effect not in effects:
                 continue
-            reachable = reachable_cache.get(route.source_instance)
-            if reachable is None:
-                reachable = _reachable_effects(
-                    machine,
-                    functions,
-                    effects,
-                    inline_effects,
-                )
-                reachable_cache[route.source_instance] = reachable
-            if route.effect not in reachable:
+            if route.effect not in actions_by_machine.get(machine.name, set()):
                 raise GlyphError(
                     f"{route.line}行目: effect '{route.effect}' はMachine "
-                    f"'{machine.name}' の遷移Actionから到達できない"
+                    f"'{machine.name}' の到達可能な遷移Actionに存在しない"
                 )
+
+
+def _bind_normalized_actions(
+    assembly_ir: tuple[MachineAssemblyIR, ...],
+    actions_by_machine: dict[str, set[str]],
+) -> tuple[MachineAssemblyIR, ...]:
+    result: list[MachineAssemblyIR] = []
+    for assembly in assembly_ir:
+        instances = tuple(
+            {
+                **dict(instance),
+                "allowed_effects": sorted(
+                    actions_by_machine.get(str(instance["machine"]), set())
+                ),
+            }
+            for instance in assembly.instances
+        )
+        result.append(replace(assembly, instances=instances))
+    return tuple(result)
 
 
 def parse_compilation_model(
@@ -107,13 +201,15 @@ def parse_compilation_model(
 
     parser_source, assemblies = extract_assemblies(source)
     base = _parse_legacy_compilation_model(parser_source, source_name)
-    _validate_route_sources_are_actions(base, assemblies)
+    actions_by_machine = _normalized_machine_actions(base, source_name)
+    _validate_route_sources_are_actions(base, assemblies, actions_by_machine)
     assembly_ir = validate_assemblies(
         base.program,
         base.machines,
         assemblies,
         base.inline_effects,
     )
+    assembly_ir = _bind_normalized_actions(assembly_ir, actions_by_machine)
 
     expanded_values = _field_values(base.expanded, ExpandedCompilation)
     expanded = AssemblyExpandedCompilation(
