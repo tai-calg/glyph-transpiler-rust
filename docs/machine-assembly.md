@@ -47,14 +47,15 @@ Only Machines reached through a route react.
 ## State and failure semantics
 
 Each instance owns one local state. The reference runtime evaluates a complete
-causal reaction against a trusted `deepcopy` of the committed state and commits
-the complete state configuration only when the top-level reaction succeeds.
-Copy behavior is not externally replaceable.
+causal reaction against a type-directed structural clone of the committed state
+and commits the complete state configuration only when the top-level reaction
+succeeds. Runtime cloning does not invoke Python `deepcopy`/`__deepcopy__` or any
+caller-supplied copy protocol.
 
 - route, re-entry, type, handler, or Host failure discards the working state
-- `runtime.states` returns a mutable but detached copy of the committed state
+- `runtime.states` returns a mutable but detached structural copy of the committed state
 - successful reaction results, traces, Host-effect records, and failure audits are recursively immutable
-- routed payloads and Host arguments use copy-by-value semantics
+- routed payloads, Host arguments, Host results, and next states are structurally cloned from validated Glyph type metadata
 - Host argument audit records are captured before the Host callback runs
 - already executed Host effects remain externally observable and cannot be rolled back
 - generators are explicitly closed on success and failure so cleanup blocks run deterministically
@@ -63,6 +64,18 @@ Copy behavior is not externally replaceable.
 
 Fail-fast rejection prevents both lost updates and the cross-thread deadlock where
 a Host callback waits for a worker that is itself waiting for the active reaction.
+
+### Trace and commit semantics
+
+A Machine that completes inside an in-progress causal reaction records a
+`phase="stage"` trace entry. This means its validated next state has been staged in
+the working configuration; it does **not** mean the state has committed.
+
+There is exactly one transactional commit boundary: the successful completion of
+the complete top-level causal reaction. If any later Machine, Host result,
+next-state validation, or generator cleanup fails, all staged Machine states are
+discarded. Failure audit traces therefore never claim that a rolled-back Machine
+state was committed.
 
 ### Failure audit
 
@@ -75,11 +88,18 @@ The audit contains:
 - the unchanged committed state
 - the discarded working state at the point of failure
 
-Host-effect records use these statuses:
+A Host-effect audit slot is created before the Host callback executes. Host-effect
+records use these statuses:
 
+- `attempted`: the Host invocation has been recorded but has not yet reached a final classification
 - `validated`: the Host returned and its result passed type validation
 - `invalid-result`: the Host returned, but its result violated the declared result type
 - `raised`: the Host callback raised an exception
+
+Audit capture is a no-throw path. If exception stringification or value
+introspection fails, the original execution failure is not masked; the audit uses
+a safe fallback such as `<message unavailable>` or an immutable
+`$snapshot_error` placeholder.
 
 If the original exception object cannot carry metadata, the runtime raises
 `ImmediateReactionFailure`, preserving the original exception as `cause` and the
@@ -111,6 +131,7 @@ The validation includes:
 - every returned next state
 - signed and unsigned fixed-width integer ranges
 - finite floating-point values and the maximum magnitude of `f32` and `f64`
+- reserved primitive, generic, and `Tuple` type names cannot be redefined by manually constructed IR
 
 Malformed or manually constructed IR is rejected with `GlyphError`; it is not
 allowed to degrade into duplicate-overwrite behavior or a raw `KeyError`.
@@ -155,9 +176,11 @@ reactions, and instance-aware Rust lowering are deferred.
 
 Validated declarations produce immutable `glyph.machine-assembly-ir` version 2.
 Nested records use a tuple-backed immutable Mapping with no mutable internal
-dictionary or assignable storage. Mapping, sequence, and set values are recursively
-frozen; opaque or mutable values without a supported IR representation are
-rejected. `to_dict()` returns a detached mutable serialization.
+dictionary or assignable storage. Mapping keys must already be strings; keys are
+never coerced with `str()`, and duplicate keys are rejected during freezing.
+Mapping, sequence, and set values are recursively frozen; opaque or mutable values
+without a supported IR representation are rejected. `to_dict()` returns a
+detached mutable serialization.
 
 Assembly-enabled compilations publish:
 
@@ -196,8 +219,10 @@ runtime_codegen.fail_closed = true
 ## Validation
 
 The hardening regression set covers recursively immutable IR and audit values,
-trusted deep-copy isolation, successful and failed Host-operation audit retention,
-invalid Host results, duplicate and malformed IR records, same-thread and
-cross-thread fail-fast re-entry rejection, fixed-width integer boundaries, finite
+type-directed structural clone isolation, staged-vs-committed trace semantics,
+no-throw audit capture, successful and failed Host-operation audit retention,
+invalid Host results, duplicate/non-string IR mapping keys, reserved type-name
+rejection, duplicate and malformed IR records, same-thread and cross-thread
+fail-fast re-entry rejection, fixed-width integer boundaries, finite
 floating-point validation, normalized Action reachability, compiler entrypoints,
 and plain-Glyph compatibility.
