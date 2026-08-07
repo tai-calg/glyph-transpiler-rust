@@ -118,7 +118,15 @@ class MachineAssemblyRouteConstraintTests(unittest.TestCase):
             "source.notify -> target.input",
             "source.probe -> target.input",
         )
-        with self.assertRaisesRegex(GlyphError, "遷移Actionから到達できない"):
+        with self.assertRaisesRegex(GlyphError, "遷移Action"):
+            parse_compilation_model(source)
+
+    def test_effect_from_unreachable_state_is_not_routable(self) -> None:
+        source = BASE.replace(
+            "input==Trigger>>source_fire(state)",
+            "state.mode==SourceDone&input==Trigger>>source_fire(state)",
+        )
+        with self.assertRaisesRegex(GlyphError, "遷移Action"):
             parse_compilation_model(source)
 
     def test_nested_inline_effect_remains_in_source_action_chain(self) -> None:
