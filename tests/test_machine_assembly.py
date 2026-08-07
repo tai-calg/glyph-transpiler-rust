@@ -4,7 +4,8 @@ import unittest
 
 from glyph import parse_compilation_model
 from glyph.assembly import extract_assemblies
-from glyph.assembly_runtime import EffectEmission, ImmediateAssemblyRuntime
+from glyph.assembly_frontend import AssemblyCompilationModel
+from glyph.assembly_runtime import EffectInvocation, ImmediateAssemblyRuntime
 from glyph.compiler import GlyphError
 
 
@@ -24,8 +25,8 @@ VALID = """\
 +MotorCommand=DisableMotor
 *Receipt(command:MotorCommand)
 
-!notify_safety(event:SafetyInput):SafetyInput=event
-!request_motor(event:MotorInput):MotorInput=event
+!notify_safety(event:SafetyInput):()
+!request_motor(event:MotorInput):()
 !write_motor(command:MotorCommand):Receipt=Receipt(command)
 
 >door_fault(state:DoorState):DoorState
@@ -84,27 +85,38 @@ assembly DoorControl
 """
 
 
+INITIAL = {
+    "door": "DoorLocked",
+    "safety": "SafetyNormal",
+    "motor": "MotorRunning",
+}
+
+
 class MachineAssemblyTests(unittest.TestCase):
-    def test_public_compilation_extracts_and_validates_assembly(self) -> None:
+    def test_public_compilation_returns_immutable_assembly_model(self) -> None:
         model = parse_compilation_model(VALID)
 
+        self.assertIsInstance(model, AssemblyCompilationModel)
+        self.assertEqual(model.assembly_source, VALID)
         self.assertEqual([item.name for item in model.assemblies], ["DoorControl"])
         self.assertEqual(len(model.assembly_ir), 1)
         ir = model.assembly_ir[0]
-        self.assertEqual(ir.delivery, "immediate")
+        self.assertEqual(ir.delivery, "immediate-call-point")
+        self.assertEqual(ir.state_commit, "atomic-per-top-level-reaction")
         self.assertEqual(ir.reentrant_reaction, "forbidden")
         self.assertEqual(
             [
                 (
                     route["source_instance"],
                     route["effect"],
+                    route["payload_parameter"],
                     route["target_instance"],
                 )
                 for route in ir.routes
             ],
             [
-                ("door", "notify_safety", "safety"),
-                ("safety", "request_motor", "motor"),
+                ("door", "notify_safety", "event", "safety"),
+                ("safety", "request_motor", "event", "motor"),
             ],
         )
 
@@ -114,13 +126,28 @@ class MachineAssemblyTests(unittest.TestCase):
         self.assertEqual(len(assemblies), 1)
         self.assertNotIn("assembly DoorControl", stripped)
 
-    def test_route_return_type_must_match_target_input(self) -> None:
+    def test_route_argument_type_must_match_target_input(self) -> None:
         source = VALID.replace(
-            "!notify_safety(event:SafetyInput):SafetyInput=event",
-            "!notify_safety(event:SafetyInput):MotorInput=StopRequested",
+            "!notify_safety(event:SafetyInput):()",
+            "!notify_safety(event:MotorInput):()",
         )
         with self.assertRaisesRegex(GlyphError, "route型不一致"):
             parse_compilation_model(source)
+
+    def test_internal_route_is_one_argument_and_unit_result(self) -> None:
+        wrong_result = VALID.replace(
+            "!notify_safety(event:SafetyInput):()",
+            "!notify_safety(event:SafetyInput):SafetyInput",
+        )
+        with self.assertRaisesRegex(GlyphError, "戻り値は\(\)が必要"):
+            parse_compilation_model(wrong_result)
+
+        wrong_arity = VALID.replace(
+            "!notify_safety(event:SafetyInput):()",
+            "!notify_safety(event:SafetyInput,context:B):()",
+        )
+        with self.assertRaisesRegex(GlyphError, "payload引数を1つ"):
+            parse_compilation_model(wrong_arity)
 
     def test_source_effect_must_be_reachable_from_source_machine(self) -> None:
         source = VALID.replace(
@@ -139,22 +166,34 @@ class MachineAssemblyTests(unittest.TestCase):
         with self.assertRaisesRegex(GlyphError, "v1は単一接続のみ"):
             parse_compilation_model(source)
 
-    def test_immediate_runtime_propagates_depth_first_and_leaves_host_effects(self) -> None:
+    def test_stateful_runtime_routes_arguments_and_returns_host_results(self) -> None:
         model = parse_compilation_model(VALID)
-        runtime = ImmediateAssemblyRuntime(model.assembly_ir[0])
+        runtime = ImmediateAssemblyRuntime(model.assembly_ir[0], INITIAL)
 
-        def handler(instance: str, input_name: str, value: object):
+        def handler(instance: str, input_name: str, value: object, state: object):
             if instance == "door":
-                return [EffectEmission("notify_safety", "EmergencyDetected")]
+                routed_result = yield EffectInvocation(
+                    "notify_safety", "EmergencyDetected"
+                )
+                self.assertIsNone(routed_result)
+                return "DoorFaulted"
             if instance == "safety":
-                return [EffectEmission("request_motor", "StopRequested")]
+                yield EffectInvocation("request_motor", "StopRequested")
+                return "SafetyEmergency"
             if instance == "motor":
-                return [EffectEmission("write_motor", "DisableMotor")]
+                receipt = yield EffectInvocation("write_motor", "DisableMotor")
+                self.assertEqual(receipt, "Receipt(DisableMotor)")
+                return "MotorStopped"
             self.fail(instance)
 
-        result = runtime.react("door", "input", "ForcedOpen", handler)
+        def host(instance: str, effect: str, arguments: tuple[object, ...]):
+            self.assertEqual((instance, effect), ("motor", "write_motor"))
+            return f"Receipt({arguments[0]})"
+
+        result = runtime.react("door", "input", "ForcedOpen", handler, host)
+        enters = [item for item in result.trace if item.phase == "enter"]
         self.assertEqual(
-            [(item.instance, item.input, item.depth) for item in result.trace],
+            [(item.instance, item.input, item.depth) for item in enters],
             [
                 ("door", "input", 0),
                 ("safety", "input", 1),
@@ -163,13 +202,28 @@ class MachineAssemblyTests(unittest.TestCase):
         )
         self.assertEqual(
             [
-                (item.instance, item.effect, item.value)
+                (item.instance, item.effect, item.arguments, item.result)
                 for item in result.external_effects
             ],
-            [("motor", "write_motor", "DisableMotor")],
+            [
+                (
+                    "motor",
+                    "write_motor",
+                    ("DisableMotor",),
+                    "Receipt(DisableMotor)",
+                )
+            ],
+        )
+        self.assertEqual(
+            result.states,
+            {
+                "door": "DoorFaulted",
+                "safety": "SafetyEmergency",
+                "motor": "MotorStopped",
+            },
         )
 
-    def test_immediate_runtime_rejects_reentry(self) -> None:
+    def test_reentry_failure_rolls_back_all_machine_states(self) -> None:
         model = parse_compilation_model(VALID)
         ir = model.assembly_ir[0]
         cyclic_routes = (
@@ -178,7 +232,9 @@ class MachineAssemblyTests(unittest.TestCase):
                 "source_instance": "motor",
                 "source_machine": "Motor",
                 "effect": "write_motor",
-                "value_type": "DoorInput",
+                "payload_parameter": "command",
+                "payload_type": "DoorInput",
+                "result_type": "()",
                 "target_instance": "door",
                 "target_machine": "Door",
                 "input": "input",
@@ -192,23 +248,45 @@ class MachineAssemblyTests(unittest.TestCase):
             version=ir.version,
             name=ir.name,
             delivery=ir.delivery,
+            state_commit=ir.state_commit,
             reentrant_reaction=ir.reentrant_reaction,
             instances=ir.instances,
             routes=cyclic_routes,
             diagnostics=ir.diagnostics,
         )
-        runtime = ImmediateAssemblyRuntime(cyclic_ir)
+        runtime = ImmediateAssemblyRuntime(cyclic_ir, INITIAL)
 
-        def handler(instance: str, input_name: str, value: object):
+        def handler(instance: str, input_name: str, value: object, state: object):
             effects = {
-                "door": EffectEmission("notify_safety", "EmergencyDetected"),
-                "safety": EffectEmission("request_motor", "StopRequested"),
-                "motor": EffectEmission("write_motor", "ForcedOpen"),
+                "door": EffectInvocation("notify_safety", "EmergencyDetected"),
+                "safety": EffectInvocation("request_motor", "StopRequested"),
+                "motor": EffectInvocation("write_motor", "ForcedOpen"),
             }
-            return [effects[instance]]
+            yield effects[instance]
+            return f"changed-{instance}"
 
         with self.assertRaisesRegex(GlyphError, "再入は禁止"):
             runtime.react("door", "input", "ForcedOpen", handler)
+        self.assertEqual(runtime.states, INITIAL)
+
+    def test_runtime_rejects_unknown_input_and_effect(self) -> None:
+        model = parse_compilation_model(VALID)
+        runtime = ImmediateAssemblyRuntime(model.assembly_ir[0], INITIAL)
+
+        def no_effect(instance: str, input_name: str, value: object, state: object):
+            if False:
+                yield EffectInvocation("never")
+            return state
+
+        with self.assertRaisesRegex(GlyphError, "入力 'missing' がない"):
+            runtime.react("door", "missing", "ForcedOpen", no_effect)
+
+        def unknown_effect(instance: str, input_name: str, value: object, state: object):
+            yield EffectInvocation("typo", value)
+            return state
+
+        with self.assertRaisesRegex(GlyphError, "遷移Actionとして宣言されていない"):
+            runtime.react("door", "input", "ForcedOpen", unknown_effect)
 
 
 if __name__ == "__main__":
