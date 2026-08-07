@@ -39,15 +39,21 @@ class MachineAssemblyToolingTests(unittest.TestCase):
         design = json.loads(build_design_json(model))
         payload = design["machine_assemblies"]
         self.assertEqual(payload["schema"], "glyph.machine-assembly-set-ir")
+        self.assertEqual(payload["version"], 2)
         self.assertEqual(payload["runtime_codegen"]["status"], "blocked")
         self.assertTrue(payload["runtime_codegen"]["fail_closed"])
-        self.assertEqual(payload["assemblies"][0]["name"], "DoorControl")
+        assembly = payload["assemblies"][0]
+        self.assertEqual(assembly["version"], 2)
+        self.assertEqual(assembly["name"], "DoorControl")
+        self.assertTrue(assembly["types"])
+        self.assertTrue(assembly["instances"][0]["effects"])
 
         bundle = build_diagram_bundle(model, "machine_assembly_immediate.glyph")
         self.assertIn("machine-assembly-ir.json", bundle.files)
         self.assertIn("machine-assembly.mmd", bundle.files)
         topology = bundle.files["machine-assembly.mmd"]
         self.assertIn("door: Door", topology)
+        self.assertIn("input:DoorInput", topology)
         self.assertIn("notify_safety(event:SafetyInput)", topology)
         self.assertIn("Host effects", topology)
         self.assertIn("write_motor", topology)
