@@ -3,6 +3,8 @@ from __future__ import annotations
 import unittest
 
 from glyph import parse_compilation_model
+from glyph.artifacts import CompilationModel
+from glyph.assembly_frontend import _parse_legacy_compilation_model
 
 
 PLAIN = """\
@@ -26,8 +28,9 @@ machine Controller(state:State,input:Input)
 class MachineAssemblyCompatibilityTests(unittest.TestCase):
     def test_plain_source_uses_original_compilation_model_unchanged(self) -> None:
         model = parse_compilation_model(PLAIN)
-        original = parse_compilation_model.__glyph_original__(PLAIN)
+        original = _parse_legacy_compilation_model(PLAIN, "input.glyph")
 
+        self.assertIs(type(model), CompilationModel)
         self.assertEqual(model, original)
         self.assertFalse(hasattr(model, "assemblies"))
         self.assertFalse(hasattr(model, "assembly_ir"))
