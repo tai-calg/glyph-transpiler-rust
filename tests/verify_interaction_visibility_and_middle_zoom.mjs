@@ -130,15 +130,19 @@ try {
   const x = box.x + box.width * 0.55;
   const y = box.y + box.height * 0.55;
 
-  await page.mouse.move(x, y);
-  await page.mouse.down({ button: "middle" });
-  await page.waitForFunction(() => {
+  const waitForMiddleZoomActive = () => page.waitForFunction(() => {
     const shell = document.querySelector(".canvas-shell");
     return shell?.classList.contains("glyph-middle-zooming")
       && !shell.classList.contains("glyph-panning")
       && window.glyphDiagramMiddleDragZoom?.active() === true;
   });
+
+  await page.mouse.move(x, y);
+  await page.mouse.down({ button: "middle" });
+  await waitForMiddleZoomActive();
+  await page.waitForTimeout(32);
   await page.mouse.move(x, y - 120, { steps: 14 });
+  await page.waitForTimeout(80);
   await page.mouse.up({ button: "middle" });
   await page.waitForFunction(() => Number.parseFloat(
     document.querySelector(".graph-stage")?.dataset.viewportScale || "1"
@@ -148,7 +152,10 @@ try {
 
   await page.mouse.move(x, y);
   await page.mouse.down({ button: "middle" });
+  await waitForMiddleZoomActive();
+  await page.waitForTimeout(32);
   await page.mouse.move(x, y + 150, { steps: 16 });
+  await page.waitForTimeout(80);
   await page.mouse.up({ button: "middle" });
   await page.waitForFunction(previous => Number.parseFloat(
     document.querySelector(".graph-stage")?.dataset.viewportScale || "1"
