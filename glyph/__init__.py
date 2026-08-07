@@ -1,120 +1,105 @@
-from __future__ import annotations
-
 from .artifacts import (
     CompilationModel,
-    ExpandedCompilation,
     RustArtifacts,
-    build_rust_artifacts,
     compile_artifact_files,
     compile_artifacts,
     parse_artifact_model,
     parse_compilation_model,
 )
-from .compiler import (
-    AliasDecl,
-    ArchitectureDecl,
-    ArchitecturePort,
-    BinaryExpr,
-    BoolExpr,
-    CallExpr,
-    ExternDecl,
-    FieldExpr,
-    FunctionDecl,
-    GlyphError,
-    HostBindingDecl,
-    HostBindingField,
-    LambdaExpr,
-    LetExpr,
-    NameExpr,
-    NumberExpr,
-    OpaqueDecl,
-    Param,
-    ProductDecl,
-    Program,
-    StringExpr,
-    SumDecl,
-    SumVariant,
-    TryExpr,
-    TypeRef,
-    UnaryExpr,
-    compile_file,
-    compile_source,
-    parse_program,
-)
 from .compilation import (
     CompilationOutputs,
     CompilationPipeline,
-    build_design_json,
-    build_diagram_bundle,
-    compile_text,
+    compile_diagram_bundle,
+    compile_outputs,
+    write_diagram_bundle,
 )
-from .incremental import (
-    CompilationSnapshot,
-    IncrementalCompiler,
-    IncrementalResult,
-    watch_file,
+from .tooling_delivery_v2 import install_tooling_delivery_v2 as _install_tooling_delivery_v2
+
+_install_tooling_delivery_v2()
+del _install_tooling_delivery_v2
+
+from .compiler import GlyphError
+from .frontend import compile_file, compile_source, parse_program
+from .incremental import CompilationSnapshot, IncrementalCompiler, IncrementalResult
+from .mermaid import DiagramBundle
+from .preprocessor import (
+    PreprocessResult,
+    RawMacroDef,
+    preprocess_source as _preprocess_source,
 )
-from .preprocessor import PreprocessResult, preprocess_source as _preprocess_source
-from .studio import GlyphStudio, StudioSnapshot
+from .semantic import SemanticModel
+from .studio import GlyphStudio, StudioSnapshot, run_studio
+from .symbols import SymbolId, SymbolRecord
+from .temporal_sigils import reject_reserved_temporal_macro_names
+
+# Studio diagnostics retain their canonical message while exposing Japanese and
+# English variants to the browser. The HTML enhancer is applied here so every
+# import path, including the desktop server, receives the same default-Japanese
+# selector without duplicating the Studio document.
+from . import studio as _studio_module
+from .diagnostic_i18n import localize_message_payload as _localize_message_payload
+from .studio_locale import enhance_studio_locale_html as _enhance_studio_locale_html
+
+_original_studio_snapshot_to_dict = StudioSnapshot.to_dict
+
+
+def _localized_studio_snapshot_to_dict(
+    self: StudioSnapshot,
+    source_path,
+    output_dir,
+    _original=_original_studio_snapshot_to_dict,
+    _localize=_localize_message_payload,
+):
+    return _localize(_original(self, source_path, output_dir))
+
+
+_localized_studio_snapshot_to_dict.__glyph_localized__ = True
+if not getattr(StudioSnapshot.to_dict, "__glyph_localized__", False):
+    StudioSnapshot.to_dict = _localized_studio_snapshot_to_dict
+
+_studio_module.STUDIO_HTML = _enhance_studio_locale_html(_studio_module.STUDIO_HTML)
+_studio_module._studio_ui.STUDIO_HTML = _studio_module.STUDIO_HTML
 
 
 def preprocess_source(source: str) -> PreprocessResult:
+    """Run the public raw preprocessor with language-level name reservations."""
+
+    reject_reserved_temporal_macro_names(source)
     return _preprocess_source(source)
+
+
 
 
 # Keep the package root as the stable user-facing facade. Glyph 0.4 IR models,
 # semantic builders, validators, and code generators remain available from
 # their responsibility-specific modules but are deliberately not re-exported.
-
 __all__ = [
-    "AliasDecl",
-    "ArchitectureDecl",
-    "ArchitecturePort",
-    "BinaryExpr",
-    "BoolExpr",
-    "CallExpr",
     "CompilationModel",
     "CompilationOutputs",
     "CompilationPipeline",
     "CompilationSnapshot",
-    "ExpandedCompilation",
-    "ExternDecl",
-    "FieldExpr",
-    "FunctionDecl",
+    "DiagramBundle",
     "GlyphError",
     "GlyphStudio",
-    "HostBindingDecl",
-    "HostBindingField",
     "IncrementalCompiler",
     "IncrementalResult",
-    "LambdaExpr",
-    "LetExpr",
-    "NameExpr",
-    "NumberExpr",
-    "OpaqueDecl",
-    "Param",
     "PreprocessResult",
-    "ProductDecl",
-    "Program",
+    "RawMacroDef",
     "RustArtifacts",
-    "StringExpr",
+    "SemanticModel",
     "StudioSnapshot",
-    "SumDecl",
-    "SumVariant",
-    "TryExpr",
-    "TypeRef",
-    "UnaryExpr",
-    "build_design_json",
-    "build_diagram_bundle",
-    "build_rust_artifacts",
+    "SymbolId",
+    "SymbolRecord",
     "compile_artifact_files",
     "compile_artifacts",
+    "compile_diagram_bundle",
     "compile_file",
+    "compile_outputs",
     "compile_source",
-    "compile_text",
     "parse_artifact_model",
     "parse_compilation_model",
     "parse_program",
     "preprocess_source",
-    "watch_file",
+    "run_studio",
+    "write_diagram_bundle",
 ]
