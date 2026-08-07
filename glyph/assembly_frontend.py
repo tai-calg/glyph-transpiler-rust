@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, fields, replace
+from dataclasses import dataclass, fields
 from pathlib import Path
 
 from .assembly import (
     AssemblyDecl,
     MachineAssemblyIR,
     _direct_calls,
-    _value_expressions,
+    _potentially_reachable_values,
     extract_assemblies,
     has_top_level_assembly,
     validate_assemblies,
@@ -62,12 +62,12 @@ def _reachable_action_effects(
     base: CompilationModel,
     reachable_branch_lines: set[int],
 ) -> set[str]:
-    """Resolve effects only through reachable transition result expressions.
+    """Resolve effect Actions through reachable branch result expressions.
 
-    StateTransitionIR remains the authority for branch reachability. The AST call
-    graph is then followed from those result expressions so block-lowered helper
-    functions such as `door_fault` remain visible without treating guard calls as
-    Actions.
+    The normalized transition IR selects reachable branches of the Machine's
+    transition function. Calls made from those result expressions are then
+    traversed recursively. Nested helper guard functions use their own potential
+    branch order; their guard conditions are never classified as Actions.
     """
 
     functions = {
@@ -83,35 +83,47 @@ def _reachable_action_effects(
     inline_effects = {item.name: item for item in base.inline_effects}
 
     result: set[str] = set()
-    pending = list(_direct_calls(machine.next_expr))
-    visited: set[str] = set()
+    pending: list[tuple[str, bool]] = [
+        (name, True) for name in _direct_calls(machine.next_expr)
+    ]
+    visited: set[tuple[str, bool]] = set()
 
     while pending:
-        name = pending.pop()
-        if name in visited:
+        name, constrained = pending.pop()
+        key = (name, constrained)
+        if key in visited:
             continue
-        visited.add(name)
+        visited.add(key)
 
         if name in externs:
             result.add(name)
             implementation = inline_effects.get(name)
             if implementation is not None:
-                for expression in _value_expressions(implementation):
-                    pending.extend(_direct_calls(expression))
+                for expression in _potentially_reachable_values(implementation):
+                    pending.extend((called, False) for called in _direct_calls(expression))
             continue
 
         function = functions.get(name)
         if function is None:
             continue
         if function.expression is not None:
-            pending.extend(_direct_calls(function.expression))
+            pending.extend(
+                (called, False) for called in _direct_calls(function.expression)
+            )
             continue
 
-        # Conditions are intentionally never traversed. A guard may select a
-        # transition but is not itself a transition Action.
-        for clause in function.guards:
-            if clause.line in reachable_branch_lines:
-                pending.extend(_direct_calls(clause.value))
+        selected = ()
+        if constrained:
+            selected = tuple(
+                clause.value
+                for clause in function.guards
+                if clause.line in reachable_branch_lines
+            )
+        if not selected:
+            selected = _potentially_reachable_values(function)
+
+        for expression in selected:
+            pending.extend((called, False) for called in _direct_calls(expression))
 
     return result
 
@@ -120,7 +132,7 @@ def _normalized_machine_actions(
     base: CompilationModel,
     source_name: str,
 ) -> dict[str, set[str]]:
-    """Combine normalized reachability with the existing function AST."""
+    """Combine normalized state reachability with recursive Action call paths."""
 
     execution = build_execution_structure_ir(
         base.preprocess.source,
@@ -159,7 +171,7 @@ def _validate_route_sources_are_actions(
     assemblies: tuple[AssemblyDecl, ...],
     actions_by_machine: dict[str, set[str]],
 ) -> None:
-    """Reject guard-only, shadowed and state-unreachable route sources."""
+    """Reject guard-only, shadowed and state-unreachable route sources first."""
 
     machines = {machine.name: machine for machine in base.machines}
     effects = {
@@ -184,25 +196,6 @@ def _validate_route_sources_are_actions(
                 )
 
 
-def _bind_normalized_actions(
-    assembly_ir: tuple[MachineAssemblyIR, ...],
-    actions_by_machine: dict[str, set[str]],
-) -> tuple[MachineAssemblyIR, ...]:
-    result: list[MachineAssemblyIR] = []
-    for assembly in assembly_ir:
-        instances = tuple(
-            {
-                **dict(instance),
-                "allowed_effects": sorted(
-                    actions_by_machine.get(str(instance["machine"]), set())
-                ),
-            }
-            for instance in assembly.instances
-        )
-        result.append(replace(assembly, instances=instances))
-    return tuple(result)
-
-
 def parse_compilation_model(
     source: str,
     source_name: str = "input.glyph",
@@ -219,8 +212,8 @@ def parse_compilation_model(
         base.machines,
         assemblies,
         base.inline_effects,
+        reachable_actions_by_machine=actions_by_machine,
     )
-    assembly_ir = _bind_normalized_actions(assembly_ir, actions_by_machine)
 
     expanded_values = _field_values(base.expanded, ExpandedCompilation)
     expanded = AssemblyExpandedCompilation(
