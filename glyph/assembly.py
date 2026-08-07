@@ -42,14 +42,16 @@ _BUILTIN_TYPE_NAMES = {
 
 
 class FrozenMapping(tuple, MappingABC[str, object]):
-    """Tuple-backed immutable mapping with no mutable internal storage."""
+    """Tuple-backed recursively immutable mapping for Assembly IR records."""
 
     __slots__ = ()
 
     def __new__(cls, values: Mapping[str, object]):
+        if not isinstance(values, Mapping):
+            raise TypeError("FrozenMappingにはMappingが必要")
         return tuple.__new__(
             cls,
-            tuple((str(key), value) for key, value in values.items()),
+            tuple((str(key), _freeze(value)) for key, value in values.items()),
         )
 
     def __getitem__(self, key: str) -> object:
@@ -72,12 +74,24 @@ class FrozenMapping(tuple, MappingABC[str, object]):
         return self
 
 
+_IMMUTABLE_IR_SCALARS = (str, bytes, int, float, bool, type(None))
+
+
 def _freeze(value: object) -> object:
+    if isinstance(value, FrozenMapping):
+        return value
     if isinstance(value, Mapping):
-        return FrozenMapping({str(key): _freeze(item) for key, item in value.items()})
+        return FrozenMapping(value)
     if isinstance(value, (tuple, list)):
         return tuple(_freeze(item) for item in value)
-    return value
+    if isinstance(value, (set, frozenset)):
+        return frozenset(_freeze(item) for item in value)
+    if isinstance(value, _IMMUTABLE_IR_SCALARS):
+        return value
+    raise TypeError(
+        "Assembly IRに保持できない可変または不透明な値: "
+        f"{type(value).__module__}.{type(value).__qualname__}"
+    )
 
 
 def _thaw(value: object) -> object:
@@ -85,6 +99,8 @@ def _thaw(value: object) -> object:
         return {str(key): _thaw(item) for key, item in value.items()}
     if isinstance(value, tuple):
         return [_thaw(item) for item in value]
+    if isinstance(value, frozenset):
+        return [_thaw(item) for item in sorted(value, key=repr)]
     return value
 
 
