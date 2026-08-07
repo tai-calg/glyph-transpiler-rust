@@ -2,8 +2,8 @@
 
 ## Purpose
 
-`assembly` names Machine instances and connects an existing `!` operation from
-one instance to an existing input parameter of another instance.
+`assembly` names Machine instances and connects an existing `!` operation from one
+instance to an existing input parameter of another instance.
 
 ```glyph
 assembly DoorControl
@@ -22,176 +22,106 @@ No Machine-body keyword is added. `raise`, `emit`, `signal`, `queue`, and
 
 An operation is resolved per Machine instance.
 
-- connected by the containing Assembly: internal immediate invocation
+- connected by the containing Assembly: internal immediate route
 - not connected: ordinary Host-facing external operation
 
-The two cases retain different result semantics.
-
-### Internal operation
-
-A v1 internal operation has one payload argument and a unit result.
+A connected operation is one-way in v1:
 
 ```glyph
 !notify_safety(event:SafetyInput):()
 ```
 
-The argument value is delivered to the target Machine input. The operation return
-value is not reused as an event payload. The source reaction resumes with unit
-after the target reaction completes.
-
-An internal operation is declaration-only. An inline Host prototype body would
-create two competing implementations and is rejected.
-
-### External Host operation
-
-An unconnected operation retains its ordinary request/result contract.
-
-```glyph
-!write_motor(command:MotorCommand):Receipt
-```
-
-The Host receives the operation arguments and returns a `Receipt`. That result is
-returned to the suspended source reaction.
+Its single argument is the routed payload and its result is unit. It must be a
+declaration without a Host prototype body. An unconnected operation retains its
+normal request/result contract with the Host.
 
 ## Immediate delivery
 
 Delivery occurs at the connected `!` invocation point. The source reaction is
-suspended there, the target Machine reaction runs to completion, and execution
-then returns to the source immediately after that invocation. Operations are not
-collected and delivered after the source reaction finishes.
+suspended, the target Machine reaction runs to completion, and execution returns
+to the source immediately after that invocation. There is no implicit queue or
+whole-Assembly synchronous cycle.
 
-This is causal, depth-first propagation rather than a queue or an implicit
-whole-Assembly synchronous step.
+Only Machines reached through a route react.
 
-```text
-Door reaction
-  before notify_safety
-  notify_safety(EmergencyDetected)
-    Safety reaction
-      request_motor(StopRequested)
-        Motor reaction
-          receipt = Host.write_motor(DisableMotor)
-  after notify_safety
-```
+## State and failure semantics
 
-Only Machines reached through an operation route react. Merely belonging to an
-Assembly does not cause periodic evaluation or a no-op transition.
+Each instance owns one local state. The reference runtime evaluates a complete
+causal reaction against a deep-cloned working state and commits the complete state
+configuration only when the top-level reaction succeeds.
 
-## State commit and failure
+- route, re-entry, type, handler, or Host failure discards the working state
+- mutable state returned by `states` is a detached snapshot
+- routed payloads and Host arguments use copy-by-value semantics
+- already executed Host effects remain externally observable and cannot be rolled back
+- generators are explicitly closed on success and failure so cleanup blocks run deterministically
 
-The reference runtime keeps a working state configuration for the complete
-causal reaction.
+A custom `state_cloner` may replace `deepcopy`; it must preserve the Assembly state
+mapping and provide true isolation.
 
-- nested target states become visible inside the working reaction
-- all Machine states commit together when the top-level reaction succeeds
-- a route/re-entry/Host failure leaves the prior Machine configuration unchanged
-- already executed Host effects cannot be rolled back
+## Runtime type contract
 
-Re-entry into an instance already present on the active reaction stack is an
-error. This prevents an interrupt-like route from entering the same Machine while
-its previous reaction is incomplete.
+Machine Assembly IR version 2 contains immutable structured type references,
+product/sum/alias definitions, Machine state and input types, and effect
+signatures. The reference runtime validates:
+
+- every initial state
+- every external and routed input
+- every effect argument
+- every Host result
+- every returned next state
+
+Runtime values use these reference representations:
+
+- nullary sum variant: `"Variant"`
+- tuple sum variant: `("Variant", value, ...)`
+- record sum variant: `{"$variant": "Variant", ...}`
+- product: mapping with exactly the declared fields
+- unit: `None`
+- `Option<T>`: `None`, `("Some", value)`, or a directly validated value
+- `Result<T,E>`: `("Ok", value)` or `("Err", error)`
 
 ## v1 restrictions
 
 - one source `instance.effect` has at most one target
-- an internal `!` operation has exactly one payload argument
-- an internal `!` operation returns `()`
-- an internal `!` operation has no inline Host prototype body
+- an internal route operation has one payload argument and unit result
 - a route target Machine has exactly one non-state input parameter
-- the payload argument type equals the target input type after normalization
 - a direct route back to the same instance is rejected
 - runtime re-entry into an already reacting instance is rejected
-- the source operation must be reachable from a transition result/Action path
-- an operation used only in a guard predicate cannot be routed
-- route cycles are reported because an activated cycle may attempt re-entry
+- the source operation must be reachable from a normalized transition Action
+- guard-only and state-unreachable operations cannot be routed
+- nested helper guard functions are traversed from reachable result expressions
+- payload and target input types must match after alias and short-name normalization
+- route cycles are diagnosed because an activated cycle causes re-entry failure
 
-The single-input restriction prevents an immediate route from leaving additional
-Machine inputs unspecified. A future input-record or explicit partial-binding
-model may relax it without changing the v1 route syntax.
-
-Fan-out, queued delivery, synchronized groups, dynamic instances, internal
-request/reply, and reentrant reactions are deferred. They must be explicit future
-policies rather than silent reinterpretations of the v1 arrow.
-
-## Compiler model and identity
-
-Assembly-enabled compilation returns an immutable `AssemblyCompilationModel`.
-It formally contains:
-
-```text
-assemblies
-assembly_ir
-assembly_source
-```
-
-No frozen model is modified with `object.__setattr__`, and module discovery is not
-performed through `sys.modules` scanning.
-
-Program Identity hashes both the original Assembly source and a canonical
-Assembly topology digest. Changing only a route therefore invalidates Evidence,
-witnesses, and semantic caches.
+Fan-out, queued delivery, synchronized groups, dynamic instances, reentrant
+reactions, and instance-aware Rust lowering are deferred.
 
 ## IR and tooling
 
-Validated declarations produce `glyph.machine-assembly-ir` version 1.
+Validated declarations produce immutable `glyph.machine-assembly-ir` version 2.
+All nested records and sequences are frozen; `to_dict()` returns a detached mutable
+serialization.
 
-```text
-MachineAssemblyIR
-  name
-  delivery = immediate-call-point
-  state_commit = atomic-per-top-level-reaction
-  reentrant_reaction = forbidden
-  instances[]
-    state
-    inputs[]
-    allowed_effects[]
-  routes[]
-    source_instance
-    source_machine
-    effect
-    payload_parameter
-    payload_type
-    result_type = ()
-    target_instance
-    target_machine
-    input
-    delivery
-    order
-```
-
-Assembly-enabled analysis publishes:
+Assembly-enabled compilations publish:
 
 ```text
 machine-assembly-ir.json
 machine-assembly.mmd
 ```
 
-The topology diagram includes Machine inputs, internal routes, and remaining Host
-operations. Assembly diagnostics are emitted by CLI tooling as well as stored in
-IR.
+The Assembly set is embedded into typed design JSON under `machine_assemblies`.
+Program Identity v2 binds the original source and Assembly topology, so route-only
+changes invalidate Evidence and witness caches.
 
 ## Rust code generation status
 
-The current Rust generator has no Machine-instance identity. It cannot lower an
-internal route correctly.
-
-The modes are therefore separated:
-
-| Mode | Current behavior |
-| --- | --- |
-| `--check` | succeeds after Assembly validation |
-| diagram/design JSON | succeeds |
-| Studio analysis | succeeds with blocked Rust placeholder |
-| `compile_source` / `compile_file` | raises `GlyphError` |
-| `glyphc -o` | exits nonzero and writes no Rust file |
-
-Design JSON reports:
+The legacy Rust generator has no Machine-instance identity. Rust output requests
+therefore fail before writing files. `--check`, Studio analysis, typed design JSON,
+and diagrams remain available and report:
 
 ```text
 runtime_codegen.status = blocked
 runtime_codegen.reason = instance-aware-rust-lowering-not-implemented
 runtime_codegen.fail_closed = true
 ```
-
-Plain Glyph retains the existing parser, model type, Rust output, and tooling
-output unchanged.
