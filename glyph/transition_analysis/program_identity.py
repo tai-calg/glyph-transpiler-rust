@@ -10,7 +10,7 @@ from ..compiler import ExternDecl, FunctionDecl, TypeRef
 from .machine_relation import build_machine_relation
 
 
-PROGRAM_IDENTITY_VERSION = 1
+PROGRAM_IDENTITY_VERSION = 2
 RTAI_SEMANTIC_KERNEL_VERSION = "rtai-semantic-kernel-v1"
 
 
