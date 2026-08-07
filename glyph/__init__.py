@@ -1,11 +1,4 @@
-from .artifacts import (
-    CompilationModel,
-    RustArtifacts,
-    compile_artifact_files,
-    compile_artifacts,
-    parse_artifact_model,
-    parse_compilation_model,
-)
+from .artifacts import CompilationModel, RustArtifacts
 from .compilation import (
     CompilationOutputs,
     CompilationPipeline,
@@ -68,9 +61,9 @@ def preprocess_source(source: str) -> PreprocessResult:
     return _preprocess_source(source)
 
 
-# Install after all public modules have imported their aliases of
-# parse_compilation_model. Assembly models stay responsibility-local and do not
-# widen the frozen package-root API.
+# Install Assembly-aware canonical entrypoints after the public modules have
+# loaded. Unlike the initial prototype, this does not scan sys.modules and does
+# not mutate frozen CompilationModel instances.
 from .assembly_delivery import (
     install_machine_assembly_delivery as _install_machine_assembly_delivery,
 )
@@ -84,6 +77,13 @@ from .assembly_tooling_delivery import (
 
 _install_machine_assembly_tooling_delivery()
 del _install_machine_assembly_tooling_delivery
+
+from .assembly_frontend import (
+    compile_artifact_files,
+    compile_artifacts,
+    parse_artifact_model,
+    parse_compilation_model,
+)
 
 
 # Keep the package root as the stable user-facing facade. Glyph 0.4 IR models,
