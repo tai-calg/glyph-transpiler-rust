@@ -8,9 +8,9 @@ from glyph.assembly_runtime import EffectInvocation, ImmediateAssemblyRuntime
 
 
 INITIAL = {
-    "door": "DoorLocked",
-    "safety": "SafetyNormal",
-    "motor": "MotorRunning",
+    "door": {"mode": "DoorLocked"},
+    "safety": {"mode": "SafetyNormal"},
+    "motor": {"mode": "MotorRunning"},
 }
 
 
@@ -24,14 +24,17 @@ class MachineAssemblyRuntimeFailureTests(unittest.TestCase):
 
         def handler(instance: str, input_name: str, value: object, state: object):
             if instance == "door":
+                state["mode"] = "DoorFaulted"
                 yield EffectInvocation("notify_safety", "EmergencyDetected")
-                return "DoorFaulted"
+                return state
             if instance == "safety":
+                state["mode"] = "SafetyEmergency"
                 yield EffectInvocation("request_motor", "StopRequested")
-                return "SafetyEmergency"
+                return state
             if instance == "motor":
+                state["mode"] = "MotorStopped"
                 yield EffectInvocation("write_motor", "DisableMotor")
-                return "MotorStopped"
+                return state
             raise AssertionError(instance)
 
         def failing_host(
@@ -51,6 +54,17 @@ class MachineAssemblyRuntimeFailureTests(unittest.TestCase):
             )
 
         self.assertEqual(runtime.states, INITIAL)
+
+    def test_state_snapshots_do_not_expose_internal_mutable_values(self) -> None:
+        source = Path("examples/machine_assembly_immediate.glyph").read_text(
+            encoding="utf-8"
+        )
+        model = parse_compilation_model(source)
+        runtime = ImmediateAssemblyRuntime(model.assembly_ir[0], INITIAL)
+
+        leaked = runtime.states
+        leaked["door"]["mode"] = "DoorFaulted"
+        self.assertEqual(runtime.states["door"], {"mode": "DoorLocked"})
 
 
 if __name__ == "__main__":
