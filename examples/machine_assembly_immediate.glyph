@@ -42,11 +42,12 @@ assembly DoorControl
 +MotorCommand=DisableMotor
 *Receipt(command:MotorCommand)
 
-# An effect connected by assembly becomes an internal immediate route.
-!notify_safety(event:SafetyInput):SafetyInput=event
-!request_motor(event:MotorInput):MotorInput=event
+# A connected effect is an internal one-way invocation. Its single argument is
+# delivered to the target Machine input; its result is unit.
+!notify_safety(event:SafetyInput):()
+!request_motor(event:MotorInput):()
 
-# An effect without an assembly route remains a Host-facing effect.
+# An unconnected effect remains a Host-facing request and may return a value.
 !write_motor(command:MotorCommand):Receipt=Receipt(command)
 
 >door_fault(state:DoorState):DoorState
