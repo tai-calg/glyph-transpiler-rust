@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from typing import Mapping
 
 
 def _assembly_irs(model) -> tuple[object, ...]:
@@ -12,7 +13,7 @@ def _assembly_irs(model) -> tuple[object, ...]:
 def machine_assembly_payload(model) -> dict[str, object]:
     return {
         "schema": "glyph.machine-assembly-set-ir",
-        "version": 1,
+        "version": 2,
         "runtime_codegen": {
             "status": "blocked",
             "reason": "instance-aware-rust-lowering-not-implemented",
@@ -55,9 +56,9 @@ def render_machine_assembly_mermaid(model) -> str:
             )
             node_ids[instance_name] = node_id
             input_names = [
-                str(item.get("name"))
-                for item in instance.get("inputs", [])
-                if isinstance(item, dict)
+                f"{item.get('name')}:{item.get('type')}"
+                for item in instance.get("inputs", ())
+                if isinstance(item, Mapping)
             ]
             suffix = f"<br/>in: {', '.join(input_names)}" if input_names else ""
             label = f"{instance_name}: {instance['machine']}{suffix}"
@@ -77,7 +78,7 @@ def render_machine_assembly_mermaid(model) -> str:
 
         for instance in assembly.instances:
             instance_name = str(instance["name"])
-            for effect in instance.get("allowed_effects", []):
+            for effect in instance.get("allowed_effects", ()):
                 effect_name = str(effect)
                 if effect_name in routed.get(instance_name, set()):
                     continue
