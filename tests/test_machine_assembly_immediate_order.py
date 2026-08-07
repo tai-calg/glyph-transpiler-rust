@@ -16,9 +16,9 @@ class MachineAssemblyImmediateOrderTests(unittest.TestCase):
         runtime = ImmediateAssemblyRuntime(
             model.assembly_ir[0],
             {
-                "door": "DoorLocked",
-                "safety": "SafetyNormal",
-                "motor": "MotorRunning",
+                "door": {"mode": "DoorLocked"},
+                "safety": {"mode": "SafetyNormal"},
+                "motor": {"mode": "MotorRunning"},
             },
         )
         order: list[str] = []
@@ -29,25 +29,25 @@ class MachineAssemblyImmediateOrderTests(unittest.TestCase):
                 order.append("door:before-notify")
                 yield EffectInvocation("notify_safety", "EmergencyDetected")
                 order.append("door:after-notify")
-                next_state = "DoorFaulted"
+                next_state = {"mode": "DoorFaulted"}
             elif instance == "safety":
                 order.append("safety:before-request")
                 yield EffectInvocation("request_motor", "StopRequested")
                 order.append("safety:after-request")
-                next_state = "SafetyEmergency"
+                next_state = {"mode": "SafetyEmergency"}
             elif instance == "motor":
                 order.append("motor:before-write")
                 receipt = yield EffectInvocation("write_motor", "DisableMotor")
-                order.append(f"motor:receipt:{receipt}")
+                order.append(f"motor:receipt:{receipt['command']}")
                 order.append("motor:after-write")
-                next_state = "MotorStopped"
+                next_state = {"mode": "MotorStopped"}
             else:
                 self.fail(instance)
             order.append(f"{instance}:exit")
             return next_state
 
         def host(instance: str, effect: str, arguments: tuple[object, ...]):
-            return "Receipt"
+            return {"command": arguments[0]}
 
         runtime.react("door", "input", "ForcedOpen", handler, host)
 
@@ -60,7 +60,7 @@ class MachineAssemblyImmediateOrderTests(unittest.TestCase):
                 "safety:before-request",
                 "motor:enter",
                 "motor:before-write",
-                "motor:receipt:Receipt",
+                "motor:receipt:DisableMotor",
                 "motor:after-write",
                 "motor:exit",
                 "safety:after-request",
