@@ -60,12 +60,12 @@ BUILTIN_TYPE_EQUIVALENCE = """\
 
 !notify(event:O<S>):()
 
->source_next(state:SourceState,input:O<S>):SourceState
+>source_fire(input:O<S>):SourceState
   value := notify(input)
   SourceState(SourceDone)
 
->target_next(state:TargetState,input:Option<String>):TargetState
-  TargetState(TargetDone)
+>source_next(state:SourceState,input:O<S>):SourceState=source_fire(input)
+>target_next(state:TargetState,input:Option<String>):TargetState=TargetState(TargetDone)
 
 machine Source(state:SourceState,input:O<S>)
   select=state.mode
