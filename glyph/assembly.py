@@ -49,10 +49,16 @@ class FrozenMapping(tuple, MappingABC[str, object]):
     def __new__(cls, values: Mapping[str, object]):
         if not isinstance(values, Mapping):
             raise TypeError("FrozenMappingにはMappingが必要")
-        return tuple.__new__(
-            cls,
-            tuple((str(key), _freeze(value)) for key, value in values.items()),
-        )
+        pairs: list[tuple[str, object]] = []
+        seen: set[str] = set()
+        for key, value in values.items():
+            if type(key) is not str:
+                raise TypeError("Assembly IR mapping keyはstrのみ許可する")
+            if key in seen:
+                raise TypeError(f"Assembly IR mapping keyが重複している: {key}")
+            seen.add(key)
+            pairs.append((key, _freeze(value)))
+        return tuple.__new__(cls, tuple(pairs))
 
     def __getitem__(self, key: str) -> object:
         for item_key, item_value in tuple.__iter__(self):
