@@ -22,6 +22,7 @@ class ProgramIdentity:
     entry_signature_sha256: str
     effect_declaration_sha256: str
     machine_relation_sha256: str
+    assembly_topology_sha256: str
     analysis_kernel_id: str = RTAI_SEMANTIC_KERNEL_VERSION
 
     @property
@@ -35,6 +36,7 @@ class ProgramIdentity:
                 "entry_signature_sha256": self.entry_signature_sha256,
                 "effect_declaration_sha256": self.effect_declaration_sha256,
                 "machine_relation_sha256": self.machine_relation_sha256,
+                "assembly_topology_sha256": self.assembly_topology_sha256,
                 "analysis_kernel_id": self.analysis_kernel_id,
             }
         )
@@ -48,9 +50,22 @@ class ProgramIdentity:
             "entry_signature_sha256": self.entry_signature_sha256,
             "effect_declaration_sha256": self.effect_declaration_sha256,
             "machine_relation_sha256": self.machine_relation_sha256,
+            "assembly_topology_sha256": self.assembly_topology_sha256,
             "analysis_kernel_id": self.analysis_kernel_id,
             "fingerprint": self.fingerprint,
         }
+
+
+def _artifact_source(model: CompilationModel) -> str:
+    assembly_source = getattr(model, "assembly_source", "")
+    return assembly_source if assembly_source else model.preprocess.source
+
+
+def _assembly_topology_ir(model: CompilationModel) -> list[dict[str, object]]:
+    return [
+        item.to_dict()
+        for item in getattr(model, "assembly_ir", ())
+    ]
 
 
 def build_program_identity(
@@ -62,17 +77,18 @@ def build_program_identity(
 ) -> ProgramIdentity:
     """Build a deterministic identity for one reviewed public execution context.
 
-    The artifact digest is intentionally byte-sensitive. Comments, whitespace and
-    line-ending changes invalidate a reviewed artifact rather than silently reusing
-    witnesses. Separate semantic component digests make the rejection diagnosable
-    and provide stable binding material for Evidence and witness records.
+    The artifact digest is byte-sensitive. For Assembly-enabled models it hashes
+    the original source, including the Assembly block, rather than the blanked
+    parser compatibility source. Assembly topology is also bound independently so
+    route-only changes invalidate Evidence and witness caches.
     """
 
-    source = model.preprocess.source
+    source = _artifact_source(model)
     artifact_sha256 = hashlib.sha256(source.encode("utf-8")).hexdigest()
     entry_ir = _entry_signature_ir(model, entry)
-    effects_ir = _effect_declarations_ir(model)
+    effects_ir = _effect_declarations_ir(model, source)
     relations_ir = _machine_relations_ir(model)
+    assemblies_ir = _assembly_topology_ir(model)
     semantic_ir = {
         "identity_version": PROGRAM_IDENTITY_VERSION,
         "analysis_kernel_id": RTAI_SEMANTIC_KERNEL_VERSION,
@@ -81,6 +97,7 @@ def build_program_identity(
         "entry_signature": entry_ir,
         "effects": effects_ir,
         "machine_relations": relations_ir,
+        "machine_assemblies": assemblies_ir,
     }
     return ProgramIdentity(
         source_id=source_id,
@@ -89,6 +106,7 @@ def build_program_identity(
         entry_signature_sha256=_digest(entry_ir),
         effect_declaration_sha256=_digest(effects_ir),
         machine_relation_sha256=_digest(relations_ir),
+        assembly_topology_sha256=_digest(assemblies_ir),
     )
 
 
@@ -119,8 +137,11 @@ def _entry_signature_ir(model: CompilationModel, entry: str) -> dict[str, object
     }
 
 
-def _effect_declarations_ir(model: CompilationModel) -> list[dict[str, object]]:
-    effect_names = _top_level_effect_names(model.preprocess.source)
+def _effect_declarations_ir(
+    model: CompilationModel,
+    source: str,
+) -> list[dict[str, object]]:
+    effect_names = _top_level_effect_names(source)
     declarations = {
         item.name: item
         for item in model.program.declarations
