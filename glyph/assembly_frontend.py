@@ -23,12 +23,8 @@ from .compiler import ExternDecl, FunctionDecl, GlyphError, Program
 from .execution_ir import build_execution_structure_ir
 from .machine import MachineDecl
 from .state_machine_analysis import analyze_machine
-from .state_transition_block_lowering import lower_analyzed_block_transitions
-from .state_transition_compiler import (
-    enrich_state_transition_ir as compile_state_transition_ir,
-)
+from .state_transition_compiler import build_machine_state_transition_ir
 from .temporal import SpecDecl
-from .transition_action_projection import project_machine_transition_actions
 
 
 _RUST_CODEGEN_ERROR = (
@@ -61,15 +57,17 @@ def _field_values(value: object, model_type: type) -> dict[str, object]:
     return {field.name: getattr(value, field.name) for field in fields(model_type)}
 
 
-def _expand_inline_effect_chain(
-    direct: set[str],
+def _reachable_action_effects(
+    machine: MachineDecl,
     base: CompilationModel,
+    reachable_branch_lines: set[int],
 ) -> set[str]:
-    """Expand only from normalized reachable transition operations.
+    """Resolve effects only through reachable transition result expressions.
 
-    StateTransitionIR decides which operation call sites are actual transition
-    Actions. Inline effect prototypes may delegate to another declared effect;
-    that delegation remains part of the same Action chain.
+    StateTransitionIR remains the authority for branch reachability. The AST call
+    graph is then followed from those result expressions so block-lowered helper
+    functions such as `door_fault` remain visible without treating guard calls as
+    Actions.
     """
 
     functions = {
@@ -83,8 +81,9 @@ def _expand_inline_effect_chain(
         if isinstance(item, ExternDecl)
     }
     inline_effects = {item.name: item for item in base.inline_effects}
+
     result: set[str] = set()
-    pending = list(direct)
+    pending = list(_direct_calls(machine.next_expr))
     visited: set[str] = set()
 
     while pending:
@@ -92,6 +91,7 @@ def _expand_inline_effect_chain(
         if name in visited:
             continue
         visited.add(name)
+
         if name in externs:
             result.add(name)
             implementation = inline_effects.get(name)
@@ -99,10 +99,20 @@ def _expand_inline_effect_chain(
                 for expression in _value_expressions(implementation):
                     pending.extend(_direct_calls(expression))
             continue
+
         function = functions.get(name)
-        if function is not None:
-            for expression in _value_expressions(function):
-                pending.extend(_direct_calls(expression))
+        if function is None:
+            continue
+        if function.expression is not None:
+            pending.extend(_direct_calls(function.expression))
+            continue
+
+        # Conditions are intentionally never traversed. A guard may select a
+        # transition but is not itself a transition Action.
+        for clause in function.guards:
+            if clause.line in reachable_branch_lines:
+                pending.extend(_direct_calls(clause.value))
+
     return result
 
 
@@ -110,7 +120,7 @@ def _normalized_machine_actions(
     base: CompilationModel,
     source_name: str,
 ) -> dict[str, set[str]]:
-    """Use the existing normalized StateTransitionIR as the Action authority."""
+    """Combine normalized reachability with the existing function AST."""
 
     execution = build_execution_structure_ir(
         base.preprocess.source,
@@ -119,38 +129,28 @@ def _normalized_machine_actions(
         base.specs,
         base.machines,
     )
-    analyzed_by_name = {
-        machine_view.name: analyze_machine(base, machine_view)
-        for machine_view in execution.machines
-    }
-    compiled = compile_state_transition_ir(
-        base,
-        {
-            "summary": {},
-            "state": {"machines": list(analyzed_by_name.values())},
-        },
-    )
-
+    machine_by_name = {machine.name: machine for machine in base.machines}
     actions: dict[str, set[str]] = {}
-    for compiled_machine in compiled.get("state", {}).get("machines", []):
-        machine_name = str(compiled_machine.get("name") or "")
-        lowered = lower_analyzed_block_transitions(
-            base,
-            dict(compiled_machine),
-            dict(analyzed_by_name.get(machine_name, {})),
+
+    for machine_view in execution.machines:
+        analyzed = analyze_machine(base, machine_view)
+        normalized = build_machine_state_transition_ir(base, analyzed)
+        reachable_branch_lines = {
+            int(transition.get("source", {}).get("line", 0))
+            for transition in normalized.get("transitions", [])
+            if bool(transition.get("source_reachable", True))
+            and int(transition.get("source", {}).get("line", 0)) > 0
+        }
+        machine = machine_by_name.get(machine_view.name)
+        actions[machine_view.name] = (
+            _reachable_action_effects(
+                machine,
+                base,
+                reachable_branch_lines,
+            )
+            if machine is not None
+            else set()
         )
-        projected = project_machine_transition_actions(base, lowered)
-        direct: set[str] = set()
-        for transition in projected.get("transitions", []):
-            if not bool(transition.get("source_reachable", True)):
-                continue
-            for invocation in transition.get("machine_action_invocations", []):
-                if not isinstance(invocation, dict):
-                    continue
-                operation = str(invocation.get("operation") or "").strip()
-                if operation:
-                    direct.add(operation)
-        actions[machine_name] = _expand_inline_effect_chain(direct, base)
     return actions
 
 
@@ -159,7 +159,7 @@ def _validate_route_sources_are_actions(
     assemblies: tuple[AssemblyDecl, ...],
     actions_by_machine: dict[str, set[str]],
 ) -> None:
-    """Reject guard-only, unreachable and state-unreachable route sources."""
+    """Reject guard-only, shadowed and state-unreachable route sources."""
 
     machines = {machine.name: machine for machine in base.machines}
     effects = {
@@ -180,7 +180,7 @@ def _validate_route_sources_are_actions(
             if route.effect not in actions_by_machine.get(machine.name, set()):
                 raise GlyphError(
                     f"{route.line}行目: effect '{route.effect}' はMachine "
-                    f"'{machine.name}' の到達可能な遷移Actionに存在しない"
+                    f"'{machine.name}' の到達可能な遷移Actionから到達できない"
                 )
 
 
