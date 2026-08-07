@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterator, Mapping as MappingABC
 from dataclasses import dataclass
 import re
 from typing import Iterable, Mapping, Sequence
@@ -40,21 +41,25 @@ _BUILTIN_TYPE_NAMES = {
 }
 
 
-class FrozenDict(dict[str, object]):
-    """Deep-freeze friendly dict used by public immutable IR records."""
+class FrozenMapping(MappingABC[str, object]):
+    """Immutable mapping that cannot be bypassed through dict base methods."""
 
-    @staticmethod
-    def _immutable(*args, **kwargs):
-        raise TypeError("Machine Assembly IR is immutable")
+    __slots__ = ("_data",)
 
-    __setitem__ = _immutable
-    __delitem__ = _immutable
-    clear = _immutable
-    pop = _immutable
-    popitem = _immutable
-    setdefault = _immutable
-    update = _immutable
-    __ior__ = _immutable
+    def __init__(self, values: Mapping[str, object]):
+        object.__setattr__(self, "_data", dict(values))
+
+    def __getitem__(self, key: str) -> object:
+        return self._data[key]
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._data)
+
+    def __len__(self) -> int:
+        return len(self._data)
+
+    def __repr__(self) -> str:
+        return f"FrozenMapping({self._data!r})"
 
     def __deepcopy__(self, memo):
         return self
@@ -62,7 +67,7 @@ class FrozenDict(dict[str, object]):
 
 def _freeze(value: object) -> object:
     if isinstance(value, Mapping):
-        return FrozenDict({str(key): _freeze(item) for key, item in value.items()})
+        return FrozenMapping({str(key): _freeze(item) for key, item in value.items()})
     if isinstance(value, (tuple, list)):
         return tuple(_freeze(item) for item in value)
     return value

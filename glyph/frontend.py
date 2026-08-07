@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .assembly_frontend import compile_artifacts, parse_compilation_model
+from .artifacts import compile_artifacts, parse_compilation_model
 from .compiler import Program
 
 

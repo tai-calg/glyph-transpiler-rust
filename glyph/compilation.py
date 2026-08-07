@@ -10,8 +10,12 @@ from .algorithm_mermaid import render_algorithm_mermaid
 from .artifacts import (
     CompilationModel,
     RustArtifacts,
-    build_rust_artifacts,
     parse_compilation_model,
+)
+from .assembly_frontend import build_analysis_rust_artifacts
+from .assembly_tooling_delivery import (
+    machine_assembly_payload,
+    render_machine_assembly_mermaid,
 )
 from .execution_ir import build_execution_structure_ir
 from .glyph04_derived import Glyph04DerivedModels, derive_glyph04_models
@@ -130,6 +134,8 @@ def build_design_json(
     if derived.features.enabled:
         payload["verification"] = derived.verification.to_dict()
         payload["host_requirements"] = derived.host_requirements.to_dict()
+    if getattr(model, "assembly_ir", ()):
+        payload["machine_assemblies"] = machine_assembly_payload(model)
     return json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
 
 
@@ -326,6 +332,14 @@ def build_diagram_bundle(
             derived.host_requirements
         )
 
+    if getattr(model, "assembly_ir", ()):
+        files["machine-assembly-ir.json"] = json.dumps(
+            machine_assembly_payload(model),
+            ensure_ascii=False,
+            indent=2,
+        ) + "\n"
+        files["machine-assembly.mmd"] = render_machine_assembly_mermaid(model)
+
     index = render_index_markdown(
         execution_ir,
         model.architecture,
@@ -387,7 +401,7 @@ class CompilationPipeline:
         derived = _derive(model)
         return CompilationOutputs(
             model=model,
-            artifacts=build_rust_artifacts(model),
+            artifacts=build_analysis_rust_artifacts(model),
             diagrams=build_diagram_bundle(
                 model,
                 source_name,

@@ -16,8 +16,8 @@ from .artifacts import (
     CompilationModel,
     ExpandedCompilation,
     RustArtifacts,
-    build_rust_artifacts as _build_legacy_rust_artifacts,
-    parse_compilation_model as _parse_legacy_compilation_model,
+    _legacy_build_rust_artifacts as _build_legacy_rust_artifacts,
+    _legacy_parse_compilation_model as _parse_legacy_compilation_model,
 )
 from .compiler import ExternDecl, FunctionDecl, GlyphError, Program
 from .execution_ir import build_execution_structure_ir
@@ -112,14 +112,15 @@ def _reachable_action_effects(
             )
             continue
 
-        selected = ()
         if constrained:
+            # Empty is a real normalized result: all branches are unreachable or
+            # shadowed. Only unconstrained nested helpers use the syntax fallback.
             selected = tuple(
                 clause.value
                 for clause in function.guards
                 if clause.line in reachable_branch_lines
             )
-        if not selected:
+        else:
             selected = _potentially_reachable_values(function)
 
         for expression in selected:

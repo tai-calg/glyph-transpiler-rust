@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import dataclass
 import sys
+from threading import RLock
 from types import GeneratorType
 from typing import Callable, Generator, Mapping
 
@@ -88,8 +89,35 @@ class ImmediateAssemblyRuntime:
         *,
         state_cloner: StateCloner = deepcopy,
     ) -> None:
+        expected_contract = {
+            "schema": "glyph.machine-assembly-ir",
+            "version": 2,
+            "delivery": "immediate-call-point",
+            "state_commit": "atomic-per-top-level-reaction",
+            "reentrant_reaction": "forbidden",
+        }
+        actual_contract = {
+            "schema": ir.schema,
+            "version": ir.version,
+            "delivery": ir.delivery,
+            "state_commit": ir.state_commit,
+            "reentrant_reaction": ir.reentrant_reaction,
+        }
+        if actual_contract != expected_contract:
+            differences = ", ".join(
+                f"{key}={actual_contract[key]!r} (expected {value!r})"
+                for key, value in expected_contract.items()
+                if actual_contract[key] != value
+            )
+            raise GlyphError(
+                "ImmediateAssemblyRuntimeが未対応のAssembly IR契約を受け取った: "
+                + differences
+            )
+
         self.ir = ir
         self._state_cloner = state_cloner
+        self._reaction_lock = RLock()
+        self._reaction_active = False
         self._instances = {
             str(item["name"]): item
             for item in ir.instances
@@ -353,6 +381,35 @@ class ImmediateAssemblyRuntime:
         )
 
     def react(
+        self,
+        instance: str,
+        input_name: str,
+        value: object,
+        handler: ReactionHandler,
+        host_executor: HostExecutor | None = None,
+    ) -> ImmediateReactionResult:
+        # One top-level reaction owns a complete working configuration. A nested
+        # call from a Host callback would otherwise overwrite its inner commit.
+        # RLock serializes other threads while allowing same-thread re-entry to be
+        # diagnosed instead of deadlocking.
+        with self._reaction_lock:
+            if self._reaction_active:
+                raise GlyphError(
+                    "同一Assembly Runtimeへのtop-level反応の再入は禁止"
+                )
+            self._reaction_active = True
+            try:
+                return self._react_locked(
+                    instance,
+                    input_name,
+                    value,
+                    handler,
+                    host_executor,
+                )
+            finally:
+                self._reaction_active = False
+
+    def _react_locked(
         self,
         instance: str,
         input_name: str,

@@ -93,49 +93,8 @@ def render_machine_assembly_mermaid(model) -> str:
     return "\n".join(lines) + "\n"
 
 
-def install_machine_assembly_tooling_delivery() -> None:
-    """Publish Assembly IR through the canonical tooling functions."""
 
-    from . import compilation as compilation_module
-
-    current_design = compilation_module.build_design_json
-    if not getattr(current_design, "__glyph_machine_assembly__", False):
-        original_design = current_design
-
-        def build_design_json_with_assemblies(model, derived=None):
-            rendered = original_design(model, derived)
-            if not _assembly_irs(model):
-                return rendered
-            payload = json.loads(rendered)
-            payload["machine_assemblies"] = machine_assembly_payload(model)
-            return json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
-
-        build_design_json_with_assemblies.__glyph_machine_assembly__ = True
-        build_design_json_with_assemblies.__glyph_original__ = original_design
-        compilation_module.build_design_json = build_design_json_with_assemblies
-
-    current_bundle = compilation_module.build_diagram_bundle
-    if not getattr(current_bundle, "__glyph_machine_assembly__", False):
-        original_bundle = current_bundle
-
-        def build_diagram_bundle_with_assemblies(
-            model,
-            source_name,
-            source_href=None,
-            derived=None,
-        ):
-            bundle = original_bundle(model, source_name, source_href, derived)
-            if not _assembly_irs(model):
-                return bundle
-            files = dict(bundle.files)
-            files["machine-assembly-ir.json"] = json.dumps(
-                machine_assembly_payload(model),
-                ensure_ascii=False,
-                indent=2,
-            ) + "\n"
-            files["machine-assembly.mmd"] = render_machine_assembly_mermaid(model)
-            return type(bundle)(bundle.ir, bundle.algorithm_ir, files)
-
-        build_diagram_bundle_with_assemblies.__glyph_machine_assembly__ = True
-        build_diagram_bundle_with_assemblies.__glyph_original__ = original_bundle
-        compilation_module.build_diagram_bundle = build_diagram_bundle_with_assemblies
+__all__ = [
+    "machine_assembly_payload",
+    "render_machine_assembly_mermaid",
+]
