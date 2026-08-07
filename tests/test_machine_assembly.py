@@ -86,9 +86,9 @@ assembly DoorControl
 
 
 INITIAL = {
-    "door": "DoorLocked",
-    "safety": "SafetyNormal",
-    "motor": "MotorRunning",
+    "door": {"mode": "DoorLocked"},
+    "safety": {"mode": "SafetyNormal"},
+    "motor": {"mode": "MotorRunning"},
 }
 
 
@@ -101,6 +101,7 @@ class MachineAssemblyTests(unittest.TestCase):
         self.assertEqual([item.name for item in model.assemblies], ["DoorControl"])
         self.assertEqual(len(model.assembly_ir), 1)
         ir = model.assembly_ir[0]
+        self.assertEqual(ir.version, 2)
         self.assertEqual(ir.delivery, "immediate-call-point")
         self.assertEqual(ir.state_commit, "atomic-per-top-level-reaction")
         self.assertEqual(ir.reentrant_reaction, "forbidden")
@@ -120,11 +121,22 @@ class MachineAssemblyTests(unittest.TestCase):
             ],
         )
 
+        with self.assertRaises(TypeError):
+            ir.instances[0]["machine"] = "Other"  # type: ignore[index]
+        with self.assertRaises(TypeError):
+            ir.instances[0]["state"]["type"] = "Other"  # type: ignore[index]
+        with self.assertRaises(TypeError):
+            ir.routes[0]["target_instance"] = "motor"  # type: ignore[index]
+
     def test_extraction_preserves_source_line_count(self) -> None:
         stripped, assemblies = extract_assemblies(VALID)
         self.assertEqual(len(stripped.splitlines()), len(VALID.splitlines()))
         self.assertEqual(len(assemblies), 1)
         self.assertNotIn("assembly DoorControl", stripped)
+
+    def test_tab_between_assembly_and_name_is_accepted(self) -> None:
+        model = parse_compilation_model(VALID.replace("assembly DoorControl", "assembly\tDoorControl"))
+        self.assertEqual(model.assembly_ir[0].name, "DoorControl")
 
     def test_route_argument_type_must_match_target_input(self) -> None:
         source = VALID.replace(
@@ -176,19 +188,19 @@ class MachineAssemblyTests(unittest.TestCase):
                     "notify_safety", "EmergencyDetected"
                 )
                 self.assertIsNone(routed_result)
-                return "DoorFaulted"
+                return {"mode": "DoorFaulted"}
             if instance == "safety":
                 yield EffectInvocation("request_motor", "StopRequested")
-                return "SafetyEmergency"
+                return {"mode": "SafetyEmergency"}
             if instance == "motor":
                 receipt = yield EffectInvocation("write_motor", "DisableMotor")
-                self.assertEqual(receipt, "Receipt(DisableMotor)")
-                return "MotorStopped"
+                self.assertEqual(receipt, {"command": "DisableMotor"})
+                return {"mode": "MotorStopped"}
             self.fail(instance)
 
         def host(instance: str, effect: str, arguments: tuple[object, ...]):
             self.assertEqual((instance, effect), ("motor", "write_motor"))
-            return f"Receipt({arguments[0]})"
+            return {"command": arguments[0]}
 
         result = runtime.react("door", "input", "ForcedOpen", handler, host)
         enters = [item for item in result.trace if item.phase == "enter"]
@@ -210,16 +222,16 @@ class MachineAssemblyTests(unittest.TestCase):
                     "motor",
                     "write_motor",
                     ("DisableMotor",),
-                    "Receipt(DisableMotor)",
+                    {"command": "DisableMotor"},
                 )
             ],
         )
         self.assertEqual(
             result.states,
             {
-                "door": "DoorFaulted",
-                "safety": "SafetyEmergency",
-                "motor": "MotorStopped",
+                "door": {"mode": "DoorFaulted"},
+                "safety": {"mode": "SafetyEmergency"},
+                "motor": {"mode": "MotorStopped"},
             },
         )
 
@@ -234,7 +246,9 @@ class MachineAssemblyTests(unittest.TestCase):
                 "effect": "write_motor",
                 "payload_parameter": "command",
                 "payload_type": "DoorInput",
+                "payload_type_ref": {"name": "DoorInput", "arguments": ()},
                 "result_type": "()",
+                "result_type_ref": {"name": "()", "arguments": ()},
                 "target_instance": "door",
                 "target_machine": "Door",
                 "input": "input",
@@ -253,6 +267,7 @@ class MachineAssemblyTests(unittest.TestCase):
             instances=ir.instances,
             routes=cyclic_routes,
             diagnostics=ir.diagnostics,
+            types=ir.types,
         )
         runtime = ImmediateAssemblyRuntime(cyclic_ir, INITIAL)
 
@@ -263,7 +278,7 @@ class MachineAssemblyTests(unittest.TestCase):
                 "motor": EffectInvocation("write_motor", "ForcedOpen"),
             }
             yield effects[instance]
-            return f"changed-{instance}"
+            return state
 
         with self.assertRaisesRegex(GlyphError, "再入は禁止"):
             runtime.react("door", "input", "ForcedOpen", handler)
