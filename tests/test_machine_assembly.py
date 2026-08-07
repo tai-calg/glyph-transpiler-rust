@@ -135,7 +135,9 @@ class MachineAssemblyTests(unittest.TestCase):
         self.assertNotIn("assembly DoorControl", stripped)
 
     def test_tab_between_assembly_and_name_is_accepted(self) -> None:
-        model = parse_compilation_model(VALID.replace("assembly DoorControl", "assembly\tDoorControl"))
+        model = parse_compilation_model(
+            VALID.replace("assembly DoorControl", "assembly\tDoorControl")
+        )
         self.assertEqual(model.assembly_ir[0].name, "DoorControl")
 
     def test_route_argument_type_must_match_target_input(self) -> None:
@@ -236,52 +238,39 @@ class MachineAssemblyTests(unittest.TestCase):
         )
 
     def test_reentry_failure_rolls_back_all_machine_states(self) -> None:
-        model = parse_compilation_model(VALID)
-        ir = model.assembly_ir[0]
-        cyclic_routes = (
-            *ir.routes,
-            {
-                "source_instance": "motor",
-                "source_machine": "Motor",
-                "effect": "write_motor",
-                "payload_parameter": "command",
-                "payload_type": "DoorInput",
-                "payload_type_ref": {"name": "DoorInput", "arguments": ()},
-                "result_type": "()",
-                "result_type_ref": {"name": "()", "arguments": ()},
-                "target_instance": "door",
-                "target_machine": "Door",
-                "input": "input",
-                "delivery": "immediate",
-                "order": 3,
-                "line": 1,
-            },
+        cyclic_source = VALID.replace(
+            "!write_motor(command:MotorCommand):Receipt=Receipt(command)",
+            "!write_motor(command:MotorCommand):Receipt=Receipt(command)\n"
+            "!loop_door(event:DoorInput):()",
+        ).replace(
+            "  receipt := write_motor(DisableMotor)\n"
+            "  MotorState(MotorStopped)",
+            "  receipt := write_motor(DisableMotor)\n"
+            "  loop := loop_door(ForcedOpen)\n"
+            "  MotorState(MotorStopped)",
+        ).replace(
+            "  safety.request_motor -> motor.input\n",
+            "  safety.request_motor -> motor.input\n"
+            "  motor.loop_door -> door.input\n",
         )
-        cyclic_ir = type(ir)(
-            schema=ir.schema,
-            version=ir.version,
-            name=ir.name,
-            delivery=ir.delivery,
-            state_commit=ir.state_commit,
-            reentrant_reaction=ir.reentrant_reaction,
-            instances=ir.instances,
-            routes=cyclic_routes,
-            diagnostics=ir.diagnostics,
-            types=ir.types,
-        )
-        runtime = ImmediateAssemblyRuntime(cyclic_ir, INITIAL)
+        model = parse_compilation_model(cyclic_source)
+        runtime = ImmediateAssemblyRuntime(model.assembly_ir[0], INITIAL)
 
         def handler(instance: str, input_name: str, value: object, state: object):
-            effects = {
-                "door": EffectInvocation("notify_safety", "EmergencyDetected"),
-                "safety": EffectInvocation("request_motor", "StopRequested"),
-                "motor": EffectInvocation("write_motor", "ForcedOpen"),
-            }
-            yield effects[instance]
+            if instance == "door":
+                yield EffectInvocation("notify_safety", "EmergencyDetected")
+            elif instance == "safety":
+                yield EffectInvocation("request_motor", "StopRequested")
+            elif instance == "motor":
+                yield EffectInvocation("write_motor", "DisableMotor")
+                yield EffectInvocation("loop_door", "ForcedOpen")
             return state
 
+        def host(instance: str, effect: str, arguments: tuple[object, ...]):
+            return {"command": arguments[0]}
+
         with self.assertRaisesRegex(GlyphError, "再入は禁止"):
-            runtime.react("door", "input", "ForcedOpen", handler)
+            runtime.react("door", "input", "ForcedOpen", handler, host)
         self.assertEqual(runtime.states, INITIAL)
 
     def test_runtime_rejects_unknown_input_and_effect(self) -> None:
