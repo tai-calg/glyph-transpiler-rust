@@ -3,14 +3,6 @@ from __future__ import annotations
 import json
 import re
 
-from .assembly_delivery import _patch_function_references
-
-
-_RUNTIME_CODEGEN_MESSAGE = (
-    "Glyph Machine Assembly immediate routing has not yet been lowered into "
-    "generated Rust; use machine-assembly-ir.json and the reference runtime"
-)
-
 
 def _assembly_irs(model) -> tuple[object, ...]:
     value = getattr(model, "assembly_ir", ())
@@ -22,7 +14,8 @@ def machine_assembly_payload(model) -> dict[str, object]:
         "schema": "glyph.machine-assembly-set-ir",
         "version": 1,
         "runtime_codegen": {
-            "status": "not-lowered",
+            "status": "blocked",
+            "reason": "instance-aware-rust-lowering-not-implemented",
             "fail_closed": True,
         },
         "assemblies": [item.to_dict() for item in _assembly_irs(model)],
@@ -42,11 +35,18 @@ def render_machine_assembly_mermaid(model) -> str:
     lines = [
         "flowchart LR",
         "  classDef machine fill:#eef,stroke:#446;",
+        "  classDef host fill:#fee,stroke:#844,stroke-dasharray:4 3;",
     ]
     for assembly_index, assembly in enumerate(_assembly_irs(model), start=1):
         assembly_id = f"assembly_{assembly_index}_{_mermaid_id(assembly.name)}"
         lines.append(f'  subgraph {assembly_id}["{_escape(assembly.name)}"]')
         node_ids: dict[str, str] = {}
+        routed: dict[str, set[str]] = {}
+        for route in assembly.routes:
+            routed.setdefault(str(route["source_instance"]), set()).add(
+                str(route["effect"])
+            )
+
         for instance_index, instance in enumerate(assembly.instances, start=1):
             instance_name = str(instance["name"])
             node_id = (
@@ -54,46 +54,48 @@ def render_machine_assembly_mermaid(model) -> str:
                 f"{_mermaid_id(instance_name)}"
             )
             node_ids[instance_name] = node_id
-            label = f"{instance_name}: {instance['machine']}"
+            input_names = [
+                str(item.get("name"))
+                for item in instance.get("inputs", [])
+                if isinstance(item, dict)
+            ]
+            suffix = f"<br/>in: {', '.join(input_names)}" if input_names else ""
+            label = f"{instance_name}: {instance['machine']}{suffix}"
             lines.append(f'    {node_id}["{_escape(label)}"]')
             lines.append(f"    class {node_id} machine;")
+
+        host_id = f"{assembly_id}_host"
+        host_used = False
         for route in assembly.routes:
             source = node_ids[str(route["source_instance"])]
             target = node_ids[str(route["target_instance"])]
-            label = f"{route['effect']} → {route['input']}"
+            label = (
+                f"{route['effect']}({route['payload_parameter']}:"
+                f"{route['payload_type']}) → {route['input']}"
+            )
             lines.append(f'    {source} -->|"{_escape(label)}"| {target}')
+
+        for instance in assembly.instances:
+            instance_name = str(instance["name"])
+            for effect in instance.get("allowed_effects", []):
+                effect_name = str(effect)
+                if effect_name in routed.get(instance_name, set()):
+                    continue
+                if not host_used:
+                    lines.append(f'    {host_id}[/"Host effects"/]')
+                    lines.append(f"    class {host_id} host;")
+                    host_used = True
+                lines.append(
+                    f'    {node_ids[instance_name]} -.->|"{_escape(effect_name)}"| {host_id}'
+                )
         lines.append("  end")
     return "\n".join(lines) + "\n"
 
 
 def install_machine_assembly_tooling_delivery() -> None:
-    """Publish opt-in Assembly artifacts and fail closed in legacy Rust codegen."""
+    """Publish Assembly IR through the canonical tooling functions."""
 
-    from . import artifacts as artifacts_module
     from . import compilation as compilation_module
-
-    current_rust = artifacts_module.build_rust_artifacts
-    if not getattr(current_rust, "__glyph_machine_assembly__", False):
-        original_rust = current_rust
-
-        def build_rust_artifacts_with_assembly_guard(model):
-            artifacts = original_rust(model)
-            if not _assembly_irs(model):
-                return artifacts
-            logic = artifacts.logic.rstrip() + (
-                "\n\ncompile_error!(\""
-                + _RUNTIME_CODEGEN_MESSAGE
-                + "\");\n"
-            )
-            return type(artifacts)(logic, artifacts.host, artifacts.manual_scaffold)
-
-        build_rust_artifacts_with_assembly_guard.__name__ = original_rust.__name__
-        build_rust_artifacts_with_assembly_guard.__qualname__ = original_rust.__qualname__
-        build_rust_artifacts_with_assembly_guard.__doc__ = original_rust.__doc__
-        build_rust_artifacts_with_assembly_guard.__glyph_machine_assembly__ = True
-        build_rust_artifacts_with_assembly_guard.__glyph_original__ = original_rust
-        _patch_function_references(original_rust, build_rust_artifacts_with_assembly_guard)
-        artifacts_module.build_rust_artifacts = build_rust_artifacts_with_assembly_guard
 
     current_design = compilation_module.build_design_json
     if not getattr(current_design, "__glyph_machine_assembly__", False):
@@ -107,12 +109,8 @@ def install_machine_assembly_tooling_delivery() -> None:
             payload["machine_assemblies"] = machine_assembly_payload(model)
             return json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
 
-        build_design_json_with_assemblies.__name__ = original_design.__name__
-        build_design_json_with_assemblies.__qualname__ = original_design.__qualname__
-        build_design_json_with_assemblies.__doc__ = original_design.__doc__
         build_design_json_with_assemblies.__glyph_machine_assembly__ = True
         build_design_json_with_assemblies.__glyph_original__ = original_design
-        _patch_function_references(original_design, build_design_json_with_assemblies)
         compilation_module.build_design_json = build_design_json_with_assemblies
 
     current_bundle = compilation_module.build_diagram_bundle
@@ -137,10 +135,6 @@ def install_machine_assembly_tooling_delivery() -> None:
             files["machine-assembly.mmd"] = render_machine_assembly_mermaid(model)
             return type(bundle)(bundle.ir, bundle.algorithm_ir, files)
 
-        build_diagram_bundle_with_assemblies.__name__ = original_bundle.__name__
-        build_diagram_bundle_with_assemblies.__qualname__ = original_bundle.__qualname__
-        build_diagram_bundle_with_assemblies.__doc__ = original_bundle.__doc__
         build_diagram_bundle_with_assemblies.__glyph_machine_assembly__ = True
         build_diagram_bundle_with_assemblies.__glyph_original__ = original_bundle
-        _patch_function_references(original_bundle, build_diagram_bundle_with_assemblies)
         compilation_module.build_diagram_bundle = build_diagram_bundle_with_assemblies
