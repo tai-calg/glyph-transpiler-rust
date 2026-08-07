@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
+import math
 import sys
-from threading import RLock
+from threading import Lock
 from types import GeneratorType
 from typing import Callable, Generator, Mapping
 
@@ -70,7 +71,25 @@ _INT_TYPES = {
     "u128",
     "usize",
 }
+_INT_RANGES: dict[str, tuple[int, int]] = {
+    "i8": (-(2**7), 2**7 - 1),
+    "i16": (-(2**15), 2**15 - 1),
+    "i32": (-(2**31), 2**31 - 1),
+    "i64": (-(2**63), 2**63 - 1),
+    "i128": (-(2**127), 2**127 - 1),
+    "isize": (-sys.maxsize - 1, sys.maxsize),
+    "u8": (0, 2**8 - 1),
+    "u16": (0, 2**16 - 1),
+    "u32": (0, 2**32 - 1),
+    "u64": (0, 2**64 - 1),
+    "u128": (0, 2**128 - 1),
+    "usize": (0, 2 * sys.maxsize + 1),
+}
 _FLOAT_TYPES = {"F", "Float", "f32", "f64"}
+_FLOAT_MAX = {
+    "f32": 3.4028234663852886e38,
+    "f64": 1.7976931348623157e308,
+}
 _STRING_TYPES = {"String", "str"}
 
 
@@ -116,8 +135,7 @@ class ImmediateAssemblyRuntime:
 
         self.ir = ir
         self._state_cloner = state_cloner
-        self._reaction_lock = RLock()
-        self._reaction_active = False
+        self._reaction_gate = Lock()
         self._instances = {
             str(item["name"]): item
             for item in ir.instances
@@ -251,10 +269,28 @@ class ImmediateAssemblyRuntime:
         if name in _INT_TYPES:
             if type(value) is not int:
                 raise GlyphError(f"{path}: {name}にはintが必要")
+            bounds = _INT_RANGES.get(name)
+            if bounds is not None and not bounds[0] <= value <= bounds[1]:
+                raise GlyphError(
+                    f"{path}: {name}の範囲外: {value} "
+                    f"(許容範囲 {bounds[0]}..{bounds[1]})"
+                )
             return
         if name in _FLOAT_TYPES:
             if type(value) not in {int, float}:
                 raise GlyphError(f"{path}: {name}には数値が必要")
+            try:
+                numeric = float(value)
+            except (OverflowError, ValueError) as exc:
+                raise GlyphError(f"{path}: {name}へ変換できない数値") from exc
+            if not math.isfinite(numeric):
+                raise GlyphError(f"{path}: {name}には有限値が必要")
+            maximum = _FLOAT_MAX.get(name)
+            if maximum is not None and abs(numeric) > maximum:
+                raise GlyphError(
+                    f"{path}: {name}の表現範囲外: {value} "
+                    f"(最大絶対値 {maximum})"
+                )
             return
         if name in _STRING_TYPES:
             if not isinstance(value, str):
@@ -388,26 +424,22 @@ class ImmediateAssemblyRuntime:
         handler: ReactionHandler,
         host_executor: HostExecutor | None = None,
     ) -> ImmediateReactionResult:
-        # One top-level reaction owns a complete working configuration. A nested
-        # call from a Host callback would otherwise overwrite its inner commit.
-        # RLock serializes other threads while allowing same-thread re-entry to be
-        # diagnosed instead of deadlocking.
-        with self._reaction_lock:
-            if self._reaction_active:
-                raise GlyphError(
-                    "同一Assembly Runtimeへのtop-level反応の再入は禁止"
-                )
-            self._reaction_active = True
-            try:
-                return self._react_locked(
-                    instance,
-                    input_name,
-                    value,
-                    handler,
-                    host_executor,
-                )
-            finally:
-                self._reaction_active = False
+        # Reject same-thread and cross-thread competing reactions without waiting.
+        # Blocking here can deadlock when a Host callback joins the competing thread.
+        if not self._reaction_gate.acquire(blocking=False):
+            raise GlyphError(
+                "同一Assembly Runtimeへのtop-level反応の再入は禁止（並行実行も禁止）"
+            )
+        try:
+            return self._react_locked(
+                instance,
+                input_name,
+                value,
+                handler,
+                host_executor,
+            )
+        finally:
+            self._reaction_gate.release()
 
     def _react_locked(
         self,
@@ -547,6 +579,13 @@ class ImmediateAssemblyRuntime:
                                 )
                                 for argument in invocation.arguments
                             )
+                            audit_arguments = tuple(
+                                self._clone(
+                                    argument,
+                                    f"Host audit argument {target}.{invocation.effect}",
+                                )
+                                for argument in host_arguments
+                            )
                             raw_result = host_executor(
                                 target,
                                 invocation.effect,
@@ -570,10 +609,7 @@ class ImmediateAssemblyRuntime:
                                 ExternalEffect(
                                     instance=target,
                                     effect=invocation.effect,
-                                    arguments=tuple(
-                                        self._clone(item, "external effect argument")
-                                        for item in host_arguments
-                                    ),
+                                    arguments=audit_arguments,
                                     result=self._clone(
                                         raw_result,
                                         "external effect result",

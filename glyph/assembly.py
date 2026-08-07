@@ -41,25 +41,32 @@ _BUILTIN_TYPE_NAMES = {
 }
 
 
-class FrozenMapping(MappingABC[str, object]):
-    """Immutable mapping that cannot be bypassed through dict base methods."""
+class FrozenMapping(tuple, MappingABC[str, object]):
+    """Tuple-backed immutable mapping with no mutable internal storage."""
 
-    __slots__ = ("_data",)
+    __slots__ = ()
 
-    def __init__(self, values: Mapping[str, object]):
-        object.__setattr__(self, "_data", dict(values))
+    def __new__(cls, values: Mapping[str, object]):
+        return tuple.__new__(
+            cls,
+            tuple((str(key), value) for key, value in values.items()),
+        )
 
     def __getitem__(self, key: str) -> object:
-        return self._data[key]
+        for item_key, item_value in tuple.__iter__(self):
+            if item_key == key:
+                return item_value
+        raise KeyError(key)
 
     def __iter__(self) -> Iterator[str]:
-        return iter(self._data)
-
-    def __len__(self) -> int:
-        return len(self._data)
+        return (key for key, _ in tuple.__iter__(self))
 
     def __repr__(self) -> str:
-        return f"FrozenMapping({self._data!r})"
+        body = ", ".join(
+            f"{key!r}: {value!r}"
+            for key, value in tuple.__iter__(self)
+        )
+        return f"FrozenMapping({{{body}}})"
 
     def __deepcopy__(self, memo):
         return self
