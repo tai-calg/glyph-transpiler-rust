@@ -6,7 +6,9 @@ import unittest
 
 from glyph import parse_compilation_model
 from glyph.artifacts import build_rust_artifacts
+from glyph.assembly_frontend import build_analysis_rust_artifacts
 from glyph.compilation import build_design_json, build_diagram_bundle
+from glyph.compiler import GlyphError
 
 
 PLAIN = """\
@@ -37,25 +39,31 @@ class MachineAssemblyToolingTests(unittest.TestCase):
         design = json.loads(build_design_json(model))
         payload = design["machine_assemblies"]
         self.assertEqual(payload["schema"], "glyph.machine-assembly-set-ir")
-        self.assertEqual(payload["runtime_codegen"]["status"], "not-lowered")
+        self.assertEqual(payload["runtime_codegen"]["status"], "blocked")
         self.assertTrue(payload["runtime_codegen"]["fail_closed"])
         self.assertEqual(payload["assemblies"][0]["name"], "DoorControl")
 
         bundle = build_diagram_bundle(model, "machine_assembly_immediate.glyph")
         self.assertIn("machine-assembly-ir.json", bundle.files)
         self.assertIn("machine-assembly.mmd", bundle.files)
-        self.assertIn("door: Door", bundle.files["machine-assembly.mmd"])
-        self.assertIn("notify_safety", bundle.files["machine-assembly.mmd"])
+        topology = bundle.files["machine-assembly.mmd"]
+        self.assertIn("door: Door", topology)
+        self.assertIn("notify_safety(event:SafetyInput)", topology)
+        self.assertIn("Host effects", topology)
+        self.assertIn("write_motor", topology)
 
-    def test_assembly_rust_codegen_fails_closed_until_instance_lowering_exists(self) -> None:
+    def test_direct_assembly_rust_codegen_raises_without_emitting_fake_rust(self) -> None:
         source = Path("examples/machine_assembly_immediate.glyph").read_text(
             encoding="utf-8"
         )
         model = parse_compilation_model(source)
-        artifacts = build_rust_artifacts(model)
 
-        self.assertIn("compile_error!", artifacts.logic)
-        self.assertIn("has not yet been lowered", artifacts.logic)
+        with self.assertRaisesRegex(GlyphError, "Rust loweringは未実装"):
+            build_rust_artifacts(model)
+
+        analysis = build_analysis_rust_artifacts(model)
+        self.assertIn("Rust generation is blocked", analysis.logic)
+        self.assertNotIn("compile_error!", analysis.logic)
 
     def test_plain_tooling_output_uses_original_functions_unchanged(self) -> None:
         model = parse_compilation_model(PLAIN)
@@ -69,8 +77,7 @@ class MachineAssemblyToolingTests(unittest.TestCase):
         self.assertEqual(actual, original)
 
         actual_rust = build_rust_artifacts(model)
-        original_rust = build_rust_artifacts.__glyph_original__(model)
-        self.assertEqual(actual_rust, original_rust)
+        self.assertNotIn("blocked", actual_rust.logic.lower())
         self.assertNotIn("compile_error!", actual_rust.logic)
 
 
