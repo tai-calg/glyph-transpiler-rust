@@ -7,6 +7,7 @@ import time
 from typing import Callable
 
 from .artifacts import CompilationModel, RustArtifacts
+from .assembly_frontend import require_rust_codegen_supported
 from .compilation import CompilationPipeline
 from .mermaid import DiagramBundle
 
@@ -96,6 +97,12 @@ class IncrementalCompiler:
                 os.sep, "/"
             )
         result = self.compile_text(source, str(input_file), source_href)
+
+        # Checking, diagrams and design JSON remain available. A request to write
+        # Rust artifacts must fail before any output is modified.
+        if logic_output is not None or host_output is not None:
+            require_rust_codegen_supported(result.snapshot.model)
+
         written: list[Path] = []
         if logic_output is not None:
             path = Path(logic_output)
