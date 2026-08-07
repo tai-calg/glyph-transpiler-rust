@@ -28,6 +28,12 @@ _INSTANCE_RE = re.compile(rf"({_NAME})\s*=\s*({_NAME})\s*$")
 _ROUTE_RE = re.compile(
     rf"({_NAME})\.({_NAME})\s*->\s*({_NAME})\.({_NAME})\s*$"
 )
+_BUILTIN_TYPE_NAMES = {
+    "R": "Result",
+    "O": "Option",
+    "V": "Vec",
+    "S": "String",
+}
 
 
 @dataclass(frozen=True)
@@ -61,6 +67,14 @@ class AssemblyDiagnostic:
     message: str
     line: int
 
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "severity": self.severity,
+            "code": self.code,
+            "message": self.message,
+            "line": self.line,
+        }
+
 
 @dataclass(frozen=True)
 class MachineAssemblyIR:
@@ -68,6 +82,7 @@ class MachineAssemblyIR:
     version: int
     name: str
     delivery: str
+    state_commit: str
     reentrant_reaction: str
     instances: tuple[dict[str, object], ...]
     routes: tuple[dict[str, object], ...]
@@ -79,18 +94,11 @@ class MachineAssemblyIR:
             "version": self.version,
             "name": self.name,
             "delivery": self.delivery,
+            "state_commit": self.state_commit,
             "reentrant_reaction": self.reentrant_reaction,
             "instances": [dict(item) for item in self.instances],
             "routes": [dict(item) for item in self.routes],
-            "diagnostics": [
-                {
-                    "severity": item.severity,
-                    "code": item.code,
-                    "message": item.message,
-                    "line": item.line,
-                }
-                for item in self.diagnostics
-            ],
+            "diagnostics": [item.to_dict() for item in self.diagnostics],
         }
 
 
@@ -99,7 +107,7 @@ def _strip_comment(line: str) -> str:
 
 
 def extract_assemblies(source: str) -> tuple[str, tuple[AssemblyDecl, ...]]:
-    """Extract top-level assembly blocks while preserving source line numbers."""
+    """Extract top-level Assembly blocks while retaining source line numbers."""
 
     raw_lines = source.splitlines()
     output = list(raw_lines)
@@ -189,7 +197,17 @@ def extract_assemblies(source: str) -> tuple[str, tuple[AssemblyDecl, ...]]:
     return "\n".join(output) + suffix, tuple(assemblies)
 
 
+def has_top_level_assembly(source: str) -> bool:
+    for original in source.splitlines():
+        clean = _strip_comment(original)
+        if clean and not original[0].isspace() and clean.startswith("assembly "):
+            return True
+    return False
+
+
 def _render_type(ty: TypeRef) -> str:
+    if ty.name == "tuple" and not ty.args:
+        return "()"
     if not ty.args:
         return ty.name
     return f"{ty.name}<{','.join(_render_type(item) for item in ty.args)}>"
@@ -201,7 +219,15 @@ def _resolve_alias(ty: TypeRef, aliases: Mapping[str, TypeRef]) -> TypeRef:
     while not current.args and current.name in aliases and current.name not in seen:
         seen.add(current.name)
         current = aliases[current.name]
-    return current
+    return TypeRef(
+        _BUILTIN_TYPE_NAMES.get(current.name, current.name),
+        tuple(_resolve_alias(item, aliases) for item in current.args),
+    )
+
+
+def _is_unit(ty: TypeRef, aliases: Mapping[str, TypeRef]) -> bool:
+    resolved = _resolve_alias(ty, aliases)
+    return resolved.name == "()" and not resolved.args
 
 
 def _walk_expr(expr: Expr) -> Iterable[Expr]:
@@ -242,7 +268,7 @@ def _reachable_effects(
     effects: Mapping[str, ExternDecl],
     inline_effects: Mapping[str, FunctionDecl],
 ) -> set[str]:
-    """Find effects in transition Action positions, including inline-effect bodies."""
+    """Collect effects reachable from transition result expressions, not guards."""
 
     pending = list(_direct_calls(machine.next_expr))
     visited: set[str] = set()
@@ -263,8 +289,6 @@ def _reachable_effects(
         function = functions.get(name)
         if function is None:
             continue
-        # A guard predicate enables a transition but is not its Action. Only the
-        # selected branch value can contribute a routable `!` invocation.
         for expression in _value_expressions(function):
             pending.extend(_direct_calls(expression))
 
@@ -295,7 +319,7 @@ def _cycle_diagnostics(assembly: AssemblyDecl) -> tuple[AssemblyDiagnostic, ...]
                     code="immediate-route-cycle",
                     message=(
                         "即時route循環がある: " + " -> ".join(cycle)
-                        + "。実行時の再入は禁止される"
+                        + "。実際に循環が発火すると再入エラーになる"
                     ),
                     line=route_lines.get(edge, assembly.line),
                 )
@@ -304,12 +328,12 @@ def _cycle_diagnostics(assembly: AssemblyDecl) -> tuple[AssemblyDiagnostic, ...]
         if node in visited:
             return
         visiting.add(node)
-        for target in adjacency.get(node, ()):
+        for target in sorted(adjacency.get(node, ())):
             visit(target, (*path, node))
         visiting.remove(node)
         visited.add(node)
 
-    for instance in adjacency:
+    for instance in sorted(adjacency):
         visit(instance, ())
 
     unique: list[AssemblyDiagnostic] = []
@@ -340,7 +364,6 @@ def validate_assemblies(
         if isinstance(declaration, ExternDecl)
     }
     inline_effect_by_name = {effect.name: effect for effect in inline_effects}
-    inline_effect_names = set(inline_effect_by_name)
     aliases = {
         declaration.name: declaration.target
         for declaration in program.declarations
@@ -399,10 +422,20 @@ def validate_assemblies(
                 raise GlyphError(
                     f"{route.line}行目: !effect '{route.effect}' が定義されていない"
                 )
-            if route.effect not in inline_effect_names:
+            if route.effect in inline_effect_by_name:
                 raise GlyphError(
-                    f"{route.line}行目: 内部route化する !effect '{route.effect}' には"
-                    "本体が必要"
+                    f"{route.line}行目: 内部route化する !effect '{route.effect}' は"
+                    "Host試作本体を持てない。宣言だけにする"
+                )
+            if len(effect.params) != 1:
+                raise GlyphError(
+                    f"{route.line}行目: v1の内部route effect '{route.effect}' は"
+                    "payload引数を1つだけ持つ必要がある"
+                )
+            if not _is_unit(effect.return_type, aliases):
+                raise GlyphError(
+                    f"{route.line}行目: 内部route effect '{route.effect}' の戻り値は()が必要。"
+                    "route payloadは戻り値ではなく引数から渡す"
                 )
             if route.effect not in reachable_by_instance[route.source_instance]:
                 raise GlyphError(
@@ -432,12 +465,14 @@ def validate_assemblies(
                     f"。使用可能: {target_param.name}"
                 )
 
-            source_type = _resolve_alias(effect.return_type, aliases)
+            payload_param = effect.params[0]
+            source_type = _resolve_alias(payload_param.ty, aliases)
             target_type = _resolve_alias(target_param.ty, aliases)
             if source_type != target_type:
                 raise GlyphError(
                     f"{route.line}行目: route型不一致: "
-                    f"{route.source_instance}.{route.effect} は {_render_type(effect.return_type)}、"
+                    f"{route.source_instance}.{route.effect} の引数は "
+                    f"{_render_type(payload_param.ty)}、"
                     f"{route.target_instance}.{route.input} は {_render_type(target_param.ty)}"
                 )
 
@@ -446,7 +481,9 @@ def validate_assemblies(
                     "source_instance": route.source_instance,
                     "source_machine": source.machine,
                     "effect": route.effect,
-                    "value_type": _render_type(effect.return_type),
+                    "payload_parameter": payload_param.name,
+                    "payload_type": _render_type(payload_param.ty),
+                    "result_type": "()",
                     "target_instance": route.target_instance,
                     "target_machine": target.machine,
                     "input": route.input,
@@ -461,13 +498,33 @@ def validate_assemblies(
                 schema="glyph.machine-assembly-ir",
                 version=1,
                 name=assembly.name,
-                delivery="immediate",
+                delivery="immediate-call-point",
+                state_commit="atomic-per-top-level-reaction",
                 reentrant_reaction="forbidden",
                 instances=tuple(
                     {
                         "name": item.name,
                         "machine": item.machine,
                         "line": item.line,
+                        "state": {
+                            "parameter": instance_machine[item.name].state_param.name,
+                            "type": _render_type(
+                                instance_machine[item.name].state_param.ty
+                            ),
+                            "initial_expression": repr(
+                                instance_machine[item.name].initial
+                            ),
+                        },
+                        "inputs": [
+                            {
+                                "name": param.name,
+                                "type": _render_type(param.ty),
+                            }
+                            for param in instance_machine[item.name].input_params
+                        ],
+                        "allowed_effects": sorted(
+                            reachable_by_instance[item.name]
+                        ),
                     }
                     for item in assembly.instances
                 ),
