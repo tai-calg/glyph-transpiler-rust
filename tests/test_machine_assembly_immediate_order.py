@@ -4,7 +4,7 @@ from pathlib import Path
 import unittest
 
 from glyph import parse_compilation_model
-from glyph.assembly_runtime import EffectEmission, ImmediateAssemblyRuntime
+from glyph.assembly_runtime import EffectInvocation, ImmediateAssemblyRuntime
 
 
 class MachineAssemblyImmediateOrderTests(unittest.TestCase):
@@ -13,26 +13,43 @@ class MachineAssemblyImmediateOrderTests(unittest.TestCase):
             encoding="utf-8"
         )
         model = parse_compilation_model(source)
-        runtime = ImmediateAssemblyRuntime(model.assembly_ir[0])
+        runtime = ImmediateAssemblyRuntime(
+            model.assembly_ir[0],
+            {
+                "door": "DoorLocked",
+                "safety": "SafetyNormal",
+                "motor": "MotorRunning",
+            },
+        )
         order: list[str] = []
 
-        def handler(instance: str, input_name: str, value: object):
+        def handler(instance: str, input_name: str, value: object, state: object):
             order.append(f"{instance}:enter")
             if instance == "door":
                 order.append("door:before-notify")
-                yield EffectEmission("notify_safety", "EmergencyDetected")
+                yield EffectInvocation("notify_safety", "EmergencyDetected")
                 order.append("door:after-notify")
+                next_state = "DoorFaulted"
             elif instance == "safety":
                 order.append("safety:before-request")
-                yield EffectEmission("request_motor", "StopRequested")
+                yield EffectInvocation("request_motor", "StopRequested")
                 order.append("safety:after-request")
+                next_state = "SafetyEmergency"
             elif instance == "motor":
                 order.append("motor:before-write")
-                yield EffectEmission("write_motor", "DisableMotor")
+                receipt = yield EffectInvocation("write_motor", "DisableMotor")
+                order.append(f"motor:receipt:{receipt}")
                 order.append("motor:after-write")
+                next_state = "MotorStopped"
+            else:
+                self.fail(instance)
             order.append(f"{instance}:exit")
+            return next_state
 
-        runtime.react("door", "input", "ForcedOpen", handler)
+        def host(instance: str, effect: str, arguments: tuple[object, ...]):
+            return "Receipt"
+
+        runtime.react("door", "input", "ForcedOpen", handler, host)
 
         self.assertEqual(
             order,
@@ -43,6 +60,7 @@ class MachineAssemblyImmediateOrderTests(unittest.TestCase):
                 "safety:before-request",
                 "motor:enter",
                 "motor:before-write",
+                "motor:receipt:Receipt",
                 "motor:after-write",
                 "motor:exit",
                 "safety:after-request",
