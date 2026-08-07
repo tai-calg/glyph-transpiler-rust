@@ -118,7 +118,8 @@ class AssemblyRuntimeHardeningV2Tests(unittest.TestCase):
         self.assertEqual(result.states["motor"], {"mode": "MotorStopped"})
         self.assertEqual(len(errors), 1)
         self.assertIsInstance(errors[0], GlyphError)
-        self.assertIn("再入・並行実行は禁止", str(errors[0]))
+        self.assertIn("top-level反応の再入は禁止", str(errors[0]))
+        self.assertIn("並行実行も禁止", str(errors[0]))
 
     def test_numeric_ranges_and_finite_values(self) -> None:
         def handler(instance, input_name, value, state):
