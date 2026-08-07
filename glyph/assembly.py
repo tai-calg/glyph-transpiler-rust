@@ -7,6 +7,7 @@ from typing import Iterable, Mapping, Sequence
 from .compiler import (
     AliasDecl,
     BinaryExpr,
+    BoolExpr,
     CallExpr,
     Expr,
     ExternDecl,
@@ -14,7 +15,9 @@ from .compiler import (
     FunctionDecl,
     GlyphError,
     NameExpr,
+    ProductDecl,
     Program,
+    SumDecl,
     TryExpr,
     TypeRef,
     UnaryExpr,
@@ -24,6 +27,7 @@ from .machine import MachineDecl
 
 _NAME = r"[A-Za-z_][A-Za-z0-9_]*"
 _ASSEMBLY_HEADER_RE = re.compile(rf"assembly\s+({_NAME})\s*$")
+_ASSEMBLY_PREFIX_RE = re.compile(r"assembly(?:\s|$)")
 _INSTANCE_RE = re.compile(rf"({_NAME})\s*=\s*({_NAME})\s*$")
 _ROUTE_RE = re.compile(
     rf"({_NAME})\.({_NAME})\s*->\s*({_NAME})\.({_NAME})\s*$"
@@ -34,6 +38,42 @@ _BUILTIN_TYPE_NAMES = {
     "V": "Vec",
     "S": "String",
 }
+
+
+class FrozenDict(dict[str, object]):
+    """Deep-freeze friendly dict used by public immutable IR records."""
+
+    @staticmethod
+    def _immutable(*args, **kwargs):
+        raise TypeError("Machine Assembly IR is immutable")
+
+    __setitem__ = _immutable
+    __delitem__ = _immutable
+    clear = _immutable
+    pop = _immutable
+    popitem = _immutable
+    setdefault = _immutable
+    update = _immutable
+    __ior__ = _immutable
+
+    def __deepcopy__(self, memo):
+        return self
+
+
+def _freeze(value: object) -> object:
+    if isinstance(value, Mapping):
+        return FrozenDict({str(key): _freeze(item) for key, item in value.items()})
+    if isinstance(value, (tuple, list)):
+        return tuple(_freeze(item) for item in value)
+    return value
+
+
+def _thaw(value: object) -> object:
+    if isinstance(value, Mapping):
+        return {str(key): _thaw(item) for key, item in value.items()}
+    if isinstance(value, tuple):
+        return [_thaw(item) for item in value]
+    return value
 
 
 @dataclass(frozen=True)
@@ -84,9 +124,16 @@ class MachineAssemblyIR:
     delivery: str
     state_commit: str
     reentrant_reaction: str
-    instances: tuple[dict[str, object], ...]
-    routes: tuple[dict[str, object], ...]
+    instances: tuple[Mapping[str, object], ...]
+    routes: tuple[Mapping[str, object], ...]
     diagnostics: tuple[AssemblyDiagnostic, ...] = ()
+    types: tuple[Mapping[str, object], ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "instances", tuple(_freeze(item) for item in self.instances))
+        object.__setattr__(self, "routes", tuple(_freeze(item) for item in self.routes))
+        object.__setattr__(self, "types", tuple(_freeze(item) for item in self.types))
+        object.__setattr__(self, "diagnostics", tuple(self.diagnostics))
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -96,14 +143,19 @@ class MachineAssemblyIR:
             "delivery": self.delivery,
             "state_commit": self.state_commit,
             "reentrant_reaction": self.reentrant_reaction,
-            "instances": [dict(item) for item in self.instances],
-            "routes": [dict(item) for item in self.routes],
+            "instances": _thaw(self.instances),
+            "routes": _thaw(self.routes),
             "diagnostics": [item.to_dict() for item in self.diagnostics],
+            "types": _thaw(self.types),
         }
 
 
 def _strip_comment(line: str) -> str:
     return line.split("#", 1)[0].rstrip()
+
+
+def _top_level(line: str) -> bool:
+    return bool(line) and not line[0].isspace()
 
 
 def extract_assemblies(source: str) -> tuple[str, tuple[AssemblyDecl, ...]]:
@@ -118,7 +170,11 @@ def extract_assemblies(source: str) -> tuple[str, tuple[AssemblyDecl, ...]]:
     while i < len(raw_lines):
         original = raw_lines[i]
         clean = _strip_comment(original)
-        if not clean.strip() or clean[0].isspace() or not clean.startswith("assembly "):
+        if (
+            not clean.strip()
+            or not _top_level(original)
+            or _ASSEMBLY_PREFIX_RE.match(clean) is None
+        ):
             i += 1
             continue
 
@@ -140,7 +196,7 @@ def extract_assemblies(source: str) -> tuple[str, tuple[AssemblyDecl, ...]]:
         while i < len(raw_lines):
             body_original = raw_lines[i]
             body_clean = _strip_comment(body_original)
-            if body_clean.strip() and not body_original[0].isspace():
+            if body_clean.strip() and _top_level(body_original):
                 break
             output[i] = ""
             if not body_clean.strip():
@@ -200,7 +256,7 @@ def extract_assemblies(source: str) -> tuple[str, tuple[AssemblyDecl, ...]]:
 def has_top_level_assembly(source: str) -> bool:
     for original in source.splitlines():
         clean = _strip_comment(original)
-        if clean and not original[0].isspace() and clean.startswith("assembly "):
+        if clean and _top_level(original) and _ASSEMBLY_PREFIX_RE.match(clean):
             return True
     return False
 
@@ -213,14 +269,33 @@ def _render_type(ty: TypeRef) -> str:
     return f"{ty.name}<{','.join(_render_type(item) for item in ty.args)}>"
 
 
+def _normalized_type_name(name: str) -> str:
+    return _BUILTIN_TYPE_NAMES.get(name, name)
+
+
+def _type_ref_ir(ty: TypeRef) -> dict[str, object]:
+    name = "()" if ty.name == "tuple" and not ty.args else (
+        "Tuple" if ty.name == "tuple" else _normalized_type_name(ty.name)
+    )
+    return {
+        "name": name,
+        "arguments": tuple(_type_ref_ir(item) for item in ty.args),
+    }
+
+
 def _resolve_alias(ty: TypeRef, aliases: Mapping[str, TypeRef]) -> TypeRef:
     current = ty
     seen: set[str] = set()
     while not current.args and current.name in aliases and current.name not in seen:
         seen.add(current.name)
         current = aliases[current.name]
+    normalized_name = (
+        "()" if current.name == "tuple" and not current.args else (
+            "Tuple" if current.name == "tuple" else _normalized_type_name(current.name)
+        )
+    )
     return TypeRef(
-        _BUILTIN_TYPE_NAMES.get(current.name, current.name),
+        normalized_name,
         tuple(_resolve_alias(item, aliases) for item in current.args),
     )
 
@@ -262,13 +337,27 @@ def _value_expressions(function: FunctionDecl) -> tuple[Expr, ...]:
     return tuple(clause.value for clause in function.guards)
 
 
+def _potentially_reachable_values(function: FunctionDecl) -> tuple[Expr, ...]:
+    if function.expression is not None:
+        return (function.expression,)
+    result: list[Expr] = []
+    for clause in function.guards:
+        condition = clause.condition
+        if isinstance(condition, BoolExpr) and not condition.value:
+            continue
+        result.append(clause.value)
+        if condition is None or (isinstance(condition, BoolExpr) and condition.value):
+            break
+    return tuple(result)
+
+
 def _reachable_effects(
     machine: MachineDecl,
     functions: Mapping[str, FunctionDecl],
     effects: Mapping[str, ExternDecl],
     inline_effects: Mapping[str, FunctionDecl],
 ) -> set[str]:
-    """Collect effects reachable from transition result expressions, not guards."""
+    """Conservative fallback used when normalized Action reachability is unavailable."""
 
     pending = list(_direct_calls(machine.next_expr))
     visited: set[str] = set()
@@ -283,16 +372,83 @@ def _reachable_effects(
             reachable.add(name)
             implementation = inline_effects.get(name)
             if implementation is not None:
-                for expression in _value_expressions(implementation):
+                for expression in _potentially_reachable_values(implementation):
                     pending.extend(_direct_calls(expression))
             continue
         function = functions.get(name)
         if function is None:
             continue
-        for expression in _value_expressions(function):
+        for expression in _potentially_reachable_values(function):
             pending.extend(_direct_calls(expression))
 
     return reachable
+
+
+def _type_definitions(program: Program) -> tuple[dict[str, object], ...]:
+    result: list[dict[str, object]] = []
+    for declaration in program.declarations:
+        if isinstance(declaration, ProductDecl):
+            result.append(
+                {
+                    "name": declaration.name,
+                    "kind": "product",
+                    "fields": tuple(
+                        {
+                            "name": field.name,
+                            "type": _type_ref_ir(field.ty),
+                        }
+                        for field in declaration.fields
+                    ),
+                }
+            )
+        elif isinstance(declaration, SumDecl):
+            result.append(
+                {
+                    "name": declaration.name,
+                    "kind": "sum",
+                    "variants": tuple(
+                        {
+                            "name": variant.name,
+                            "tuple_types": tuple(
+                                _type_ref_ir(item) for item in variant.tuple_types
+                            ),
+                            "fields": tuple(
+                                {
+                                    "name": field.name,
+                                    "type": _type_ref_ir(field.ty),
+                                }
+                                for field in variant.fields
+                            ),
+                        }
+                        for variant in declaration.variants
+                    ),
+                }
+            )
+        elif isinstance(declaration, AliasDecl):
+            result.append(
+                {
+                    "name": declaration.name,
+                    "kind": "alias",
+                    "target": _type_ref_ir(declaration.target),
+                }
+            )
+    return tuple(result)
+
+
+def _effect_signature(effect: ExternDecl) -> dict[str, object]:
+    return {
+        "name": effect.name,
+        "parameters": tuple(
+            {
+                "name": parameter.name,
+                "type": _render_type(parameter.ty),
+                "type_ref": _type_ref_ir(parameter.ty),
+            }
+            for parameter in effect.params
+        ),
+        "result_type": _render_type(effect.return_type),
+        "result_type_ref": _type_ref_ir(effect.return_type),
+    }
 
 
 def _cycle_diagnostics(assembly: AssemblyDecl) -> tuple[AssemblyDiagnostic, ...]:
@@ -351,6 +507,7 @@ def validate_assemblies(
     machines: Sequence[MachineDecl],
     assemblies: Sequence[AssemblyDecl],
     inline_effects: Sequence[FunctionDecl] = (),
+    reachable_actions_by_machine: Mapping[str, set[str]] | None = None,
 ) -> tuple[MachineAssemblyIR, ...]:
     machine_by_name = {machine.name: machine for machine in machines}
     functions = {
@@ -389,15 +546,20 @@ def validate_assemblies(
             instance_by_name[instance.name] = instance
             instance_machine[instance.name] = machine
 
-        reachable_by_instance = {
-            instance_name: _reachable_effects(
-                machine,
-                functions,
-                effects,
-                inline_effect_by_name,
-            )
-            for instance_name, machine in instance_machine.items()
-        }
+        reachable_by_instance: dict[str, set[str]] = {}
+        for instance_name, machine in instance_machine.items():
+            if reachable_actions_by_machine is not None:
+                reachable_by_instance[instance_name] = set(
+                    reachable_actions_by_machine.get(machine.name, set())
+                )
+            else:
+                reachable_by_instance[instance_name] = _reachable_effects(
+                    machine,
+                    functions,
+                    effects,
+                    inline_effect_by_name,
+                )
+
         routed_sources: dict[tuple[str, str], int] = {}
         route_ir: list[dict[str, object]] = []
 
@@ -440,7 +602,7 @@ def validate_assemblies(
             if route.effect not in reachable_by_instance[route.source_instance]:
                 raise GlyphError(
                     f"{route.line}行目: effect '{route.effect}' はMachine "
-                    f"'{source.machine}' の遷移Actionから到達できない"
+                    f"'{source.machine}' の到達可能な遷移Actionから到達できない"
                 )
 
             source_key = (route.source_instance, route.effect)
@@ -483,7 +645,9 @@ def validate_assemblies(
                     "effect": route.effect,
                     "payload_parameter": payload_param.name,
                     "payload_type": _render_type(payload_param.ty),
+                    "payload_type_ref": _type_ref_ir(payload_param.ty),
                     "result_type": "()",
+                    "result_type_ref": {"name": "()", "arguments": ()},
                     "target_instance": route.target_instance,
                     "target_machine": target.machine,
                     "input": route.input,
@@ -493,43 +657,50 @@ def validate_assemblies(
                 }
             )
 
+        instance_ir: list[dict[str, object]] = []
+        for item in assembly.instances:
+            machine = instance_machine[item.name]
+            allowed_names = tuple(sorted(reachable_by_instance[item.name]))
+            instance_ir.append(
+                {
+                    "name": item.name,
+                    "machine": item.machine,
+                    "line": item.line,
+                    "state": {
+                        "parameter": machine.state_param.name,
+                        "type": _render_type(machine.state_param.ty),
+                        "type_ref": _type_ref_ir(machine.state_param.ty),
+                        "initial_expression": repr(machine.initial),
+                    },
+                    "inputs": tuple(
+                        {
+                            "name": param.name,
+                            "type": _render_type(param.ty),
+                            "type_ref": _type_ref_ir(param.ty),
+                        }
+                        for param in machine.input_params
+                    ),
+                    "allowed_effects": allowed_names,
+                    "effects": tuple(
+                        _effect_signature(effects[name])
+                        for name in allowed_names
+                        if name in effects
+                    ),
+                }
+            )
+
         result.append(
             MachineAssemblyIR(
                 schema="glyph.machine-assembly-ir",
-                version=1,
+                version=2,
                 name=assembly.name,
                 delivery="immediate-call-point",
                 state_commit="atomic-per-top-level-reaction",
                 reentrant_reaction="forbidden",
-                instances=tuple(
-                    {
-                        "name": item.name,
-                        "machine": item.machine,
-                        "line": item.line,
-                        "state": {
-                            "parameter": instance_machine[item.name].state_param.name,
-                            "type": _render_type(
-                                instance_machine[item.name].state_param.ty
-                            ),
-                            "initial_expression": repr(
-                                instance_machine[item.name].initial
-                            ),
-                        },
-                        "inputs": [
-                            {
-                                "name": param.name,
-                                "type": _render_type(param.ty),
-                            }
-                            for param in instance_machine[item.name].input_params
-                        ],
-                        "allowed_effects": sorted(
-                            reachable_by_instance[item.name]
-                        ),
-                    }
-                    for item in assembly.instances
-                ),
+                instances=tuple(instance_ir),
                 routes=tuple(route_ir),
                 diagnostics=_cycle_diagnostics(assembly),
+                types=_type_definitions(program),
             )
         )
 
