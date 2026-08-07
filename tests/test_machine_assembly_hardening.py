@@ -9,7 +9,7 @@ import glyph.compilation as compilation_module
 from glyph import IncrementalCompiler, parse_compilation_model
 from glyph.assembly_frontend import _reachable_action_effects
 from glyph.assembly_runtime import EffectInvocation, ImmediateAssemblyRuntime
-from glyph.compiler import GlyphError
+from glyph.compiler import FunctionDecl, GlyphError
 
 
 SOURCE = Path("examples/machine_assembly_immediate.glyph").read_text(encoding="utf-8")
@@ -56,8 +56,19 @@ class MachineAssemblyHardeningTests(unittest.TestCase):
 
     def test_empty_normalized_reachability_does_not_fallback(self) -> None:
         machine = next(item for item in self.model.machines if item.name == "Door")
+        normalized_lines = {
+            clause.line
+            for item in self.model.program.declarations
+            if isinstance(item, FunctionDecl)
+            for clause in item.guards
+        }
         self.assertEqual(
-            _reachable_action_effects(machine, self.model, set()),
+            _reachable_action_effects(
+                machine,
+                self.model,
+                set(),
+                normalized_lines,
+            ),
             set(),
         )
 

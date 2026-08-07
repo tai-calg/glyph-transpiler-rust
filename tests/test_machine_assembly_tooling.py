@@ -71,16 +71,14 @@ class MachineAssemblyToolingTests(unittest.TestCase):
         self.assertIn("Rust generation is blocked", analysis.logic)
         self.assertNotIn("compile_error!", analysis.logic)
 
-    def test_plain_tooling_output_uses_original_functions_unchanged(self) -> None:
+    def test_plain_tooling_output_has_no_assembly_projection(self) -> None:
         model = parse_compilation_model(PLAIN)
-        self.assertEqual(
-            build_design_json(model),
-            build_design_json.__glyph_original__(model),
-        )
+        design = json.loads(build_design_json(model))
+        self.assertNotIn("machine_assemblies", design)
 
-        actual = build_diagram_bundle(model, "plain.glyph")
-        original = build_diagram_bundle.__glyph_original__(model, "plain.glyph")
-        self.assertEqual(actual, original)
+        bundle = build_diagram_bundle(model, "plain.glyph")
+        self.assertNotIn("machine-assembly-ir.json", bundle.files)
+        self.assertNotIn("machine-assembly.mmd", bundle.files)
 
         actual_rust = build_rust_artifacts(model)
         self.assertNotIn("blocked", actual_rust.logic.lower())

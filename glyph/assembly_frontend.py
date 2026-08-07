@@ -61,6 +61,7 @@ def _reachable_action_effects(
     machine: MachineDecl,
     base: CompilationModel,
     reachable_branch_lines: set[int],
+    normalized_branch_lines: set[int],
 ) -> set[str]:
     """Resolve effect Actions through reachable branch result expressions.
 
@@ -112,9 +113,11 @@ def _reachable_action_effects(
             )
             continue
 
-        if constrained:
-            # Empty is a real normalized result: all branches are unreachable or
-            # shadowed. Only unconstrained nested helpers use the syntax fallback.
+        function_branch_lines = {clause.line for clause in function.guards}
+        if constrained and function_branch_lines & normalized_branch_lines:
+            # Empty is a real normalized result only when the normalized IR
+            # actually describes this function. Helper guards absent from the
+            # normalized root IR retain their own ordered branch semantics.
             selected = tuple(
                 clause.value
                 for clause in function.guards
@@ -148,6 +151,11 @@ def _normalized_machine_actions(
     for machine_view in execution.machines:
         analyzed = analyze_machine(base, machine_view)
         normalized = build_machine_state_transition_ir(base, analyzed)
+        normalized_branch_lines = {
+            int(transition.get("source", {}).get("line", 0))
+            for transition in normalized.get("transitions", [])
+            if int(transition.get("source", {}).get("line", 0)) > 0
+        }
         reachable_branch_lines = {
             int(transition.get("source", {}).get("line", 0))
             for transition in normalized.get("transitions", [])
@@ -160,6 +168,7 @@ def _normalized_machine_actions(
                 machine,
                 base,
                 reachable_branch_lines,
+                normalized_branch_lines,
             )
             if machine is not None
             else set()
