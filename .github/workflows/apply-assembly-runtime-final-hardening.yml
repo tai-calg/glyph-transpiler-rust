@@ -1,0 +1,305 @@
+name: Apply Assembly runtime final hardening
+
+on:
+  push:
+    branches:
+      - agent/machine-assembly-immediate-routing
+    paths:
+      - .github/workflows/apply-assembly-runtime-final-hardening.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/machine-assembly-immediate-routing
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Patch runtime and IR
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          runtime_path = Path('glyph/assembly_runtime.py')
+          text = runtime_path.read_text(encoding='utf-8')
+          text = text.replace('from copy import deepcopy\n', '')
+
+          old = '''def _error_text(error: BaseException) -> str:\n    return f"{type(error).__name__}: {error}"\n'''
+          new = '''def _error_text(error: BaseException) -> str:\n    try:\n        message = str(error)\n    except BaseException:\n        message = "<message unavailable>"\n    try:\n        type_name = type(error).__name__\n    except BaseException:\n        type_name = "<unknown exception>"\n    return f"{type_name}: {message}"\n'''
+          assert old in text
+          text = text.replace(old, new, 1)
+
+          old_sig = 'def _public_snapshot(value: object, active: set[int] | None = None) -> object:\n'
+          assert old_sig in text
+          text = text.replace(old_sig, 'def _public_snapshot_impl(value: object, active: set[int] | None = None) -> object:\n', 1)
+
+          marker = '\n\nclass ImmediateAssemblyRuntime:\n'
+          assert marker in text
+          wrapper = '''\n\ndef _public_snapshot(value: object, active: set[int] | None = None) -> object:\n    """Create a detached immutable audit snapshot without masking the source failure."""\n\n    try:\n        return _public_snapshot_impl(value, active)\n    except BaseException as snapshot_error:\n        try:\n            type_name = f"{type(value).__module__}.{type(value).__qualname__}"\n        except BaseException:\n            type_name = "<unknown value>"\n        return FrozenObjectSnapshot(\n            type_name=type_name,\n            attributes=MappingProxyType(\n                {"$snapshot_error": _error_text(snapshot_error)}\n            ),\n        )\n'''
+          text = text.replace(marker, wrapper + marker, 1)
+
+          old = '''        for name, definition in self._types.items():\n            kind = definition.get("kind")\n            path = f"type {name}"\n'''
+          new = '''        reserved_type_names = _PRIMITIVE_TYPE_NAMES | set(_GENERIC_ARITY) | {"Tuple"}\n        for name, definition in self._types.items():\n            path = f"type {name}"\n            if name in reserved_type_names:\n                raise GlyphError(f"{path}: 予約型名はユーザー定義できない")\n            kind = definition.get("kind")\n'''
+          assert old in text
+          text = text.replace(old, new, 1)
+
+          old = '''    @staticmethod\n    def _clone(value: object, context: str) -> object:\n        try:\n            return deepcopy(value)\n        except Exception as exc:\n            raise GlyphError(f"{context}を安全に複製できない: {exc}") from exc\n\n    @property\n    def states(self) -> dict[str, object]:\n        cloned = self._clone(self._states, "Assembly state snapshot")\n        if not isinstance(cloned, dict):\n            raise GlyphError("deepcopyはAssembly stateのdictを保持する必要がある")\n        return cloned\n'''
+          new = '''    def _clone_typed(\n        self,\n        type_ref: Mapping[str, object],\n        value: object,\n        path: str,\n        alias_stack: tuple[str, ...] = (),\n    ) -> object:\n        """Clone a validated Glyph value without invoking Python copy protocols."""\n\n        name = str(type_ref.get("name") or "")\n        arguments = self._type_arguments(type_ref)\n        definition = self._types.get(name)\n        if definition is not None and definition.get("kind") == "alias":\n            if name in alias_stack:\n                raise GlyphError(\n                    f"{path}: 型alias循環がある: {' -> '.join((*alias_stack, name))}"\n                )\n            target = definition.get("target")\n            if not isinstance(target, Mapping):\n                raise GlyphError(f"{path}: alias '{name}' の型IRが壊れている")\n            return self._clone_typed(target, value, path, (*alias_stack, name))\n\n        if name == "()" or name in _BOOL_TYPES or name in _INT_TYPES or name in _FLOAT_TYPES or name in _STRING_TYPES:\n            return value\n        if name == "Option":\n            if value is None:\n                return None\n            if isinstance(value, (tuple, list)) and len(value) == 2 and value[0] == "Some":\n                return ("Some", self._clone_typed(arguments[0], value[1], f"{path}.Some"))\n            return self._clone_typed(arguments[0], value, f"{path}.Some")\n        if name == "Vec":\n            return [\n                self._clone_typed(arguments[0], item, f"{path}[{index}]")\n                for index, item in enumerate(value)\n            ]\n        if name == "Tuple":\n            return tuple(\n                self._clone_typed(item_type, item, f"{path}[{index}]")\n                for index, (item_type, item) in enumerate(zip(arguments, value))\n            )\n        if name == "Result":\n            tag = value[0]\n            branch = 0 if tag == "Ok" else 1\n            return (tag, self._clone_typed(arguments[branch], value[1], f"{path}.{tag}"))\n\n        if definition is not None and definition.get("kind") == "product":\n            fields_value = tuple(\n                item for item in definition.get("fields", ()) if isinstance(item, Mapping)\n            )\n            cloned: dict[str, object] = {}\n            for field in fields_value:\n                field_name = str(field["name"])\n                field_type = field.get("type")\n                if not isinstance(field_type, Mapping):\n                    raise GlyphError(f"{path}.{field_name}: 型IRが壊れている")\n                cloned[field_name] = self._clone_typed(\n                    field_type, value[field_name], f"{path}.{field_name}"\n                )\n            return cloned\n\n        if definition is not None and definition.get("kind") == "sum":\n            variants = {\n                str(item["name"]): item\n                for item in definition.get("variants", ())\n                if isinstance(item, Mapping)\n            }\n            if isinstance(value, str):\n                return value\n            if isinstance(value, (tuple, list)) and value:\n                variant_name = str(value[0])\n                variant = variants[variant_name]\n                tuple_types = tuple(\n                    item for item in variant.get("tuple_types", ()) if isinstance(item, Mapping)\n                )\n                return (\n                    variant_name,\n                    *(\n                        self._clone_typed(item_type, item, f"{path}.{variant_name}[{index}]")\n                        for index, (item_type, item) in enumerate(zip(tuple_types, value[1:]))\n                    ),\n                )\n            if isinstance(value, Mapping) and "$variant" in value:\n                variant_name = str(value["$variant"])\n                variant = variants[variant_name]\n                cloned_record: dict[str, object] = {"$variant": variant_name}\n                for field in variant.get("fields", ()):\n                    if not isinstance(field, Mapping):\n                        continue\n                    field_name = str(field["name"])\n                    field_type = field.get("type")\n                    if not isinstance(field_type, Mapping):\n                        raise GlyphError(f"{path}.{field_name}: 型IRが壊れている")\n                    cloned_record[field_name] = self._clone_typed(\n                        field_type, value[field_name], f"{path}.{variant_name}.{field_name}"\n                    )\n                return cloned_record\n\n        raise GlyphError(f"{path}: 型 '{name}' をstructural cloneできない")\n\n    def _clone_state_map(\n        self,\n        states: Mapping[str, object],\n        context: str,\n    ) -> dict[str, object]:\n        return {\n            instance: self._clone_typed(\n                self._state_type(instance),\n                states[instance],\n                f"{context}.{instance}",\n            )\n            for instance in self._instances\n        }\n\n    @property\n    def states(self) -> dict[str, object]:\n        return self._clone_state_map(self._states, "Assembly state snapshot")\n'''
+          assert old in text
+          text = text.replace(old, new, 1)
+
+          old = '''        cloned = self._clone(dict(initial_states), "initial Assembly state")\n        if not isinstance(cloned, dict):\n            raise GlyphError("deepcopyはAssembly stateのdictを保持する必要がある")\n        self._states = cloned\n'''
+          assert old in text
+          text = text.replace(old, '        self._states = self._clone_state_map(initial_states, "initial Assembly state")\n', 1)
+
+          old = '''        working_value = self._clone(self._states, "reaction working state")\n        if not isinstance(working_value, dict):\n            raise GlyphError("deepcopyはAssembly stateのdictを保持する必要がある")\n        working: dict[str, object] = working_value\n'''
+          assert old in text
+          text = text.replace(old, '        working: dict[str, object] = self._clone_state_map(\n            self._states, "reaction working state"\n        )\n', 1)
+
+          old = '''                            routed_payload = self._clone(\n                                invocation.arguments[0],\n                                f"route payload {target}.{invocation.effect}",\n                            )\n'''
+          new = '''                            payload_type = parameters[0].get("type_ref")\n                            if not isinstance(payload_type, Mapping):\n                                raise GlyphError(\n                                    f"effect '{target}.{invocation.effect}' のpayload型IRが壊れている"\n                                )\n                            routed_payload = self._clone_typed(\n                                payload_type,\n                                invocation.arguments[0],\n                                f"route payload {target}.{invocation.effect}",\n                            )\n'''
+          assert old in text
+          text = text.replace(old, new, 1)
+
+          old = '''                            host_arguments = tuple(\n                                self._clone(\n                                    argument,\n                                    f"Host argument {target}.{invocation.effect}",\n                                )\n                                for argument in invocation.arguments\n                            )\n'''
+          new = '''                            host_arguments_list: list[object] = []\n                            for parameter, argument in zip(parameters, invocation.arguments):\n                                parameter_type = parameter.get("type_ref")\n                                if not isinstance(parameter_type, Mapping):\n                                    raise GlyphError(\n                                        f"effect '{target}.{invocation.effect}' の引数型IRが壊れている"\n                                    )\n                                host_arguments_list.append(\n                                    self._clone_typed(\n                                        parameter_type,\n                                        argument,\n                                        f"Host argument {target}.{invocation.effect}",\n                                    )\n                                )\n                            host_arguments = tuple(host_arguments_list)\n'''
+          assert old in text
+          text = text.replace(old, new, 1)
+
+          old = '''                            try:\n                                raw_result = host_executor(\n                                    target,\n                                    invocation.effect,\n                                    host_arguments,\n                                )\n                            except BaseException as host_error:\n                                external.append(\n                                    ExternalEffect(\n                                        instance=target,\n                                        effect=invocation.effect,\n                                        arguments=audit_arguments,\n                                        result=None,\n                                        status="raised",\n                                        error=_error_text(host_error),\n                                    )\n                                )\n                                raise\n\n                            result_snapshot = _public_snapshot(raw_result)\n'''
+          new = '''                            audit_index = len(external)\n                            external.append(\n                                ExternalEffect(\n                                    instance=target,\n                                    effect=invocation.effect,\n                                    arguments=audit_arguments,\n                                    result=None,\n                                    status="attempted",\n                                )\n                            )\n                            try:\n                                raw_result = host_executor(\n                                    target,\n                                    invocation.effect,\n                                    host_arguments,\n                                )\n                            except BaseException as host_error:\n                                external[audit_index] = ExternalEffect(\n                                    instance=target,\n                                    effect=invocation.effect,\n                                    arguments=audit_arguments,\n                                    result=None,\n                                    status="raised",\n                                    error=_error_text(host_error),\n                                )\n                                raise\n\n                            result_snapshot = _public_snapshot(raw_result)\n'''
+          assert old in text
+          text = text.replace(old, new, 1)
+
+          text = text.replace('''                                external.append(\n                                    ExternalEffect(\n                                        instance=target,\n                                        effect=invocation.effect,\n                                        arguments=audit_arguments,\n                                        result=result_snapshot,\n                                        status="invalid-result",\n                                        error=_error_text(definition_error),\n                                    )\n                                )\n''', '''                                external[audit_index] = ExternalEffect(\n                                    instance=target,\n                                    effect=invocation.effect,\n                                    arguments=audit_arguments,\n                                    result=result_snapshot,\n                                    status="invalid-result",\n                                    error=_error_text(definition_error),\n                                )\n''', 1)
+          text = text.replace('''                                external.append(\n                                    ExternalEffect(\n                                        instance=target,\n                                        effect=invocation.effect,\n                                        arguments=audit_arguments,\n                                        result=result_snapshot,\n                                        status="invalid-result",\n                                        error=_error_text(validation_error),\n                                    )\n                                )\n''', '''                                external[audit_index] = ExternalEffect(\n                                    instance=target,\n                                    effect=invocation.effect,\n                                    arguments=audit_arguments,\n                                    result=result_snapshot,\n                                    status="invalid-result",\n                                    error=_error_text(validation_error),\n                                )\n''', 1)
+
+          old = '''                            effect_result = self._clone(\n                                raw_result,\n                                f"Host result {target}.{invocation.effect}",\n                            )\n                            external.append(\n                                ExternalEffect(\n                                    instance=target,\n                                    effect=invocation.effect,\n                                    arguments=audit_arguments,\n                                    result=result_snapshot,\n                                    status="validated",\n                                )\n                            )\n'''
+          new = '''                            effect_result = self._clone_typed(\n                                result_type,\n                                raw_result,\n                                f"Host result {target}.{invocation.effect}",\n                            )\n                            external[audit_index] = ExternalEffect(\n                                instance=target,\n                                effect=invocation.effect,\n                                arguments=audit_arguments,\n                                result=result_snapshot,\n                                status="validated",\n                            )\n'''
+          assert old in text
+          text = text.replace(old, new, 1)
+
+          old = '                working[target] = self._clone(next_state, f"next state {target}")\n'
+          new = '                working[target] = self._clone_typed(\n                    self._state_type(target), next_state, f"next state {target}"\n                )\n'
+          assert old in text
+          text = text.replace(old, new, 1)
+
+          assert 'phase="commit",' in text
+          text = text.replace('phase="commit",', 'phase="stage",', 1)
+
+          old = '            top_payload = self._clone(value, f"input {instance}.{input_name}")\n'
+          new = '            top_payload = self._clone_typed(\n                input_type, value, f"input {instance}.{input_name}"\n            )\n'
+          assert old in text
+          text = text.replace(old, new, 1)
+
+          old = '''            committed = self._clone(working, "committed Assembly state")\n            if not isinstance(committed, dict):\n                raise GlyphError("deepcopyはAssembly stateのdictを保持する必要がある")\n            self._states = committed\n'''
+          new = '''            self._states = self._clone_state_map(\n                working, "committed Assembly state"\n            )\n'''
+          assert old in text
+          text = text.replace(old, new, 1)
+
+          assert 'self._clone(' not in text
+          assert 'deepcopy' not in text
+          runtime_path.write_text(text, encoding='utf-8')
+
+          assembly_path = Path('glyph/assembly.py')
+          text = assembly_path.read_text(encoding='utf-8')
+          old = '''    def __new__(cls, values: Mapping[str, object]):\n        if not isinstance(values, Mapping):\n            raise TypeError("FrozenMappingにはMappingが必要")\n        return tuple.__new__(\n            cls,\n            tuple((str(key), _freeze(value)) for key, value in values.items()),\n        )\n'''
+          new = '''    def __new__(cls, values: Mapping[str, object]):\n        if not isinstance(values, Mapping):\n            raise TypeError("FrozenMappingにはMappingが必要")\n        pairs: list[tuple[str, object]] = []\n        seen: set[str] = set()\n        for key, value in values.items():\n            if type(key) is not str:\n                raise TypeError("Assembly IR mapping keyはstrのみ許可する")\n            if key in seen:\n                raise TypeError(f"Assembly IR mapping keyが重複している: {key}")\n            seen.add(key)\n            pairs.append((key, _freeze(value)))\n        return tuple.__new__(cls, tuple(pairs))\n'''
+          assert old in text
+          text = text.replace(old, new, 1)
+          assembly_path.write_text(text, encoding='utf-8')
+          PY
+
+          cat > tests/test_machine_assembly_runtime_final_hardening.py <<'PY'
+          from __future__ import annotations
+
+          from collections.abc import Mapping
+          from dataclasses import replace
+          from pathlib import Path
+          import unittest
+
+          from glyph import parse_compilation_model
+          from glyph.assembly import FrozenMapping
+          from glyph.assembly_runtime import (
+              EffectInvocation,
+              FrozenObjectSnapshot,
+              ImmediateAssemblyRuntime,
+          )
+          from glyph.compiler import GlyphError
+
+
+          SOURCE = Path("examples/machine_assembly_immediate.glyph").read_text(encoding="utf-8")
+          INITIAL = {
+              "door": {"mode": "DoorLocked"},
+              "safety": {"mode": "SafetyNormal"},
+              "motor": {"mode": "MotorRunning"},
+          }
+
+
+          class DeepcopyTrapDict(dict):
+              def __deepcopy__(self, memo):
+                  raise AssertionError("Runtime must not invoke Python deepcopy protocol")
+
+
+          class BadStringError(RuntimeError):
+              def __str__(self) -> str:
+                  raise RuntimeError("stringification failed")
+
+
+          class SnapshotHostileReceipt(dict):
+              def items(self):
+                  raise RuntimeError("audit iteration disabled")
+
+              def __repr__(self) -> str:
+                  raise RuntimeError("repr disabled")
+
+
+          class DuplicateItemsMapping(Mapping[str, object]):
+              def __getitem__(self, key: str) -> object:
+                  if key == "x":
+                      return 1
+                  raise KeyError(key)
+
+              def __iter__(self):
+                  return iter(("x",))
+
+              def __len__(self) -> int:
+                  return 1
+
+              def items(self):
+                  return (("x", 1), ("x", 2))
+
+
+          class MachineAssemblyRuntimeFinalHardeningTests(unittest.TestCase):
+              @classmethod
+              def setUpClass(cls) -> None:
+                  cls.ir = parse_compilation_model(SOURCE).assembly_ir[0]
+
+              def test_structural_clone_ignores_hostile_deepcopy_protocol(self) -> None:
+                  initial = dict(INITIAL)
+                  motor = DeepcopyTrapDict({"mode": "MotorRunning"})
+                  initial["motor"] = motor
+                  runtime = ImmediateAssemblyRuntime(self.ir, initial)
+
+                  def handler(instance, input_name, value, state):
+                      if False:
+                          yield EffectInvocation("never")
+                      state["mode"] = "MotorStopped"
+                      raise RuntimeError("abort")
+
+                  with self.assertRaisesRegex(RuntimeError, "abort"):
+                      runtime.react("motor", "input", "StopRequested", handler)
+
+                  self.assertEqual(runtime.states["motor"], {"mode": "MotorRunning"})
+                  self.assertEqual(motor, {"mode": "MotorRunning"})
+
+              def test_failure_trace_uses_stage_not_false_commit(self) -> None:
+                  runtime = ImmediateAssemblyRuntime(self.ir, INITIAL)
+
+                  def handler(instance, input_name, value, state):
+                      if instance == "door":
+                          yield EffectInvocation("notify_safety", "EmergencyDetected")
+                          return {"mode": "MotorStopped"}
+                      if instance == "safety":
+                          yield EffectInvocation("request_motor", "StopRequested")
+                          return {"mode": "SafetyEmergency"}
+                      if instance == "motor":
+                          yield EffectInvocation("write_motor", "DisableMotor")
+                          return {"mode": "MotorStopped"}
+                      raise AssertionError(instance)
+
+                  def host(instance, effect, arguments):
+                      return {"command": arguments[0]}
+
+                  with self.assertRaises(GlyphError) as caught:
+                      runtime.react("door", "input", "ForcedOpen", handler, host)
+
+                  phases = [entry.phase for entry in caught.exception.assembly_audit.trace]
+                  self.assertIn("stage", phases)
+                  self.assertNotIn("commit", phases)
+                  self.assertEqual(caught.exception.assembly_audit.committed_states, INITIAL)
+                  self.assertEqual(runtime.states, INITIAL)
+
+              def test_audit_stringification_failure_cannot_mask_host_error(self) -> None:
+                  runtime = ImmediateAssemblyRuntime(self.ir, INITIAL)
+
+                  def handler(instance, input_name, value, state):
+                      yield EffectInvocation("write_motor", "DisableMotor")
+                      return state
+
+                  def host(instance, effect, arguments):
+                      raise BadStringError()
+
+                  with self.assertRaises(BadStringError) as caught:
+                      runtime.react("motor", "input", "StopRequested", handler, host)
+
+                  effect = caught.exception.assembly_audit.external_effects[0]
+                  self.assertEqual(effect.status, "raised")
+                  self.assertIn("<message unavailable>", effect.error)
+
+              def test_audit_snapshot_failure_is_non_fatal(self) -> None:
+                  runtime = ImmediateAssemblyRuntime(self.ir, INITIAL)
+
+                  def handler(instance, input_name, value, state):
+                      receipt = yield EffectInvocation("write_motor", "DisableMotor")
+                      self.assertEqual(receipt, {"command": "DisableMotor"})
+                      return {"mode": "MotorStopped"}
+
+                  def host(instance, effect, arguments):
+                      return SnapshotHostileReceipt({"command": arguments[0]})
+
+                  result = runtime.react("motor", "input", "StopRequested", handler, host)
+                  effect = result.external_effects[0]
+                  self.assertEqual(effect.status, "validated")
+                  self.assertIsInstance(effect.result, FrozenObjectSnapshot)
+                  self.assertIn("$snapshot_error", effect.result.attributes)
+
+              def test_frozen_mapping_rejects_non_string_and_duplicate_keys(self) -> None:
+                  with self.assertRaisesRegex(TypeError, "keyはstr"):
+                      FrozenMapping({1: "integer", "1": "string"})
+                  with self.assertRaisesRegex(TypeError, "重複"):
+                      FrozenMapping(DuplicateItemsMapping())
+
+              def test_runtime_rejects_reserved_builtin_type_definition(self) -> None:
+                  bad_ir = replace(
+                      self.ir,
+                      types=(
+                          {
+                              "name": "Option",
+                              "kind": "product",
+                              "fields": (),
+                          },
+                          *self.ir.types,
+                      ),
+                  )
+                  with self.assertRaisesRegex(GlyphError, "予約型名"):
+                      ImmediateAssemblyRuntime(bad_ir, INITIAL)
+
+
+          if __name__ == "__main__":
+              unittest.main()
+          PY
+
+      - name: Run Assembly hardening tests
+        run: |
+          python -m unittest \
+            tests.test_machine_assembly \
+            tests.test_machine_assembly_runtime_audit_integrity \
+            tests.test_machine_assembly_runtime_final_hardening
+      - name: Commit hardened implementation and remove temporary workflow
+        shell: bash
+        run: |
+          rm .github/workflows/apply-assembly-runtime-final-hardening.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add glyph/assembly.py glyph/assembly_runtime.py tests/test_machine_assembly_runtime_final_hardening.py .github/workflows/apply-assembly-runtime-final-hardening.yml
+          git commit -m "Harden Assembly runtime semantics"
+          git push origin HEAD:agent/machine-assembly-immediate-routing
