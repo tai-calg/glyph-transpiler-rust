@@ -158,3 +158,11 @@ runtime_codegen.status = blocked
 runtime_codegen.reason = instance-aware-rust-lowering-not-implemented
 runtime_codegen.fail_closed = true
 ```
+
+## Validation
+
+The final hardening regression set covers tuple-backed IR immutability,
+same-thread and cross-thread fail-fast re-entry rejection, fixed-width integer
+boundaries, finite floating-point validation, and pre-Host audit snapshots. The
+current branch passes CI, Python Test Collection, Public UI SDK, Desktop,
+Certified Incremental Layout, and I/O State Diagram Snapshot.
