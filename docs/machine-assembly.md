@@ -101,7 +101,8 @@ Runtime values use these reference representations:
 - the source operation must be reachable from a normalized transition Action
 - guard-only and state-unreachable operations cannot be routed
 - an explicitly empty normalized reachability result is not replaced by syntax-only fallback
-- nested helper guard functions are traversed from reachable result expressions
+- nested helper guard functions absent from the root normalized IR retain their own ordered branch semantics
+- nested helper guard functions are traversed only from reachable result expressions
 - payload and target input types must match after alias and short-name normalization
 - route cycles are diagnosed because an activated cycle causes re-entry failure
 
