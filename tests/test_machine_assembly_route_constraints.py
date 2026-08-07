@@ -141,6 +141,21 @@ class MachineAssemblyRouteConstraintTests(unittest.TestCase):
         model = parse_compilation_model(source)
         self.assertEqual(model.assembly_ir[0].routes[0]["effect"], "notify")
 
+    def test_nested_guard_function_action_is_routable(self) -> None:
+        source = BASE.replace(
+            ">source_next(state:SourceState,input:SourceInput):SourceState\n"
+            "  input==Trigger>>source_fire(state)\n"
+            "  _>>state\n",
+            ">source_helper(state:SourceState,input:SourceInput):SourceState\n"
+            "  input==Trigger>>source_fire(state)\n"
+            "  _>>state\n\n"
+            ">source_next(state:SourceState,input:SourceInput):SourceState\n"
+            "  input==Trigger>>source_helper(state,input)\n"
+            "  _>>state\n",
+        )
+        model = parse_compilation_model(source)
+        self.assertEqual(model.assembly_ir[0].routes[0]["effect"], "notify")
+
     def test_builtin_short_and_long_type_names_are_route_equivalent(self) -> None:
         model = parse_compilation_model(BUILTIN_TYPE_EQUIVALENCE)
         route = model.assembly_ir[0].routes[0]
