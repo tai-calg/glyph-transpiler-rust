@@ -6,6 +6,7 @@ from pathlib import Path
 from .assembly import (
     AssemblyDecl,
     MachineAssemblyIR,
+    _reachable_effects,
     extract_assemblies,
     has_top_level_assembly,
     validate_assemblies,
@@ -17,7 +18,7 @@ from .artifacts import (
     build_rust_artifacts as _build_legacy_rust_artifacts,
     parse_compilation_model as _parse_legacy_compilation_model,
 )
-from .compiler import FunctionDecl, GlyphError, Program
+from .compiler import ExternDecl, FunctionDecl, GlyphError, Program
 from .machine import MachineDecl
 from .temporal import SpecDecl
 
@@ -52,6 +53,51 @@ def _field_values(value: object, model_type: type) -> dict[str, object]:
     return {field.name: getattr(value, field.name) for field in fields(model_type)}
 
 
+def _validate_route_sources_are_actions(
+    base: CompilationModel,
+    assemblies: tuple[AssemblyDecl, ...],
+) -> None:
+    """Report guard-only/non-action routes before payload signature diagnostics."""
+
+    machines = {machine.name: machine for machine in base.machines}
+    functions = {
+        item.name: item
+        for item in base.program.declarations
+        if isinstance(item, FunctionDecl)
+    }
+    effects = {
+        item.name: item
+        for item in base.program.declarations
+        if isinstance(item, ExternDecl)
+    }
+    inline_effects = {item.name: item for item in base.inline_effects}
+
+    for assembly in assemblies:
+        instance_machines = {
+            instance.name: machines.get(instance.machine)
+            for instance in assembly.instances
+        }
+        reachable_cache: dict[str, set[str]] = {}
+        for route in assembly.routes:
+            machine = instance_machines.get(route.source_instance)
+            if machine is None or route.effect not in effects:
+                continue
+            reachable = reachable_cache.get(route.source_instance)
+            if reachable is None:
+                reachable = _reachable_effects(
+                    machine,
+                    functions,
+                    effects,
+                    inline_effects,
+                )
+                reachable_cache[route.source_instance] = reachable
+            if route.effect not in reachable:
+                raise GlyphError(
+                    f"{route.line}行目: effect '{route.effect}' はMachine "
+                    f"'{machine.name}' の遷移Actionから到達できない"
+                )
+
+
 def parse_compilation_model(
     source: str,
     source_name: str = "input.glyph",
@@ -61,6 +107,7 @@ def parse_compilation_model(
 
     parser_source, assemblies = extract_assemblies(source)
     base = _parse_legacy_compilation_model(parser_source, source_name)
+    _validate_route_sources_are_actions(base, assemblies)
     assembly_ir = validate_assemblies(
         base.program,
         base.machines,
