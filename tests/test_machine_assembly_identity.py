@@ -4,7 +4,10 @@ from pathlib import Path
 import unittest
 
 from glyph import parse_compilation_model
-from glyph.transition_analysis.program_identity import build_program_identity
+from glyph.transition_analysis.program_identity import (
+    PROGRAM_IDENTITY_VERSION,
+    build_program_identity,
+)
 
 
 class MachineAssemblyIdentityTests(unittest.TestCase):
@@ -36,6 +39,8 @@ class MachineAssemblyIdentityTests(unittest.TestCase):
             entry="missing",
         )
 
+        self.assertEqual(PROGRAM_IDENTITY_VERSION, 2)
+        self.assertEqual(first_identity.to_ir()["version"], 2)
         self.assertEqual(
             first_identity.machine_relation_sha256,
             second_identity.machine_relation_sha256,
