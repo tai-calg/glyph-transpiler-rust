@@ -139,7 +139,7 @@ class MachineAssemblyTests(unittest.TestCase):
             "!notify_safety(event:SafetyInput):()",
             "!notify_safety(event:SafetyInput):SafetyInput",
         )
-        with self.assertRaisesRegex(GlyphError, "戻り値は\(\)が必要"):
+        with self.assertRaisesRegex(GlyphError, r"戻り値は\(\)が必要"):
             parse_compilation_model(wrong_result)
 
         wrong_arity = VALID.replace(
