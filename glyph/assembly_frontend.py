@@ -23,8 +23,12 @@ from .compiler import ExternDecl, FunctionDecl, GlyphError, Program
 from .execution_ir import build_execution_structure_ir
 from .machine import MachineDecl
 from .state_machine_analysis import analyze_machine
-from .state_transition_compiler import build_machine_state_transition_ir
+from .state_transition_block_lowering import lower_analyzed_block_transitions
+from .state_transition_compiler import (
+    enrich_state_transition_ir as compile_state_transition_ir,
+)
 from .temporal import SpecDecl
+from .transition_action_projection import project_machine_transition_actions
 
 
 _RUST_CODEGEN_ERROR = (
@@ -57,20 +61,15 @@ def _field_values(value: object, model_type: type) -> dict[str, object]:
     return {field.name: getattr(value, field.name) for field in fields(model_type)}
 
 
-def _operation_name(call: str) -> str:
-    open_position = call.find("(")
-    return call[:open_position].strip() if open_position > 0 else call.strip()
-
-
 def _expand_inline_effect_chain(
     direct: set[str],
     base: CompilationModel,
 ) -> set[str]:
     """Expand only from normalized reachable transition operations.
 
-    The normalized StateTransitionIR decides which operation call sites are real
-    transition Actions. Inline effect prototypes may then delegate to another
-    declared effect; that delegation remains part of the same Action chain.
+    StateTransitionIR decides which operation call sites are actual transition
+    Actions. Inline effect prototypes may delegate to another declared effect;
+    that delegation remains part of the same Action chain.
     """
 
     functions = {
@@ -120,26 +119,38 @@ def _normalized_machine_actions(
         base.specs,
         base.machines,
     )
+    analyzed_by_name = {
+        machine_view.name: analyze_machine(base, machine_view)
+        for machine_view in execution.machines
+    }
+    compiled = compile_state_transition_ir(
+        base,
+        {
+            "summary": {},
+            "state": {"machines": list(analyzed_by_name.values())},
+        },
+    )
+
     actions: dict[str, set[str]] = {}
-    for machine_view in execution.machines:
-        analyzed = analyze_machine(base, machine_view)
-        normalized = build_machine_state_transition_ir(base, analyzed)
+    for compiled_machine in compiled.get("state", {}).get("machines", []):
+        machine_name = str(compiled_machine.get("name") or "")
+        lowered = lower_analyzed_block_transitions(
+            base,
+            dict(compiled_machine),
+            dict(analyzed_by_name.get(machine_name, {})),
+        )
+        projected = project_machine_transition_actions(base, lowered)
         direct: set[str] = set()
-        for transition in normalized.get("transitions", []):
+        for transition in projected.get("transitions", []):
             if not bool(transition.get("source_reachable", True)):
                 continue
-            action = str(transition.get("action") or "").strip()
-            if not action:
-                continue
-            direct.update(
-                name
-                for name in (
-                    _operation_name(item)
-                    for item in action.split("; ")
-                )
-                if name
-            )
-        actions[machine_view.name] = _expand_inline_effect_chain(direct, base)
+            for invocation in transition.get("machine_action_invocations", []):
+                if not isinstance(invocation, dict):
+                    continue
+                operation = str(invocation.get("operation") or "").strip()
+                if operation:
+                    direct.add(operation)
+        actions[machine_name] = _expand_inline_effect_chain(direct, base)
     return actions
 
 
