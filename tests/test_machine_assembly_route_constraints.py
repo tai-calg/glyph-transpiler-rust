@@ -15,7 +15,7 @@ BASE = """\
 +TargetMode=TargetIdle|TargetDone|TargetFault
 *TargetState(mode:TargetMode)
 
-!notify(event:TargetInput):TargetInput=event
+!notify(event:TargetInput):()
 
 >source_fire(state:SourceState):SourceState
   notice := notify(Notice)
@@ -58,7 +58,7 @@ BUILTIN_TYPE_EQUIVALENCE = """\
 +TargetMode=TargetIdle|TargetDone|TargetFault
 *TargetState(mode:TargetMode)
 
-!notify(event:O<S>):O<S>=event
+!notify(event:O<S>):()
 
 >source_next(state:SourceState,input:O<S>):SourceState
   value := notify(input)
@@ -90,12 +90,12 @@ assembly Connected
 
 
 class MachineAssemblyRouteConstraintTests(unittest.TestCase):
-    def test_internal_route_requires_inline_effect_body(self) -> None:
+    def test_internal_route_rejects_host_prototype_body(self) -> None:
         source = BASE.replace(
-            "!notify(event:TargetInput):TargetInput=event",
-            "!notify(event:TargetInput):TargetInput",
+            "!notify(event:TargetInput):()",
+            "!notify(event:TargetInput):()=notify(event)",
         )
-        with self.assertRaisesRegex(GlyphError, "本体が必要"):
+        with self.assertRaisesRegex(GlyphError, "Host試作本体を持てない"):
             parse_compilation_model(source)
 
     def test_immediate_route_target_has_one_input_parameter(self) -> None:
@@ -108,12 +108,12 @@ class MachineAssemblyRouteConstraintTests(unittest.TestCase):
 
     def test_effect_used_only_in_guard_is_not_a_routable_transition_action(self) -> None:
         source = BASE.replace(
-            "!notify(event:TargetInput):TargetInput=event",
-            "!notify(event:TargetInput):TargetInput=event\n"
-            "!probe(event:TargetInput):TargetInput=event",
+            "!notify(event:TargetInput):()",
+            "!notify(event:TargetInput):()\n"
+            "!probe(event:TargetInput):B",
         ).replace(
             "input==Trigger>>source_fire(state)",
-            "probe(Notice)==Notice>>source_fire(state)",
+            "probe(Notice)>>source_fire(state)",
         ).replace(
             "source.notify -> target.input",
             "source.probe -> target.input",
@@ -123,9 +123,9 @@ class MachineAssemblyRouteConstraintTests(unittest.TestCase):
 
     def test_nested_inline_effect_remains_in_source_action_chain(self) -> None:
         source = BASE.replace(
-            "!notify(event:TargetInput):TargetInput=event",
-            "!notify(event:TargetInput):TargetInput=event\n"
-            "!forward(event:TargetInput):TargetInput=notify(event)",
+            "!notify(event:TargetInput):()",
+            "!notify(event:TargetInput):()\n"
+            "!forward(event:TargetInput):()=notify(event)",
         ).replace(
             "notice := notify(Notice)",
             "notice := forward(Notice)",
@@ -136,7 +136,7 @@ class MachineAssemblyRouteConstraintTests(unittest.TestCase):
     def test_builtin_short_and_long_type_names_are_route_equivalent(self) -> None:
         model = parse_compilation_model(BUILTIN_TYPE_EQUIVALENCE)
         route = model.assembly_ir[0].routes[0]
-        self.assertEqual(route["value_type"], "O<S>")
+        self.assertEqual(route["payload_type"], "O<S>")
         self.assertEqual(route["target_machine"], "Target")
 
 
