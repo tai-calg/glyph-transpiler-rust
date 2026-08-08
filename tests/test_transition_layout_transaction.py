@@ -105,9 +105,11 @@ def test_io_clusters_use_bounded_ordinary_placement() -> None:
         "function placeCluster(",
         "function repairCollisions(stage,entries)",
         'profile:"ordinary"',
+        'nodeDragRouting:"deferred-full"',
         "transitionIoRenderBudgetExceeded",
         "transitionIoCollisionBudgetMs",
         '.observe(view,{childList:true})',
+        'schedule(null,"node-drag-end")',
     ):
         assert required in html
 
@@ -118,6 +120,8 @@ def test_io_clusters_use_bounded_ordinary_placement() -> None:
         "nano-io",
         "micro-io",
         "compact-io",
+        'document.addEventListener("pointermove",event=>{\n  if(!event.target?.closest?.(".state-node"))return;',
+        "rerouteRaf",
     ):
         assert removed not in html
 
@@ -189,7 +193,7 @@ def test_diagram_app_uses_only_the_bounded_ordinary_layout_stack() -> None:
     transaction = html.index("glyph-transition-layout-transaction-v1-script")
     interaction = html.index("glyph-transition-layout-interaction-adapter-v1-script")
 
-    assert node_adapter < clusters < transaction < interaction
+    assert clusters < transaction < interaction < node_adapter
     assert "glyph-transition-label-layout-v1-script" not in html
     assert "glyph-uml-transition-semantics-v1-script" not in html
     assert "glyph-initial-transition-routing-v2-script" not in html
