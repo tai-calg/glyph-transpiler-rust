@@ -257,9 +257,22 @@ function preserveOrdinaryScale(stage){
   requestAnimationFrame(()=>requestAnimationFrame(()=>{const surface=stage.parentElement;shell.scrollLeft=Math.max(0,(surface?.offsetLeft||0)+x*scale-shell.clientWidth/2);shell.scrollTop=Math.max(0,(surface?.offsetTop||0)+y*scale-shell.clientHeight/2);stage.dataset.stateDiagramWorkspaceViewportReady="true"}));
 }
 function prepare(stage=stageOf(),machine=selectedMachine(liveState())){
+  if(dragActive){deferredFullReason="direct-prepare";return false}
   if(!stage||!machine||!stage.isConnected)return false;expandWorkspace(stage,machine);applyWorkspaceOrigin(stage);updateTransitionGeometry(stage,machine);renderTransitionIndex(stage,machine);preserveOrdinaryScale(stage);stage.dataset.stateDiagramWorkspaceReason="transaction-prepare";return true;
 }
-async function refresh(reason){if(running||destroyed)return false;const stage=stageOf();if(!stage)return false;running=true;try{const machine=await readMachine();if(!machine||!stage.isConnected)return false;const result=prepare(stage,machine);stage.dataset.stateDiagramWorkspaceReason=reason;document.dispatchEvent(new CustomEvent("glyph-state-diagram-workspace-ready",{detail:{marker:MARKER,machine:machine.name,reason}}));return result}finally{running=false}}
+async function refresh(reason){
+  if(running||destroyed)return false;
+  if(dragActive){deferredFullReason=reason;return false}
+  const stage=stageOf();if(!stage)return false;running=true;
+  try{
+    const machine=await readMachine();
+    if(dragActive){deferredFullReason=reason;return false}
+    if(!machine||!stage.isConnected)return false;
+    const result=prepare(stage,machine);stage.dataset.stateDiagramWorkspaceReason=reason;
+    if(result)document.dispatchEvent(new CustomEvent("glyph-state-diagram-workspace-ready",{detail:{marker:MARKER,machine:machine.name,reason}}));
+    return result;
+  }finally{running=false}
+}
 function schedule(reason="scheduled"){
   if(destroyed)return;
   if(dragActive){deferredFullReason=reason;return}
@@ -274,6 +287,7 @@ function scheduleIncident(node){
 }
 function beginNodeDrag(event){
   const node=event.target?.closest?.(".state-node");if(!node)return;
+  cancelAnimationFrame(frame);frame=0;
   dragActive=true;deferredFullReason="";
 }
 function finishNodeDrag(event,cancelled=false){
@@ -291,7 +305,7 @@ document.addEventListener("pointermove",event=>{const node=event.target?.closest
 document.addEventListener("pointerup",event=>finishNodeDrag(event,false),true);
 document.addEventListener("pointercancel",event=>finishNodeDrag(event,true),true);
 for(const eventName of["pagehide","beforeunload"])window.addEventListener(eventName,()=>{destroyed=true;cancelAnimationFrame(frame);cancelAnimationFrame(dragFrame);dragNode=null;dragActive=false;deferredFullReason=""},{once:true});
-window.glyphStateDiagramWorkspace={marker:MARKER,version:4,prepare,schedule,refresh:()=>schedule("api-refresh"),updateNodeGeometry:updateIncidentTransitionGeometry,mapRestoredPosition,markPositionMigration,audit:()=>{const stage=stageOf(),panel=stage?.closest(".canvas-shell")?.nextElementSibling;return{ok:Boolean(stage?.dataset.stateDiagramWorkspaceGeometryReady==="true"&&panel?.classList?.contains("transition-index")),width:num(stage?.style.width),height:num(stage?.style.height),spreadX:num(stage?.dataset.stateDiagramWorkspaceSpreadX),spreadY:num(stage?.dataset.stateDiagramWorkspaceSpreadY),adaptive:stage?.dataset.stateDiagramWorkspaceAdaptive||"",initialReady:stage?.dataset.initialRouteReady||"",initialCollisions:num(stage?.dataset.initialRouteCollisionCount),fullGeometryPasses,incidentGeometryPasses,dragActive,dragMaxDurationMs:maxIncidentDurationMs,dragBudgetMs:DRAG_FRAME_BUDGET_MS}}};
+window.glyphStateDiagramWorkspace={marker:MARKER,version:4,prepare,schedule,refresh:()=>schedule("api-refresh"),isDragging:()=>dragActive,updateNodeGeometry:updateIncidentTransitionGeometry,mapRestoredPosition,markPositionMigration,audit:()=>{const stage=stageOf(),panel=stage?.closest(".canvas-shell")?.nextElementSibling;return{ok:Boolean(stage?.dataset.stateDiagramWorkspaceGeometryReady==="true"&&panel?.classList?.contains("transition-index")),width:num(stage?.style.width),height:num(stage?.style.height),spreadX:num(stage?.dataset.stateDiagramWorkspaceSpreadX),spreadY:num(stage?.dataset.stateDiagramWorkspaceSpreadY),adaptive:stage?.dataset.stateDiagramWorkspaceAdaptive||"",initialReady:stage?.dataset.initialRouteReady||"",initialCollisions:num(stage?.dataset.initialRouteCollisionCount),fullGeometryPasses,incidentGeometryPasses,dragActive,dragMaxDurationMs:maxIncidentDurationMs,dragBudgetMs:DRAG_FRAME_BUDGET_MS}}};
 schedule("bootstrap");
 })();
 </script>
