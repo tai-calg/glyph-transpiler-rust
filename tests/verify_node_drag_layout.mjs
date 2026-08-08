@@ -70,6 +70,30 @@ async function nodePositions(page) {
   })));
 }
 
+async function waitForPersistedPositions(page, label) {
+  await page.waitForFunction(() => {
+    const digest = snapshot?.digest || "source";
+    const machine = document.getElementById("machine-select")?.value || 0;
+    const key = `glyph.diagram.positions.v1:${digest}:state:${machine}`;
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem(key) || "null"); } catch { return false; }
+    if (!saved || typeof saved !== "object") return false;
+    const nodes = [...document.querySelectorAll(".state-node")];
+    if (!nodes.length) return false;
+    return nodes.every(node => {
+      const name = node.querySelector(".state-name,.node-name")?.textContent?.trim() || "";
+      const position = saved[name];
+      if (!position) return false;
+      const left = Number.parseFloat(node.style.left || "0") || 0;
+      const top = Number.parseFloat(node.style.top || "0") || 0;
+      return Math.abs(Number(position.x) - left) <= 0.5
+        && Math.abs(Number(position.y) - top) <= 0.5;
+    });
+  }, null, { timeout: 4000 });
+  const current = await state(page);
+  assert.equal(current.persisted, true, `${label} did not produce a persisted node-position snapshot`);
+}
+
 async function initialGeometry(page) {
   return page.evaluate(() => {
     const stage = document.querySelector(".state-node")?.closest(".graph-stage");
@@ -210,6 +234,7 @@ try {
       && path.getAttribute("d") !== before.path
       && (Math.abs(dotLeft - before.dotLeft) > 1 || Math.abs(dotTop - before.dotTop) > 1);
   }, initialBefore, { timeout: 3000 });
+  await waitForPersistedPositions(page, "pointer drag");
   const pointerReady = await waitForReady(
     page,
     "initial-node-pointer",
@@ -246,7 +271,6 @@ try {
   assert(keyboardSetup, "keyboard drag setup failed");
   const keyboardGeneration = Number(pointerReady.transactionGeneration || 0) + 1;
   await page.keyboard.press(keyboardSetup.direction);
-  const keyboardReady = await waitForReady(page, "keyboard-node", keyboardGeneration, true);
   const keyboardPositions = await nodePositions(page);
   const selected = keyboardPositions.find(item => item.selected);
   assert(selected, "selected node disappeared after keyboard movement");
@@ -254,12 +278,15 @@ try {
     Math.abs(selected.left - keyboardSetup.left) > 1 || Math.abs(selected.top - keyboardSetup.top) > 1,
     "keyboard movement did not change node position",
   );
+  await waitForPersistedPositions(page, "keyboard movement");
+  const keyboardReady = await waitForReady(page, "keyboard-node", keyboardGeneration, true);
 
   const firstQuiescent = await waitForQuiescence(
     page,
     "post-drag",
     Number(keyboardReady.transactionGeneration || 0),
   );
+  await waitForPersistedPositions(page, "pre-reload quiescence");
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => document.querySelector("#status")?.textContent === "ready");
   await page.click('button[data-tab="state"]');
