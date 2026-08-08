@@ -122,13 +122,25 @@ try {
       && window.glyphDiagramMiddleDragZoom?.version === 1;
   }, null, { timeout: 60_000 });
 
-  await page.evaluate(() => window.glyphDiagramViewport.reset());
-  await page.waitForFunction(() => document.querySelector(".graph-stage")?.dataset.viewportScale === "1");
   const shell = page.locator(".canvas-shell");
   const box = await shell.boundingBox();
   assert(box, "diagram canvas has no bounding box");
   const x = box.x + box.width * 0.55;
   const y = box.y + box.height * 0.55;
+
+  // The production viewport tracks the canvas under the pointer as activeShell.
+  // Activate the same visible canvas a real middle-drag will use before reset,
+  // then verify reset numerically rather than relying on a string representation.
+  await page.mouse.move(x, y);
+  await page.evaluate(() => window.glyphDiagramViewport.reset());
+  await page.waitForFunction(() => {
+    const shell = [...document.querySelectorAll(".canvas-shell")]
+      .find(candidate => candidate.getClientRects().length > 0);
+    const scale = Number.parseFloat(
+      shell?.querySelector(".graph-stage")?.dataset.viewportScale || ""
+    );
+    return Number.isFinite(scale) && Math.abs(scale - 1) < 0.001;
+  }, null, { timeout: 5_000 });
 
   const readScale = () => page.evaluate(() => Number.parseFloat(
     document.querySelector(".graph-stage")?.dataset.viewportScale || "1"
