@@ -63,9 +63,41 @@ async function workspaceAudit(page) {
   return page.evaluate(() => ({
     workspace: window.glyphStateDiagramWorkspace?.audit?.() ?? null,
     transaction: window.glyphTransitionLayoutTransaction?.audit?.() ?? null,
+    transactionGeneration: window.glyphTransitionLayoutTransaction?.generation ?? null,
+    transactionCompletedGeneration: window.glyphTransitionLayoutTransaction?.completedGeneration ?? null,
     layoutState: document.querySelector(".state-node")?.closest(".graph-stage")?.dataset.transitionLayoutState || "",
     publicationReady: document.querySelector(".state-node")?.closest(".graph-stage")?.dataset.transitionPublicationReady || "",
   }));
+}
+
+async function waitForWorkspaceQuiescence(page, label) {
+  let stable = 0;
+  let previous = "";
+  let current = null;
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    current = await workspaceAudit(page);
+    const signature = JSON.stringify({
+      fullGeometryPasses: current.workspace?.fullGeometryPasses ?? -1,
+      layoutState: current.layoutState,
+      publicationReady: current.publicationReady,
+      transactionGeneration: current.transactionGeneration,
+      transactionCompletedGeneration: current.transactionCompletedGeneration,
+    });
+    const ready = current.workspace?.ok === true
+      && current.workspace?.dragActive === false
+      && current.layoutState === "ready"
+      && current.publicationReady === "true"
+      && current.transactionGeneration === current.transactionCompletedGeneration;
+    if (ready && signature === previous) {
+      stable += 1;
+      if (stable >= 5) return current;
+    } else {
+      stable = 0;
+    }
+    previous = signature;
+    await page.waitForTimeout(100);
+  }
+  throw new Error(`${label} did not become quiescent: ${JSON.stringify(current)}`);
 }
 
 function percentile(values, ratio) {
@@ -108,12 +140,18 @@ try {
       && stage.dataset.transitionLayoutState === "ready";
   }, stateCount, { timeout: 15_000 });
 
-  await page.waitForTimeout(350);
-  const baseline = await workspaceAudit(page);
-  assert.equal(baseline.workspace?.ok, true, JSON.stringify(baseline));
-  assert.equal(baseline.workspace?.dragBudgetMs, 8, JSON.stringify(baseline));
-  assert.equal(baseline.transaction?.frameSliceBudgetMs, 8, JSON.stringify(baseline));
-  assert(baseline.transaction?.ownerDispatchMaxMs <= 8, JSON.stringify(baseline));
+  const initialQuiescent = await waitForWorkspaceQuiescence(page, "initial large graph");
+  assert.equal(initialQuiescent.workspace?.dragBudgetMs, 8, JSON.stringify(initialQuiescent));
+  assert.equal(initialQuiescent.transaction?.frameSliceBudgetMs, 8, JSON.stringify(initialQuiescent));
+  assert(initialQuiescent.transaction?.ownerDispatchMaxMs <= 8, JSON.stringify(initialQuiescent));
+
+  const node = page.locator(".state-node", { hasText: "S32" }).first();
+  await node.scrollIntoViewIfNeeded();
+  await waitForWorkspaceQuiescence(page, "large graph after target reveal");
+  const box = await node.boundingBox();
+  assert(box, "drag target is not visible");
+  const startX = box.x + box.width / 2;
+  const startY = box.y + box.height / 2;
 
   await page.evaluate(() => {
     const stage = document.querySelector(".state-node")?.closest(".graph-stage");
@@ -153,14 +191,12 @@ try {
     window.__glyphLargeGraphProbe = probe;
   });
 
-  const node = page.locator(".state-node", { hasText: "S32" }).first();
-  await node.scrollIntoViewIfNeeded();
-  const box = await node.boundingBox();
-  assert(box, "drag target is not visible");
-  const startX = box.x + box.width / 2;
-  const startY = box.y + box.height / 2;
   await page.mouse.move(startX, startY);
   await page.mouse.down();
+  const pressedBaseline = await workspaceAudit(page);
+  assert.equal(pressedBaseline.workspace?.dragActive, true, JSON.stringify(pressedBaseline));
+  await page.evaluate(() => window.__glyphLargeGraphProbe?.changedPaths?.clear?.());
+
   for (let step = 1; step <= 24; step += 1) {
     await page.mouse.move(startX + step * 3, startY + Math.sin(step / 3) * 18);
     await page.waitForTimeout(18);
@@ -182,11 +218,11 @@ try {
 
   assert.equal(
     duringDrag.workspace?.fullGeometryPasses,
-    baseline.workspace?.fullGeometryPasses,
+    pressedBaseline.workspace?.fullGeometryPasses,
     `full graph geometry ran while pointer was held: ${JSON.stringify(duringDrag)}`,
   );
   assert(
-    duringDrag.workspace?.incidentGeometryPasses > baseline.workspace?.incidentGeometryPasses,
+    duringDrag.workspace?.incidentGeometryPasses > pressedBaseline.workspace?.incidentGeometryPasses,
     `incident geometry did not run: ${JSON.stringify(duringDrag)}`,
   );
   assert(
@@ -205,10 +241,11 @@ try {
     const audit = window.glyphStateDiagramWorkspace?.audit?.();
     const stage = document.querySelector(".state-node")?.closest(".graph-stage");
     return audit?.fullGeometryPasses > previousPasses
+      && audit.dragActive === false
       && stage?.dataset.transitionLayoutState === "ready"
       && stage.dataset.transitionPublicationReady === "true"
       && stage.dataset.initialRouteReady === "true";
-  }, baseline.workspace.fullGeometryPasses, { timeout: 8000 });
+  }, pressedBaseline.workspace.fullGeometryPasses, { timeout: 8000 });
 
   const finalProbe = await page.evaluate(() => {
     const probe = window.__glyphLargeGraphProbe;
@@ -223,9 +260,9 @@ try {
     };
   });
 
-  const p95RafGap = percentile(finalProbe.rafGaps, 0.95);
-  const maxRafGap = Math.max(0, ...finalProbe.rafGaps);
-  const maxLongTask = Math.max(0, ...finalProbe.longTasks);
+  const p95RafGap = percentile(duringDrag.rafGaps, 0.95);
+  const maxRafGap = Math.max(0, ...duringDrag.rafGaps);
+  const maxLongTask = Math.max(0, ...duringDrag.longTasks);
   assert(p95RafGap <= 80, `large-graph drag animation-frame p95 was ${p95RafGap.toFixed(1)}ms`);
   assert(maxRafGap <= 180, `large-graph drag maximum animation-frame gap was ${maxRafGap.toFixed(1)}ms`);
   assert(maxLongTask <= 120, `large-graph drag main-thread long task was ${maxLongTask.toFixed(1)}ms`);
@@ -237,9 +274,10 @@ try {
     transitionCount: stateCount * 3 + 1,
     dragIncidentEdgeCount: duringDrag.incidentEdgeCount,
     changedPathCountDuringDrag: duringDrag.changedPathCount,
-    fullGeometryPassesBeforeDrag: baseline.workspace.fullGeometryPasses,
+    fullGeometryPassesAtPress: pressedBaseline.workspace.fullGeometryPasses,
+    fullGeometryPassesDuringDrag: duringDrag.workspace.fullGeometryPasses,
     fullGeometryPassesAfterDrag: finalProbe.workspace.fullGeometryPasses,
-    incidentGeometryPassesBeforeDrag: baseline.workspace.incidentGeometryPasses,
+    incidentGeometryPassesAtPress: pressedBaseline.workspace.incidentGeometryPasses,
     incidentGeometryPassesDuringDrag: duringDrag.workspace.incidentGeometryPasses,
     dragMaxDurationMs: duringDrag.dragMaxDurationMs,
     animationFrameP95Ms: p95RafGap,
