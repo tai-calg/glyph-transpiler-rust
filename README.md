@@ -21,17 +21,18 @@ Glyphはアプリケーションの細部をすべて実装する言語ではあ
 9. [Rust実装、外部入力、外部作用](#9-rust実装外部入力外部作用)
 10. [System境界](#10-system境界)
 11. [状態機械](#11-状態機械)
-12. [時間制約](#12-時間制約)
-13. [マクロ](#13-マクロ)
-14. [CapabilityとResource](#14-capabilityとresource)
-15. [Contract](#15-contract)
-16. [理論的基盤と保証範囲](#16-理論的基盤と保証範囲)
-17. [生成物](#17-生成物)
-18. [Glyph Studioの操作](#18-glyph-studioの操作)
-19. [よくある間違い](#19-よくある間違い)
-20. [開発とテスト](#20-開発とテスト)
-21. [文書一覧](#21-文書一覧)
-22. [ライセンス](#22-ライセンス)
+12. [Machine Assembly](#12-machine-assembly)
+13. [時間制約](#13-時間制約)
+14. [マクロ](#14-マクロ)
+15. [CapabilityとResource](#15-capabilityとresource)
+16. [Contract](#16-contract)
+17. [理論的基盤と保証範囲](#17-理論的基盤と保証範囲)
+18. [生成物](#18-生成物)
+19. [Glyph Studioの操作](#19-glyph-studioの操作)
+20. [よくある間違い](#20-よくある間違い)
+21. [開発とテスト](#21-開発とテスト)
+22. [文書一覧](#22-文書一覧)
+23. [ライセンス](#23-ライセンス)
 
 ---
 
@@ -181,10 +182,10 @@ Glyphの文法は、設計対象を次の順序で記述するように構成さ
 1. **型とデータ**で、システムが扱う値の形を定義する
 2. **関数と分岐**で、入力から出力を得る判断や変換を定義する
 3. **外部境界**で、システム外からの入力と外部への作用を分離する
-4. **SystemとMachine**で、処理全体と状態遷移の境界を定義する
+4. **SystemとMachine**で、処理全体と状態遷移の境界を定義し、必要なら**Assembly**でMachine同士を接続する
 5. 必要に応じて、**時間制約、Resource、Contract**を追加する
 
-最初にすべての記号を暗記する必要はありません。通常は`*`、`+`、`>`、`>>`、`:=`、`ext`、`!`、`system`、`machine`まで理解すれば、基本的な設計を記述できます。
+最初にすべての記号を暗記する必要はありません。通常は`*`、`+`、`>`、`>>`、`:=`、`ext`、`!`、`system`、`machine`、`assembly`まで理解すれば、基本的な設計を記述できます。
 
 | 重要度 | 記法 | 名前 | 役割 | 導入目的 |
 |---:|---|---|---|---|
@@ -198,12 +199,13 @@ Glyphの文法は、設計対象を次の順序で記述するように構成さ
 | 8 | `!name(...)` | 外部作用 | システム外へ作用を要求する | 保存、送信、駆動などの作用点を特定するため |
 | 9 | `system Name` | System境界 | entry、source、sinkを宣言する | 実際のcall graphからシステム構成を導出するため |
 | 10 | `machine Name(...)` | 状態機械 | 初期状態と次状態計算を宣言する | 通常の関数変換と状態遷移を区別するため |
-| 11 | `?name(...)=...` | 時間制約 | 実行履歴に対する安全条件や期限を表す | 単一関数では表せない時間的要求を設計へ含めるため |
-| 12 | `resource Name[...]` | 状態付き資源 | 資源の所有形態と状態を表す | 二重使用や不正な状態遷移を静的に検査するため |
-| 13 | `'...` | Contract | 実行場所、通信手順、失敗処理、法則を付加する | 本体とは別の横断的要求を機械処理可能にするため |
-| 14 | `@NAME=...` / `@name(x)=...` | マクロ | 定型式や構文を再利用する | 重複を減らし、同じ設計規則を再利用するため |
-| 15 | `=Name=Type` | 型別名 | 既存型へ別名を付ける | 型表現へ設計上の名前を与えるため |
-| 16 | `~name(...)` | Rust実装関数 | 型契約だけGlyphへ置く | 既存ライブラリや複雑な処理をHost側へ残すため |
+| 11 | `assembly Name` | Machine Assembly | Machine instanceを名前付きで配置し、既存の`!`作用を別Machineの入力へ接続する | 独立した状態機械を明示的な型付き経路で合成するため |
+| 12 | `?name(...)=...` | 時間制約 | 実行履歴に対する安全条件や期限を表す | 単一関数では表せない時間的要求を設計へ含めるため |
+| 13 | `resource Name[...]` | 状態付き資源 | 資源の所有形態と状態を表す | 二重使用や不正な状態遷移を静的に検査するため |
+| 14 | `'...` | Contract | 実行場所、通信手順、失敗処理、法則を付加する | 本体とは別の横断的要求を機械処理可能にするため |
+| 15 | `@NAME=...` / `@name(x)=...` | マクロ | 定型式や構文を再利用する | 重複を減らし、同じ設計規則を再利用するため |
+| 16 | `=Name=Type` | 型別名 | 既存型へ別名を付ける | 型表現へ設計上の名前を与えるため |
+| 17 | `~name(...)` | Rust実装関数 | 型契約だけGlyphへ置く | 既存ライブラリや複雑な処理をHost側へ残すため |
 
 以降では、この表の順序に沿って、まず型とデータから説明します。
 
@@ -540,7 +542,47 @@ machine Motor(state:MotorState,input:Input)
 
 ---
 
-## 12. 時間制約
+## 12. Machine Assembly
+
+`assembly`は、既存の`machine`を**名前付きinstanceとして配置し、あるMachineの`!`作用を別Machineの入力へ接続する**ための構文です。Machine本体へ専用の送信構文を追加せず、既存の入力と`!`作用をそのまま再利用します。
+
+```glyph
+assembly DoorControl
+  door=Door
+  safety=Safety
+  motor=Motor
+
+  door.notify_safety -> safety.input
+  safety.request_motor -> motor.input
+```
+
+この例では、`door`、`safety`、`motor`がそれぞれMachine instanceです。`door.notify_safety -> safety.input`は、`door`内で実行された既存の`!notify_safety(...)`のpayloadを、`safety`の既存入力`input`へ渡します。
+
+v1の基本規則:
+
+- `instance=Machine`でMachine instanceへ名前を付ける
+- `source.effect -> target.input`でMachine間routeを宣言する
+- 接続された`!`はHostへ出ず、宣言位置でtarget Machineへ**即時・depth-first**に配送される
+- source Machineの反応はtarget Machineの反応が完了するまでそのcall pointで中断し、その後sourceへ戻る
+- 接続されていない`!`は従来どおりHost向けの外部作用として扱う
+- v1の内部routeはpayload引数1個、戻り値`()`のone-way operationに限定する
+- 暗黙queue、broadcast、whole-Assembly同期cycleは導入しない
+
+接続される作用は、たとえば次のように既存の`!`宣言として書きます。
+
+```glyph
+!notify_safety(event:SafetyInput):()
+```
+
+Assembly全体のtop-level causal reactionが成功した場合だけ、各instanceの次状態をまとめてcommitします。途中のMachine、route、Host、型検証などが失敗した場合、Machine stateはtop-level reaction開始前の状態へrollbackします。ただし、すでに実行されたHost側の外部作用そのものは取り消せません。
+
+> 現在、Assemblyの解析、型検証、Studio/図/JSON出力、Python reference runtimeは利用できますが、Machine instanceを考慮したRust loweringは未実装です。Assemblyを含むRustコード生成は誤ったコードを出さずfail-closedします。
+
+詳細仕様は[`docs/machine-assembly.md`](docs/machine-assembly.md)を参照してください。実例は[`examples/machine_assembly_immediate.glyph`](examples/machine_assembly_immediate.glyph)にあります。
+
+---
+
+## 13. 時間制約
 
 この機能は現在開発中でありalpha版の機能です。時相論理をglyph上で組み込む目的で導入しています。現時点ではglyphコード上で時間制約を表現して設計のためのコードとしての完成度を上げるだけの文法に過ぎず、コンパイル後への反映が甘く、どのようにこの制約をRustコード上で保証させるかは未決定です。
 
@@ -579,7 +621,7 @@ Glyphは対応する時相式を解析し、有限trace評価、streaming monito
 
 ---
 
-## 13. マクロ
+## 14. マクロ
 
 ### rawマクロ
 
@@ -637,7 +679,7 @@ ASTマクロの基本規則:
 
 ---
 
-## 14. CapabilityとResource
+## 15. CapabilityとResource
 
 CapabilityとResourceは、値の型だけでなく、**誰がその値を保持できるか**、**どの状態の資源へどの操作を許可するか**を設計へ含めるために導入されています。
 
@@ -687,7 +729,7 @@ resource Buffer[Allocated|Ready|InFlight|Used|Retired]
 
 ---
 
-## 15. Contract
+## 16. Contract
 
 Contractは、通常の関数本体だけでは表しにくい**実行場所、通信順序、timeout、retry、rollback、安全法則**などの横断的要求を、型や関数へ付加するために導入されています。
 
@@ -738,11 +780,11 @@ Bundleと適用:
 
 ---
 
-## 16. 理論的基盤と保証範囲
+## 17. 理論的基盤と保証範囲
 
 Glyphは複数の理論を一つの設計体験へ接続しています。ただし、**理論に由来する構造を実装していること**と、**Glyphコンパイラや生成システム全体が形式証明済みであること**は同じではありません。
 
-### 16.1 実装状況の読み方
+### 17.1 実装状況の読み方
 
 | 表記 | 意味 |
 |---|---|
@@ -752,7 +794,7 @@ Glyphは複数の理論を一つの設計体験へ接続しています。ただ
 | Host依存 | 実行時の保証をHost実装が担う |
 | 未対応 | 現在の保証範囲外 |
 
-### 16.2 分野別の対応
+### 17.2 分野別の対応
 
 | 分野 | 理論的な基盤 | 現在の実装 | まだカバーしない範囲 |
 |---|---|---|---|
@@ -769,7 +811,7 @@ Glyphは複数の理論を一つの設計体験へ接続しています。ただ
 | System境界 | typed call graph / effect boundary | entry/source/sink検査、到達可能call graph、完全な関数signature、図生成 | 外部装置・network・driverの正しさ |
 | Rust・図・IR生成 | 意味保存変換の工学的設計 | 同一validated modelからの決定的生成、回帰試験 | compiler correctnessや完全なsemantic preservationの形式証明 |
 
-### 16.3 強く裏付けられている範囲
+### 17.3 強く裏付けられている範囲
 
 現在、比較的明確に理論と実装が対応しているのは次です。
 
@@ -783,7 +825,7 @@ Glyphは複数の理論を一つの設計体験へ接続しています。ただ
 - entryから導出した完全な関数実行境界
 - 同一意味モデルからの決定的なRust・IR・図生成
 
-### 16.4 部分対応またはHost依存の範囲
+### 17.4 部分対応またはHost依存の範囲
 
 次は理論的な方向性がありますが、Glyphだけでは完結しません。
 
@@ -796,7 +838,7 @@ Glyphは複数の理論を一つの設計体験へ接続しています。ただ
 - センサー、actuator、driver、OS、hardwareの正しさ
 - 並列候補を実際に並列実行するschedule
 
-### 16.5 現在主張できること
+### 17.5 現在主張できること
 
 - 対応構文の型・名前・境界整合性を検査する
 - 純粋計算と外部作用の境界を明示する
@@ -806,7 +848,7 @@ Glyphは複数の理論を一つの設計体験へ接続しています。ただ
 - 同じvalidated modelからRust、JSON、図を決定的に生成する
 - 生成物とwitnessを継続的な回帰試験へかける
 
-### 16.6 現在主張できないこと
+### 17.6 現在主張できないこと
 
 - Glyphコードのコンパイル後のシステム全体にバグがない
 - 全状態・全入力・全無限実行が検証済み
@@ -822,7 +864,7 @@ Glyph 0.4は、**形式手法の考え方を実用的な設計、生成、診断
 
 ---
 
-## 17. 生成物
+## 18. 生成物
 
 設定と使用構文に応じて、次のファイルを生成します。
 
@@ -854,7 +896,7 @@ machine-scenarios.generated.rs
 
 ---
 
-## 18. Glyph Studioの操作
+## 19. Glyph Studioの操作
 
 ### 編集
 
@@ -884,7 +926,7 @@ machine-scenarios.generated.rs
 
 ---
 
-## 19. よくある間違い
+## 20. よくある間違い
 
 ### 比較に`=`を使う
 
@@ -954,7 +996,7 @@ system Correct
 
 ---
 
-## 20. 開発とテスト
+## 21. 開発とテスト
 
 Python:
 
@@ -982,11 +1024,12 @@ cargo test
 
 ---
 
-## 21. 文書一覧
+## 22. 文書一覧
 
 | 目的 | 文書 |
 |---|---|
 | 言語仕様全体 | [`docs/LANGUAGE.md`](docs/LANGUAGE.md) |
+| Machine Assembly | [`docs/machine-assembly.md`](docs/machine-assembly.md) |
 | 時間制約 | [`docs/TEMPORAL.md`](docs/TEMPORAL.md) |
 | Capability、Resource、Contract | [`docs/CONTRACTS.md`](docs/CONTRACTS.md) |
 | I/O図と状態遷移図 | [`docs/IO_STATE_APP.md`](docs/IO_STATE_APP.md) |
@@ -998,6 +1041,6 @@ cargo test
 
 ---
 
-## 22. ライセンス
+## 23. ライセンス
 
 MIT License。詳細は[`LICENSE`](LICENSE)を参照してください。
