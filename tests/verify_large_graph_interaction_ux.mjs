@@ -84,6 +84,56 @@ async function waitForWorkspaceQuiescence(page, label) {
   throw new Error(`${label} did not become quiescent: ${JSON.stringify(current)}`);
 }
 
+async function findNodeHitPoint(page, stateName) {
+  return page.evaluate(name => {
+    const node = [...document.querySelectorAll(".state-node")].find(candidate => (
+      candidate.querySelector(".state-name,.node-name")?.textContent?.trim() === name
+    ));
+    if (!node) return { ok: false, reason: "node-missing" };
+    const rect = node.getBoundingClientRect();
+    const fractions = [
+      [0.5, 0.5],
+      [0.3, 0.3],
+      [0.7, 0.3],
+      [0.3, 0.7],
+      [0.7, 0.7],
+      [0.5, 0.25],
+      [0.5, 0.75],
+      [0.25, 0.5],
+      [0.75, 0.5],
+    ];
+    const blockers = [];
+    for (const [fx, fy] of fractions) {
+      const x = rect.left + rect.width * fx;
+      const y = rect.top + rect.height * fy;
+      const hit = document.elementFromPoint(x, y);
+      const hitNode = hit?.closest?.(".state-node") || null;
+      if (hitNode === node) {
+        return {
+          ok: true,
+          x,
+          y,
+          target: hit?.tagName || "",
+          targetClass: hit?.className?.baseVal || hit?.className || "",
+        };
+      }
+      blockers.push({
+        fx,
+        fy,
+        tag: hit?.tagName || "",
+        className: hit?.className?.baseVal || hit?.className || "",
+        state: hitNode?.querySelector?.(".state-name,.node-name")?.textContent?.trim() || "",
+      });
+    }
+    return {
+      ok: false,
+      reason: "node-has-no-hit-testable-point",
+      rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+      blockers,
+    };
+  }, stateName);
+}
+
 function percentile(values, ratio) {
   if (!values.length) return 0;
   const sorted = [...values].sort((left, right) => left - right);
@@ -129,13 +179,14 @@ try {
   assert.equal(initialQuiescent.transaction?.frameSliceBudgetMs, 8, JSON.stringify(initialQuiescent));
   assert(initialQuiescent.transaction?.ownerDispatchMaxMs <= 8, JSON.stringify(initialQuiescent));
 
-  const node = page.locator(".state-node", { hasText: "S32" }).first();
+  const targetName = "S32";
+  const node = page.locator(".state-node", { hasText: targetName }).first();
   await node.scrollIntoViewIfNeeded();
   await waitForWorkspaceQuiescence(page, "large graph after target reveal");
-  const box = await node.boundingBox();
-  assert(box, "drag target is not visible");
-  const startX = box.x + box.width / 2;
-  const startY = box.y + box.height / 2;
+  const hitPoint = await findNodeHitPoint(page, targetName);
+  assert.equal(hitPoint.ok, true, `large-graph drag target is not hit-testable: ${JSON.stringify(hitPoint)}`);
+  const startX = hitPoint.x;
+  const startY = hitPoint.y;
 
   await page.evaluate(() => {
     const stage = document.querySelector(".state-node")?.closest(".graph-stage");
@@ -177,6 +228,7 @@ try {
 
   await page.mouse.move(startX, startY);
   await page.mouse.down();
+  await page.waitForFunction(() => window.glyphStateDiagramWorkspace?.audit?.().dragActive === true, null, { timeout: 1500 });
   const pressedBaseline = await workspaceAudit(page);
   assert.equal(pressedBaseline.workspace?.dragActive, true, JSON.stringify(pressedBaseline));
   await page.evaluate(() => window.__glyphLargeGraphProbe?.changedPaths?.clear?.());
@@ -254,6 +306,9 @@ try {
   const report = {
     stateCount,
     transitionCount,
+    targetName,
+    hitTarget: hitPoint.target,
+    hitTargetClass: hitPoint.targetClass,
     dragIncidentEdgeCount: duringDrag.incidentEdgeCount,
     changedPathCountDuringDrag: duringDrag.changedPathCount,
     fullGeometryPassesAtPress: pressedBaseline.workspace.fullGeometryPasses,
