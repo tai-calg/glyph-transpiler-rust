@@ -81,6 +81,6 @@ def test_workspace_is_installed_in_the_normal_application() -> None:
     node_adapter = html.index("glyph-transition-node-position-adapter-v1-script")
     clusters = html.index("glyph-transition-io-clusters-v1-script")
 
-    assert viewport < workspace < node_adapter < clusters
+    assert viewport < workspace < clusters < node_adapter
     assert "glyph-initial-transition-routing-v2-script" not in html
     assert "glyph-state-diagram-workspace-v2-style" in html
