@@ -59,15 +59,23 @@ def test_node_drag_updates_only_incident_geometry_until_pointer_release() -> Non
         "stateDiagramWorkspaceIncidentGeometryPasses",
         "stateDiagramWorkspaceFullGeometryPasses",
         "stateDiagramWorkspaceDragBudgetExceeded",
+        "dragActive=false,deferredFullReason",
+        "if(dragActive){deferredFullReason=reason;return}",
+        "function beginNodeDrag(event)",
+        "function finishNodeDrag(event,cancelled=false)",
+        'document.addEventListener("pointerdown",beginNodeDrag,true)',
         'document.addEventListener("pointermove",event=>{const node=event.target?.closest?.(".state-node");if(node)scheduleIncident(node)},true)',
-        'setTimeout(()=>schedule("node-drag-complete"),20)',
+        'document.addEventListener("pointerup",event=>finishNodeDrag(event,false),true)',
+        'setTimeout(()=>schedule(reason),cancelled?0:20)',
         "updateNodeGeometry:updateIncidentTransitionGeometry",
+        "dragActive,dragMaxDurationMs",
     ):
         assert required in html
 
     assert '.observe(view,{childList:true,subtree:true});' in html
     assert 'attributeFilter:["style"]' not in html
     assert "attributes:true" not in html
+    assert "glyph-transition-layout-transaction-ready" not in html
 
 
 def test_workspace_is_installed_in_the_normal_application() -> None:
