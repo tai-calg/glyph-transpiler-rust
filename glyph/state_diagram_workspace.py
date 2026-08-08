@@ -26,7 +26,10 @@ _SCRIPT = r"""
 const MARKER="glyph-state-diagram-workspace-v2";
 const MIN_WIDTH=1600,MIN_HEIGHT=960,HORIZONTAL_MARGIN=300,VERTICAL_MARGIN=190,DOT_RADIUS=9;
 const INITIAL_NODE_CLEARANCE=18,INITIAL_LABEL_CLEARANCE=12,INITIAL_EDGE_MARGIN=18;
-let frame=0,running=false,pendingReason="bootstrap",destroyed=false;
+const DRAG_FRAME_BUDGET_MS=8;
+let frame=0,dragFrame=0,dragNode=null,running=false,pendingReason="bootstrap",destroyed=false;
+let fullGeometryPasses=0,incidentGeometryPasses=0,maxIncidentDurationMs=0;
+const incidentIndexCache=new WeakMap();
 const num=value=>Number.parseFloat(value||"0")||0;
 const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
 const esc=value=>String(value??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
@@ -184,12 +187,60 @@ function updateInitialTransition(stage,machine,paths,nodes){
   });
   return true;
 }
+function fastInitialPath(dot,target){
+  const x1=dot.offsetLeft+dot.offsetWidth/2,y1=dot.offsetTop+dot.offsetHeight/2,x2=target.offsetLeft+target.offsetWidth/2,y2=target.offsetTop+target.offsetHeight/2;
+  const dx=x2-x1,dy=y2-y1,length=Math.max(1,Math.hypot(dx,dy)),ux=dx/length,uy=dy/length;
+  const rx=Math.max(1,target.offsetWidth/2),ry=Math.max(1,target.offsetHeight/2),targetRadius=1/Math.sqrt((ux*ux)/(rx*rx)+(uy*uy)/(ry*ry));
+  const sx=x1+ux*Math.min(DOT_RADIUS,length/2),sy=y1+uy*Math.min(DOT_RADIUS,length/2),ex=x2-ux*Math.min(targetRadius,length/2),ey=y2-uy*Math.min(targetRadius,length/2);
+  return`M ${sx.toFixed(1)} ${sy.toFixed(1)} L ${ex.toFixed(1)} ${ey.toFixed(1)}`;
+}
+function geometrySignature(machine){return[machine?.name||"",...(machine?.transitions||[]).map((transition,index)=>[transition.id||`T${index+1}`,transition.source_state||"",transition.target_state||""].join("\u001f"))].join("\u001e")}
+function incidentIndexes(stage,machine){
+  const signature=geometrySignature(machine),cached=incidentIndexCache.get(stage);
+  if(cached?.signature===signature)return cached.byState;
+  const byState=new Map();
+  (machine?.transitions||[]).forEach((transition,index)=>{
+    for(const name of new Set([String(transition.source_state||""),String(transition.target_state||"")])){
+      if(!name)continue;
+      if(!byState.has(name))byState.set(name,[]);
+      byState.get(name).push(index);
+    }
+  });
+  incidentIndexCache.set(stage,{signature,byState});
+  return byState;
+}
 function updateTransitionGeometry(stage,machine){
   const nodes=nodesByName(stage),paths=directPaths(stage),transitions=machine?.transitions||[];
   transitions.forEach((transition,index)=>{const source=nodes.get(String(transition.source_state||"")),target=nodes.get(String(transition.target_state||"")),path=paths[index];if(!source||!target||!path)return;path.classList.add("state-transition-path");path.dataset.transitionId=transition.id||`T${index+1}`;path.setAttribute("d",statePath(source,target,source===target,index))});
   window.glyphTransitionIoClusters?.reroute?.(stage);
   updateInitialTransition(stage,machine,paths,nodes);
+  fullGeometryPasses+=1;
+  stage.dataset.stateDiagramWorkspaceFullGeometryPasses=String(fullGeometryPasses);
   stage.dataset.stateDiagramWorkspaceGeometryReady="true";
+}
+function updateIncidentTransitionGeometry(stage,machine,node){
+  if(!stage||!machine||!node||!stage.isConnected||!node.isConnected)return false;
+  const movedName=stateName(node),indexes=incidentIndexes(stage,machine).get(movedName)||[];
+  if(!movedName||!indexes.length)return false;
+  const started=performance.now(),nodes=nodesByName(stage),paths=directPaths(stage),transitions=machine.transitions||[];
+  for(const index of indexes){
+    const transition=transitions[index],source=nodes.get(String(transition?.source_state||"")),target=nodes.get(String(transition?.target_state||"")),path=paths[index];
+    if(!transition||!source||!target||!path)continue;
+    path.classList.add("state-transition-path");path.dataset.transitionId=transition.id||`T${index+1}`;path.setAttribute("d",statePath(source,target,source===target,index));
+  }
+  if(movedName===String(machine.initial_state||"")){
+    const dot=stage.querySelector(".initial-dot"),initialPath=paths[transitions.length]||paths.find(path=>path.classList.contains("initial-transition-path")),target=nodes.get(movedName);
+    if(dot&&initialPath&&target)initialPath.setAttribute("d",fastInitialPath(dot,target));
+  }
+  const duration=performance.now()-started;
+  incidentGeometryPasses+=1;maxIncidentDurationMs=Math.max(maxIncidentDurationMs,duration);
+  stage.dataset.stateDiagramWorkspaceIncidentGeometryPasses=String(incidentGeometryPasses);
+  stage.dataset.stateDiagramWorkspaceIncidentEdgeCount=String(indexes.length);
+  stage.dataset.stateDiagramWorkspaceDragDurationMs=duration.toFixed(2);
+  stage.dataset.stateDiagramWorkspaceDragMaxDurationMs=maxIncidentDurationMs.toFixed(2);
+  stage.dataset.stateDiagramWorkspaceDragBudgetMs=String(DRAG_FRAME_BUDGET_MS);
+  stage.dataset.stateDiagramWorkspaceDragBudgetExceeded=duration>DRAG_FRAME_BUDGET_MS?"true":"false";
+  return true;
 }
 function detailSignature(machine){return[machine?.name||"",...(machine?.transitions||[]).map((transition,index)=>[transition.id||`T${index+1}`,transition.source_state||"",transition.target_state||"",transitionSummary(transition),transition.source?.line||0].join("\u001f"))].join("\u001e")}
 function renderTransitionIndex(stage,machine){
@@ -210,11 +261,22 @@ function prepare(stage=stageOf(),machine=selectedMachine(liveState())){
 }
 async function refresh(reason){if(running||destroyed)return false;const stage=stageOf();if(!stage)return false;running=true;try{const machine=await readMachine();if(!machine||!stage.isConnected)return false;const result=prepare(stage,machine);stage.dataset.stateDiagramWorkspaceReason=reason;document.dispatchEvent(new CustomEvent("glyph-state-diagram-workspace-ready",{detail:{marker:MARKER,machine:machine.name,reason}}));return result}finally{running=false}}
 function schedule(reason="scheduled"){if(destroyed)return;pendingReason=reason;cancelAnimationFrame(frame);frame=requestAnimationFrame(()=>refresh(pendingReason).catch(error=>console.error("state diagram workspace refresh failed",error)))}
+function scheduleIncident(node){
+  if(destroyed||!node)return;dragNode=node;cancelAnimationFrame(dragFrame);dragFrame=requestAnimationFrame(()=>{
+    const current=dragNode;dragNode=null;if(!current?.isConnected)return;
+    const stage=current.closest(".graph-stage"),machine=selectedMachine(liveState());
+    if(stage&&machine)updateIncidentTransitionGeometry(stage,machine,current);
+  });
+}
 const view=document.getElementById("view")||document.body;
-new MutationObserver(records=>{if(records.some(record=>record.type==="childList"||(record.type==="attributes"&&record.target?.classList?.contains("state-node"))))schedule("diagram-mutation")}).observe(view,{childList:true,subtree:true,attributes:true,attributeFilter:["style"]});
-document.addEventListener("change",event=>{if(event.target?.id==="machine-select")schedule("machine-change")});document.addEventListener("pointerup",event=>{if(event.target?.closest?.(".state-node"))setTimeout(()=>schedule("node-drag-complete"),20)},true);document.addEventListener("pointercancel",()=>schedule("node-drag-cancelled"),true);document.addEventListener("glyph-transition-layout-transaction-ready",()=>schedule("layout-ready"));
-for(const eventName of["pagehide","beforeunload"])window.addEventListener(eventName,()=>{destroyed=true;cancelAnimationFrame(frame)},{once:true});
-window.glyphStateDiagramWorkspace={marker:MARKER,version:3,prepare,schedule,refresh:()=>schedule("api-refresh"),mapRestoredPosition,markPositionMigration,audit:()=>{const stage=stageOf(),panel=stage?.closest(".canvas-shell")?.nextElementSibling;return{ok:Boolean(stage?.dataset.stateDiagramWorkspaceGeometryReady==="true"&&panel?.classList?.contains("transition-index")),width:num(stage?.style.width),height:num(stage?.style.height),spreadX:num(stage?.dataset.stateDiagramWorkspaceSpreadX),spreadY:num(stage?.dataset.stateDiagramWorkspaceSpreadY),adaptive:stage?.dataset.stateDiagramWorkspaceAdaptive||"",initialReady:stage?.dataset.initialRouteReady||"",initialCollisions:num(stage?.dataset.initialRouteCollisionCount)}}};
+new MutationObserver(records=>{if(records.some(record=>record.type==="childList"))schedule("diagram-mutation")}).observe(view,{childList:true,subtree:true});
+document.addEventListener("change",event=>{if(event.target?.id==="machine-select")schedule("machine-change")});
+document.addEventListener("pointermove",event=>{const node=event.target?.closest?.(".state-node");if(node)scheduleIncident(node)},true);
+document.addEventListener("pointerup",event=>{if(event.target?.closest?.(".state-node")){cancelAnimationFrame(dragFrame);dragNode=null;setTimeout(()=>schedule("node-drag-complete"),20)}},true);
+document.addEventListener("pointercancel",()=>{cancelAnimationFrame(dragFrame);dragNode=null;schedule("node-drag-cancelled")},true);
+document.addEventListener("glyph-transition-layout-transaction-ready",()=>schedule("layout-ready"));
+for(const eventName of["pagehide","beforeunload"])window.addEventListener(eventName,()=>{destroyed=true;cancelAnimationFrame(frame);cancelAnimationFrame(dragFrame);dragNode=null},{once:true});
+window.glyphStateDiagramWorkspace={marker:MARKER,version:4,prepare,schedule,refresh:()=>schedule("api-refresh"),updateNodeGeometry:updateIncidentTransitionGeometry,mapRestoredPosition,markPositionMigration,audit:()=>{const stage=stageOf(),panel=stage?.closest(".canvas-shell")?.nextElementSibling;return{ok:Boolean(stage?.dataset.stateDiagramWorkspaceGeometryReady==="true"&&panel?.classList?.contains("transition-index")),width:num(stage?.style.width),height:num(stage?.style.height),spreadX:num(stage?.dataset.stateDiagramWorkspaceSpreadX),spreadY:num(stage?.dataset.stateDiagramWorkspaceSpreadY),adaptive:stage?.dataset.stateDiagramWorkspaceAdaptive||"",initialReady:stage?.dataset.initialRouteReady||"",initialCollisions:num(stage?.dataset.initialRouteCollisionCount),fullGeometryPasses,incidentGeometryPasses,dragMaxDurationMs:maxIncidentDurationMs,dragBudgetMs:DRAG_FRAME_BUDGET_MS}};
 schedule("bootstrap");
 })();
 </script>
