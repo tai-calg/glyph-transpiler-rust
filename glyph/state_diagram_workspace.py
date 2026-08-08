@@ -27,7 +27,7 @@ const MARKER="glyph-state-diagram-workspace-v2";
 const MIN_WIDTH=1600,MIN_HEIGHT=960,HORIZONTAL_MARGIN=300,VERTICAL_MARGIN=190,DOT_RADIUS=9;
 const INITIAL_NODE_CLEARANCE=18,INITIAL_LABEL_CLEARANCE=12,INITIAL_EDGE_MARGIN=18;
 const DRAG_FRAME_BUDGET_MS=8;
-let frame=0,dragFrame=0,dragNode=null,running=false,pendingReason="bootstrap",destroyed=false;
+let frame=0,dragFrame=0,dragNode=null,dragActive=false,deferredFullReason="",running=false,pendingReason="bootstrap",destroyed=false;
 let fullGeometryPasses=0,incidentGeometryPasses=0,maxIncidentDurationMs=0;
 const incidentIndexCache=new WeakMap();
 const num=value=>Number.parseFloat(value||"0")||0;
@@ -260,7 +260,11 @@ function prepare(stage=stageOf(),machine=selectedMachine(liveState())){
   if(!stage||!machine||!stage.isConnected)return false;expandWorkspace(stage,machine);applyWorkspaceOrigin(stage);updateTransitionGeometry(stage,machine);renderTransitionIndex(stage,machine);preserveOrdinaryScale(stage);stage.dataset.stateDiagramWorkspaceReason="transaction-prepare";return true;
 }
 async function refresh(reason){if(running||destroyed)return false;const stage=stageOf();if(!stage)return false;running=true;try{const machine=await readMachine();if(!machine||!stage.isConnected)return false;const result=prepare(stage,machine);stage.dataset.stateDiagramWorkspaceReason=reason;document.dispatchEvent(new CustomEvent("glyph-state-diagram-workspace-ready",{detail:{marker:MARKER,machine:machine.name,reason}}));return result}finally{running=false}}
-function schedule(reason="scheduled"){if(destroyed)return;pendingReason=reason;cancelAnimationFrame(frame);frame=requestAnimationFrame(()=>refresh(pendingReason).catch(error=>console.error("state diagram workspace refresh failed",error)))}
+function schedule(reason="scheduled"){
+  if(destroyed)return;
+  if(dragActive){deferredFullReason=reason;return}
+  pendingReason=reason;cancelAnimationFrame(frame);frame=requestAnimationFrame(()=>refresh(pendingReason).catch(error=>console.error("state diagram workspace refresh failed",error)));
+}
 function scheduleIncident(node){
   if(destroyed||!node)return;dragNode=node;cancelAnimationFrame(dragFrame);dragFrame=requestAnimationFrame(()=>{
     const current=dragNode;dragNode=null;if(!current?.isConnected)return;
@@ -268,15 +272,26 @@ function scheduleIncident(node){
     if(stage&&machine)updateIncidentTransitionGeometry(stage,machine,current);
   });
 }
+function beginNodeDrag(event){
+  const node=event.target?.closest?.(".state-node");if(!node)return;
+  dragActive=true;deferredFullReason="";
+}
+function finishNodeDrag(event,cancelled=false){
+  const node=event.target?.closest?.(".state-node");
+  if(!dragActive&&!node)return;
+  dragActive=false;cancelAnimationFrame(dragFrame);dragNode=null;
+  const reason=deferredFullReason||(cancelled?"node-drag-cancelled":"node-drag-complete");deferredFullReason="";
+  setTimeout(()=>schedule(reason),cancelled?0:20);
+}
 const view=document.getElementById("view")||document.body;
 new MutationObserver(records=>{if(records.some(record=>record.type==="childList"))schedule("diagram-mutation")}).observe(view,{childList:true,subtree:true});
 document.addEventListener("change",event=>{if(event.target?.id==="machine-select")schedule("machine-change")});
+document.addEventListener("pointerdown",beginNodeDrag,true);
 document.addEventListener("pointermove",event=>{const node=event.target?.closest?.(".state-node");if(node)scheduleIncident(node)},true);
-document.addEventListener("pointerup",event=>{if(event.target?.closest?.(".state-node")){cancelAnimationFrame(dragFrame);dragNode=null;setTimeout(()=>schedule("node-drag-complete"),20)}},true);
-document.addEventListener("pointercancel",()=>{cancelAnimationFrame(dragFrame);dragNode=null;schedule("node-drag-cancelled")},true);
-document.addEventListener("glyph-transition-layout-transaction-ready",()=>schedule("layout-ready"));
-for(const eventName of["pagehide","beforeunload"])window.addEventListener(eventName,()=>{destroyed=true;cancelAnimationFrame(frame);cancelAnimationFrame(dragFrame);dragNode=null},{once:true});
-window.glyphStateDiagramWorkspace={marker:MARKER,version:4,prepare,schedule,refresh:()=>schedule("api-refresh"),updateNodeGeometry:updateIncidentTransitionGeometry,mapRestoredPosition,markPositionMigration,audit:()=>{const stage=stageOf(),panel=stage?.closest(".canvas-shell")?.nextElementSibling;return{ok:Boolean(stage?.dataset.stateDiagramWorkspaceGeometryReady==="true"&&panel?.classList?.contains("transition-index")),width:num(stage?.style.width),height:num(stage?.style.height),spreadX:num(stage?.dataset.stateDiagramWorkspaceSpreadX),spreadY:num(stage?.dataset.stateDiagramWorkspaceSpreadY),adaptive:stage?.dataset.stateDiagramWorkspaceAdaptive||"",initialReady:stage?.dataset.initialRouteReady||"",initialCollisions:num(stage?.dataset.initialRouteCollisionCount),fullGeometryPasses,incidentGeometryPasses,dragMaxDurationMs:maxIncidentDurationMs,dragBudgetMs:DRAG_FRAME_BUDGET_MS}};
+document.addEventListener("pointerup",event=>finishNodeDrag(event,false),true);
+document.addEventListener("pointercancel",event=>finishNodeDrag(event,true),true);
+for(const eventName of["pagehide","beforeunload"])window.addEventListener(eventName,()=>{destroyed=true;cancelAnimationFrame(frame);cancelAnimationFrame(dragFrame);dragNode=null;dragActive=false;deferredFullReason=""},{once:true});
+window.glyphStateDiagramWorkspace={marker:MARKER,version:4,prepare,schedule,refresh:()=>schedule("api-refresh"),updateNodeGeometry:updateIncidentTransitionGeometry,mapRestoredPosition,markPositionMigration,audit:()=>{const stage=stageOf(),panel=stage?.closest(".canvas-shell")?.nextElementSibling;return{ok:Boolean(stage?.dataset.stateDiagramWorkspaceGeometryReady==="true"&&panel?.classList?.contains("transition-index")),width:num(stage?.style.width),height:num(stage?.style.height),spreadX:num(stage?.dataset.stateDiagramWorkspaceSpreadX),spreadY:num(stage?.dataset.stateDiagramWorkspaceSpreadY),adaptive:stage?.dataset.stateDiagramWorkspaceAdaptive||"",initialReady:stage?.dataset.initialRouteReady||"",initialCollisions:num(stage?.dataset.initialRouteCollisionCount),fullGeometryPasses,incidentGeometryPasses,dragActive,dragMaxDurationMs:maxIncidentDurationMs,dragBudgetMs:DRAG_FRAME_BUDGET_MS}}};
 schedule("bootstrap");
 })();
 </script>
