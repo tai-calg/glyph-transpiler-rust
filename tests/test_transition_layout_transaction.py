@@ -34,6 +34,7 @@ def test_transaction_is_strictly_bounded_and_preserves_base_geometry() -> None:
 
     for required in (
         "TRANSACTION_DEADLINE_MS=48",
+        "FRAME_SLICE_BUDGET_MS=8",
         "MAX_FRAME_BUDGET=2",
         "MAX_RETRIES=0",
         "maxRetries:MAX_RETRIES",
@@ -44,6 +45,12 @@ def test_transaction_is_strictly_bounded_and_preserves_base_geometry() -> None:
         "requestAndWait",
         'geometryOwner:"base-renderer"',
         'cancel("state-tab-deactivated")',
+        "function ownersReady(stage)",
+        "function requestOwners(stage,reason)",
+        "window.glyphStateDiagramWorkspace?.schedule?.(`transaction:${reason}`)",
+        "transitionLayoutOwnerDispatchMaxMs",
+        "transitionLayoutFrameSliceBudgetExceeded",
+        "version:9",
     ):
         assert required in html
 
@@ -57,6 +64,8 @@ def test_transaction_is_strictly_bounded_and_preserves_base_geometry() -> None:
         "__glyphRenderStateFailure",
         "State diagram certification failed",
         'stage.dataset.transitionPublicationReady="false"',
+        "window.glyphStateDiagramWorkspace?.prepare?.(stage)",
+        "window.glyphTransitionIoClusters?.reroute?.(stage)",
     ):
         assert removed not in html
 
@@ -175,11 +184,12 @@ def test_diagram_app_uses_only_the_bounded_ordinary_layout_stack() -> None:
     from glyph import diagram_app
 
     html = diagram_app.DIAGRAM_HTML
+    node_adapter = html.index("glyph-transition-node-position-adapter-v1-script")
     clusters = html.index("glyph-transition-io-clusters-v1-script")
     transaction = html.index("glyph-transition-layout-transaction-v1-script")
     interaction = html.index("glyph-transition-layout-interaction-adapter-v1-script")
 
-    assert clusters < transaction < interaction
+    assert node_adapter < clusters < transaction < interaction
     assert "glyph-transition-label-layout-v1-script" not in html
     assert "glyph-uml-transition-semantics-v1-script" not in html
     assert "glyph-initial-transition-routing-v2-script" not in html
