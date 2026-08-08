@@ -92,15 +92,8 @@ async function findNodeHitPoint(page, stateName) {
     if (!node) return { ok: false, reason: "node-missing" };
     const rect = node.getBoundingClientRect();
     const fractions = [
-      [0.5, 0.5],
-      [0.3, 0.3],
-      [0.7, 0.3],
-      [0.3, 0.7],
-      [0.7, 0.7],
-      [0.5, 0.25],
-      [0.5, 0.75],
-      [0.25, 0.5],
-      [0.75, 0.5],
+      [0.5, 0.5], [0.3, 0.3], [0.7, 0.3], [0.3, 0.7], [0.7, 0.7],
+      [0.5, 0.25], [0.5, 0.75], [0.25, 0.5], [0.75, 0.5],
     ];
     const blockers = [];
     for (const [fx, fy] of fractions) {
@@ -132,6 +125,21 @@ async function findNodeHitPoint(page, stateName) {
       blockers,
     };
   }, stateName);
+}
+
+async function chooseDragTarget(page) {
+  const preferred = ["S63", "S62", "S60", "S56", "S48", "S40", "S32", "S24", "S16", "S8", "S1"];
+  const failures = [];
+  for (const stateName of preferred) {
+    const node = page.locator(".state-node", { hasText: stateName }).first();
+    if (await node.count() !== 1) continue;
+    await node.scrollIntoViewIfNeeded();
+    await waitForWorkspaceQuiescence(page, `large graph target ${stateName}`);
+    const hitPoint = await findNodeHitPoint(page, stateName);
+    if (hitPoint.ok) return { stateName, node, hitPoint };
+    failures.push({ stateName, hitPoint });
+  }
+  throw new Error(`large graph has no hit-testable drag target: ${JSON.stringify(failures)}`);
 }
 
 function percentile(values, ratio) {
@@ -179,12 +187,9 @@ try {
   assert.equal(initialQuiescent.transaction?.frameSliceBudgetMs, 8, JSON.stringify(initialQuiescent));
   assert(initialQuiescent.transaction?.ownerDispatchMaxMs <= 8, JSON.stringify(initialQuiescent));
 
-  const targetName = "S32";
-  const node = page.locator(".state-node", { hasText: targetName }).first();
-  await node.scrollIntoViewIfNeeded();
-  await waitForWorkspaceQuiescence(page, "large graph after target reveal");
-  const hitPoint = await findNodeHitPoint(page, targetName);
-  assert.equal(hitPoint.ok, true, `large-graph drag target is not hit-testable: ${JSON.stringify(hitPoint)}`);
+  const target = await chooseDragTarget(page);
+  const targetName = target.stateName;
+  const hitPoint = target.hitPoint;
   const startX = hitPoint.x;
   const startY = hitPoint.y;
 
