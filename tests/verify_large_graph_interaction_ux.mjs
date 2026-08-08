@@ -6,44 +6,28 @@ import { chromium } from "playwright";
 
 const outputDirectory = path.resolve("build/large-graph-interaction-ux");
 await fs.mkdir(outputDirectory, { recursive: true });
-const sourcePath = path.join(outputDirectory, "large-graph.glyph");
 const stateCount = 64;
-const states = Array.from({ length: stateCount }, (_, index) => `S${index}`);
-const source = [
-  "machine LargeGraph(state:LargeState,input:LargeInput)",
-  "  select=state.mode",
-  "  init=LargeState(S0)",
-  "  next=large_step(state,input)",
-  "  success=S1",
-  `  failure=S${stateCount - 1}`,
-  "",
-  "*LargeInput(forward:B,back:B,jump:B)",
-  `+LargeMode=${states.join("|")}`,
-  "*LargeState(mode:LargeMode)",
-  "",
-  ">large_step(state:LargeState,input:LargeInput):LargeState",
-  ...states.flatMap((state, index) => [
-    `  state.mode==${state}&input.forward >> LargeState(S${(index + 1) % stateCount})`,
-    `  state.mode==${state}&input.back >> LargeState(S${(index - 1 + stateCount) % stateCount})`,
-    `  state.mode==${state}&input.jump >> LargeState(S${(index + 7) % stateCount})`,
-  ]),
-  "  _ >> state",
-  "",
-].join("\n");
-await fs.writeFile(sourcePath, source, "utf8");
-
+const transitionCount = stateCount * 3;
 const port = 8897;
 const url = `http://127.0.0.1:${port}`;
 const logs = [];
 const sleep = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
 
 async function waitForServer(child) {
-  for (let attempt = 0; attempt < 300; attempt += 1) {
+  for (let attempt = 0; attempt < 180; attempt += 1) {
     if (child.exitCode !== null) throw new Error(`Glyph process exited early\n${logs.join("")}`);
     try {
       const response = await fetch(`${url}/api/state`, { cache: "no-store" });
-      if (response.ok && (await response.json()).status === "ready") return;
-    } catch {}
+      if (response.ok) {
+        const state = await response.json();
+        if (state.status === "ready"
+          && state.views?.large_graph_fixture?.state_count === stateCount
+          && state.views?.large_graph_fixture?.transition_count === transitionCount) return;
+        if (state.status === "error") throw new Error(`large graph fixture failed: ${JSON.stringify(state.diagnostics || [])}`);
+      }
+    } catch (error) {
+      if (String(error?.message || error).startsWith("large graph fixture failed:")) throw error;
+    }
     await sleep(100);
   }
   throw new Error(`Glyph server did not become ready\n${logs.join("")}`);
@@ -106,7 +90,7 @@ function percentile(values, ratio) {
   return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * ratio))];
 }
 
-const child = spawn("python3", ["glyph.py", sourcePath], {
+const child = spawn("python3", ["tests/run_large_graph_interaction_ux_server.py"], {
   env: {
     ...process.env,
     GLYPH_DIAGRAM_PORT: String(port),
@@ -129,16 +113,16 @@ try {
   });
 
   await page.goto(url, { waitUntil: "domcontentloaded" });
-  await page.waitForFunction(expectedStateCount => {
+  await page.waitForFunction(expected => {
     const stage = document.querySelector(".state-node")?.closest(".graph-stage");
     return window.glyphStateDiagramWorkspace?.version === 4
       && window.glyphTransitionLayoutTransaction?.version === 9
-      && document.querySelectorAll(".state-node").length === expectedStateCount
-      && document.querySelectorAll("path.state-transition-path").length >= expectedStateCount * 3
+      && document.querySelectorAll(".state-node").length === expected.states
+      && document.querySelectorAll("path.state-transition-path").length >= expected.transitions
       && stage?.dataset.stateDiagramWorkspaceGeometryReady === "true"
       && stage.dataset.transitionIoClustersReady === "true"
       && stage.dataset.transitionLayoutState === "ready";
-  }, stateCount, { timeout: 15_000 });
+  }, { states: stateCount, transitions: transitionCount }, { timeout: 15_000 });
 
   const initialQuiescent = await waitForWorkspaceQuiescence(page, "initial large graph");
   assert.equal(initialQuiescent.workspace?.dragBudgetMs, 8, JSON.stringify(initialQuiescent));
@@ -253,8 +237,6 @@ try {
     probe.pathObserver?.disconnect();
     probe.longTaskObserver?.disconnect();
     return {
-      rafGaps: [...probe.rafGaps],
-      longTasks: [...probe.longTasks],
       workspace: window.glyphStateDiagramWorkspace?.audit?.() ?? null,
       transaction: window.glyphTransitionLayoutTransaction?.audit?.() ?? null,
     };
@@ -271,7 +253,7 @@ try {
 
   const report = {
     stateCount,
-    transitionCount: stateCount * 3 + 1,
+    transitionCount,
     dragIncidentEdgeCount: duringDrag.incidentEdgeCount,
     changedPathCountDuringDrag: duringDrag.changedPathCount,
     fullGeometryPassesAtPress: pressedBaseline.workspace.fullGeometryPasses,
@@ -294,4 +276,4 @@ try {
   await stop(child);
 }
 
-console.log("verified incident-only node dragging and frame-bounded transaction dispatch on a large state graph");
+console.log("verified incident-only node dragging and frame-bounded transaction dispatch on a 64-state / 192-transition view");
