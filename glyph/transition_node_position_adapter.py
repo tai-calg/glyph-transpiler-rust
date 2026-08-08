@@ -110,7 +110,7 @@ function clearancePenalty(record,left,top){
   return[...record.stage.querySelectorAll(".state-node")].reduce((total,other)=>{
     if(other===record.node)return total;
     const otherLeft=other.offsetLeft,otherTop=other.offsetTop;
-    const otherRight=otherLeft+other.offsetWidth,otherBottom=otherTop+other.offsetHeight;
+    const otherRight=otherLeft+other.offsetWidth,otherBottom=other.offsetTop+other.offsetHeight;
     const horizontalGap=Math.max(otherLeft-right,left-otherRight,0);
     const verticalGap=Math.max(otherTop-bottom,top-otherBottom,0);
     if(horizontalGap>=NODE_CLEARANCE||verticalGap>=NODE_CLEARANCE)return total;
@@ -332,7 +332,7 @@ for(const eventName of["pagehide","beforeunload"]){
 }
 lastStage=document.querySelector(".state-node")?.closest(".graph-stage")||null;
 scheduleRestore(lastStage,0);
-window.glyphTransitionNodePositionAdapter={marker:MARKER,version:9,restore:()=>scheduleRestore(null,0)};
+window.glyphTransitionNodePositionAdapter={marker:MARKER,version:8,restore:()=>scheduleRestore(null,0)};
 })();
 </script>
 """
