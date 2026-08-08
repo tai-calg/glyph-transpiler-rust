@@ -14,6 +14,7 @@ from glyph.io_state_views import build_io_state_views
 
 STATE_COUNT = 64
 EDGES_PER_STATE = 3
+_FIXTURE_SOURCE_LINE = 1
 
 
 def large_graph_view_builder(model: object, ir: object) -> dict[str, object]:
@@ -34,7 +35,9 @@ def large_graph_view_builder(model: object, ir: object) -> dict[str, object]:
         item["name"] = f"S{index}"
         item["reachable"] = True
         item["terminal"] = "success" if index == 1 else "failure" if index == STATE_COUNT - 1 else None
-        item["source"] = {"line": 20 + index}
+        # Synthetic view records must still point at a valid source line because
+        # production labels remain clickable during this GUI performance test.
+        item["source"] = {"line": _FIXTURE_SOURCE_LINE}
         states.append(item)
 
     transitions: list[dict[str, object]] = []
@@ -52,7 +55,7 @@ def large_graph_view_builder(model: object, ir: object) -> dict[str, object]:
                     "condition": f"input.{label}",
                     "condition_raw": f"input.{label}",
                     "display_label": f"input.{label}",
-                    "source": {"line": 100 + transition_index},
+                    "source": {"line": _FIXTURE_SOURCE_LINE},
                     "source_reachable": True,
                     "expanded_from_wildcard": False,
                     "event": "",
