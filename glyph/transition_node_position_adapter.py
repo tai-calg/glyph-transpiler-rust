@@ -171,9 +171,24 @@ async function persist(record){
   record.stage.dataset.transitionNodePositions=`saved:${Object.keys(record.positions).length}`;
   window.glyphTransitionLayoutTransaction?.schedule("manual-node-persisted",0);
 }
+function nextFrame(){return new Promise(resolve=>requestAnimationFrame(resolve))}
+async function waitForWorkspaceOrigin(stage,token){
+  if(!workspace())return true;
+  for(let attempt=0;attempt<24;attempt+=1){
+    if(token!==restoreGeneration||!stage?.isConnected||destroyed)return false;
+    if(stage.dataset.stateDiagramWorkspaceOriginReady==="true")return true;
+    await nextFrame();
+  }
+  return stage?.dataset.stateDiagramWorkspaceOriginReady==="true";
+}
 async function restore(stage,token){
   if(!stage||!stage.isConnected||destroyed)return false;
   const data=await diagramState();
+  if(token!==restoreGeneration||!stage.isConnected||destroyed)return false;
+  if(!(await waitForWorkspaceOrigin(stage,token))){
+    if(token===restoreGeneration&&stage.isConnected&&!destroyed)scheduleRestore(stage,0);
+    return false;
+  }
   if(token!==restoreGeneration||!stage.isConnected||destroyed)return false;
   const key=canonicalKey(data);
   let value=parse(key),source=key;
@@ -317,7 +332,7 @@ for(const eventName of["pagehide","beforeunload"]){
 }
 lastStage=document.querySelector(".state-node")?.closest(".graph-stage")||null;
 scheduleRestore(lastStage,0);
-window.glyphTransitionNodePositionAdapter={marker:MARKER,version:8,restore:()=>scheduleRestore(null,0)};
+window.glyphTransitionNodePositionAdapter={marker:MARKER,version:9,restore:()=>scheduleRestore(null,0)};
 })();
 </script>
 """
