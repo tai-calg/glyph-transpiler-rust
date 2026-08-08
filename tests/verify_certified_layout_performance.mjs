@@ -55,6 +55,8 @@ async function layoutState(page) {
       layoutReason: stage?.dataset.transitionLayoutReason || "",
       layoutGeneration: Number(stage?.dataset.transitionLayoutGeneration || 0),
       layoutBudgetMs: Number(stage?.dataset.transitionLayoutBudgetMs || 0),
+      frameSliceBudgetMs: Number(stage?.dataset.transitionLayoutFrameSliceBudgetMs || 0),
+      ownerDispatchMaxMs: Number(stage?.dataset.transitionLayoutOwnerDispatchMaxMs || 0),
       renderBudgetMs: Number(stage?.dataset.transitionIoRenderBudgetMs || 0),
       renderDurationMs: Number(stage?.dataset.transitionIoRenderDurationMs || 0),
       renderBudgetExceeded: stage?.dataset.transitionIoRenderBudgetExceeded || "",
@@ -66,6 +68,7 @@ async function layoutState(page) {
       transactionVersion: Number(transaction?.version || 0),
       transactionProfile: transaction?.profile || "",
       transactionBudgetMs: Number(transaction?.budgetMs || 0),
+      transactionFrameSliceBudgetMs: Number(transaction?.frameSliceBudgetMs || 0),
       maxFrames: Number(transaction?.maxFrames || 0),
       maxRetries: Number(transaction?.maxRetries ?? -1),
       requestedGeneration: Number(transaction?.generation || 0),
@@ -116,17 +119,22 @@ try {
   assert.equal(first.layoutProfile, "ordinary", JSON.stringify(first));
   assert.equal(first.layoutMode, "base", JSON.stringify(first));
   assert.equal(first.layoutBudgetMs, 48, JSON.stringify(first));
+  assert.equal(first.frameSliceBudgetMs, 8, JSON.stringify(first));
+  assert(first.ownerDispatchMaxMs <= 8, JSON.stringify(first));
   assert.equal(first.renderBudgetMs, 16, JSON.stringify(first));
   assert.equal(first.denseCanvas, "disabled", JSON.stringify(first));
   assert.equal(first.error, "", JSON.stringify(first));
   assert(first.transitionCount > 0, "no transitions rendered");
   assert(first.maximumLabelDistance <= first.labelDistanceLimit + 0.5, JSON.stringify(first));
-  assert.equal(first.transactionVersion, 8, JSON.stringify(first));
+  assert.equal(first.transactionVersion, 9, JSON.stringify(first));
   assert.equal(first.transactionProfile, "ordinary", JSON.stringify(first));
   assert.equal(first.transactionBudgetMs, 48, JSON.stringify(first));
+  assert.equal(first.transactionFrameSliceBudgetMs, 8, JSON.stringify(first));
   assert.equal(first.maxFrames, 2, JSON.stringify(first));
   assert.equal(first.maxRetries, 0, JSON.stringify(first));
   assert.equal(first.audit?.ok, true, JSON.stringify(first));
+  assert.equal(first.audit?.frameSliceBudgetMs, 8, JSON.stringify(first));
+  assert(first.audit?.ownerDispatchMaxMs <= 8, JSON.stringify(first));
   assert(first.geometryKernelVersion >= 2, JSON.stringify(first));
   assert.equal(first.renderedAdapterVersion, 1, JSON.stringify(first));
   assert.equal(first.certificatePresent, false, JSON.stringify(first));
@@ -151,6 +159,7 @@ try {
   assert(repeated.completedGeneration >= repeated.requestedGeneration, JSON.stringify(repeated));
   assert.equal(repeated.error, "", JSON.stringify(repeated));
   assert(repeated.maximumLabelDistance <= repeated.labelDistanceLimit + 0.5, JSON.stringify(repeated));
+  assert(repeated.ownerDispatchMaxMs <= 8, JSON.stringify(repeated));
   assert.deepEqual(browserErrors, [], browserErrors.join("\n"));
 
   console.log(JSON.stringify({ initialLatencyMs, burstLatencyMs, requested, first, repeated }));

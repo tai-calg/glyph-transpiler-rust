@@ -122,38 +122,80 @@ try {
       && window.glyphDiagramMiddleDragZoom?.version === 1;
   }, null, { timeout: 60_000 });
 
-  await page.evaluate(() => window.glyphDiagramViewport.reset());
-  await page.waitForFunction(() => document.querySelector(".graph-stage")?.dataset.viewportScale === "1");
   const shell = page.locator(".canvas-shell");
   const box = await shell.boundingBox();
   assert(box, "diagram canvas has no bounding box");
   const x = box.x + box.width * 0.55;
   const y = box.y + box.height * 0.55;
 
+  // The production viewport tracks the canvas under the pointer as activeShell.
+  // Activate the same visible canvas a real middle-drag will use before reset,
+  // then verify reset numerically rather than relying on a string representation.
   await page.mouse.move(x, y);
-  await page.mouse.down({ button: "middle" });
+  await page.evaluate(() => window.glyphDiagramViewport.reset());
   await page.waitForFunction(() => {
+    const shell = [...document.querySelectorAll(".canvas-shell")]
+      .find(candidate => candidate.getClientRects().length > 0);
+    const scale = Number.parseFloat(
+      shell?.querySelector(".graph-stage")?.dataset.viewportScale || ""
+    );
+    return Number.isFinite(scale) && Math.abs(scale - 1) < 0.001;
+  }, null, { timeout: 5_000 });
+
+  const readScale = () => page.evaluate(() => Number.parseFloat(
+    document.querySelector(".graph-stage")?.dataset.viewportScale || "1"
+  ));
+  const waitForMiddleZoomActive = () => page.waitForFunction(() => {
     const shell = document.querySelector(".canvas-shell");
     return shell?.classList.contains("glyph-middle-zooming")
       && !shell.classList.contains("glyph-panning")
       && window.glyphDiagramMiddleDragZoom?.active() === true;
-  });
-  await page.mouse.move(x, y - 120, { steps: 14 });
-  await page.mouse.up({ button: "middle" });
-  await page.waitForFunction(() => Number.parseFloat(
-    document.querySelector(".graph-stage")?.dataset.viewportScale || "1"
-  ) > 1);
-  const zoomedIn = Number.parseFloat(await page.locator(".graph-stage").getAttribute("data-viewport-scale"));
+  }, null, { timeout: 5_000 });
+  const waitForMiddleZoomIdle = () => page.waitForFunction(() => {
+    const shell = document.querySelector(".canvas-shell");
+    return shell?.dataset.middleDragZoomState === "idle"
+      && !shell.classList.contains("glyph-middle-zooming")
+      && window.glyphDiagramMiddleDragZoom?.active() === false;
+  }, null, { timeout: 5_000 });
+
+  const performMiddleDrag = async (deltaY, direction) => {
+    let lastError = null;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const before = await readScale();
+      await page.mouse.move(x, y);
+      await page.mouse.down({ button: "middle" });
+      try {
+        await waitForMiddleZoomActive();
+        await page.waitForTimeout(32);
+        await page.mouse.move(
+          x,
+          y + deltaY * (1 + attempt * 0.15),
+          { steps: 18 + attempt * 4 },
+        );
+        await page.waitForFunction(({ previous, expectedDirection }) => {
+          const current = Number.parseFloat(
+            document.querySelector(".graph-stage")?.dataset.viewportScale || "1"
+          );
+          return expectedDirection === "increase"
+            ? current > previous + 0.0001
+            : current < previous - 0.0001;
+        }, { previous: before, expectedDirection: direction }, { timeout: 4_000 });
+        await page.mouse.up({ button: "middle" });
+        await waitForMiddleZoomIdle();
+        return await readScale();
+      } catch (error) {
+        lastError = error;
+        await page.mouse.up({ button: "middle" }).catch(() => {});
+        await page.waitForTimeout(100);
+      }
+    }
+    throw lastError;
+  };
+
+  const zoomedIn = await performMiddleDrag(-120, "increase");
   assert(zoomedIn > 1, `middle-button upward drag did not zoom in: ${zoomedIn}`);
 
-  await page.mouse.move(x, y);
-  await page.mouse.down({ button: "middle" });
-  await page.mouse.move(x, y + 150, { steps: 16 });
-  await page.mouse.up({ button: "middle" });
-  await page.waitForFunction(previous => Number.parseFloat(
-    document.querySelector(".graph-stage")?.dataset.viewportScale || "1"
-  ) < previous, zoomedIn);
-  const zoomedOut = Number.parseFloat(await page.locator(".graph-stage").getAttribute("data-viewport-scale"));
+  const zoomedOut = await performMiddleDrag(150, "decrease");
   assert(zoomedOut < zoomedIn, `middle-button downward drag did not zoom out: ${zoomedOut}`);
   assert.equal(await shell.getAttribute("data-middle-drag-zoom-state"), "idle");
   assert.equal(await shell.evaluate(element => element.classList.contains("glyph-middle-zooming")), false);

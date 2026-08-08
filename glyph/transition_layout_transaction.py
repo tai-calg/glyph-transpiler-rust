@@ -21,9 +21,11 @@ _SCRIPT = r"""
 (()=>{
 const MARKER="glyph-transition-layout-transaction-v1";
 const TRANSACTION_DEADLINE_MS=48;
+const FRAME_SLICE_BUDGET_MS=8;
 const MAX_FRAME_BUDGET=2;
 const MAX_RETRIES=0;
 let generation=0,completedGeneration=0,destroyed=false,timer=0,lastPromise=Promise.resolve({ok:true,skipped:true}),waiters=[];
+let maxOwnerDispatchMs=0;
 const activeTab=()=>document.querySelector(".tab.active")?.dataset.tab||"state";
 const stageOf=()=>document.querySelector(".state-node")?.closest(".graph-stage")||null;
 
@@ -42,6 +44,14 @@ function clearFailure(stage){
   delete stage.dataset.transitionLayoutFailureCode;
   delete stage.dataset.transitionLayoutFailureDetails;
 }
+function recordOwnerDispatch(stage,duration){
+  maxOwnerDispatchMs=Math.max(maxOwnerDispatchMs,duration);
+  if(!stage)return;
+  stage.dataset.transitionLayoutFrameSliceBudgetMs=String(FRAME_SLICE_BUDGET_MS);
+  stage.dataset.transitionLayoutOwnerDispatchMs=duration.toFixed(2);
+  stage.dataset.transitionLayoutOwnerDispatchMaxMs=maxOwnerDispatchMs.toFixed(2);
+  stage.dataset.transitionLayoutFrameSliceBudgetExceeded=duration>FRAME_SLICE_BUDGET_MS?"true":"false";
+}
 function markReady(stage,token,reason,degraded=false){
   clearFailure(stage);
   stage.dataset.transitionLayoutState="ready";
@@ -54,6 +64,7 @@ function markReady(stage,token,reason,degraded=false){
   stage.dataset.transitionLayoutMode="base";
   stage.dataset.transitionDenseCanvas="disabled";
   stage.dataset.transitionLayoutBudgetMs=String(TRANSACTION_DEADLINE_MS);
+  stage.dataset.transitionLayoutFrameSliceBudgetMs=String(FRAME_SLICE_BUDGET_MS);
   stage.dataset.transitionLayoutBudgetExceeded=degraded?"true":"false";
   stage.setAttribute("data-transition-layout-ready","true");
   stage.setAttribute("data-transition-publication-ready","true");
@@ -73,6 +84,21 @@ function nextFrame(deadline){
     requestAnimationFrame(finish);
   });
 }
+function ownersReady(stage){
+  const workspaceReady=!window.glyphStateDiagramWorkspace
+    ||(stage.dataset.stateDiagramWorkspaceGeometryReady==="true"
+      &&stage.dataset.stateDiagramWorkspaceViewportReady==="true");
+  const clustersReady=!window.glyphTransitionIoClusters
+    ||stage.dataset.transitionIoClustersReady==="true";
+  return workspaceReady&&clustersReady;
+}
+function requestOwners(stage,reason){
+  const started=performance.now();
+  window.glyphStateDiagramWorkspace?.schedule?.(`transaction:${reason}`);
+  const duration=performance.now()-started;
+  recordOwnerDispatch(stage,duration);
+  return duration;
+}
 async function run(token,reason){
   const started=performance.now();
   if(destroyed||token!==generation)return{ok:false,cancelled:true,generation:token};
@@ -82,25 +108,19 @@ async function run(token,reason){
     settleWaiters(result);
     return result;
   }
+  let stage=stageOf();
+  requestOwners(stage,reason);
   const deadline=started+TRANSACTION_DEADLINE_MS;
   for(let frame=0;frame<=MAX_FRAME_BUDGET;frame+=1){
     if(destroyed||token!==generation)return{ok:false,cancelled:true,generation:token};
-    const stage=stageOf();
-    if(stage&&stage.querySelector(".state-node")){
-      window.glyphStateDiagramWorkspace?.prepare?.(stage);
-      const viewportReady=!window.glyphStateDiagramWorkspace
-        || stage.dataset.stateDiagramWorkspaceViewportReady==="true";
-      if(viewportReady){
-        window.glyphTransitionIoClusters?.reroute?.(stage);
-        return markReady(stage,token,reason,false);
-      }
+    stage=stageOf();
+    if(stage&&stage.querySelector(".state-node")&&ownersReady(stage)){
+      return markReady(stage,token,reason,false);
     }
     if(frame<MAX_FRAME_BUDGET&&performance.now()<deadline)await nextFrame(deadline);
   }
-  const stage=stageOf();
+  stage=stageOf();
   if(stage){
-    window.glyphStateDiagramWorkspace?.prepare?.(stage);
-    window.glyphTransitionIoClusters?.reroute?.(stage);
     return markReady(stage,token,reason,true);
   }
   completedGeneration=Math.max(completedGeneration,token);
@@ -146,6 +166,9 @@ function audit(){
     geometryOwner:"base-renderer",
     nodeCount:stage?.querySelectorAll(".state-node").length||0,
     transitionCount:stage?.querySelectorAll("path.state-transition-path").length||0,
+    deadlineMs:TRANSACTION_DEADLINE_MS,
+    frameSliceBudgetMs:FRAME_SLICE_BUDGET_MS,
+    ownerDispatchMaxMs:maxOwnerDispatchMs,
   };
 }
 
@@ -175,9 +198,10 @@ const control=window.glyphTransitionLegacyControl;
 if(control)control.ownsScheduling=true;
 window.glyphTransitionLayoutTransaction={
   marker:MARKER,
-  version:8,
+  version:9,
   profile:"ordinary",
   budgetMs:TRANSACTION_DEADLINE_MS,
+  frameSliceBudgetMs:FRAME_SLICE_BUDGET_MS,
   maxFrames:MAX_FRAME_BUDGET,
   maxRetries:MAX_RETRIES,
   schedule,

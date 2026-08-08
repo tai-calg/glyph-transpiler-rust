@@ -435,7 +435,7 @@ def _parse_glyph04_compilation_model(
     )
 
 
-def parse_compilation_model(
+def _legacy_parse_compilation_model(
     source: str,
     source_name: str = "input.glyph",
 ) -> CompilationModel:
@@ -448,7 +448,7 @@ def parse_compilation_model(
     return _parse_legacy_compilation_model(source_name, preprocess)
 
 
-def parse_artifact_model(
+def _legacy_parse_artifact_model(
     source: str,
 ) -> tuple[
     Program,
@@ -456,11 +456,11 @@ def parse_artifact_model(
     tuple[SpecDecl, ...],
     tuple[MachineDecl, ...],
 ]:
-    model = parse_compilation_model(source)
+    model = _legacy_parse_compilation_model(source)
     return model.program, model.inline_effects, model.specs, model.machines
 
 
-def build_rust_artifacts(model: CompilationModel) -> RustArtifacts:
+def _legacy_build_rust_artifacts(model: CompilationModel) -> RustArtifacts:
     logic = OpaqueAwareRustGenerator(
         model.program,
         model.opaques,
@@ -480,16 +480,16 @@ def build_rust_artifacts(model: CompilationModel) -> RustArtifacts:
     )
 
 
-def compile_artifacts(source: str) -> RustArtifacts:
-    return build_rust_artifacts(parse_compilation_model(source))
+def _legacy_compile_artifacts(source: str) -> RustArtifacts:
+    return _legacy_build_rust_artifacts(_legacy_parse_compilation_model(source))
 
 
-def compile_artifact_files(
+def _legacy_compile_artifact_files(
     input_path: str | Path,
     logic_output_path: str | Path,
     host_output_path: str | Path,
 ) -> None:
-    artifacts = compile_artifacts(Path(input_path).read_text(encoding="utf-8"))
+    artifacts = _legacy_compile_artifacts(Path(input_path).read_text(encoding="utf-8"))
 
     logic_output = Path(logic_output_path)
     logic_output.parent.mkdir(parents=True, exist_ok=True)
@@ -498,3 +498,34 @@ def compile_artifact_files(
     host_output = Path(host_output_path)
     host_output.parent.mkdir(parents=True, exist_ok=True)
     host_output.write_text(artifacts.host, encoding="utf-8")
+
+
+# Machine Assembly canonical entrypoints (owned by glyph.artifacts)
+def parse_compilation_model(source: str, source_name: str = "input.glyph"):
+    from .assembly_frontend import parse_compilation_model as implementation
+
+    return implementation(source, source_name)
+
+
+def build_rust_artifacts(model):
+    from .assembly_frontend import build_rust_artifacts as implementation
+
+    return implementation(model)
+
+
+def compile_artifacts(source: str):
+    from .assembly_frontend import compile_artifacts as implementation
+
+    return implementation(source)
+
+
+def compile_artifact_files(input_path, logic_output_path, host_output_path) -> None:
+    from .assembly_frontend import compile_artifact_files as implementation
+
+    implementation(input_path, logic_output_path, host_output_path)
+
+
+def parse_artifact_model(source: str):
+    from .assembly_frontend import parse_artifact_model as implementation
+
+    return implementation(source)

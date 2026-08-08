@@ -110,7 +110,7 @@ function clearancePenalty(record,left,top){
   return[...record.stage.querySelectorAll(".state-node")].reduce((total,other)=>{
     if(other===record.node)return total;
     const otherLeft=other.offsetLeft,otherTop=other.offsetTop;
-    const otherRight=otherLeft+other.offsetWidth,otherBottom=otherTop+other.offsetHeight;
+    const otherRight=otherLeft+other.offsetWidth,otherBottom=other.offsetTop+other.offsetHeight;
     const horizontalGap=Math.max(otherLeft-right,left-otherRight,0);
     const verticalGap=Math.max(otherTop-bottom,top-otherBottom,0);
     if(horizontalGap>=NODE_CLEARANCE||verticalGap>=NODE_CLEARANCE)return total;
@@ -171,9 +171,24 @@ async function persist(record){
   record.stage.dataset.transitionNodePositions=`saved:${Object.keys(record.positions).length}`;
   window.glyphTransitionLayoutTransaction?.schedule("manual-node-persisted",0);
 }
+function nextFrame(){return new Promise(resolve=>requestAnimationFrame(resolve))}
+async function waitForWorkspaceOrigin(stage,token){
+  if(!workspace())return true;
+  for(let attempt=0;attempt<24;attempt+=1){
+    if(token!==restoreGeneration||!stage?.isConnected||destroyed)return false;
+    if(stage.dataset.stateDiagramWorkspaceOriginReady==="true")return true;
+    await nextFrame();
+  }
+  return stage?.dataset.stateDiagramWorkspaceOriginReady==="true";
+}
 async function restore(stage,token){
   if(!stage||!stage.isConnected||destroyed)return false;
   const data=await diagramState();
+  if(token!==restoreGeneration||!stage.isConnected||destroyed)return false;
+  if(!(await waitForWorkspaceOrigin(stage,token))){
+    if(token===restoreGeneration&&stage.isConnected&&!destroyed)scheduleRestore(stage,0);
+    return false;
+  }
   if(token!==restoreGeneration||!stage.isConnected||destroyed)return false;
   const key=canonicalKey(data);
   let value=parse(key),source=key;

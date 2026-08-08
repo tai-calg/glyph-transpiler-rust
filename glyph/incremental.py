@@ -7,6 +7,7 @@ import time
 from typing import Callable
 
 from .artifacts import CompilationModel, RustArtifacts
+from .assembly_frontend import require_rust_codegen_supported
 from .compilation import CompilationPipeline
 from .mermaid import DiagramBundle
 
@@ -27,8 +28,19 @@ class IncrementalResult:
     written: tuple[Path, ...]
 
 
+_INCREMENTAL_CACHE_VERSION = "glyph-incremental-cache-v2"
+
+
 def _digest(source: str) -> str:
     return hashlib.sha256(source.encode("utf-8")).hexdigest()
+
+
+def _cache_key(
+    digest: str,
+    source_name: str,
+    source_href: str | None,
+) -> tuple[str, str, str, str | None]:
+    return (_INCREMENTAL_CACHE_VERSION, digest, source_name, source_href)
 
 
 def _write_if_changed(path: Path, content: str) -> bool:
@@ -46,8 +58,10 @@ class IncrementalCompiler:
 
     def __init__(self, pipeline: CompilationPipeline | None = None) -> None:
         self.pipeline = pipeline or CompilationPipeline()
-        self._cache: dict[str, CompilationSnapshot] = {}
-        self._last_digest: str | None = None
+        self._cache: dict[
+            tuple[str, str, str, str | None], CompilationSnapshot
+        ] = {}
+        self._last_key: tuple[str, str, str, str | None] | None = None
         self._last_snapshot: CompilationSnapshot | None = None
 
     @property
@@ -61,7 +75,8 @@ class IncrementalCompiler:
         source_href: str | None = None,
     ) -> IncrementalResult:
         digest = _digest(source)
-        cached = self._cache.get(digest)
+        key = _cache_key(digest, source_name, source_href)
+        cached = self._cache.get(key)
         if cached is None:
             outputs = self.pipeline.compile_text(source, source_name, source_href)
             cached = CompilationSnapshot(
@@ -71,9 +86,9 @@ class IncrementalCompiler:
                 outputs.design_json,
                 outputs.model,
             )
-            self._cache[digest] = cached
-        changed = digest != self._last_digest
-        self._last_digest = digest
+            self._cache[key] = cached
+        changed = key != self._last_key
+        self._last_key = key
         self._last_snapshot = cached
         return IncrementalResult(changed, cached, ())
 
@@ -96,6 +111,12 @@ class IncrementalCompiler:
                 os.sep, "/"
             )
         result = self.compile_text(source, str(input_file), source_href)
+
+        # Checking, diagrams and design JSON remain available. A request to write
+        # Rust artifacts must fail before any output is modified.
+        if logic_output is not None or host_output is not None:
+            require_rust_codegen_supported(result.snapshot.model)
+
         written: list[Path] = []
         if logic_output is not None:
             path = Path(logic_output)

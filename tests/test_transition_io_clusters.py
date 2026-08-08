@@ -49,6 +49,21 @@ class TransitionIoClusterTests(unittest.TestCase):
         self.assertNotIn("writeSaved(data,saved)", html)
         self.assertNotIn("select(null)", html)
 
+    def test_node_drag_defers_full_cluster_routing_until_release(self) -> None:
+        html = enhance_transition_io_clusters_html(DIAGRAM_HTML)
+        self.assertIn('nodeDragRouting:"deferred-full"', html)
+        self.assertIn(
+            'document.addEventListener("pointerup",event=>{\n'
+            '  if(event.target?.closest?.(".state-node"))schedule(null,"node-drag-end");',
+            html,
+        )
+        self.assertNotIn("rerouteRaf", html)
+        self.assertNotIn(
+            'document.addEventListener("pointermove",event=>{\n'
+            '  if(!event.target?.closest?.(".state-node"))return;',
+            html,
+        )
+
     def test_prepared_diagram_app_contains_transition_io_layer(self) -> None:
         prepare_diagram_app()
         self.assertIn(

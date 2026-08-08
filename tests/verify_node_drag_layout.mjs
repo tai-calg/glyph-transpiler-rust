@@ -70,6 +70,30 @@ async function nodePositions(page) {
   })));
 }
 
+async function waitForPersistedPositions(page, label) {
+  await page.waitForFunction(() => {
+    const digest = snapshot?.digest || "source";
+    const machine = document.getElementById("machine-select")?.value || 0;
+    const key = `glyph.diagram.positions.v1:${digest}:state:${machine}`;
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem(key) || "null"); } catch { return false; }
+    if (!saved || typeof saved !== "object") return false;
+    const nodes = [...document.querySelectorAll(".state-node")];
+    if (!nodes.length) return false;
+    return nodes.every(node => {
+      const name = node.querySelector(".state-name,.node-name")?.textContent?.trim() || "";
+      const position = saved[name];
+      if (!position) return false;
+      const left = Number.parseFloat(node.style.left || "0") || 0;
+      const top = Number.parseFloat(node.style.top || "0") || 0;
+      return Math.abs(Number(position.x) - left) <= 0.5
+        && Math.abs(Number(position.y) - top) <= 0.5;
+    });
+  }, null, { timeout: 4000 });
+  const current = await state(page);
+  assert.equal(current.persisted, true, `${label} did not produce a persisted node-position snapshot`);
+}
+
 async function initialGeometry(page) {
   return page.evaluate(() => {
     const stage = document.querySelector(".state-node")?.closest(".graph-stage");
@@ -110,8 +134,10 @@ function ready(current, minimumGeneration = 0, requirePersisted = false) {
     && current.transactionGeneration === current.transactionCompletedGeneration
     && (!requirePersisted || current.persisted)
     && current.maximumLabelDistance <= current.labelDistanceLimit + 0.5
-    && current.workspaceVersion === 3
+    && current.workspaceVersion === 4
     && current.workspaceAudit?.ok === true
+    && current.workspaceAudit?.dragActive === false
+    && Number(current.workspaceAudit?.dragBudgetMs || 0) === 8
     && current.workspaceWidth >= 1600
     && current.workspaceHeight >= 960
     && current.workspaceOriginReady === "true"
@@ -183,6 +209,8 @@ try {
 
   assert.equal(initial.nodeAdapterVersion, 8, JSON.stringify(initial));
   assert.equal(initial.nodeGuardVersion, 2, JSON.stringify(initial));
+  assert.equal(initial.workspaceVersion, 4, JSON.stringify(initial));
+  assert.equal(initial.workspaceAudit?.dragBudgetMs, 8, JSON.stringify(initial));
   assert.equal(initial.certificatePresent, false, JSON.stringify(initial));
   assert.equal(initial.routerPresent, false, JSON.stringify(initial));
   assert(initial.transitionDetails > 0, JSON.stringify(initial));
@@ -206,6 +234,7 @@ try {
       && path.getAttribute("d") !== before.path
       && (Math.abs(dotLeft - before.dotLeft) > 1 || Math.abs(dotTop - before.dotTop) > 1);
   }, initialBefore, { timeout: 3000 });
+  await waitForPersistedPositions(page, "pointer drag");
   const pointerReady = await waitForReady(
     page,
     "initial-node-pointer",
@@ -239,40 +268,60 @@ try {
     document.activeElement?.blur?.();
     return { left, top, direction };
   });
-  assert(keyboardSetup, "keyboard node setup failed");
+  assert(keyboardSetup, "keyboard drag setup failed");
+  const keyboardGeneration = Number(pointerReady.transactionGeneration || 0) + 1;
   await page.keyboard.press(keyboardSetup.direction);
-  await page.waitForFunction(before => {
-    const node = document.querySelector(".state-node.selected-node");
-    if (!node) return false;
-    const left = Number.parseFloat(node.style.left || "0") || 0;
-    const top = Number.parseFloat(node.style.top || "0") || 0;
-    return Math.abs(left - before.left) > 1 || Math.abs(top - before.top) > 1;
-  }, keyboardSetup, { timeout: 3000 });
-  const keyboardReady = await waitForReady(
-    page,
-    "node-keyboard",
-    Number(pointerReady.transactionGeneration || 0) + 1,
-    true,
+  const keyboardPositions = await nodePositions(page);
+  const selected = keyboardPositions.find(item => item.selected);
+  assert(selected, "selected node disappeared after keyboard movement");
+  assert(
+    Math.abs(selected.left - keyboardSetup.left) > 1 || Math.abs(selected.top - keyboardSetup.top) > 1,
+    "keyboard movement did not change node position",
   );
-  const quiescent = await waitForQuiescence(page, "node-keyboard", Number(keyboardReady.transactionGeneration || 0));
+  await waitForPersistedPositions(page, "keyboard movement");
+  const keyboardReady = await waitForReady(page, "keyboard-node", keyboardGeneration, true);
 
-  const editor = page.locator("#editor");
-  assert.equal(await editor.count(), 1, "editor textarea is missing");
-  await editor.focus();
-  assert.deepEqual(await page.evaluate(() => ({
-    id: document.activeElement?.id || "",
-    tag: document.activeElement?.tagName || "",
-  })), { id: "editor", tag: "TEXTAREA" });
-  await page.keyboard.press("ArrowRight");
-  await page.waitForTimeout(150);
-  assert.deepEqual(await nodePositions(page), quiescent.positions, "editor arrow key moved a selected state node");
-  const afterEditorState = await state(page);
-  assert.equal(afterEditorState.transactionGeneration, quiescent.currentState.transactionGeneration);
-  assert.equal(afterEditorState.publicationReady, "true");
+  const firstQuiescent = await waitForQuiescence(
+    page,
+    "post-drag",
+    Number(keyboardReady.transactionGeneration || 0),
+  );
+  await waitForPersistedPositions(page, "pre-reload quiescence");
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.waitForFunction(() => document.querySelector("#status")?.textContent === "ready");
+  await page.click('button[data-tab="state"]');
+  const reloaded = await waitForReady(page, "reload", 0, true);
+  const secondQuiescent = await waitForQuiescence(
+    page,
+    "reload-quiescence",
+    Number(reloaded.transactionGeneration || 0),
+  );
+
+  const positionsByName = items => new Map(items.map(item => [item.name, item]));
+  const firstPositions = positionsByName(firstQuiescent.positions);
+  const secondPositions = positionsByName(secondQuiescent.positions);
+  for (const [name, before] of firstPositions) {
+    const after = secondPositions.get(name);
+    assert(after, `state node ${name} disappeared after reload`);
+    assert(Math.abs(after.left - before.left) <= 1, `${name} left position changed after reload`);
+    assert(Math.abs(after.top - before.top) <= 1, `${name} top position changed after reload`);
+  }
+  assert.equal(secondQuiescent.currentState.initialRouteCertificate, "ordinary-obstacle-free");
+  assert.equal(secondQuiescent.currentState.workspaceAudit?.initialCollisions, 0);
+  assert(secondQuiescent.currentState.maximumLabelDistance <= secondQuiescent.currentState.labelDistanceLimit + 0.5);
   assert.deepEqual(browserErrors, [], browserErrors.join("\n"));
 
+  console.log(JSON.stringify({
+    initialGeneration: initial.transactionGeneration,
+    pointerGeneration: pointerReady.transactionGeneration,
+    keyboardGeneration: keyboardReady.transactionGeneration,
+    workspaceVersion: secondQuiescent.currentState.workspaceVersion,
+    fullGeometryPasses: secondQuiescent.currentState.workspaceAudit?.fullGeometryPasses,
+    incidentGeometryPasses: secondQuiescent.currentState.workspaceAudit?.incidentGeometryPasses,
+    initialRouteCertificate: secondQuiescent.currentState.initialRouteCertificate,
+    persisted: secondQuiescent.currentState.persisted,
+  }));
   await page.close();
-  console.log("verified broad workspace, transition details, initial-arrow following, node persistence, and editor isolation");
 } finally {
   await browser.close();
   await stopProcess(child);

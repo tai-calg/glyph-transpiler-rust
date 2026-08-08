@@ -26,7 +26,7 @@ def test_workspace_adapts_density_and_routes_initial_marker_around_obstacles() -
         "window.glyphTransitionIoClusters?.reroute?.(stage)",
         "stateDiagramWorkspaceOriginReady",
         "stateDiagramWorkspaceViewportReady",
-        "version:3",
+        "version:4",
     ):
         assert required in html
 
@@ -43,6 +43,41 @@ def test_workspace_adapts_density_and_routes_initial_marker_around_obstacles() -
         assert forbidden not in html
 
 
+def test_node_drag_updates_only_incident_geometry_until_pointer_release() -> None:
+    html = enhance_state_diagram_workspace_html(
+        '<html><head></head><body><div id="view"></div></body></html>'
+    )
+
+    for required in (
+        "DRAG_FRAME_BUDGET_MS=8",
+        "const incidentIndexCache=new WeakMap()",
+        "function incidentIndexes(stage,machine)",
+        "function updateIncidentTransitionGeometry(stage,machine,node)",
+        "const movedName=stateName(node),indexes=incidentIndexes(stage,machine).get(movedName)||[]",
+        "function fastInitialPath(dot,target)",
+        'if(movedName===String(machine.initial_state||""))',
+        "stateDiagramWorkspaceIncidentGeometryPasses",
+        "stateDiagramWorkspaceFullGeometryPasses",
+        "stateDiagramWorkspaceDragBudgetExceeded",
+        "dragActive=false,deferredFullReason",
+        "if(dragActive){deferredFullReason=reason;return}",
+        "function beginNodeDrag(event)",
+        "function finishNodeDrag(event,cancelled=false)",
+        'document.addEventListener("pointerdown",beginNodeDrag,true)',
+        'document.addEventListener("pointermove",event=>{const node=event.target?.closest?.(".state-node");if(node)scheduleIncident(node)},true)',
+        'document.addEventListener("pointerup",event=>finishNodeDrag(event,false),true)',
+        'setTimeout(()=>schedule(reason),cancelled?0:20)',
+        "updateNodeGeometry:updateIncidentTransitionGeometry",
+        "dragActive,dragMaxDurationMs",
+    ):
+        assert required in html
+
+    assert '.observe(view,{childList:true,subtree:true});' in html
+    assert 'attributeFilter:["style"]' not in html
+    assert "attributes:true" not in html
+    assert "glyph-transition-layout-transaction-ready" not in html
+
+
 def test_workspace_is_installed_in_the_normal_application() -> None:
     prepare_diagram_app()
 
@@ -52,7 +87,8 @@ def test_workspace_is_installed_in_the_normal_application() -> None:
     viewport = html.index("glyph-diagram-canvas-viewport-v1-script")
     workspace = html.index("glyph-state-diagram-workspace-v2-script")
     node_adapter = html.index("glyph-transition-node-position-adapter-v1-script")
+    clusters = html.index("glyph-transition-io-clusters-v1-script")
 
-    assert viewport < workspace < node_adapter
+    assert viewport < workspace < clusters < node_adapter
     assert "glyph-initial-transition-routing-v2-script" not in html
     assert "glyph-state-diagram-workspace-v2-style" in html
