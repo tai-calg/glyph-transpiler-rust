@@ -141,6 +141,20 @@ async function persist(record){
   window.glyphTransitionLayoutTransaction?.schedule("manual-label-persisted",0);
 }
 async function resetCluster(cluster){const data=await diagramState(),key=storageKey(data),saved=parseStored(key),id=cluster.dataset.transitionId||"";if(id in saved){delete saved[id];writeStored(key,saved)}cluster.dataset.manualIo="false";delete cluster.dataset.manualIoRejected;delete cluster.dataset.manualIoAdjusted;cluster.dataset.manualIoGestureState="reset";window.glyphTransitionLayoutTransaction?.schedule("manual-label-reset",0)}
+async function keyboardNudge(cluster,dx,dy){
+  if(!cluster?.isConnected||active)return false;
+  const stage=cluster.closest(".graph-stage");
+  if(!stage||stage.dataset.transitionLayoutState!=="ready")return false;
+  select(cluster);
+  const left=num(cluster.style.left),top=num(cluster.style.top),anchor={x:num(cluster.dataset.anchorX),y:num(cluster.dataset.anchorY)};
+  const point=feasible({x:left+num(dx),y:top+num(dy)},anchor,cluster,stage);
+  if(!point)return false;
+  const record={cluster,stage,id:cluster.dataset.transitionId||"",gestureToken:++gestureSequence,left,top,anchor,anchorFraction:clamp(num(cluster.dataset.anchorFraction)||.5,.18,.82),dragged:true,publicationInvalidated:Boolean(publicationGuard()?.invalidate?.(stage,"manual-label-keyboard")),finalPoint:point,finalOffset:{x:point.x-anchor.x,y:point.y-anchor.y}};
+  cluster.style.left=`${point.x}px`;cluster.style.top=`${point.y}px`;cluster.dataset.ioDistance=String(Math.hypot(point.x-anchor.x,point.y-anchor.y));
+  markGesture(record,"keyboard");
+  try{await persist(record);return liveCluster(record)?.dataset.manualIoGestureState==="persisted"}
+  catch(error){restoreRecord(record);markGesture(record,"failed",String(error?.message||error));publicationGuard()?.schedule?.("manual-label-keyboard-failed");report(error,"manual transition keyboard position persistence failed");return false}
+}
 function finish(event){
   if(!active||active.pointerId!==event.pointerId)return;
   event.preventDefault();event.stopImmediatePropagation();
@@ -194,14 +208,14 @@ document.addEventListener("lostpointercapture",event=>{
 document.addEventListener("dblclick",event=>{const cluster=event.target?.closest?.(".transition-io-cluster");if(cluster)resetCluster(cluster).catch(error=>report(error,"manual transition position reset failed"))},true);
 document.addEventListener("change",event=>{if(event.target?.id==="machine-select"){selected=null;invalidateState()}});
 for(const eventName of["pagehide","beforeunload"]){window.addEventListener(eventName,()=>{destroyed=true;active=null;selected=null;invalidateState()},{once:true})}
-window.glyphTransitionLayoutInteractionAdapter={marker:MARKER,version:4,validateManualPlacement:manualPlacementViolation,nearestCertifiablePoint};
+window.glyphTransitionLayoutInteractionAdapter={marker:MARKER,version:5,validateManualPlacement:manualPlacementViolation,nearestCertifiablePoint,keyboardNudge,resetCluster};
 })();
 </script>
 """
 
 
 def enhance_transition_layout_interaction_adapter_html(html: str) -> str:
-    """Own label gestures and persist their arrow-relative final point."""
+    """Own pointer and keyboard label gestures and persist their arrow-relative final point."""
 
     if _MARKER in html:
         return html
