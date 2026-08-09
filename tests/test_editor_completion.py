@@ -79,6 +79,8 @@ class EditorCompletionTests(unittest.TestCase):
     def test_context_classifier_is_bounded_and_glyph_specific(self) -> None:
         self.assertIn("MAX_LINE_CONTEXT=2048", CONTEXT_SCRIPT)
         self.assertIn("MAX_SCOPE_CONTEXT=4096", CONTEXT_SCRIPT)
+        self.assertIn('chunkStart=start+firstNewline+1', CONTEXT_SCRIPT)
+        self.assertIn('if(trimmed.startsWith("#"))continue', CONTEXT_SCRIPT)
         self.assertIn('id:"resource-state"', CONTEXT_SCRIPT)
         self.assertIn('id:"system-entry"', CONTEXT_SCRIPT)
         self.assertIn('id:"system-source"', CONTEXT_SCRIPT)
