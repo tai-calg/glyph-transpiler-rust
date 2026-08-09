@@ -58,8 +58,8 @@ popup.id="glyph-completion-popup";popup.className="glyph-completion-popup";popup
 popup.setAttribute("role","listbox");popup.setAttribute("aria-label","Glyph completion");document.body.appendChild(popup);
 const measure=document.createElement("span");measure.className="glyph-completion-measure";measure.setAttribute("aria-hidden","true");document.body.appendChild(measure);
 editor.setAttribute("aria-autocomplete","list");editor.setAttribute("aria-controls",popup.id);editor.setAttribute("aria-expanded","false");
-let candidates=[],selected=0,frame=0,lastContext=null,lastClassification=null,explicit=false;
-const metrics={queries:0,opens:0,accepts:0,staleAcceptRechecks:0,strictStaleAccepts:0,contextFilteredQueries:0};
+let candidates=[],selected=0,frame=0,lastContext=null,lastClassification=null,explicit=false,pendingAcceptance=null;
+const metrics={queries:0,opens:0,accepts:0,staleAcceptRechecks:0,strictStaleAccepts:0,strictStaleDeferrals:0,contextFilteredQueries:0};
 const WORD=/[A-Za-z0-9_]/;
 const IDENTIFIER=/^[A-Za-z_][A-Za-z0-9_]*$/;
 
@@ -194,6 +194,22 @@ function recordMatchesClassification(row,classification){
   if(classification?.exactText&&row.text!==classification.exactText)return false;
   return true;
 }
+function applyCandidate(text,context){
+  if(!inCodeOccurrence(context.source,text,context.left,context.right))return false;
+  documentRuntime.replaceRange(context.left,context.right,text);metrics.accepts+=1;close();editor.focus();return true;
+}
+function resumePendingAcceptance(){
+  const pending=pendingAcceptance;if(!pending)return false;
+  if(documentRuntime.revision()!==pending.revision){pendingAcceptance=null;return false}
+  const snapshot=lexicalIndex.snapshot();
+  if(!snapshot||Number(snapshot.revision)!==pending.revision)return false;
+  const context=contextAtCaret();
+  if(!context||context.caret!==pending.caret||context.left!==pending.left||context.right!==pending.right||!pending.text.startsWith(context.prefix)){pendingAcceptance=null;return false}
+  const classification=contextService.classify(context);
+  if(classification.id!==pending.classificationId||!recordMatchesClassification(lexicalIndex.record(pending.text),classification)){pendingAcceptance=null;return false}
+  pendingAcceptance=null;
+  return applyCandidate(pending.text,context);
+}
 function accept(){
   const candidate=candidates[selected];if(!candidate){close();return false}
   const context=contextAtCaret();if(!context||!candidate.text.startsWith(context.prefix)){close();return false}
@@ -203,37 +219,54 @@ function accept(){
   if(candidate.origin==="document"){
     if(classification.strict){
       const snapshot=lexicalIndex.snapshot();
-      if(snapshot&&Number(snapshot.revision)===documentRuntime.revision()){
-        if(!recordMatchesClassification(lexicalIndex.record(candidate.text),classification)){close();return false}
-      }else metrics.strictStaleAccepts+=1;
+      if(!snapshot||Number(snapshot.revision)!==documentRuntime.revision()){
+        pendingAcceptance={
+          text:candidate.text,
+          revision:documentRuntime.revision(),
+          classificationId:classification.id,
+          caret:context.caret,
+          left:context.left,
+          right:context.right,
+        };
+        metrics.strictStaleDeferrals+=1;
+        close();
+        lexicalIndex.refresh();
+        return true;
+      }
+      if(!recordMatchesClassification(lexicalIndex.record(candidate.text),classification)){close();return false}
     }
-    if(!inCodeOccurrence(context.source,candidate.text,context.left,context.right)){close();return false}
+    return applyCandidate(candidate.text,context);
   }
   documentRuntime.replaceRange(context.left,context.right,candidate.text);metrics.accepts+=1;close();editor.focus();return true;
 }
 
 editor.addEventListener("keydown",event=>{
-  if(event.isComposing||documentRuntime.compositionActive()){close();return}
+  if(event.isComposing||documentRuntime.compositionActive()){pendingAcceptance=null;close();return}
   if((event.ctrlKey||event.metaKey)&&event.code==="Space"){event.preventDefault();event.stopPropagation();schedule({force:true,allowEmpty:true});return}
   if(popup.hidden)return;
   if(event.key==="ArrowDown"){event.preventDefault();event.stopPropagation();setSelected(selected+1);return}
   if(event.key==="ArrowUp"){event.preventDefault();event.stopPropagation();setSelected(selected-1);return}
   if(event.key==="Tab"||event.key==="Enter"){event.preventDefault();event.stopPropagation();accept();return}
-  if(event.key==="Escape"){event.preventDefault();event.stopPropagation();close()}
+  if(event.key==="Escape"){event.preventDefault();event.stopPropagation();pendingAcceptance=null;close()}
 });
 editor.addEventListener("input",event=>{if(event.isComposing)return;schedule()});
 for(const eventName of["click","keyup","select"]){editor.addEventListener(eventName,event=>{if(eventName==="keyup"&&["ArrowUp","ArrowDown","Enter","Tab","Escape"].includes(event.key))return;schedule()})}
-editor.addEventListener("compositionstart",close);editor.addEventListener("compositionend",()=>schedule());
+editor.addEventListener("compositionstart",()=>{pendingAcceptance=null;close()});editor.addEventListener("compositionend",()=>schedule());
 editor.addEventListener("scroll",()=>{if(!popup.hidden)requestAnimationFrame(positionPopup)},{passive:true});
-editor.addEventListener("blur",()=>setTimeout(()=>{if(document.activeElement!==editor)close()},0));window.addEventListener("resize",()=>{if(!popup.hidden)positionPopup()});
+editor.addEventListener("blur",()=>{pendingAcceptance=null;setTimeout(()=>{if(document.activeElement!==editor)close()},0)});window.addEventListener("resize",()=>{if(!popup.hidden)positionPopup()});
 document.addEventListener("selectionchange",()=>{if(document.activeElement===editor&&!popup.hidden)schedule({allowEmpty:explicit})});
-document.addEventListener("glyph-editor-source-replaced",close);
-document.addEventListener("glyph-editor-lexical-index-updated",()=>{if(document.activeElement===editor)schedule({allowEmpty:explicit})});
+document.addEventListener("glyph-editor-document-changed",()=>{if(pendingAcceptance&&documentRuntime.revision()!==pendingAcceptance.revision)pendingAcceptance=null});
+document.addEventListener("glyph-editor-source-replaced",()=>{pendingAcceptance=null;close()});
+document.addEventListener("glyph-editor-lexical-index-error",()=>{pendingAcceptance=null});
+document.addEventListener("glyph-editor-lexical-index-updated",event=>{
+  if(pendingAcceptance){if(event.detail?.exact)resumePendingAcceptance();return}
+  if(document.activeElement===editor)schedule({allowEmpty:explicit});
+});
 editor.dataset.completionReady="true";
 window.GlyphEditorCompletion={
   marker:MARKER,version:2,open:()=>schedule({force:true,allowEmpty:true}),close,accept,
   candidates:()=>candidates.map(candidate=>({...candidate,kinds:[...(candidate.kinds||[])],owners:[...(candidate.owners||[])]})),
-  selected:()=>selected,context:()=>lastClassification?{...lastClassification,static:undefined}:null,metrics:()=>({...metrics}),
+  selected:()=>selected,context:()=>lastClassification?{...lastClassification,static:undefined}:null,metrics:()=>({...metrics,pendingAcceptance:Boolean(pendingAcceptance)}),
 };
 })();
 </script>
