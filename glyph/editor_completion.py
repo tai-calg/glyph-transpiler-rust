@@ -211,8 +211,9 @@ function recordMatchesClassification(row,classification){
   return true;
 }
 function insertionText(candidate,classification){
-  if(candidate?.origin==="document"&&classification?.insertPrefix)return`${classification.insertPrefix}${candidate.text}`;
-  return candidate?.text||"";
+  const prefix=candidate?.origin==="document"?(classification?.insertPrefix||""):"";
+  const suffix=classification?.insertSuffix||"";
+  return`${prefix}${candidate?.text||""}${suffix}`;
 }
 function applyCandidate(candidate,context,classification){
   if(!candidate?.text||!inCodeOccurrence(context.source,candidate.text,context.left,context.right))return false;
@@ -257,7 +258,7 @@ function accept(){
     }
     return applyCandidate(candidate,context,classification);
   }
-  documentRuntime.replaceRange(context.left,context.right,candidate.text);return finishAcceptance();
+  documentRuntime.replaceRange(context.left,context.right,insertionText(candidate,classification));return finishAcceptance();
 }
 
 editor.addEventListener("keydown",event=>{
