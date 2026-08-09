@@ -35,6 +35,9 @@ class EditorCompletionTests(unittest.TestCase):
         self.assertIn("globalThis.syncLines=()=>renderLines()", DOCUMENT_SCRIPT)
         self.assertIn('document.addEventListener("glyph-editor-source-replaced"', INDEX_SCRIPT)
         self.assertIn("scheduleFullLineRecount", DOCUMENT_SCRIPT)
+        self.assertIn("scheduleCaretReconcile", DOCUMENT_SCRIPT)
+        self.assertIn("selectionStart===knownCaret?caretLine:null", DOCUMENT_SCRIPT)
+        self.assertNotIn("selectionStart===knownCaret?caretLine:lineAt(selectionStart)", DOCUMENT_SCRIPT)
         self.assertNotIn("split('\\n')", DOCUMENT_SCRIPT)
 
     def test_lexical_index_coalesces_and_rejects_pre_replacement_results(self) -> None:
