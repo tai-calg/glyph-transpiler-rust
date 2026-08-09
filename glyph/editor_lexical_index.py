@@ -4,10 +4,9 @@ from __future__ import annotations
 _MARKER = "glyph-editor-lexical-index-v2"
 
 LEXICAL_WORKER_JS = r"""(()=>{
-const IDENT=/[A-Za-z_][A-Za-z0-9_]*/g;
 const isStart=code=>(code>=65&&code<=90)||(code>=97&&code<=122)||code===95;
 const isPart=code=>isStart(code)||(code>=48&&code<=57);
-const KIND_PRIORITY=["Resource","Type","StateField","State","Field","Function","Source","Sink","Temporal","Machine","System","Macro","Binding","Parameter","Contract","Identifier"];
+const KIND_PRIORITY=["Resource","Type","StateField","State","Field","Function","EntryFunction","Source","Sink","Temporal","Machine","System","Macro","Binding","Parameter","Contract","Identifier"];
 
 function stripComments(source){
   return source.split("\n").map(line=>{
@@ -50,12 +49,8 @@ function topLevelIndex(text,target){
   }
   return-1;
 }
-function typeHead(raw){
-  let text=String(raw||"").trim();
-  text=text.replace(/^(?:own|share|link)\s+/,"").replace(/^&\s*(?:mut\s+)?/,"").trim();
-  const pipe=topLevelIndex(text,"|");
-  if(pipe>=0)text=text.slice(0,pipe).trim();
-  const match=text.match(/^([A-Za-z_][A-Za-z0-9_]*)/);
+function directTypeName(raw){
+  const match=String(raw||"").trim().match(/^([A-Za-z_][A-Za-z0-9_]*)$/);
   return match?match[1]:"";
 }
 function parseNamedFields(body){
@@ -73,7 +68,7 @@ function parseNamedFields(body){
     const type=item.slice(colon+1).trim();
     const names=[...pending,name];
     pending.length=0;
-    for(const fieldName of names){if(/^[A-Za-z_][A-Za-z0-9_]*$/.test(fieldName))fields.push({name:fieldName,type:typeHead(type)})}
+    for(const fieldName of names){if(/^[A-Za-z_][A-Za-z0-9_]*$/.test(fieldName))fields.push({name:fieldName,type:directTypeName(type)})}
   }
   return fields;
 }
@@ -138,7 +133,7 @@ self.onmessage=event=>{
   const machineRecords=[];
 
   let match;
-  const productRe=/^[ \t]*\*\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(/gm;
+  const productRe=/^\*\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(/gm;
   while((match=productRe.exec(codeSource))!==null){
     const name=match[1];mark(name,"Type");
     const open=codeSource.indexOf("(",match.index);
@@ -151,21 +146,21 @@ self.onmessage=event=>{
     productRe.lastIndex=close+1;
   }
 
-  const sumRe=/^[ \t]*\+\s*([A-Za-z_][A-Za-z0-9_]*)\s*=([^\n]*)/gm;
+  const sumRe=/^\+\s*([A-Za-z_][A-Za-z0-9_]*)\s*=([^\n]*)/gm;
   while((match=sumRe.exec(codeSource))!==null){
     const name=match[1];mark(name,"Type");
     const variants=[];
     for(const part of splitTopLevel(match[2],"|")){
-      const variant=part.match(/^([A-Za-z_][A-Za-z0-9_]*)/ )?.[1]||"";
+      const variant=part.match(/^([A-Za-z_][A-Za-z0-9_]*)/)?.[1]||"";
       if(variant){variants.push(variant);mark(variant,"State",name)}
     }
     sumVariants.set(name,variants);
   }
 
-  const aliasRe=/^[ \t]*=\s*([A-Za-z_][A-Za-z0-9_]*)\s*=/gm;
+  const aliasRe=/^=\s*([A-Za-z_][A-Za-z0-9_]*)\s*=/gm;
   while((match=aliasRe.exec(codeSource))!==null)mark(match[1],"Type");
 
-  const resourceRe=/^[ \t]*resource\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s*<[^>\n]*>)?\s*\[/gm;
+  const resourceRe=/^resource\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s*<[^>\n]*>)?\s*\[/gm;
   while((match=resourceRe.exec(codeSource))!==null){
     const name=match[1];mark(name,"Resource");mark(name,"Type");
     const open=codeSource.indexOf("[",match.index);
@@ -179,10 +174,10 @@ self.onmessage=event=>{
   }
 
   for(const [owner,fields] of productFields.entries()){
-    for(const [field,type] of Object.entries(fields)){if(sumVariants.has(type))mark(field,"StateField",owner)}
+    for(const [field,type] of Object.entries(fields)){if(type&&sumVariants.has(type))mark(field,"StateField",owner)}
   }
 
-  const functionRe=/^[ \t]*([>!~?])\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(/gm;
+  const functionRe=/^([>!~?])\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(/gm;
   while((match=functionRe.exec(codeSource))!==null){
     const marker=match[1],name=match[2];
     const kind=marker==="!"?"Sink":marker==="?"?"Temporal":"Function";
@@ -191,26 +186,26 @@ self.onmessage=event=>{
     const open=codeSource.indexOf("(",match.index),close=findMatching(codeSource,open);
     if(close>=0){for(const field of parseNamedFields(codeSource.slice(open+1,close)))mark(field.name,"Parameter",name);functionRe.lastIndex=close+1}
   }
-  const extRe=/^[ \t]*ext\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/gm;
+  const extRe=/^ext\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/gm;
   while((match=extRe.exec(codeSource))!==null){
     const name=match[1];mark(name,"Source");
     const open=codeSource.indexOf("(",match.index),close=findMatching(codeSource,open);
     if(close>=0){for(const field of parseNamedFields(codeSource.slice(open+1,close)))mark(field.name,"Parameter",name);extRe.lastIndex=close+1}
   }
 
-  const rawMacroRe=/^[ \t]*@([A-Z][A-Z0-9_]*)(?=[ \t]|=|$)/gm;
+  const rawMacroRe=/^@([A-Z][A-Z0-9_]*)(?=[ \t]|=|$)/gm;
   while((match=rawMacroRe.exec(codeSource))!==null){if(match[1]!=="A"&&match[1]!=="E")mark(match[1],"Macro")}
-  const astMacroRe=/^[ \t]*@([A-Za-z_][A-Za-z0-9_]*)\s*\(/gm;
+  const astMacroRe=/^@([A-Za-z_][A-Za-z0-9_]*)\s*\(/gm;
   while((match=astMacroRe.exec(codeSource))!==null){if(match[1]!=="A"&&match[1]!=="E")mark(match[1],"Macro")}
   const bindingRe=/^[ \t]+([A-Za-z_][A-Za-z0-9_]*)\s*:=/gm;
   while((match=bindingRe.exec(codeSource))!==null)mark(match[1],"Binding");
-  const systemRe=/^[ \t]*system\s+([A-Za-z_][A-Za-z0-9_]*)\b/gm;
+  const systemRe=/^system\s+([A-Za-z_][A-Za-z0-9_]*)\b/gm;
   while((match=systemRe.exec(codeSource))!==null)mark(match[1],"System");
 
-  const contractRe=/^[ \t]*'[@>!?]?\s*([A-Za-z_][A-Za-z0-9_]*)\b/gm;
+  const contractRe=/^'[@>!?]?\s*([A-Za-z_][A-Za-z0-9_]*)\b/gm;
   while((match=contractRe.exec(codeSource))!==null)mark(match[1],"Contract");
 
-  const machineRe=/^[ \t]*machine\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/gm;
+  const machineRe=/^machine\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/gm;
   while((match=machineRe.exec(codeSource))!==null){
     const name=match[1];mark(name,"Machine");
     const open=codeSource.indexOf("(",match.index),close=findMatching(codeSource,open);
