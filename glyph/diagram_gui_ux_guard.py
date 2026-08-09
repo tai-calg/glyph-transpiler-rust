@@ -202,9 +202,11 @@ window.addEventListener("blur",()=>{
 
 for(const eventName of["glyph-transition-layout-ready","glyph-transition-layout-transaction-ready","glyph-state-transition-ir-v3-labels-ready","glyph-locale-changed","glyph-save-state-changed"]){document.addEventListener(eventName,scheduleEnhance)}
 document.addEventListener("change",scheduleEnhance);
+const tabsRoot=document.querySelector(".tabs");
+if(tabsRoot)new MutationObserver(setupTabs).observe(tabsRoot,{subtree:true,attributes:true,attributeFilter:["class"]});
 new MutationObserver(scheduleEnhance).observe(document.getElementById("main")||document.body,{childList:true,subtree:true});
 window.glyphDiagramGuiUxGuard={marker:MARKER,version:1,refresh:scheduleEnhance,activePointers:()=>pointerSessions.size};
-enhance();
+enhance();requestAnimationFrame(setupTabs);
 })();
 </script>
 """
