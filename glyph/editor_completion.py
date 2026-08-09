@@ -89,6 +89,12 @@ function close(){
   candidates=[];selected=0;lastContext=null;lastClassification=null;explicit=false;
   popup.hidden=true;popup.replaceChildren();editor.setAttribute("aria-expanded","false");editor.removeAttribute("aria-activedescendant");
 }
+function dismiss(){
+  dismissedContextKey=contextKey(contextAtCaret());pendingAcceptance=null;close();
+}
+function finishAcceptance(){
+  metrics.accepts+=1;dismissedContextKey=contextKey(contextAtCaret());close();editor.focus();return true;
+}
 function setSelected(index){
   if(!candidates.length)return;
   selected=(index+candidates.length)%candidates.length;
@@ -165,7 +171,7 @@ function update({force=false,allowEmpty=false}={}){
   const context=contextAtCaret();if(!context){close();return}
   if(!force&&dismissedContextKey&&dismissedContextKey===contextKey(context)){close();return}
   const classification=contextService.classify(context);
-  if(classification.id==="comment"||classification.id==="unsafe-long-line"){close();return}
+  if(classification.id==="comment"||classification.id==="unsafe-long-line"||classification.id==="unsafe-scope"){close();return}
   if(!force&&!allowEmpty&&context.prefix.length<MIN_PREFIX){close();return}
   if(!force&&!context.prefix&&context.left<context.right){close();return}
   metrics.queries+=1;
@@ -210,7 +216,7 @@ function insertionText(candidate,classification){
 }
 function applyCandidate(candidate,context,classification){
   if(!candidate?.text||!inCodeOccurrence(context.source,candidate.text,context.left,context.right))return false;
-  documentRuntime.replaceRange(context.left,context.right,insertionText(candidate,classification));metrics.accepts+=1;close();editor.focus();return true;
+  documentRuntime.replaceRange(context.left,context.right,insertionText(candidate,classification));return finishAcceptance();
 }
 function resumePendingAcceptance(){
   const pending=pendingAcceptance;if(!pending)return false;
@@ -251,13 +257,13 @@ function accept(){
     }
     return applyCandidate(candidate,context,classification);
   }
-  documentRuntime.replaceRange(context.left,context.right,candidate.text);metrics.accepts+=1;close();editor.focus();return true;
+  documentRuntime.replaceRange(context.left,context.right,candidate.text);return finishAcceptance();
 }
 
 editor.addEventListener("keydown",event=>{
   if(event.isComposing||documentRuntime.compositionActive()){pendingAcceptance=null;close();return}
   if(event.key==="Escape"&&(pendingAcceptance||!popup.hidden)){
-    event.preventDefault();event.stopPropagation();dismissedContextKey=contextKey(contextAtCaret());pendingAcceptance=null;close();return;
+    event.preventDefault();event.stopPropagation();dismiss();return;
   }
   if((event.ctrlKey||event.metaKey)&&event.code==="Space"){event.preventDefault();event.stopPropagation();dismissedContextKey="";schedule({force:true,allowEmpty:true});return}
   if(popup.hidden)return;
@@ -280,7 +286,7 @@ document.addEventListener("glyph-editor-lexical-index-updated",event=>{
 });
 editor.dataset.completionReady="true";
 window.GlyphEditorCompletion={
-  marker:MARKER,version:2,open:()=>{dismissedContextKey="";schedule({force:true,allowEmpty:true})},close,accept,
+  marker:MARKER,version:2,open:()=>{dismissedContextKey="";schedule({force:true,allowEmpty:true})},close:dismiss,accept,
   candidates:()=>candidates.map(candidate=>({...candidate,kinds:[...(candidate.kinds||[])],owners:[...(candidate.owners||[])]})),
   selected:()=>selected,context:()=>lastClassification?{...lastClassification,static:undefined}:null,metrics:()=>({...metrics,pendingAcceptance:Boolean(pendingAcceptance)}),
 };
