@@ -102,12 +102,18 @@ self.onmessage=event=>{
   const metadata=new Map();
   const metaFor=text=>{
     let row=metadata.get(text);
-    if(!row){row={kinds:new Set(),owners:new Set()};metadata.set(text,row)}
+    if(!row){row={kinds:new Set(),owners:new Set(),ownerKinds:new Map()};metadata.set(text,row)}
     return row;
   };
   const mark=(text,kind,owner="")=>{
     if(!text)return;
-    const meta=metaFor(text);meta.kinds.add(kind);if(owner)meta.owners.add(owner);
+    const meta=metaFor(text);meta.kinds.add(kind);
+    if(owner){
+      meta.owners.add(owner);
+      let kinds=meta.ownerKinds.get(owner);
+      if(!kinds){kinds=new Set();meta.ownerKinds.set(owner,kinds)}
+      kinds.add(kind);
+    }
   };
 
   let index=0,comment=false;
@@ -181,6 +187,7 @@ self.onmessage=event=>{
     const marker=match[1],name=match[2];
     const kind=marker==="!"?"Sink":marker==="?"?"Temporal":"Function";
     mark(name,kind);
+    if(marker===">")mark(name,"EntryFunction");
     const open=codeSource.indexOf("(",match.index),close=findMatching(codeSource,open);
     if(close>=0){for(const field of parseNamedFields(codeSource.slice(open+1,close)))mark(field.name,"Parameter",name);functionRe.lastIndex=close+1}
   }
@@ -191,8 +198,10 @@ self.onmessage=event=>{
     if(close>=0){for(const field of parseNamedFields(codeSource.slice(open+1,close)))mark(field.name,"Parameter",name);extRe.lastIndex=close+1}
   }
 
-  const macroRe=/^[ \t]*@([A-Za-z_][A-Za-z0-9_]*)\s*=/gm;
-  while((match=macroRe.exec(codeSource))!==null)mark(match[1],"Macro");
+  const rawMacroRe=/^[ \t]*@([A-Z][A-Z0-9_]*)(?=[ \t]|=|$)/gm;
+  while((match=rawMacroRe.exec(codeSource))!==null){if(match[1]!=="A"&&match[1]!=="E")mark(match[1],"Macro")}
+  const astMacroRe=/^[ \t]*@([A-Za-z_][A-Za-z0-9_]*)\s*\(/gm;
+  while((match=astMacroRe.exec(codeSource))!==null){if(match[1]!=="A"&&match[1]!=="E")mark(match[1],"Macro")}
   const bindingRe=/^[ \t]+([A-Za-z_][A-Za-z0-9_]*)\s*:=/gm;
   while((match=bindingRe.exec(codeSource))!==null)mark(match[1],"Binding");
   const systemRe=/^[ \t]*system\s+([A-Za-z_][A-Za-z0-9_]*)\b/gm;
@@ -218,6 +227,7 @@ self.onmessage=event=>{
     machineRecords.push({name,stateType,selectorField,selectorType});
     machineRe.lastIndex=close+1;
   }
+  machineRecords.sort((left,right)=>left.name<right.name?-1:left.name>right.name?1:0);
 
   const names=[...table.keys()].sort();
   let allLength=0,codeLength=0;
@@ -230,7 +240,8 @@ self.onmessage=event=>{
     const kinds=meta?[...meta.kinds]:["Identifier"];
     if(!kinds.length)kinds.push("Identifier");
     const owners=meta?[...meta.owners]:[];
-    records.push({text,allOffset,allCount:row.all.length,codeOffset,codeCount:row.code.length,kinds,owners,kind:primaryKind(kinds)});
+    const ownerKinds=meta?Object.fromEntries([...meta.ownerKinds.entries()].map(([owner,set])=>[owner,[...set]])):{};
+    records.push({text,allOffset,allCount:row.all.length,codeOffset,codeCount:row.code.length,kinds,owners,ownerKinds,kind:primaryKind(kinds)});
     allOffset+=row.all.length;codeOffset+=row.code.length;
   }
   self.postMessage({type:"snapshot",revision,sourceLength:source.length,records,positions,codePositions,machineRecords},[positions.buffer,codePositions.buffer]);
@@ -270,8 +281,6 @@ function ensureWorker(){
     const currentRevision=documentRuntime.revision();
     if(Number(result.revision)<minimumRevision){metrics.staleDiscarded+=1}
     else if(!snapshot||Number(result.revision)>=Number(snapshot.revision)){
-      result.recordMap=new Map(result.records.map(record=>[record.text,record]));
-      result.machineMap=new Map((result.machineRecords||[]).map(record=>[record.name,record]));
       snapshot=result;
       if(result.revision<currentRevision)metrics.staleAccepted+=1;
       emit("glyph-editor-lexical-index-updated",{revision:result.revision,currentRevision,exact:result.revision===currentRevision});
@@ -295,8 +304,21 @@ function schedule({immediate=false,invalidate=false}={}){
   const run=()=>{timer=0;const request=buildRequest();if(inFlight){pending=request;metrics.maxPendingDepth=Math.max(metrics.maxPendingDepth,1);return}send(request)};
   if(immediate)run();else timer=setTimeout(run,DEBOUNCE_MS);
 }
-function record(name){return snapshot?.recordMap?.get(String(name||""))||null}
-function machineInfo(name){return snapshot?.machineMap?.get(String(name||""))||null}
+function record(name){
+  if(!snapshot)return null;
+  const text=String(name||"");
+  const index=lowerBound(snapshot.records,text,row=>row.text);
+  const row=snapshot.records[index];
+  return row?.text===text?row:null;
+}
+function machineInfo(name){
+  if(!snapshot)return null;
+  const text=String(name||"");
+  const records=snapshot.machineRecords||[];
+  const index=lowerBound(records,text,row=>row.name);
+  const row=records[index];
+  return row?.name===text?row:null;
+}
 function allPositions(row){return row&&snapshot?snapshot.positions.subarray(row.allOffset,row.allOffset+row.allCount):new Int32Array()}
 function codePositionsFor(row){return row&&snapshot?snapshot.codePositions.subarray(row.codeOffset,row.codeOffset+row.codeCount):new Int32Array()}
 function query(prefix,caret,{limit=8,exclude="",kinds=null,owner=null,allowContract=false}={}){
@@ -310,8 +332,10 @@ function query(prefix,caret,{limit=8,exclude="",kinds=null,owner=null,allowContr
     const row=records[index];
     if(text&&!row.text.startsWith(text))break;
     if(row.codeCount<=0||row.text===exclude)continue;
-    if(kindSet&&!row.kinds.some(kind=>kindSet.has(kind)))continue;
-    if(owner&&!row.owners.includes(owner))continue;
+    const ownedKinds=owner?(row.ownerKinds?.[owner]||[]):null;
+    if(owner&&!ownedKinds.length)continue;
+    const candidateKinds=owner?ownedKinds:row.kinds;
+    if(kindSet&&!candidateKinds.some(kind=>kindSet.has(kind)))continue;
     if(!allowContract&&row.kinds.length===1&&row.kinds[0]==="Contract")continue;
     const positions=codePositionsFor(row);
     rows.push({
