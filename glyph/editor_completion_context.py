@@ -98,6 +98,7 @@ function withDefaults(result,scope){
     preferredText:null,
     exactText:null,
     insertPrefix:"",
+    insertSuffix:"",
     excludeText:null,
     static:[],
     scope,
@@ -160,10 +161,10 @@ function classify(context){
       },scope);
     }
     if(key==="init"&&/^[A-Za-z0-9_]*$/.test(value)&&machine?.stateType){
-      return withDefaults({id:"machine-init",strict:true,kinds:["Type"],preferredKinds:["Type"],exactText:machine.stateType},scope);
+      return withDefaults({id:"machine-init",strict:true,kinds:["Type"],preferredKinds:["Type"],exactText:machine.stateType,insertSuffix:"("},scope);
     }
     if(key==="next"&&/^[A-Za-z0-9_]*$/.test(value)){
-      return withDefaults({id:"machine-next",strict:true,kinds:["EntryFunction"],preferredKinds:["EntryFunction","Function"]},scope);
+      return withDefaults({id:"machine-next",strict:true,kinds:["EntryFunction"],preferredKinds:["EntryFunction","Function"],insertSuffix:"("},scope);
     }
     if((key==="success"||key==="failure")&&/^[A-Za-z0-9_]*$/.test(value)&&machine?.selectorType){
       return withDefaults({id:`machine-${key}`,strict:true,kinds:["State"],owner:machine.selectorType,preferredKinds:["State"]},scope);
