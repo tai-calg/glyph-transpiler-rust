@@ -23,6 +23,17 @@ function findMatching(text,start,left="(",right=")"){
   }
   return-1;
 }
+function findMatchingOnLine(text,start,left="(",right=")"){
+  if(start<0||text[start]!==left)return-1;
+  const newline=text.indexOf("\n",start);
+  const limit=newline<0?text.length:newline;
+  let depth=0;
+  for(let index=start;index<limit;index+=1){
+    if(text[index]===left)depth+=1;
+    else if(text[index]===right){depth-=1;if(depth===0)return index}
+  }
+  return-1;
+}
 function splitTopLevel(text,separator){
   const output=[];
   let start=0,round=0,brace=0,angle=0,bracket=0;
@@ -137,7 +148,7 @@ self.onmessage=event=>{
   while((match=productRe.exec(codeSource))!==null){
     const name=match[1];mark(name,"Type");
     const open=codeSource.indexOf("(",match.index);
-    const close=findMatching(codeSource,open);
+    const close=findMatchingOnLine(codeSource,open);
     if(close<0)continue;
     const fields=parseNamedFields(codeSource.slice(open+1,close));
     const fieldMap={};
@@ -164,7 +175,7 @@ self.onmessage=event=>{
   while((match=resourceRe.exec(codeSource))!==null){
     const name=match[1];mark(name,"Resource");mark(name,"Type");
     const open=codeSource.indexOf("[",match.index);
-    const close=findMatching(codeSource,open,"[","]");
+    const close=findMatchingOnLine(codeSource,open,"[","]");
     if(close<0)continue;
     for(const part of splitTopLevel(codeSource.slice(open+1,close),"|")){
       const state=part.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)/)?.[1]||"";
@@ -183,13 +194,13 @@ self.onmessage=event=>{
     const kind=marker==="!"?"Sink":marker==="?"?"Temporal":"Function";
     mark(name,kind);
     if(marker===">")mark(name,"EntryFunction");
-    const open=codeSource.indexOf("(",match.index),close=findMatching(codeSource,open);
+    const open=codeSource.indexOf("(",match.index),close=findMatchingOnLine(codeSource,open);
     if(close>=0){for(const field of parseNamedFields(codeSource.slice(open+1,close)))mark(field.name,"Parameter",name);functionRe.lastIndex=close+1}
   }
   const extRe=/^ext\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/gm;
   while((match=extRe.exec(codeSource))!==null){
     const name=match[1];mark(name,"Source");
-    const open=codeSource.indexOf("(",match.index),close=findMatching(codeSource,open);
+    const open=codeSource.indexOf("(",match.index),close=findMatchingOnLine(codeSource,open);
     if(close>=0){for(const field of parseNamedFields(codeSource.slice(open+1,close)))mark(field.name,"Parameter",name);extRe.lastIndex=close+1}
   }
 
@@ -208,7 +219,7 @@ self.onmessage=event=>{
   const machineRe=/^machine\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/gm;
   while((match=machineRe.exec(codeSource))!==null){
     const name=match[1];mark(name,"Machine");
-    const open=codeSource.indexOf("(",match.index),close=findMatching(codeSource,open);
+    const open=codeSource.indexOf("(",match.index),close=findMatchingOnLine(codeSource,open);
     if(close<0)continue;
     const params=parseNamedFields(codeSource.slice(open+1,close));
     for(const param of params)mark(param.name,"Parameter",name);
