@@ -12,6 +12,7 @@ from .diagram_editor_exports import enhance_diagram_editor_exports_html
 from .diagram_editor_render_guard import enhance_diagram_editor_render_guard_html
 from .diagram_editor_route_guard import enhance_diagram_editor_route_guard_html
 from .diagram_geometry_kernel import enhance_diagram_geometry_kernel_html
+from .diagram_gui_ux_guard import enhance_diagram_gui_ux_guard_html
 from .diagram_label_editor import enhance_diagram_label_editor_html
 from .diagram_live_stability import (
     enhance_diagram_live_stability_html,
@@ -109,6 +110,7 @@ def _presentation_pipeline():
         enhance_editor_lexical_index_html,
         enhance_editor_identifier_highlight_html,
         enhance_editor_completion_html,
+        enhance_diagram_gui_ux_guard_html,
     )
 
 
