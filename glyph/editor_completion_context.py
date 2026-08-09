@@ -72,12 +72,20 @@ function scopeBefore(source,lineStart){
   if(!last&&truncated&&!sawTopLevel)return {kind:"bounded-unknown",name:"",start:chunkStart};
   return last;
 }
+function lastTypeColon(lineBefore){
+  for(let index=lineBefore.length-1;index>=0;index-=1){
+    if(lineBefore[index]===":"&&lineBefore[index+1]!=="=")return index;
+  }
+  return-1;
+}
 function typeContext(lineBefore){
-  if(/\b(?:own|share|link)\s+$/.test(lineBefore))return"qualified";
-  if(/&\s*(?:mut\s+)?$/.test(lineBefore))return"qualified";
-  if(/:\s*$/.test(lineBefore))return"root";
-  if(/[<,]\s*$/.test(lineBefore)&&lineBefore.includes(":"))return"root";
-  if(/\|\s*$/.test(lineBefore)&&lineBefore.includes(":"))return"root";
+  const colon=lastTypeColon(lineBefore);
+  if(colon<0)return null;
+  const tail=lineBefore.slice(colon+1);
+  if(/^\s*$/.test(tail))return"root";
+  if(/\b(?:own|share|link)\s+$/.test(tail))return"qualified";
+  if(/&\s*(?:mut\s+)?$/.test(tail))return"qualified";
+  if(/[<,|]\s*$/.test(tail))return"root";
   return null;
 }
 function withDefaults(result,scope){
