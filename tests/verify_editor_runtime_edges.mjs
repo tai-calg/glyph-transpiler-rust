@@ -115,7 +115,7 @@ try {
     const editor = document.getElementById("editor");
     editor.value = value;
     const position = value.indexOf("MotorCommand");
-    assert(position >= 0);
+    if (position < 0) throw new Error("MotorCommand missing from runtime edge fixture");
     editor.focus();
     editor.setSelectionRange(position + 2, position + 2);
     window.glyphEditorIdentifierHighlight.refresh();
