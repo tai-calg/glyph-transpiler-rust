@@ -11,6 +11,8 @@ from glyph.editor_completion import _SCRIPT as COMPLETION_SCRIPT
 from glyph.editor_completion import enhance_editor_completion_html
 from glyph.editor_completion_context import _SCRIPT as CONTEXT_SCRIPT
 from glyph.editor_document_runtime import (
+    _BASE_INPUT_LISTENER,
+    _OPTIMIZED_BASE_INPUT_LISTENER,
     _OPTIMIZED_SAVE_INPUT_LISTENER,
     _SAVE_INPUT_LISTENER,
     _SCRIPT as DOCUMENT_SCRIPT,
@@ -47,6 +49,7 @@ class EditorCompletionTests(unittest.TestCase):
         self.assertIn("countNewlines(source,knownCaret,target)", DOCUMENT_SCRIPT)
         self.assertIn("countNewlines(textValue(),plan.start,knownCaret)", DOCUMENT_SCRIPT)
         self.assertIn("compositionActive=false;syncCaretFromSelection();", DOCUMENT_SCRIPT)
+        self.assertIn('for(const eventName of["keyup","click","select"])', DOCUMENT_SCRIPT)
         self.assertNotIn("compositionActive=false;syncCaretFromSelection(true);", DOCUMENT_SCRIPT)
         self.assertNotIn("selectionStart===knownCaret?caretLine:lineAt(selectionStart)", DOCUMENT_SCRIPT)
         self.assertNotIn("split('\\n')", DOCUMENT_SCRIPT)
@@ -54,12 +57,20 @@ class EditorCompletionTests(unittest.TestCase):
     def test_document_runtime_limits_save_state_updates_to_dirty_transition(self) -> None:
         html = (
             '<html><head></head><body><!-- glyph-save-triggered-rendering-v4 -->\n'
+            + _BASE_INPUT_LISTENER
+            + "\n"
             + _SAVE_INPUT_LISTENER
             + "\n</body></html>"
         )
         enhanced = enhance_editor_document_runtime_html(html)
+        self.assertNotIn(_BASE_INPUT_LISTENER, enhanced)
         self.assertNotIn(_SAVE_INPUT_LISTENER, enhanced)
+        self.assertIn(_OPTIMIZED_BASE_INPUT_LISTENER, enhanced)
         self.assertIn(_OPTIMIZED_SAVE_INPUT_LISTENER, enhanced)
+        self.assertLess(
+            enhanced.index(_OPTIMIZED_BASE_INPUT_LISTENER),
+            enhanced.index(_OPTIMIZED_SAVE_INPUT_LISTENER),
+        )
 
     def test_lexical_index_coalesces_and_rejects_pre_replacement_results(self) -> None:
         self.assertIn("pending=request", INDEX_SCRIPT)
