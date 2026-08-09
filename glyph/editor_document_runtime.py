@@ -47,13 +47,28 @@ let deferredRecountTimer=0;
 let deferredCaretTimer=0;
 let suppressValueHook=false;
 let compositionActive=false;
-const metrics={fullLineRecounts:1,caretFullScans:1,incrementalCaretMoves:0,incrementalInputs:0,sourceReplacements:0};
+const metrics={fullLineRecounts:1,caretFullScans:1,incrementalCaretMoves:0,incrementalInputs:0,sourceReplacements:0,lineSuffixMutations:0};
 
+function fullLineText(count){return Array.from({length:Math.max(1,count)},(_,index)=>index+1).join("\n")}
 function renderLines(force=false){
   if(!force&&renderedLineCount===lineCount)return;
-  lines.textContent=Array.from({length:Math.max(1,lineCount)},(_,index)=>index+1).join("\n");
-  if(meta)meta.textContent=`${Math.max(1,lineCount)} lines`;
-  renderedLineCount=lineCount;
+  const target=Math.max(1,lineCount);
+  const node=lines.childNodes.length===1&&lines.firstChild?.nodeType===3?lines.firstChild:null;
+  if(!force&&node&&renderedLineCount>=1){
+    if(target>renderedLineCount){
+      let suffix="";
+      for(let number=renderedLineCount+1;number<=target;number+=1)suffix+=`\n${number}`;
+      if(suffix){node.appendData(suffix);metrics.lineSuffixMutations+=1}
+    }else if(target<renderedLineCount){
+      let removeLength=0;
+      for(let number=target+1;number<=renderedLineCount;number+=1)removeLength+=1+String(number).length;
+      if(removeLength>0){node.deleteData(Math.max(0,node.length-removeLength),removeLength);metrics.lineSuffixMutations+=1}
+    }
+  }else{
+    lines.textContent=fullLineText(target);
+  }
+  if(meta)meta.textContent=`${target} lines`;
+  renderedLineCount=target;
 }
 function lineAt(position){
   metrics.caretFullScans+=1;
@@ -103,6 +118,10 @@ function scheduleFullLineRecount(){
     syncCaretFromSelection(true);
     dispatch("glyph-editor-line-index-reconciled",{deferred:true});
   },0);
+}
+function cancelDeferredReconciles(){
+  if(deferredRecountTimer){clearTimeout(deferredRecountTimer);deferredRecountTimer=0}
+  if(deferredCaretTimer){clearTimeout(deferredCaretTimer);deferredCaretTimer=0}
 }
 function insertedTextFor(event){
   const type=String(event?.inputType||"");
@@ -182,7 +201,9 @@ Object.defineProperty(editor,"value",{
     const value=String(next??"");
     const previous=descriptor.get.call(editor);
     descriptor.set.call(editor,value);
-    if(suppressValueHook||value===previous)return;
+    if(suppressValueHook)return;
+    if(value===previous){syncCaretFromSelection();return}
+    cancelDeferredReconciles();
     revision+=1;
     metrics.sourceReplacements+=1;
     lineCount=countNewlines(value)+1;
