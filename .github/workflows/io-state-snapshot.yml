@@ -45,7 +45,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p build/checked-system-context-io build/execution-context-selection build/rtai-semantic-status build/rtai-strict-projection build/state-diagram-regression build/state-diagram-stability build/adaptive-state-workspace build/transition-arrow-clearance build/diagram-editor-exports build/diagram-canvas-viewport build/localized-semantic-canvas build/save-triggered-studio build/interactive-save-ux build/transition-label-readability build/transition-layout-transaction build/transition-semantic-readability build/label-identifier-interactions build/editor-completion build/editor-runtime-edges
+          mkdir -p build/checked-system-context-io build/execution-context-selection build/rtai-semantic-status build/rtai-strict-projection build/state-diagram-regression build/state-diagram-stability build/adaptive-state-workspace build/transition-arrow-clearance build/diagram-editor-exports build/diagram-canvas-viewport build/localized-semantic-canvas build/save-triggered-studio build/interactive-save-ux build/transition-label-readability build/transition-layout-transaction build/transition-semantic-readability build/label-identifier-interactions build/editor-completion build/editor-runtime-edges build/gui-interaction-completeness
 
           run_node() {
             local script="$1"
@@ -80,13 +80,14 @@ jobs:
           run_node tests/verify_adaptive_state_workspace.mjs build/adaptive-state-workspace/verify.log
           run_node tests/verify_transition_arrow_clearance.mjs build/transition-arrow-clearance/verify.log
 
-          # Editor features touched by this change run before the README image baseline.
+          # Editor and GUI features touched by this change run before the README image baseline.
           # This keeps their functional regressions visible even when main carries a stale PNG baseline.
           run_node tests/verify_editor_completion.mjs build/editor-completion/verify.log
           run_node tests/verify_editor_runtime_edges.mjs build/editor-runtime-edges/verify.log
           run_node tests/verify_save_triggered_studio.mjs build/save-triggered-studio/verify.log
           run_node tests/verify_interactive_save_ux.mjs build/interactive-save-ux/verify.log
           run_node tests/verify_label_and_identifier_interactions.mjs build/label-identifier-interactions/verify.log
+          run_node tests/verify_gui_interaction_completeness.mjs build/gui-interaction-completeness/verify.log
 
           python tests/verify_readme_state_snapshot.py \
             2>&1 | tee -a build/state-diagram-regression/verify.log
@@ -129,6 +130,7 @@ jobs:
             build/label-identifier-interactions/**
             build/editor-completion/**
             build/editor-runtime-edges/**
+            build/gui-interaction-completeness/**
             examples/acceptance/door_controller.glyph
             examples/acceptance/door_execution_contexts.glyph
             examples/acceptance/motor_safety.glyph
