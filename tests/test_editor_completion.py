@@ -9,6 +9,7 @@ from pathlib import Path
 
 from glyph.editor_completion import _SCRIPT as COMPLETION_SCRIPT
 from glyph.editor_completion import enhance_editor_completion_html
+from glyph.editor_completion_context import _SCRIPT as CONTEXT_SCRIPT
 from glyph.editor_document_runtime import (
     _OPTIMIZED_SAVE_INPUT_LISTENER,
     _SAVE_INPUT_LISTENER,
@@ -60,16 +61,49 @@ class EditorCompletionTests(unittest.TestCase):
         self.assertIn("Number(result.revision)<minimumRevision", INDEX_SCRIPT)
         self.assertIn("maxPendingDepth", INDEX_SCRIPT)
 
+    def test_lexical_worker_extracts_lightweight_symbol_relationships(self) -> None:
+        self.assertIn('mark(name,"Resource")', LEXICAL_WORKER_JS)
+        self.assertIn('mark(variant,"State",name)', LEXICAL_WORKER_JS)
+        self.assertIn('mark(field,"StateField",owner)', LEXICAL_WORKER_JS)
+        self.assertIn("productFields", LEXICAL_WORKER_JS)
+        self.assertIn("sumVariants", LEXICAL_WORKER_JS)
+        self.assertIn("machineRecords.push", LEXICAL_WORKER_JS)
+        self.assertIn("selectorType", LEXICAL_WORKER_JS)
+
+    def test_context_classifier_is_bounded_and_glyph_specific(self) -> None:
+        self.assertIn("MAX_LINE_CONTEXT=2048", CONTEXT_SCRIPT)
+        self.assertIn("MAX_SCOPE_CONTEXT=4096", CONTEXT_SCRIPT)
+        self.assertIn('id:"resource-state"', CONTEXT_SCRIPT)
+        self.assertIn('id:"system-entry"', CONTEXT_SCRIPT)
+        self.assertIn('id:"system-source"', CONTEXT_SCRIPT)
+        self.assertIn('id:"system-sink"', CONTEXT_SCRIPT)
+        self.assertIn('id:`machine-${key}`', CONTEXT_SCRIPT)
+        self.assertIn('kinds:["StateField"]', CONTEXT_SCRIPT)
+        self.assertNotIn("parse_program", CONTEXT_SCRIPT)
+        self.assertNotIn("fetch(", CONTEXT_SCRIPT)
+
     def test_highlight_uses_exact_shared_revision(self) -> None:
         self.assertIn("Number(snapshot.revision)!==revision", HIGHLIGHT_SCRIPT)
         self.assertIn("lexicalIndex.allPositions", HIGHLIGHT_SCRIPT)
         self.assertNotIn("SOURCE_IDENTIFIER", HIGHLIGHT_SCRIPT)
 
-    def test_completion_has_accept_revalidation_and_ime_guard(self) -> None:
+    def test_completion_has_context_filtering_accept_revalidation_and_ime_guard(self) -> None:
+        self.assertIn("contextService.classify", COMPLETION_SCRIPT)
+        self.assertIn("contextFilteredQueries", COMPLETION_SCRIPT)
         self.assertIn("inCodeOccurrence", COMPLETION_SCRIPT)
         self.assertIn("candidate.text.startsWith(context.prefix)", COMPLETION_SCRIPT)
+        self.assertIn("recordMatchesClassification", COMPLETION_SCRIPT)
         self.assertIn("event.isComposing", COMPLETION_SCRIPT)
         self.assertIn("documentRuntime.replaceRange", COMPLETION_SCRIPT)
+        self.assertNotIn("compile(", COMPLETION_SCRIPT)
+        self.assertNotIn("/api/", COMPLETION_SCRIPT)
+
+    def test_completion_enhancer_installs_context_before_controller(self) -> None:
+        html = "<html><head></head><body><textarea id='editor'></textarea></body></html>"
+        enhanced = enhance_editor_completion_html(html)
+        context_position = enhanced.index("glyph-editor-completion-context-v1-script")
+        completion_position = enhanced.index("glyph-editor-completion-v2-script")
+        self.assertLess(context_position, completion_position)
 
     def test_enhancers_are_idempotent(self) -> None:
         html = "<html><head></head><body><textarea id='editor'></textarea></body></html>"
@@ -87,6 +121,7 @@ class EditorCompletionTests(unittest.TestCase):
         scripts = {
             "document.js": DOCUMENT_SCRIPT,
             "index.js": INDEX_SCRIPT,
+            "context.js": CONTEXT_SCRIPT,
             "highlight.js": HIGHLIGHT_SCRIPT,
             "completion.js": COMPLETION_SCRIPT,
             "worker.js": LEXICAL_WORKER_JS,
