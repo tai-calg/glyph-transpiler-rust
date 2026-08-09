@@ -184,6 +184,7 @@ resource Buffer[Ready|InFlight|Done]
 >cycle(system:System,input:Input):System=step(system,input)
 >compute(system:System):System=system
 >internal_public(system:System):System=system
+>resourceful(system:System):System=system
 ~internal_private(system:System):System=system
 ext read_sensor():Input|Error
 ext read_backup():Input|Error
@@ -291,9 +292,36 @@ ext read_backup():Input|Error
   const nextRows = await typeForContext(`${machinePrefix}  select=state.mode\n  init=System(Idle,Red,0)\n  next=`, "st", "step", "machine-next");
   assert(nextRows.candidates.every(item => item.kinds.includes("Function")));
 
+  const nextPrivateRows = await typeForContext(`${machinePrefix}  select=state.mode\n  init=System(Idle,Red,0)\n  next=`, "internal_", "internal_public", "machine-next");
+  assert(!nextPrivateRows.candidates.some(item => item.text === "internal_private"), "machine next must not offer ~ internal functions");
+
   const successRows = await typeForContext(`${machinePrefix}  select=state.mode\n  success=`, "Ru", "Running", "machine-success");
   assert(successRows.candidates.every(item => item.owners.includes("Mode")));
   assert(!successRows.candidates.some(item => item.text === "Red"));
+
+  const longPadding = Array.from({ length: 180 }, (_, index) => `  # bounded-scope-padding-${index}-${"x".repeat(28)}`).join("\n");
+  await installSource(`${machinePrefix}${longPadding}\n  success=Re`);
+  const boundedScope = await page.evaluate(() => {
+    const editor = document.getElementById("editor");
+    const source = editor.value;
+    const caret = editor.selectionStart;
+    const lineStart = window.GlyphEditorCompletionContext.boundedLineStart(source, caret);
+    let left = caret;
+    while (left > lineStart && /[A-Za-z0-9_]/.test(source[left - 1])) left -= 1;
+    return window.GlyphEditorCompletionContext.classify({
+      source,
+      caret,
+      left,
+      right: caret,
+      prefix: source.slice(left, caret),
+      current: source.slice(left, caret),
+      lineStart,
+    });
+  });
+  assert.equal(boundedScope.id, "unsafe-scope", "a truncated machine scope must fail closed instead of falling back to general completion");
+  await page.evaluate(() => window.GlyphEditorCompletion.open());
+  await page.waitForTimeout(80);
+  assert.equal(await page.locator("#glyph-completion-popup").isHidden(), true, "unsafe bounded scope must not show generic candidates");
 
   const macroSource = `@MAX 100
 @limit(x) x
@@ -350,6 +378,10 @@ ${semanticBase}`;
   assert.equal(await page.locator("#glyph-completion-popup").isHidden(), true, "Escape dismissal must survive an index refresh for the unchanged context");
   await page.keyboard.type("o", { delay: 4 });
   await page.waitForFunction(() => window.GlyphEditorCompletion.candidates().some(item => item.text === "resource"));
+  await page.keyboard.press("Tab");
+  await page.waitForFunction(() => document.getElementById("editor").value.endsWith("resource"));
+  await page.waitForTimeout(180);
+  assert.equal(await page.locator("#glyph-completion-popup").isHidden(), true, "accepted completion must not immediately reopen for a longer matching identifier");
 
   await page.waitForTimeout(250);
   assert.deepEqual(sourceRequests, [], `typing/completion unexpectedly invoked source actions: ${sourceRequests.join(", ")}`);
