@@ -149,6 +149,7 @@ function mergeCandidates(documentRows,staticRows,classification,context){
   for(const row of[...documentRows,...staticRows]){
     if(!row?.text||row.text===context.current||seen.has(row.text))continue;
     if(classification?.exactText&&row.text!==classification.exactText)continue;
+    if(classification?.excludeText&&row.text===classification.excludeText)continue;
     seen.add(row.text);rows.push(row);
   }
   rows.sort((a,b)=>compareCandidates(a,b,classification));
@@ -192,11 +193,16 @@ function recordMatchesClassification(row,classification){
   if(classification?.kinds?.length&&!row.kinds.some(kind=>classification.kinds.includes(kind)))return false;
   if(classification?.owner&&!row.owners.includes(classification.owner))return false;
   if(classification?.exactText&&row.text!==classification.exactText)return false;
+  if(classification?.excludeText&&row.text===classification.excludeText)return false;
   return true;
 }
-function applyCandidate(text,context){
-  if(!inCodeOccurrence(context.source,text,context.left,context.right))return false;
-  documentRuntime.replaceRange(context.left,context.right,text);metrics.accepts+=1;close();editor.focus();return true;
+function insertionText(candidate,classification){
+  if(candidate?.origin==="document"&&classification?.insertPrefix)return`${classification.insertPrefix}${candidate.text}`;
+  return candidate?.text||"";
+}
+function applyCandidate(candidate,context,classification){
+  if(!candidate?.text||!inCodeOccurrence(context.source,candidate.text,context.left,context.right))return false;
+  documentRuntime.replaceRange(context.left,context.right,insertionText(candidate,classification));metrics.accepts+=1;close();editor.focus();return true;
 }
 function resumePendingAcceptance(){
   const pending=pendingAcceptance;if(!pending)return false;
@@ -208,7 +214,7 @@ function resumePendingAcceptance(){
   const classification=contextService.classify(context);
   if(classification.id!==pending.classificationId||!recordMatchesClassification(lexicalIndex.record(pending.text),classification)){pendingAcceptance=null;return false}
   pendingAcceptance=null;
-  return applyCandidate(pending.text,context);
+  return applyCandidate({text:pending.text,origin:"document"},context,classification);
 }
 function accept(){
   const candidate=candidates[selected];if(!candidate){close();return false}
@@ -235,7 +241,7 @@ function accept(){
       }
       if(!recordMatchesClassification(lexicalIndex.record(candidate.text),classification)){close();return false}
     }
-    return applyCandidate(candidate.text,context);
+    return applyCandidate(candidate,context,classification);
   }
   documentRuntime.replaceRange(context.left,context.right,candidate.text);metrics.accepts+=1;close();editor.focus();return true;
 }
