@@ -28,6 +28,7 @@ const lines=document.getElementById("lines");
 const meta=document.getElementById("editor-meta");
 if(!editor||!lines||editor.dataset.documentRuntimeReady==="true")return;
 const descriptor=Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,"value");
+const nativeSetRangeText=HTMLTextAreaElement.prototype.setRangeText;
 if(!descriptor?.get||!descriptor?.set)return;
 const countNewlines=(value,start=0,end=value.length)=>{
   let count=0;
@@ -46,8 +47,9 @@ let syntheticPlan=null;
 let deferredRecountTimer=0;
 let deferredCaretTimer=0;
 let suppressValueHook=false;
+let suppressTrackedInput=false;
 let compositionActive=false;
-const metrics={fullLineRecounts:1,caretFullScans:1,incrementalCaretMoves:0,incrementalInputs:0,sourceReplacements:0,lineSuffixMutations:0};
+const metrics={fullLineRecounts:1,caretFullScans:1,incrementalCaretMoves:0,incrementalInputs:0,sourceReplacements:0,programmaticRangeEdits:0,lineSuffixMutations:0};
 
 function fullLineText(count){return Array.from({length:Math.max(1,count)},(_,index)=>index+1).join("\n")}
 function renderLines(force=false){
@@ -158,6 +160,7 @@ function makePlan(event){
   };
 }
 function applyInput(event){
+  if(suppressTrackedInput){suppressTrackedInput=false;beforePlan=null;syntheticPlan=null;return}
   const plan=syntheticPlan||beforePlan;
   syntheticPlan=null;
   beforePlan=null;
@@ -217,6 +220,37 @@ Object.defineProperty(editor,"value",{
     dispatch("glyph-editor-source-replaced",{sourceLength:value.length});
   },
 });
+
+if(typeof nativeSetRangeText==="function"){
+  Object.defineProperty(editor,"setRangeText",{
+    configurable:true,
+    value:function(...args){
+      const previous=textValue();
+      suppressValueHook=true;
+      try{nativeSetRangeText.apply(editor,args)}finally{suppressValueHook=false}
+      const value=textValue();
+      if(value===previous){syncCaretFromSelection();return}
+      cancelDeferredReconciles();
+      revision+=1;
+      metrics.programmaticRangeEdits+=1;
+      lineCount=countNewlines(value)+1;
+      metrics.fullLineRecounts+=1;
+      renderLines();
+      knownCaret=editor.selectionStart||0;
+      caretLine=countNewlines(value,0,knownCaret)+1;
+      caretLineValid=true;
+      metrics.caretFullScans+=1;
+      beforePlan=null;syntheticPlan=null;
+      dispatch("glyph-editor-source-replaced",{sourceLength:value.length,rangeEdit:true});
+      suppressTrackedInput=true;
+      let event;
+      const replacement=String(args[0]??"");
+      try{event=new InputEvent("input",{bubbles:true,inputType:"insertReplacementText",data:replacement})}
+      catch{event=new Event("input",{bubbles:true})}
+      editor.dispatchEvent(event);
+    },
+  });
+}
 
 const legacySyncLines=globalThis.syncLines;
 globalThis.syncLines=()=>renderLines();
