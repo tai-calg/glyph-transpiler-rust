@@ -2,6 +2,19 @@ from __future__ import annotations
 
 
 _MARKER = "glyph-editor-document-runtime-v1"
+_SAVE_CONTROLLER_MARKER = "glyph-save-triggered-rendering-v4"
+_SAVE_INPUT_LISTENER = '''editor.addEventListener("input",()=>{
+ dirty=true;
+ updateUi();
+});'''
+_OPTIMIZED_SAVE_INPUT_LISTENER = '''editor.addEventListener("input",()=>{
+ if(!dirty){
+  dirty=true;
+  updateUi();
+ }else{
+  dirty=true;
+ }
+});'''
 
 _SCRIPT = r"""
 <script id="glyph-editor-document-runtime-v1-script">
@@ -203,11 +216,23 @@ dispatch("glyph-editor-document-runtime-ready",{sourceLength:textValue().length}
 """
 
 
+def _optimize_save_input_listener(html: str) -> str:
+    """Update save-state chrome only when dirty changes from false to true."""
+
+    if _SAVE_CONTROLLER_MARKER not in html:
+        return html
+    count = html.count(_SAVE_INPUT_LISTENER)
+    if count != 1:
+        raise ValueError(f"save input listener anchor changed: expected 1, got {count}")
+    return html.replace(_SAVE_INPUT_LISTENER, _OPTIMIZED_SAVE_INPUT_LISTENER, 1)
+
+
 def enhance_editor_document_runtime_html(html: str) -> str:
-    """Install the shared editor document state without adding synchronous full scans."""
+    """Install shared editor state and keep ordinary typing on a bounded sync path."""
 
     if _MARKER in html:
         return html
+    html = _optimize_save_input_listener(html)
     return html.replace("</body>", _SCRIPT + "\n</body>")
 
 
