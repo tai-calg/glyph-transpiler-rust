@@ -216,7 +216,7 @@ function enhance(){
 function scheduleEnhance(){if(enhanceFrame)return;enhanceFrame=requestAnimationFrame(enhance)}
 
 function modalOpen(){return document.querySelector("dialog[open]")}
-document.addEventListener("keydown",event=>{
+window.addEventListener("keydown",event=>{
   const modal=modalOpen();if(!modal)return;
   const saveShortcut=(event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==="s";
   const diagramZoom=(event.ctrlKey||event.metaKey)&&["+","=","-","0"].includes(event.key);
