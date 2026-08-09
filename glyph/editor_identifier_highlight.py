@@ -54,6 +54,8 @@ _SCRIPT = r"""
 (()=>{
 const MARKER="glyph-editor-identifier-highlight-v1";
 const IDENTIFIER=/^[A-Za-z_][A-Za-z0-9_]*$/;
+const IDENTIFIER_PART=/[A-Za-z0-9_]/;
+const MAX_IDENTIFIER_LENGTH=256;
 const sourceEditor=document.getElementById("editor");
 const documentRuntime=window.GlyphEditorDocument;
 const lexicalIndex=window.GlyphEditorLexicalIndex;
@@ -70,14 +72,24 @@ parent.insertBefore(surface,sourceEditor);
 sourceEditor.dataset.identifierHighlightReady="true";
 let frame=0,lastRevision=-1,lastStart=-1,lastEnd=-1,lastFocused=false,currentIdentifier="",matchCount=0;
 let renderedRevision=-1,renderedIdentifier="",renderedMatchCount=0;
-const metrics={htmlRebuilds:0,htmlReuses:0};
+const metrics={htmlRebuilds:0,htmlReuses:0,boundedIdentifierRejects:0};
 const esc=value=>String(value??"").replace(/[&<>]/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[char]));
 function identifierAt(value,start,end,focused){
   if(!focused)return"";
-  if(start!==end){const selected=value.slice(start,end);return IDENTIFIER.test(selected)?selected:""}
-  let left=start,right=start;
-  while(left>0&&/[A-Za-z0-9_]/.test(value[left-1]))left-=1;
-  while(right<value.length&&/[A-Za-z0-9_]/.test(value[right]))right+=1;
+  if(start!==end){
+    if(end-start>MAX_IDENTIFIER_LENGTH){metrics.boundedIdentifierRejects+=1;return""}
+    const selected=value.slice(start,end);
+    return IDENTIFIER.test(selected)?selected:"";
+  }
+  let left=start,right=start,budget=MAX_IDENTIFIER_LENGTH;
+  while(left>0&&IDENTIFIER_PART.test(value[left-1])){
+    if(budget===0){metrics.boundedIdentifierRejects+=1;return""}
+    left-=1;budget-=1;
+  }
+  while(right<value.length&&IDENTIFIER_PART.test(value[right])){
+    if(budget===0){metrics.boundedIdentifierRejects+=1;return""}
+    right+=1;budget-=1;
+  }
   const candidate=value.slice(left,right);
   return IDENTIFIER.test(candidate)?candidate:"";
 }
