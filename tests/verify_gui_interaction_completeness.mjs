@@ -57,24 +57,30 @@ try {
   page.on("request", request => requests.push({ method: request.method(), url: request.url() }));
   await page.goto(url, { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => document.querySelector("#status")?.textContent === "ready"
-    && window.glyphDiagramGuiUxGuard?.version === 1);
+    && window.glyphDiagramGuiUxGuard?.version === 1
+    && window.glyphTransitionLayoutInteractionAdapter?.version >= 5);
   await page.waitForFunction(() => [...document.querySelectorAll(".tabs .tab")].every(tab => (
     tab.getAttribute("aria-selected") === (tab.classList.contains("active") ? "true" : "false")
   )));
 
   const tabContract = await page.evaluate(() => {
     const tabs = [...document.querySelectorAll(".tabs .tab")];
+    const panel = document.getElementById("view");
     return {
       listRole: document.querySelector(".tabs")?.getAttribute("role"),
       roles: tabs.map(tab => tab.getAttribute("role")),
       selected: tabs.map(tab => tab.getAttribute("aria-selected")),
       active: tabs.map(tab => tab.classList.contains("active")),
+      panelRole: panel?.getAttribute("role"),
+      panelLabelledBy: panel?.getAttribute("aria-labelledby"),
     };
   });
   assert.equal(tabContract.listRole, "tablist");
   assert.deepEqual(tabContract.roles, ["tab", "tab"]);
   assert.equal(tabContract.active.filter(Boolean).length, 1, "exactly one visual tab must be active");
   assert.deepEqual(tabContract.selected, tabContract.active.map(active => active ? "true" : "false"));
+  assert.equal(tabContract.panelRole, "tabpanel");
+  assert(tabContract.panelLabelledBy, "tabpanel is not labelled by its active tab");
 
   await page.locator('.tab[data-tab="io"]').click();
   await page.waitForFunction(() => document.querySelector('.tab[data-tab="io"]')?.getAttribute("aria-selected") === "true");
@@ -88,8 +94,11 @@ try {
   }, null, { timeout: 60_000 });
   assert.equal(await page.locator('.tab[data-tab="state"]').getAttribute("aria-selected"), "true");
   assert.equal(await page.evaluate(() => document.activeElement?.dataset?.tab || ""), "state");
+  assert.equal(await page.locator("#view").getAttribute("aria-labelledby"), await page.locator('.tab[data-tab="state"]').getAttribute("id"));
 
-  const cluster = page.locator(".transition-io-cluster").first();
+  let cluster = page.locator(".transition-io-cluster").first();
+  const clusterId = await cluster.getAttribute("data-transition-id");
+  assert(clusterId, "transition label is missing a stable transition id");
   await cluster.focus();
   assert.equal(await cluster.getAttribute("aria-haspopup"), "dialog");
   await page.keyboard.press("Enter");
@@ -99,21 +108,59 @@ try {
   await page.waitForFunction(() => document.querySelector(".transition-label-inspector")?.hidden === true);
   await page.waitForFunction(() => document.activeElement?.classList.contains("transition-io-cluster"));
 
+  const clusterBeforeKeyboard = await page.evaluate(id => {
+    const element = [...document.querySelectorAll(".transition-io-cluster")].find(item => item.dataset.transitionId === id);
+    return element ? { left: element.style.left, top: element.style.top } : null;
+  }, clusterId);
+  assert(clusterBeforeKeyboard, "transition label disappeared before keyboard movement");
+  await page.keyboard.press("ArrowRight");
+  await page.waitForFunction(id => {
+    const element = [...document.querySelectorAll(".transition-io-cluster")].find(item => item.dataset.transitionId === id);
+    return element?.dataset.manualIoGestureState === "persisted" && element.dataset.manualIo === "true";
+  }, clusterId, { timeout: 10_000 });
+  await page.waitForFunction(id => document.activeElement?.dataset?.transitionId === id, clusterId, { timeout: 10_000 });
+  const clusterAfterKeyboard = await page.evaluate(id => {
+    const element = [...document.querySelectorAll(".transition-io-cluster")].find(item => item.dataset.transitionId === id);
+    return element ? { left: element.style.left, top: element.style.top } : null;
+  }, clusterId);
+  assert(clusterAfterKeyboard, "transition label disappeared after keyboard movement");
+  assert.notDeepEqual(clusterAfterKeyboard, clusterBeforeKeyboard, "transition label did not move from an Arrow key");
+  await page.keyboard.press("Delete");
+  await page.waitForFunction(id => {
+    const element = [...document.querySelectorAll(".transition-io-cluster")].find(item => item.dataset.transitionId === id);
+    return element && element.dataset.manualIo !== "true";
+  }, clusterId, { timeout: 10_000 });
+  await page.waitForFunction(id => document.activeElement?.dataset?.transitionId === id, clusterId, { timeout: 10_000 });
+
   const node = page.locator(".state-node").first();
   await node.focus();
   assert.equal(await node.evaluate(element => element.classList.contains("selected-node")), true);
-  const nodeBeforeModal = await node.evaluate(element => ({ left: element.style.left, top: element.style.top }));
+  const nodeBeforeKeyboard = await node.evaluate(element => ({ left: element.style.left, top: element.style.top }));
+  await page.keyboard.press("ArrowRight");
+  await page.waitForFunction(before => {
+    const node = document.querySelector(".state-node.selected-node");
+    return node && (node.style.left !== before.left || node.style.top !== before.top);
+  }, nodeBeforeKeyboard, { timeout: 10_000 });
+  const nodeAfterKeyboard = await page.locator(".state-node.selected-node").evaluate(element => ({ left: element.style.left, top: element.style.top }));
+  assert.notDeepEqual(nodeAfterKeyboard, nodeBeforeKeyboard, "focused state node did not move from an Arrow key");
+
+  const nodeBeforeModal = nodeAfterKeyboard;
   const scaleBeforeModal = await page.locator(".graph-stage").getAttribute("data-viewport-scale");
   const saveRequestsBeforeModal = requests.filter(item => item.method === "POST" && item.url.endsWith("/api/save")).length;
 
   await page.locator("#glyph-settings").click();
   await page.waitForFunction(() => document.querySelector("#glyph-settings-dialog")?.open === true);
+  assert.equal(await page.locator("#glyph-settings").getAttribute("aria-haspopup"), "dialog");
+  assert.equal(await page.locator("#glyph-settings").getAttribute("aria-controls"), "glyph-settings-dialog");
   await page.locator("#glyph-settings-close").focus();
   await page.keyboard.press("ArrowRight");
   await page.keyboard.press("Control+s");
   await page.keyboard.press("Control+=");
+  await page.locator("#glyph-language").focus();
+  await page.keyboard.press("Control+s");
+  await page.keyboard.press("Control+=");
   await page.waitForTimeout(150);
-  const nodeDuringModal = await node.evaluate(element => ({ left: element.style.left, top: element.style.top }));
+  const nodeDuringModal = await page.locator(".state-node.selected-node").evaluate(element => ({ left: element.style.left, top: element.style.top }));
   const scaleDuringModal = await page.locator(".graph-stage").getAttribute("data-viewport-scale");
   const saveRequestsDuringModal = requests.filter(item => item.method === "POST" && item.url.endsWith("/api/save")).length;
   assert.deepEqual(nodeDuringModal, nodeBeforeModal, "arrow key moved a diagram node behind an open modal");
@@ -123,6 +170,20 @@ try {
   await page.waitForFunction(() => document.querySelector("#glyph-settings-dialog")?.open === false);
 
   const splitter = page.locator("#splitter");
+  assert.equal(await splitter.getAttribute("role"), "separator");
+  await splitter.focus();
+  const splitterBeforeKeyboard = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--editor").trim());
+  await page.keyboard.press("ArrowRight");
+  const splitterAfterKeyboard = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--editor").trim());
+  assert.notEqual(splitterAfterKeyboard, splitterBeforeKeyboard, "splitter did not resize from ArrowRight");
+  assert(Number(await splitter.getAttribute("aria-valuenow")) >= 25);
+  await page.keyboard.press("Home");
+  assert.equal(await splitter.getAttribute("aria-valuenow"), "25");
+  await page.keyboard.press("End");
+  assert.equal(await splitter.getAttribute("aria-valuenow"), "70");
+  await page.keyboard.press("Home");
+  await page.keyboard.press("ArrowRight");
+
   const splitterBox = await splitter.boundingBox();
   assert(splitterBox, "splitter is not visible at desktop width");
   const splitX = splitterBox.x + splitterBox.width / 2;
@@ -166,14 +227,35 @@ try {
   assert.equal(narrow.settingsVisible, true);
   assert.equal(narrow.saveVisible, true);
 
+  await page.setViewportSize({ width: 420, height: 700 });
+  await page.waitForTimeout(120);
+  const compact = await page.evaluate(() => ({
+    scrollWidth: document.documentElement.scrollWidth,
+    innerWidth,
+    editorVisible: document.querySelector(".editor-pane")?.getBoundingClientRect().height > 0,
+    viewerVisible: document.querySelector(".viewer")?.getBoundingClientRect().height > 0,
+    saveVisible: document.getElementById("save")?.getBoundingClientRect().width > 0,
+    settingsVisible: document.getElementById("glyph-settings")?.getBoundingClientRect().width > 0,
+  }));
+  assert(compact.scrollWidth <= compact.innerWidth + 1, `compact layout overflows horizontally: ${JSON.stringify(compact)}`);
+  assert.equal(compact.editorVisible, true);
+  assert.equal(compact.viewerVisible, true);
+  assert.equal(compact.saveVisible, true);
+  assert.equal(compact.settingsVisible, true);
+
   await page.screenshot({ path: path.join(outputDirectory, "gui-completeness-narrow.png"), fullPage: true });
   const report = {
     tabContract,
-    nodeBeforeModal,
-    scaleBeforeModal,
+    clusterBeforeKeyboard,
+    clusterAfterKeyboard,
+    nodeBeforeKeyboard,
+    nodeAfterKeyboard,
+    splitterBeforeKeyboard,
+    splitterAfterKeyboard,
     editorWidthAfterDrag,
     editorWidthAfterCancel,
     narrow,
+    compact,
     activePointers: await page.evaluate(() => window.glyphDiagramGuiUxGuard.activePointers()),
   };
   await fs.writeFile(path.join(outputDirectory, "report.json"), `${JSON.stringify(report, null, 2)}\n`);
