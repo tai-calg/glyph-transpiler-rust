@@ -24,7 +24,7 @@ def test_guard_exposes_fail_closed_publication_capability() -> None:
     assert 'stage.dataset.transitionIoCollisionSolved = "transaction-pending"' in html
     assert 'stage.dataset.layoutCertificateRequestState = "invalidated"' in html
     assert 'window.glyphTransitionLayoutTransaction?.schedule?.(reason, 0)' in html
-    assert 'interactionOwner: "glyph-transition-node-position-adapter-v8"' in html
+    assert 'interactionOwner: "glyph-transition-node-position-adapter-v9"' in html
     assert "ownsPointerEvents: false" in html
     assert "ownsKeyboardEvents: false" in html
     assert "version: 3" in html
@@ -53,7 +53,9 @@ def test_node_owner_invokes_guard_after_accepting_the_interaction() -> None:
     assert "function editingContext(event)" in html
     assert "target?.closest?.(EDITING_SELECTOR)" in html
     assert "focused?.closest?.(EDITING_SELECTOR)" in html
-    assert "version:8" in html
+    assert "if(document.activeElement!==node)return" in html
+    assert "node.focus?.({preventScroll:true})" in html
+    assert "version:9" in html
 
 
 def test_guard_javascript_is_syntactically_valid() -> None:
