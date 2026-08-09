@@ -25,6 +25,34 @@ class EditorCompletionRemainingEdgeTests(unittest.TestCase):
             HIGHLIGHT_SCRIPT,
         )
 
+    @unittest.skipUnless(shutil.which("node"), "Node.js is not installed")
+    def test_identifier_highlight_rejects_oversized_tokens(self) -> None:
+        start = HIGHLIGHT_SCRIPT.index("function identifierAt")
+        end = HIGHLIGHT_SCRIPT.index("\nfunction renderHtml", start)
+        identifier_at = HIGHLIGHT_SCRIPT[start:end]
+        runner = f"""
+const IDENTIFIER=/^[A-Za-z_][A-Za-z0-9_]*$/;
+const IDENTIFIER_PART=/[A-Za-z0-9_]/;
+const MAX_IDENTIFIER_LENGTH=256;
+const metrics={{boundedIdentifierRejects:0}};
+{identifier_at}
+const shortToken="A".repeat(256);
+const longToken="A".repeat(10000);
+const shortResult=identifierAt(shortToken,128,128,true);
+const longResult=identifierAt(longToken,5000,5000,true);
+const selectedResult=identifierAt(longToken,0,10000,true);
+console.log(JSON.stringify({{shortLength:shortResult.length,longResult,selectedResult,rejects:metrics.boundedIdentifierRejects}}));
+"""
+        result = subprocess.run(
+            ["node", "-e", runner], capture_output=True, text=True, check=False
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        data = json.loads(result.stdout)
+        self.assertEqual(data["shortLength"], 256)
+        self.assertEqual(data["longResult"], "")
+        self.assertEqual(data["selectedResult"], "")
+        self.assertEqual(data["rejects"], 2)
+
     def test_worker_marks_delimited_declarations_only_after_closure(self) -> None:
         product_close = LEXICAL_WORKER_JS.index(
             'const close=findMatchingOnLine(codeSource,open);'
