@@ -39,7 +39,7 @@ _SCRIPT = r"""
 const MARKER="glyph-diagram-gui-ux-guard-v1";
 if(window.glyphDiagramGuiUxGuard?.marker===MARKER)return;
 const pointerSessions=new Map();
-let inspectorOpener=null,restoreInspectorFocus=false,enhanceFrame=0;
+let inspectorOpener=null,restoreInspectorFocus=false,enhanceFrame=0,pendingClusterFocusId="";
 const focusableEditing="input,textarea,select,[contenteditable=true]";
 const pointerTargetSelector="#splitter,.canvas-shell,.state-node,.transition-io-cluster,.edge-label,.transition-label";
 const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
@@ -114,14 +114,40 @@ function setupStateNodes(){
     });
   }
 }
+function restoreClusterFocus(){
+  if(!pendingClusterFocusId)return;
+  const id=pendingClusterFocusId;
+  requestAnimationFrame(()=>{
+    const cluster=[...document.querySelectorAll(".transition-io-cluster")].find(item=>item.dataset.transitionId===id);
+    if(!cluster)return;
+    pendingClusterFocusId="";setupTransitionClusters();cluster.focus({preventScroll:true});
+  });
+}
 function setupTransitionClusters(){
   for(const cluster of document.querySelectorAll(".transition-io-cluster")){
     cluster.tabIndex=0;cluster.setAttribute("role","button");cluster.setAttribute("aria-haspopup","dialog");
+    cluster.setAttribute("aria-keyshortcuts","Enter ArrowUp ArrowDown ArrowLeft ArrowRight Delete");
     const label=(cluster.dataset.ioValue||cluster.textContent||"transition").trim();
     if(label)cluster.setAttribute("aria-label",label);
     if(cluster.dataset.guiUxInspectorReady==="true")continue;
     cluster.dataset.guiUxInspectorReady="true";
     cluster.addEventListener("keydown",event=>{
+      const adapter=window.glyphTransitionLayoutInteractionAdapter;
+      if(event.key.startsWith("Arrow")){
+        const step=event.shiftKey?12:4;
+        const dx=event.key==="ArrowLeft"?-step:event.key==="ArrowRight"?step:0;
+        const dy=event.key==="ArrowUp"?-step:event.key==="ArrowDown"?step:0;
+        event.preventDefault();event.stopPropagation();
+        pendingClusterFocusId=cluster.dataset.transitionId||"";
+        Promise.resolve(adapter?.keyboardNudge?.(cluster,dx,dy)).finally(restoreClusterFocus);
+        return;
+      }
+      if(event.key==="Delete"){
+        event.preventDefault();event.stopPropagation();
+        pendingClusterFocusId=cluster.dataset.transitionId||"";
+        Promise.resolve(adapter?.resetCluster?.(cluster)).finally(restoreClusterFocus);
+        return;
+      }
       if(event.key!=="Enter"&&event.key!==" ")return;
       event.preventDefault();event.stopPropagation();
       window.glyphTransitionLabelInspector?.open?.(cluster);
@@ -185,7 +211,7 @@ function setupSettings(){
   if(heading){heading.id=heading.id||"glyph-settings-title";dialog.setAttribute("aria-labelledby",heading.id)}
 }
 function enhance(){
-  enhanceFrame=0;setupTabs();setupLineJumps();setupStateNodes();setupTransitionClusters();setupInspector();setupSplitter();setupSettings();
+  enhanceFrame=0;setupTabs();setupLineJumps();setupStateNodes();setupTransitionClusters();setupInspector();setupSplitter();setupSettings();restoreClusterFocus();
 }
 function scheduleEnhance(){if(enhanceFrame)return;enhanceFrame=requestAnimationFrame(enhance)}
 
@@ -243,7 +269,8 @@ window.addEventListener("blur",()=>{
   pointerSessions.clear();
 });
 
-for(const eventName of["glyph-transition-layout-ready","glyph-transition-layout-transaction-ready","glyph-state-transition-ir-v3-labels-ready","glyph-locale-changed","glyph-save-state-changed"]){document.addEventListener(eventName,scheduleEnhance)}
+document.addEventListener("glyph-transition-layout-transaction-ready",()=>{scheduleEnhance();restoreClusterFocus()});
+for(const eventName of["glyph-transition-layout-ready","glyph-state-transition-ir-v3-labels-ready","glyph-locale-changed","glyph-save-state-changed"]){document.addEventListener(eventName,scheduleEnhance)}
 document.addEventListener("change",scheduleEnhance);
 const tabsRoot=document.querySelector(".tabs");
 if(tabsRoot)new MutationObserver(setupTabs).observe(tabsRoot,{subtree:true,attributes:true,attributeFilter:["class"]});
