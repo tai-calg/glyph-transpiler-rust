@@ -3,6 +3,8 @@ from __future__ import annotations
 
 _MARKER = "glyph-editor-document-runtime-v1"
 _SAVE_CONTROLLER_MARKER = "glyph-save-triggered-rendering-v4"
+_BASE_INPUT_LISTENER = "editor.addEventListener('input',()=>{dirty=true;syncLines()});"
+_OPTIMIZED_BASE_INPUT_LISTENER = "editor.addEventListener('input',()=>{syncLines()});"
 _SAVE_INPUT_LISTENER = '''editor.addEventListener("input",()=>{
  dirty=true;
  updateUi();
@@ -169,6 +171,7 @@ editor.addEventListener("input",applyInput);
 editor.addEventListener("compositionstart",()=>{compositionActive=true;dispatch("glyph-editor-composition-changed",{active:true})});
 editor.addEventListener("compositionend",()=>{compositionActive=false;syncCaretFromSelection();dispatch("glyph-editor-composition-changed",{active:false})});
 document.addEventListener("selectionchange",()=>{if(document.activeElement===editor)syncCaretFromSelection()});
+for(const eventName of["keyup","click","select"]){editor.addEventListener(eventName,()=>syncCaretFromSelection())}
 
 Object.defineProperty(editor,"value",{
   configurable:true,
@@ -242,13 +245,25 @@ dispatch("glyph-editor-document-runtime-ready",{sourceLength:textValue().length}
 
 
 def _optimize_save_input_listener(html: str) -> str:
-    """Update save-state chrome only when dirty changes from false to true."""
+    """Keep base line sync separate so save chrome sees the first dirty transition."""
 
     if _SAVE_CONTROLLER_MARKER not in html:
         return html
-    count = html.count(_SAVE_INPUT_LISTENER)
-    if count != 1:
-        raise ValueError(f"save input listener anchor changed: expected 1, got {count}")
+    base_count = html.count(_BASE_INPUT_LISTENER)
+    if base_count != 1:
+        raise ValueError(
+            f"base editor input listener anchor changed: expected 1, got {base_count}"
+        )
+    save_count = html.count(_SAVE_INPUT_LISTENER)
+    if save_count != 1:
+        raise ValueError(
+            f"save input listener anchor changed: expected 1, got {save_count}"
+        )
+    html = html.replace(
+        _BASE_INPUT_LISTENER,
+        _OPTIMIZED_BASE_INPUT_LISTENER,
+        1,
+    )
     return html.replace(_SAVE_INPUT_LISTENER, _OPTIMIZED_SAVE_INPUT_LISTENER, 1)
 
 
