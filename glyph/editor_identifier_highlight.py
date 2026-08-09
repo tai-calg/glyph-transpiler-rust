@@ -72,7 +72,7 @@ parent.insertBefore(surface,sourceEditor);
 sourceEditor.dataset.identifierHighlightReady="true";
 let frame=0,lastRevision=-1,lastStart=-1,lastEnd=-1,lastFocused=false,currentIdentifier="",matchCount=0;
 let renderedRevision=-1,renderedIdentifier="",renderedMatchCount=0;
-const metrics={htmlRebuilds:0,htmlReuses:0,boundedIdentifierRejects:0};
+const metrics={htmlRebuilds:0,htmlReuses:0,boundedIdentifierRejects:0,visibleInvalidations:0};
 const esc=value=>String(value??"").replace(/[&<>]/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[char]));
 function identifierAt(value,start,end,focused){
   if(!focused)return"";
@@ -125,9 +125,9 @@ function clear(identifier=""){
   sourceEditor.dataset.activeIdentifier=identifier;
   sourceEditor.dataset.identifierMatchCount="0";
 }
-function invalidate(){
-  renderedRevision=-1;renderedIdentifier="";renderedMatchCount=0;
+function invalidateVisible(){
   lastRevision=-1;lastStart=-1;lastEnd=-1;
+  metrics.visibleInvalidations+=1;
   clear("");
 }
 function publish(identifier){
@@ -180,7 +180,7 @@ for(const eventName of["input","keyup","mouseup","select","click","focus","blur"
 sourceEditor.addEventListener("scroll",syncGeometry,{passive:true});
 document.addEventListener("selectionchange",()=>{if(document.activeElement===sourceEditor)schedule()});
 document.addEventListener("glyph-editor-document-changed",()=>schedule(true));
-document.addEventListener("glyph-editor-source-replaced",()=>{invalidate();schedule(true)});
+document.addEventListener("glyph-editor-source-replaced",()=>{invalidateVisible();schedule(true)});
 document.addEventListener("glyph-editor-lexical-index-updated",()=>schedule(true));
 const status=document.getElementById("status");
 if(status)new MutationObserver(()=>schedule()).observe(status,{childList:true,subtree:true,attributes:true});
