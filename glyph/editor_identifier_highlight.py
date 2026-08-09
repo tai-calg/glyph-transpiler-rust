@@ -120,7 +120,6 @@ function render(force=false){
   const snapshot=lexicalIndex.snapshot();
   if(!focused||!identifier||!snapshot||Number(snapshot.revision)!==revision){
     clear(identifier);
-    highlight.textContent=value||"\u200b";
   }else{
     const row=lexicalIndex.record(identifier);
     const positions=row?lexicalIndex.allPositions(row):new Int32Array();
