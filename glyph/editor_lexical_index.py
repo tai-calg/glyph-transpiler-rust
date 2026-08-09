@@ -144,7 +144,7 @@ self.onmessage=event=>{
   const machineRecords=[];
 
   let match;
-  const productRe=/^\*\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(/gm;
+  const productRe=/^\*[ \t]*([A-Za-z_][A-Za-z0-9_]*)[ \t]*\(/gm;
   while((match=productRe.exec(codeSource))!==null){
     const name=match[1];
     const open=codeSource.indexOf("(",match.index);
@@ -158,7 +158,7 @@ self.onmessage=event=>{
     productRe.lastIndex=close+1;
   }
 
-  const sumRe=/^\+\s*([A-Za-z_][A-Za-z0-9_]*)\s*=([^\n]*)/gm;
+  const sumRe=/^\+[ \t]*([A-Za-z_][A-Za-z0-9_]*)[ \t]*=([^\n]*)/gm;
   while((match=sumRe.exec(codeSource))!==null){
     const name=match[1];
     const parts=splitTopLevel(match[2],"|");
@@ -172,10 +172,10 @@ self.onmessage=event=>{
     sumVariants.set(name,variants);
   }
 
-  const aliasRe=/^=\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^\n\s][^\n]*)/gm;
+  const aliasRe=/^=[ \t]*([A-Za-z_][A-Za-z0-9_]*)[ \t]*=[ \t]*([^\n\s][^\n]*)/gm;
   while((match=aliasRe.exec(codeSource))!==null)mark(match[1],"Type");
 
-  const resourceRe=/^resource\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s*<[^>\n]*>)?\s*\[/gm;
+  const resourceRe=/^resource[ \t]+([A-Za-z_][A-Za-z0-9_]*)(?:[ \t]*<[^>\n]*>)?[ \t]*\[/gm;
   while((match=resourceRe.exec(codeSource))!==null){
     const name=match[1];
     const open=codeSource.indexOf("[",match.index);
@@ -183,7 +183,7 @@ self.onmessage=event=>{
     if(close<0)continue;
     mark(name,"Resource");mark(name,"Type");
     for(const part of splitTopLevel(codeSource.slice(open+1,close),"|")){
-      const state=part.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)/)?.[1]||"";
+      const state=part.match(/^[ \t]*([A-Za-z_][A-Za-z0-9_]*)/)?.[1]||"";
       if(state)mark(state,"State",name);
     }
     resourceRe.lastIndex=close+1;
@@ -193,7 +193,7 @@ self.onmessage=event=>{
     for(const [field,type] of Object.entries(fields)){if(type&&sumVariants.has(type))mark(field,"StateField",owner)}
   }
 
-  const functionRe=/^([>!~?])\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(/gm;
+  const functionRe=/^([>!~?])[ \t]*([A-Za-z_][A-Za-z0-9_]*)[ \t]*\(/gm;
   while((match=functionRe.exec(codeSource))!==null){
     const marker=match[1],name=match[2];
     const open=codeSource.indexOf("(",match.index),close=findMatchingOnLine(codeSource,open);
@@ -204,7 +204,7 @@ self.onmessage=event=>{
     for(const field of parseNamedFields(codeSource.slice(open+1,close)))mark(field.name,"Parameter",name);
     functionRe.lastIndex=close+1;
   }
-  const extRe=/^ext\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/gm;
+  const extRe=/^ext[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*\(/gm;
   while((match=extRe.exec(codeSource))!==null){
     const name=match[1];
     const open=codeSource.indexOf("(",match.index),close=findMatchingOnLine(codeSource,open);
@@ -216,17 +216,17 @@ self.onmessage=event=>{
 
   const rawMacroRe=/^@([A-Z][A-Z0-9_]*)(?=[ \t]|=|$)/gm;
   while((match=rawMacroRe.exec(codeSource))!==null){if(match[1]!=="A"&&match[1]!=="E")mark(match[1],"Macro")}
-  const astMacroRe=/^@([A-Za-z_][A-Za-z0-9_]*)\s*\(/gm;
+  const astMacroRe=/^@([A-Za-z_][A-Za-z0-9_]*)[ \t]*\(/gm;
   while((match=astMacroRe.exec(codeSource))!==null){if(match[1]!=="A"&&match[1]!=="E")mark(match[1],"Macro")}
-  const bindingRe=/^[ \t]+([A-Za-z_][A-Za-z0-9_]*)\s*:=/gm;
+  const bindingRe=/^[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*:=/gm;
   while((match=bindingRe.exec(codeSource))!==null)mark(match[1],"Binding");
-  const systemRe=/^system\s+([A-Za-z_][A-Za-z0-9_]*)\b/gm;
+  const systemRe=/^system[ \t]+([A-Za-z_][A-Za-z0-9_]*)\b/gm;
   while((match=systemRe.exec(codeSource))!==null)mark(match[1],"System");
 
-  const contractRe=/^'[@>!?]?\s*([A-Za-z_][A-Za-z0-9_]*)\b/gm;
+  const contractRe=/^'[@>!?]?[ \t]*([A-Za-z_][A-Za-z0-9_]*)\b/gm;
   while((match=contractRe.exec(codeSource))!==null)mark(match[1],"Contract");
 
-  const machineRe=/^machine\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/gm;
+  const machineRe=/^machine[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*\(/gm;
   while((match=machineRe.exec(codeSource))!==null){
     const name=match[1];
     const open=codeSource.indexOf("(",match.index),close=findMatchingOnLine(codeSource,open);
@@ -238,7 +238,7 @@ self.onmessage=event=>{
     const stateType=stateParam?.type||"";
     const bodyEnd=nextTopLevelLine(codeSource,close);
     const body=codeSource.slice(close+1,bodyEnd);
-    const select=body.match(/^[ \t]+select\s*=\s*([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)/m);
+    const select=body.match(/^[ \t]+select[ \t]*=[ \t]*([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)/m);
     const selectorField=select?.[2]||"";
     const selectorType=stateType&&selectorField?(productFields.get(stateType)?.[selectorField]||""):"";
     machineRecords.push({name,stateType,selectorField,selectorType});
