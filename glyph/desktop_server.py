@@ -16,6 +16,7 @@ import webbrowser
 
 from . import diagram_app
 from .diagram_app import GlyphDiagramApp, SaveWriteError, ViewBuilder
+from .editor_lexical_index import LEXICAL_WORKER_JS
 from .io_state_views import build_io_state_views
 from .readable_diagram_app import prepare_diagram_app
 
@@ -110,8 +111,8 @@ def create_desktop_server(
                     "Content-Security-Policy",
                     "default-src 'self'; connect-src 'self'; img-src 'self' data: blob:; "
                     "style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; "
-                    "font-src 'self' data:; frame-ancestors tauri: http://tauri.localhost "
-                    "http://127.0.0.1:*",
+                    "worker-src 'self'; font-src 'self' data:; "
+                    "frame-ancestors tauri: http://tauri.localhost http://127.0.0.1:*",
                 )
 
         def _json(
@@ -122,6 +123,22 @@ def create_desktop_server(
             payload = json.dumps(value, ensure_ascii=False).encode("utf-8")
             self.send_response(status)
             self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(payload)))
+            self._security_headers()
+            self.end_headers()
+            try:
+                self.wfile.write(payload)
+            except (
+                BrokenPipeError,
+                ConnectionResetError,
+                ConnectionAbortedError,
+            ):
+                pass
+
+        def _javascript(self, source: str) -> None:
+            payload = source.encode("utf-8")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "text/javascript; charset=utf-8")
             self.send_header("Content-Length", str(len(payload)))
             self._security_headers()
             self.end_headers()
@@ -190,6 +207,9 @@ def create_desktop_server(
                 self._serve_app()
                 return
             if not self._require_auth():
+                return
+            if path == "/assets/editor-lexical-worker.js":
+                self._javascript(LEXICAL_WORKER_JS)
                 return
             if path == "/api/state":
                 self._json(app.state_dict())
