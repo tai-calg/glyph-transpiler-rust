@@ -52,6 +52,13 @@ class EditorCompletionTests(unittest.TestCase):
         self.assertNotIn("selectionStart===knownCaret?caretLine:lineAt(selectionStart)", DOCUMENT_SCRIPT)
         self.assertNotIn("split('\\n')", DOCUMENT_SCRIPT)
 
+    def test_document_runtime_mutates_line_gutter_by_suffix(self) -> None:
+        self.assertIn("node.appendData(suffix)", DOCUMENT_SCRIPT)
+        self.assertIn("node.deleteData", DOCUMENT_SCRIPT)
+        self.assertIn("lineSuffixMutations", DOCUMENT_SCRIPT)
+        self.assertIn("if(value===previous){syncCaretFromSelection();return}", DOCUMENT_SCRIPT)
+        self.assertIn("cancelDeferredReconciles", DOCUMENT_SCRIPT)
+
     def test_document_runtime_limits_save_state_updates_to_dirty_transition(self) -> None:
         html = (
             '<html><head></head><body><!-- glyph-save-triggered-rendering-v4 -->\n'
@@ -71,6 +78,17 @@ class EditorCompletionTests(unittest.TestCase):
         self.assertIn("Number(result.revision)<minimumRevision", INDEX_SCRIPT)
         self.assertIn("maxPendingDepth", INDEX_SCRIPT)
 
+    def test_lexical_index_keeps_owner_kind_relations_and_avoids_result_maps(self) -> None:
+        self.assertIn("ownerKinds:new Map()", LEXICAL_WORKER_JS)
+        self.assertIn("meta.ownerKinds.get(owner)", LEXICAL_WORKER_JS)
+        self.assertIn("Object.fromEntries([...meta.ownerKinds.entries()]", LEXICAL_WORKER_JS)
+        self.assertIn("row.ownerKinds?.[owner]", INDEX_SCRIPT)
+        self.assertIn("const candidateKinds=owner?ownedKinds:row.kinds", INDEX_SCRIPT)
+        self.assertNotIn("result.recordMap=new Map", INDEX_SCRIPT)
+        self.assertNotIn("result.machineMap=new Map", INDEX_SCRIPT)
+        self.assertIn("lowerBound(snapshot.records,text,row=>row.text)", INDEX_SCRIPT)
+        self.assertIn("machineRecords.sort", LEXICAL_WORKER_JS)
+
     def test_lexical_worker_extracts_lightweight_symbol_relationships(self) -> None:
         self.assertIn('mark(name,"Resource")', LEXICAL_WORKER_JS)
         self.assertIn('mark(variant,"State",name)', LEXICAL_WORKER_JS)
@@ -79,6 +97,10 @@ class EditorCompletionTests(unittest.TestCase):
         self.assertIn("sumVariants", LEXICAL_WORKER_JS)
         self.assertIn("machineRecords.push", LEXICAL_WORKER_JS)
         self.assertIn("selectorType", LEXICAL_WORKER_JS)
+        self.assertIn('if(marker===">")mark(name,"EntryFunction")', LEXICAL_WORKER_JS)
+        self.assertIn("rawMacroRe", LEXICAL_WORKER_JS)
+        self.assertIn("astMacroRe", LEXICAL_WORKER_JS)
+        self.assertIn('match[1]!=="A"&&match[1]!=="E"', LEXICAL_WORKER_JS)
 
     def test_context_classifier_is_bounded_and_glyph_specific(self) -> None:
         self.assertIn("MAX_LINE_CONTEXT=2048", CONTEXT_SCRIPT)
@@ -87,6 +109,7 @@ class EditorCompletionTests(unittest.TestCase):
         self.assertIn('if(trimmed.startsWith("#"))continue', CONTEXT_SCRIPT)
         self.assertIn('id:"resource-state"', CONTEXT_SCRIPT)
         self.assertIn('id:"system-entry"', CONTEXT_SCRIPT)
+        self.assertIn('kinds:["EntryFunction"]', CONTEXT_SCRIPT)
         self.assertIn('id:"system-source"', CONTEXT_SCRIPT)
         self.assertIn('id:"system-sink"', CONTEXT_SCRIPT)
         self.assertIn('id:`machine-${key}`', CONTEXT_SCRIPT)
@@ -94,6 +117,8 @@ class EditorCompletionTests(unittest.TestCase):
         self.assertIn('stateParam:match[2]', CONTEXT_SCRIPT)
         self.assertIn('insertPrefix=`${scope.stateParam}.`', CONTEXT_SCRIPT)
         self.assertIn('excludeText:key==="action"', CONTEXT_SCRIPT)
+        self.assertIn('return"qualified"', CONTEXT_SCRIPT)
+        self.assertIn('typeMode==="root"?staticRows(CAPABILITY_KEYWORDS,"Capability"):[]', CONTEXT_SCRIPT)
         self.assertNotIn("parse_program", CONTEXT_SCRIPT)
         self.assertNotIn("fetch(", CONTEXT_SCRIPT)
 
@@ -109,6 +134,7 @@ class EditorCompletionTests(unittest.TestCase):
         self.assertIn("inCodeOccurrence", COMPLETION_SCRIPT)
         self.assertIn("candidate.text.startsWith(context.prefix)", COMPLETION_SCRIPT)
         self.assertIn("recordMatchesClassification", COMPLETION_SCRIPT)
+        self.assertIn("row.ownerKinds?.[classification.owner]", COMPLETION_SCRIPT)
         self.assertIn("pendingAcceptance", COMPLETION_SCRIPT)
         self.assertIn("strictStaleDeferrals", COMPLETION_SCRIPT)
         self.assertIn("resumePendingAcceptance", COMPLETION_SCRIPT)
@@ -117,6 +143,9 @@ class EditorCompletionTests(unittest.TestCase):
         self.assertNotIn("else metrics.strictStaleAccepts+=1", COMPLETION_SCRIPT)
         self.assertIn("event.isComposing", COMPLETION_SCRIPT)
         self.assertIn("documentRuntime.replaceRange", COMPLETION_SCRIPT)
+        self.assertIn("dismissedContextKey", COMPLETION_SCRIPT)
+        self.assertIn('event.key==="Escape"&&(pendingAcceptance||!popup.hidden)', COMPLETION_SCRIPT)
+        self.assertIn('dismissedContextKey=contextKey(contextAtCaret())', COMPLETION_SCRIPT)
         self.assertNotIn("compile(", COMPLETION_SCRIPT)
         self.assertNotIn("/api/", COMPLETION_SCRIPT)
 
