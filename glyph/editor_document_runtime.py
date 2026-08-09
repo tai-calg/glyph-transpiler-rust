@@ -37,13 +37,14 @@ let lineCount=countNewlines(textValue())+1;
 let renderedLineCount=-1;
 let knownCaret=editor.selectionStart||0;
 let caretLine=countNewlines(textValue(),0,knownCaret)+1;
+let caretLineValid=true;
 let beforePlan=null;
 let syntheticPlan=null;
 let deferredRecountTimer=0;
 let deferredCaretTimer=0;
 let suppressValueHook=false;
 let compositionActive=false;
-const metrics={fullLineRecounts:1,caretFullScans:1,incrementalInputs:0,sourceReplacements:0};
+const metrics={fullLineRecounts:1,caretFullScans:1,incrementalCaretMoves:0,incrementalInputs:0,sourceReplacements:0};
 
 function renderLines(force=false){
   if(!force&&renderedLineCount===lineCount)return;
@@ -57,9 +58,18 @@ function lineAt(position){
 }
 function syncCaretFromSelection(force=false){
   const next=editor.selectionStart||0;
-  if(!force&&next===knownCaret)return;
+  if(!force&&caretLineValid&&next===knownCaret)return;
+  if(!force&&caretLineValid){
+    const source=textValue();
+    if(next>knownCaret)caretLine+=countNewlines(source,knownCaret,next);
+    else if(next<knownCaret)caretLine=Math.max(1,caretLine-countNewlines(source,next,knownCaret));
+    knownCaret=next;
+    metrics.incrementalCaretMoves+=1;
+    return;
+  }
   knownCaret=next;
   caretLine=lineAt(next);
+  caretLineValid=true;
 }
 function scheduleCaretReconcile(){
   if(deferredCaretTimer)return;
@@ -102,7 +112,7 @@ function makePlan(event){
   const inserted=insertedTextFor(event);
   const type=String(event?.inputType||"");
   let known=inserted!==null&&!type.startsWith("history");
-  let startLine=selectionStart===knownCaret?caretLine:null;
+  let startLine=selectionStart===knownCaret&&caretLineValid?caretLine:null;
   if(type.startsWith("delete")&&start===end){
     if(type==="deleteContentBackward"&&start>0){
       start-=1;
@@ -127,10 +137,16 @@ function applyInput(event){
   if(plan?.known){
     const delta=plan.insertedNewlines-plan.removedNewlines;
     lineCount=Math.max(1,lineCount+delta);
-    if(plan.startLine!==null)caretLine=Math.max(1,plan.startLine+plan.insertedNewlines);
-    else scheduleCaretReconcile();
+    if(plan.startLine!==null){
+      caretLine=Math.max(1,plan.startLine+plan.insertedNewlines);
+      caretLineValid=true;
+    }else{
+      caretLineValid=false;
+      scheduleCaretReconcile();
+    }
     if(delta!==0)renderLines();
   }else{
+    caretLineValid=false;
     scheduleFullLineRecount();
   }
   dispatch("glyph-editor-document-changed",{
@@ -143,7 +159,7 @@ function applyInput(event){
 editor.addEventListener("beforeinput",event=>{beforePlan=makePlan(event)});
 editor.addEventListener("input",applyInput);
 editor.addEventListener("compositionstart",()=>{compositionActive=true;dispatch("glyph-editor-composition-changed",{active:true})});
-editor.addEventListener("compositionend",()=>{compositionActive=false;syncCaretFromSelection(true);dispatch("glyph-editor-composition-changed",{active:false})});
+editor.addEventListener("compositionend",()=>{compositionActive=false;syncCaretFromSelection();dispatch("glyph-editor-composition-changed",{active:false})});
 document.addEventListener("selectionchange",()=>{if(document.activeElement===editor)syncCaretFromSelection()});
 
 Object.defineProperty(editor,"value",{
@@ -162,6 +178,7 @@ Object.defineProperty(editor,"value",{
     renderLines();
     knownCaret=editor.selectionStart||0;
     caretLine=countNewlines(value,0,knownCaret)+1;
+    caretLineValid=true;
     metrics.caretFullScans+=1;
     beforePlan=null;syntheticPlan=null;
     dispatch("glyph-editor-source-replaced",{sourceLength:value.length});
@@ -176,7 +193,7 @@ function replaceRange(start,end,replacement,{select="end"}={}){
   const left=Math.max(0,Math.min(source.length,Number(start)||0));
   const right=Math.max(left,Math.min(source.length,Number(end)||left));
   const text=String(replacement??"");
-  const startLine=left===knownCaret?caretLine:null;
+  const startLine=left===knownCaret&&caretLineValid?caretLine:null;
   syntheticPlan={
     start:left,end:right,startLine,known:true,
     removedNewlines:countNewlines(source,left,right),
