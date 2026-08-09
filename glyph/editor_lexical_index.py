@@ -146,10 +146,11 @@ self.onmessage=event=>{
   let match;
   const productRe=/^\*\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(/gm;
   while((match=productRe.exec(codeSource))!==null){
-    const name=match[1];mark(name,"Type");
+    const name=match[1];
     const open=codeSource.indexOf("(",match.index);
     const close=findMatchingOnLine(codeSource,open);
     if(close<0)continue;
+    mark(name,"Type");
     const fields=parseNamedFields(codeSource.slice(open+1,close));
     const fieldMap={};
     for(const field of fields){fieldMap[field.name]=field.type;mark(field.name,"Field",name)}
@@ -159,24 +160,28 @@ self.onmessage=event=>{
 
   const sumRe=/^\+\s*([A-Za-z_][A-Za-z0-9_]*)\s*=([^\n]*)/gm;
   while((match=sumRe.exec(codeSource))!==null){
-    const name=match[1];mark(name,"Type");
+    const name=match[1];
+    const parts=splitTopLevel(match[2],"|");
+    if(!parts.length||parts.some(part=>!part.match(/^([A-Za-z_][A-Za-z0-9_]*)/)))continue;
+    mark(name,"Type");
     const variants=[];
-    for(const part of splitTopLevel(match[2],"|")){
+    for(const part of parts){
       const variant=part.match(/^([A-Za-z_][A-Za-z0-9_]*)/)?.[1]||"";
       if(variant){variants.push(variant);mark(variant,"State",name)}
     }
     sumVariants.set(name,variants);
   }
 
-  const aliasRe=/^=\s*([A-Za-z_][A-Za-z0-9_]*)\s*=/gm;
+  const aliasRe=/^=\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^\n\s][^\n]*)/gm;
   while((match=aliasRe.exec(codeSource))!==null)mark(match[1],"Type");
 
   const resourceRe=/^resource\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s*<[^>\n]*>)?\s*\[/gm;
   while((match=resourceRe.exec(codeSource))!==null){
-    const name=match[1];mark(name,"Resource");mark(name,"Type");
+    const name=match[1];
     const open=codeSource.indexOf("[",match.index);
     const close=findMatchingOnLine(codeSource,open,"[","]");
     if(close<0)continue;
+    mark(name,"Resource");mark(name,"Type");
     for(const part of splitTopLevel(codeSource.slice(open+1,close),"|")){
       const state=part.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)/)?.[1]||"";
       if(state)mark(state,"State",name);
@@ -191,17 +196,22 @@ self.onmessage=event=>{
   const functionRe=/^([>!~?])\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(/gm;
   while((match=functionRe.exec(codeSource))!==null){
     const marker=match[1],name=match[2];
+    const open=codeSource.indexOf("(",match.index),close=findMatchingOnLine(codeSource,open);
+    if(close<0)continue;
     const kind=marker==="!"?"Sink":marker==="?"?"Temporal":"Function";
     mark(name,kind);
     if(marker===">")mark(name,"EntryFunction");
-    const open=codeSource.indexOf("(",match.index),close=findMatchingOnLine(codeSource,open);
-    if(close>=0){for(const field of parseNamedFields(codeSource.slice(open+1,close)))mark(field.name,"Parameter",name);functionRe.lastIndex=close+1}
+    for(const field of parseNamedFields(codeSource.slice(open+1,close)))mark(field.name,"Parameter",name);
+    functionRe.lastIndex=close+1;
   }
   const extRe=/^ext\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/gm;
   while((match=extRe.exec(codeSource))!==null){
-    const name=match[1];mark(name,"Source");
+    const name=match[1];
     const open=codeSource.indexOf("(",match.index),close=findMatchingOnLine(codeSource,open);
-    if(close>=0){for(const field of parseNamedFields(codeSource.slice(open+1,close)))mark(field.name,"Parameter",name);extRe.lastIndex=close+1}
+    if(close<0)continue;
+    mark(name,"Source");
+    for(const field of parseNamedFields(codeSource.slice(open+1,close)))mark(field.name,"Parameter",name);
+    extRe.lastIndex=close+1;
   }
 
   const rawMacroRe=/^@([A-Z][A-Z0-9_]*)(?=[ \t]|=|$)/gm;
@@ -218,9 +228,10 @@ self.onmessage=event=>{
 
   const machineRe=/^machine\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/gm;
   while((match=machineRe.exec(codeSource))!==null){
-    const name=match[1];mark(name,"Machine");
+    const name=match[1];
     const open=codeSource.indexOf("(",match.index),close=findMatchingOnLine(codeSource,open);
     if(close<0)continue;
+    mark(name,"Machine");
     const params=parseNamedFields(codeSource.slice(open+1,close));
     for(const param of params)mark(param.name,"Parameter",name);
     const stateParam=params[0]||null;
