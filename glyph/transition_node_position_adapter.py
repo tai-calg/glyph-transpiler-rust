@@ -213,6 +213,7 @@ document.addEventListener("pointerdown",event=>{
   event.preventDefault();
   event.stopImmediatePropagation();
   select(node);
+  node.focus?.({preventScroll:true});
   node.classList.add("dragging");
   node.setPointerCapture?.(event.pointerId);
   active={
@@ -267,6 +268,7 @@ document.addEventListener("keydown",event=>{
   const node=document.querySelector(".state-node.selected-node");
   const stage=node?.closest(".graph-stage");
   if(!node||!stage||stage.dataset.transitionLayoutState!=="ready")return;
+  if(document.activeElement!==node)return;
   event.preventDefault();
   event.stopImmediatePropagation();
   const step=event.shiftKey?1:8;
@@ -317,7 +319,7 @@ for(const eventName of["pagehide","beforeunload"]){
 }
 lastStage=document.querySelector(".state-node")?.closest(".graph-stage")||null;
 scheduleRestore(lastStage,0);
-window.glyphTransitionNodePositionAdapter={marker:MARKER,version:8,restore:()=>scheduleRestore(null,0)};
+window.glyphTransitionNodePositionAdapter={marker:MARKER,version:9,restore:()=>scheduleRestore(null,0)};
 })();
 </script>
 """
