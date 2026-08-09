@@ -249,7 +249,15 @@ document.addEventListener("pointermove",event=>{
   const record=pointerSessions.get(event.pointerId);if(!record)return;record.clientX=event.clientX;record.clientY=event.clientY;
 },true);
 document.addEventListener("pointerup",event=>pointerSessions.delete(event.pointerId),true);
-document.addEventListener("lostpointercapture",event=>pointerSessions.delete(event.pointerId),true);
+document.addEventListener("lostpointercapture",event=>{
+  const record=pointerSessions.get(event.pointerId);pointerSessions.delete(event.pointerId);
+  const node=record?.target?.closest?.(".state-node");
+  if(!node?.classList.contains("dragging"))return;
+  queueMicrotask(()=>{
+    if(!node.isConnected||!node.classList.contains("dragging"))return;
+    node.dispatchEvent(new PointerEvent("pointercancel",{bubbles:true,cancelable:true,pointerId:record.pointerId,button:record.button,clientX:record.clientX,clientY:record.clientY}));
+  });
+},true);
 document.addEventListener("pointercancel",event=>{
   const record=pointerSessions.get(event.pointerId);pointerSessions.delete(event.pointerId);
   const legacyLabel=record?.target?.closest?.(".edge-label,.transition-label");
