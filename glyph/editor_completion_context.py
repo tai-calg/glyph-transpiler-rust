@@ -34,15 +34,22 @@ function boundedLineStart(source,caret){
 }
 function scopeBefore(source,lineStart){
   const start=Math.max(0,lineStart-MAX_SCOPE_CONTEXT);
-  const chunk=source.slice(start,lineStart);
-  if(start>0&&chunk.indexOf("\n")<0)return null;
-  let absolute=start;
+  let chunk=source.slice(start,lineStart);
+  let chunkStart=start;
+  if(start>0){
+    const firstNewline=chunk.indexOf("\n");
+    if(firstNewline<0)return null;
+    chunkStart=start+firstNewline+1;
+    chunk=chunk.slice(firstNewline+1);
+  }
+  let absolute=chunkStart;
   let last=null;
   for(const line of chunk.split("\n")){
     const lineStart=absolute;
     absolute+=line.length+1;
     if(!line.trim()||/^\s/.test(line))continue;
     const trimmed=line.trim();
+    if(trimmed.startsWith("#"))continue;
     let match=trimmed.match(/^system\s+([A-Za-z_][A-Za-z0-9_]*)\b/);
     if(match){last={kind:"system",name:match[1],start:lineStart};continue}
     match=trimmed.match(/^machine\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*:/);
