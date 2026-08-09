@@ -34,22 +34,25 @@ function boundedLineStart(source,caret){
 }
 function scopeBefore(source,lineStart){
   const start=Math.max(0,lineStart-MAX_SCOPE_CONTEXT);
+  const truncated=start>0;
   let chunk=source.slice(start,lineStart);
   let chunkStart=start;
   if(start>0){
     const firstNewline=chunk.indexOf("\n");
-    if(firstNewline<0)return null;
+    if(firstNewline<0)return {kind:"bounded-unknown",name:"",start};
     chunkStart=start+firstNewline+1;
     chunk=chunk.slice(firstNewline+1);
   }
   let absolute=chunkStart;
   let last=null;
+  let sawTopLevel=false;
   for(const line of chunk.split("\n")){
     const lineStart=absolute;
     absolute+=line.length+1;
     if(!line.trim()||/^\s/.test(line))continue;
     const trimmed=line.trim();
     if(trimmed.startsWith("#"))continue;
+    sawTopLevel=true;
     let match=trimmed.match(/^system\s+([A-Za-z_][A-Za-z0-9_]*)\b/);
     if(match){last={kind:"system",name:match[1],start:lineStart};continue}
     match=trimmed.match(/^machine\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*:/);
@@ -66,6 +69,7 @@ function scopeBefore(source,lineStart){
     if(match){last={kind:"temporal",name:match[1],start:lineStart};continue}
     last=null;
   }
+  if(!last&&truncated&&!sawTopLevel)return {kind:"bounded-unknown",name:"",start:chunkStart};
   return last;
 }
 function typeContext(lineBefore){
@@ -151,7 +155,7 @@ function classify(context){
       return withDefaults({id:"machine-init",strict:true,kinds:["Type"],preferredKinds:["Type"],exactText:machine.stateType},scope);
     }
     if(key==="next"&&/^[A-Za-z0-9_]*$/.test(value)){
-      return withDefaults({id:"machine-next",strict:true,kinds:["Function"],preferredKinds:["Function"]},scope);
+      return withDefaults({id:"machine-next",strict:true,kinds:["EntryFunction"],preferredKinds:["EntryFunction","Function"]},scope);
     }
     if((key==="success"||key==="failure")&&/^[A-Za-z0-9_]*$/.test(value)&&machine?.selectorType){
       return withDefaults({id:`machine-${key}`,strict:true,kinds:["State"],owner:machine.selectorType,preferredKinds:["State"]},scope);
@@ -176,6 +180,9 @@ function classify(context){
     },scope);
   }
 
+  if(indented&&scope?.kind==="bounded-unknown"){
+    return withDefaults({id:"unsafe-scope",strict:true,kinds:[],static:[]},scope);
+  }
   if(indented&&scope?.kind==="system"&&/^\s*[A-Za-z0-9_]*$/.test(throughCaret)){
     return withDefaults({id:"system-keyword",strict:true,kinds:[],static:staticRows(SYSTEM_KEYWORDS)},scope);
   }
