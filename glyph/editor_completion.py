@@ -58,7 +58,7 @@ popup.id="glyph-completion-popup";popup.className="glyph-completion-popup";popup
 popup.setAttribute("role","listbox");popup.setAttribute("aria-label","Glyph completion");document.body.appendChild(popup);
 const measure=document.createElement("span");measure.className="glyph-completion-measure";measure.setAttribute("aria-hidden","true");document.body.appendChild(measure);
 editor.setAttribute("aria-autocomplete","list");editor.setAttribute("aria-controls",popup.id);editor.setAttribute("aria-expanded","false");
-let candidates=[],selected=0,frame=0,lastContext=null,lastClassification=null,explicit=false,pendingAcceptance=null;
+let candidates=[],selected=0,frame=0,lastContext=null,lastClassification=null,explicit=false,pendingAcceptance=null,dismissedContextKey="";
 const metrics={queries:0,opens:0,accepts:0,staleAcceptRechecks:0,strictStaleAccepts:0,strictStaleDeferrals:0,contextFilteredQueries:0};
 const WORD=/[A-Za-z0-9_]/;
 const IDENTIFIER=/^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -80,6 +80,10 @@ function contextAtCaret(){
   const prefix=source.slice(left,caret),current=source.slice(left,right);
   if(prefix&&!/^[A-Za-z_][A-Za-z0-9_]*$/.test(prefix))return null;
   return{source,caret,left,right,prefix,current,lineStart};
+}
+function contextKey(context){
+  if(!context)return"";
+  return`${documentRuntime.revision()}:${context.caret}:${context.left}:${context.right}:${context.prefix}`;
 }
 function close(){
   candidates=[];selected=0;lastContext=null;lastClassification=null;explicit=false;
@@ -159,6 +163,7 @@ function update({force=false,allowEmpty=false}={}){
   frame=0;
   if(documentRuntime.compositionActive()){close();return}
   const context=contextAtCaret();if(!context){close();return}
+  if(!force&&dismissedContextKey&&dismissedContextKey===contextKey(context)){close();return}
   const classification=contextService.classify(context);
   if(classification.id==="comment"||classification.id==="unsafe-long-line"){close();return}
   if(!force&&!allowEmpty&&context.prefix.length<MIN_PREFIX){close();return}
@@ -190,8 +195,11 @@ function inCodeOccurrence(source,text,excludeStart,excludeEnd){
 }
 function recordMatchesClassification(row,classification){
   if(!row)return false;
-  if(classification?.kinds?.length&&!row.kinds.some(kind=>classification.kinds.includes(kind)))return false;
-  if(classification?.owner&&!row.owners.includes(classification.owner))return false;
+  if(classification?.owner){
+    const ownedKinds=row.ownerKinds?.[classification.owner]||[];
+    if(!ownedKinds.length)return false;
+    if(classification?.kinds?.length&&!ownedKinds.some(kind=>classification.kinds.includes(kind)))return false;
+  }else if(classification?.kinds?.length&&!row.kinds.some(kind=>classification.kinds.includes(kind)))return false;
   if(classification?.exactText&&row.text!==classification.exactText)return false;
   if(classification?.excludeText&&row.text===classification.excludeText)return false;
   return true;
@@ -248,21 +256,23 @@ function accept(){
 
 editor.addEventListener("keydown",event=>{
   if(event.isComposing||documentRuntime.compositionActive()){pendingAcceptance=null;close();return}
-  if((event.ctrlKey||event.metaKey)&&event.code==="Space"){event.preventDefault();event.stopPropagation();schedule({force:true,allowEmpty:true});return}
+  if(event.key==="Escape"&&(pendingAcceptance||!popup.hidden)){
+    event.preventDefault();event.stopPropagation();dismissedContextKey=contextKey(contextAtCaret());pendingAcceptance=null;close();return;
+  }
+  if((event.ctrlKey||event.metaKey)&&event.code==="Space"){event.preventDefault();event.stopPropagation();dismissedContextKey="";schedule({force:true,allowEmpty:true});return}
   if(popup.hidden)return;
   if(event.key==="ArrowDown"){event.preventDefault();event.stopPropagation();setSelected(selected+1);return}
   if(event.key==="ArrowUp"){event.preventDefault();event.stopPropagation();setSelected(selected-1);return}
   if(event.key==="Tab"||event.key==="Enter"){event.preventDefault();event.stopPropagation();accept();return}
-  if(event.key==="Escape"){event.preventDefault();event.stopPropagation();pendingAcceptance=null;close()}
 });
-editor.addEventListener("input",event=>{if(event.isComposing)return;schedule()});
+editor.addEventListener("input",event=>{dismissedContextKey="";if(event.isComposing)return;schedule()});
 for(const eventName of["click","keyup","select"]){editor.addEventListener(eventName,event=>{if(eventName==="keyup"&&["ArrowUp","ArrowDown","Enter","Tab","Escape"].includes(event.key))return;schedule()})}
-editor.addEventListener("compositionstart",()=>{pendingAcceptance=null;close()});editor.addEventListener("compositionend",()=>schedule());
+editor.addEventListener("compositionstart",()=>{dismissedContextKey="";pendingAcceptance=null;close()});editor.addEventListener("compositionend",()=>{dismissedContextKey="";schedule()});
 editor.addEventListener("scroll",()=>{if(!popup.hidden)requestAnimationFrame(positionPopup)},{passive:true});
 editor.addEventListener("blur",()=>{pendingAcceptance=null;setTimeout(()=>{if(document.activeElement!==editor)close()},0)});window.addEventListener("resize",()=>{if(!popup.hidden)positionPopup()});
 document.addEventListener("selectionchange",()=>{if(document.activeElement===editor&&!popup.hidden)schedule({allowEmpty:explicit})});
 document.addEventListener("glyph-editor-document-changed",()=>{if(pendingAcceptance&&documentRuntime.revision()!==pendingAcceptance.revision)pendingAcceptance=null});
-document.addEventListener("glyph-editor-source-replaced",()=>{pendingAcceptance=null;close()});
+document.addEventListener("glyph-editor-source-replaced",()=>{dismissedContextKey="";pendingAcceptance=null;close()});
 document.addEventListener("glyph-editor-lexical-index-error",()=>{pendingAcceptance=null});
 document.addEventListener("glyph-editor-lexical-index-updated",event=>{
   if(pendingAcceptance){if(event.detail?.exact)resumePendingAcceptance();return}
@@ -270,7 +280,7 @@ document.addEventListener("glyph-editor-lexical-index-updated",event=>{
 });
 editor.dataset.completionReady="true";
 window.GlyphEditorCompletion={
-  marker:MARKER,version:2,open:()=>schedule({force:true,allowEmpty:true}),close,accept,
+  marker:MARKER,version:2,open:()=>{dismissedContextKey="";schedule({force:true,allowEmpty:true})},close,accept,
   candidates:()=>candidates.map(candidate=>({...candidate,kinds:[...(candidate.kinds||[])],owners:[...(candidate.owners||[])]})),
   selected:()=>selected,context:()=>lastClassification?{...lastClassification,static:undefined}:null,metrics:()=>({...metrics,pendingAcceptance:Boolean(pendingAcceptance)}),
 };
