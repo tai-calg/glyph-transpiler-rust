@@ -9,8 +9,12 @@ from pathlib import Path
 
 from glyph.editor_completion import _SCRIPT as COMPLETION_SCRIPT
 from glyph.editor_completion import enhance_editor_completion_html
-from glyph.editor_document_runtime import _SCRIPT as DOCUMENT_SCRIPT
-from glyph.editor_document_runtime import enhance_editor_document_runtime_html
+from glyph.editor_document_runtime import (
+    _OPTIMIZED_SAVE_INPUT_LISTENER,
+    _SAVE_INPUT_LISTENER,
+    _SCRIPT as DOCUMENT_SCRIPT,
+    enhance_editor_document_runtime_html,
+)
 from glyph.editor_identifier_highlight import _SCRIPT as HIGHLIGHT_SCRIPT
 from glyph.editor_lexical_index import LEXICAL_WORKER_JS
 from glyph.editor_lexical_index import _SCRIPT as INDEX_SCRIPT
@@ -39,6 +43,16 @@ class EditorCompletionTests(unittest.TestCase):
         self.assertIn("selectionStart===knownCaret?caretLine:null", DOCUMENT_SCRIPT)
         self.assertNotIn("selectionStart===knownCaret?caretLine:lineAt(selectionStart)", DOCUMENT_SCRIPT)
         self.assertNotIn("split('\\n')", DOCUMENT_SCRIPT)
+
+    def test_document_runtime_limits_save_state_updates_to_dirty_transition(self) -> None:
+        html = (
+            '<html><head></head><body><!-- glyph-save-triggered-rendering-v4 -->\n'
+            + _SAVE_INPUT_LISTENER
+            + "\n</body></html>"
+        )
+        enhanced = enhance_editor_document_runtime_html(html)
+        self.assertNotIn(_SAVE_INPUT_LISTENER, enhanced)
+        self.assertIn(_OPTIMIZED_SAVE_INPUT_LISTENER, enhanced)
 
     def test_lexical_index_coalesces_and_rejects_pre_replacement_results(self) -> None:
         self.assertIn("pending=request", INDEX_SCRIPT)
