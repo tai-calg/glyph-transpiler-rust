@@ -79,7 +79,14 @@ jobs:
           run_node tests/verify_state_diagram_rendering.mjs build/state-diagram-regression/verify.log
           run_node tests/verify_adaptive_state_workspace.mjs build/adaptive-state-workspace/verify.log
           run_node tests/verify_transition_arrow_clearance.mjs build/transition-arrow-clearance/verify.log
+
+          # Editor features touched by this change run before the README image baseline.
+          # This keeps their functional regressions visible even when main carries a stale PNG baseline.
           run_node tests/verify_editor_completion.mjs build/editor-completion/verify.log
+          run_node tests/verify_save_triggered_studio.mjs build/save-triggered-studio/verify.log
+          run_node tests/verify_interactive_save_ux.mjs build/interactive-save-ux/verify.log
+          run_node tests/verify_label_and_identifier_interactions.mjs build/label-identifier-interactions/verify.log
+
           python tests/verify_readme_state_snapshot.py \
             2>&1 | tee -a build/state-diagram-regression/verify.log
           run_node tests/verify_state_diagram_stability.mjs build/state-diagram-stability/verify.log
@@ -87,11 +94,8 @@ jobs:
           run_node tests/verify_diagram_editor_exports.mjs build/diagram-editor-exports/verify.log
           run_node tests/verify_diagram_canvas_viewport.mjs build/diagram-canvas-viewport/verify.log
           run_node tests/verify_localized_semantic_canvas.mjs build/localized-semantic-canvas/verify.log
-          run_node tests/verify_save_triggered_studio.mjs build/save-triggered-studio/verify.log
-          run_node tests/verify_interactive_save_ux.mjs build/interactive-save-ux/verify.log
           run_node tests/verify_transition_label_readability.mjs build/transition-label-readability/verify.log
           run_node tests/verify_transition_semantic_readability.mjs build/transition-semantic-readability/verify.log
-          run_node tests/verify_label_and_identifier_interactions.mjs build/label-identifier-interactions/verify.log
 
           # Additional RTAI UI campaigns are independent end-of-job checks.
           run_node tests/verify_rtai_strict_projection_ui.mjs build/rtai-strict-projection/ui-verify.log
