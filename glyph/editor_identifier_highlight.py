@@ -69,6 +69,8 @@ surface.append(highlight);
 parent.insertBefore(surface,sourceEditor);
 sourceEditor.dataset.identifierHighlightReady="true";
 let frame=0,lastRevision=-1,lastStart=-1,lastEnd=-1,lastFocused=false,currentIdentifier="",matchCount=0;
+let renderedRevision=-1,renderedIdentifier="";
+const metrics={htmlRebuilds:0,htmlReuses:0};
 const esc=value=>String(value??"").replace(/[&<>]/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[char]));
 function identifierAt(value,start,end,focused){
   if(!focused)return"";
@@ -111,6 +113,16 @@ function clear(identifier=""){
   sourceEditor.dataset.activeIdentifier=identifier;
   sourceEditor.dataset.identifierMatchCount="0";
 }
+function publish(identifier,revision){
+  const active=matchCount>0;
+  parent.classList.toggle("identifier-highlight-active",active);
+  currentIdentifier=identifier;
+  surface.dataset.identifier=identifier;
+  surface.dataset.identifierMatchCount=String(matchCount);
+  sourceEditor.dataset.activeIdentifier=identifier;
+  sourceEditor.dataset.identifierMatchCount=String(matchCount);
+  document.dispatchEvent(new CustomEvent("glyph-editor-identifier-highlighted",{detail:{marker:MARKER,identifier:currentIdentifier,matchCount,revision}}));
+}
 function render(force=false){
   frame=0;
   const value=sourceEditor.value,start=sourceEditor.selectionStart||0,end=sourceEditor.selectionEnd||0,focused=document.activeElement===sourceEditor;
@@ -121,21 +133,21 @@ function render(force=false){
   if(!focused||!identifier||!snapshot||Number(snapshot.revision)!==revision){
     clear(identifier);
   }else{
-    const row=lexicalIndex.record(identifier);
-    const positions=row?lexicalIndex.allPositions(row):new Int32Array();
-    matchCount=0;
-    highlight.innerHTML=renderHtml(value,identifier,positions);
-    const active=matchCount>0;
-    parent.classList.toggle("identifier-highlight-active",active);
-    currentIdentifier=identifier;
-    surface.dataset.identifier=identifier;
-    surface.dataset.identifierMatchCount=String(matchCount);
-    sourceEditor.dataset.activeIdentifier=identifier;
-    sourceEditor.dataset.identifierMatchCount=String(matchCount);
+    if(renderedRevision!==revision||renderedIdentifier!==identifier){
+      const row=lexicalIndex.record(identifier);
+      const positions=row?lexicalIndex.allPositions(row):new Int32Array();
+      matchCount=0;
+      highlight.innerHTML=renderHtml(value,identifier,positions);
+      renderedRevision=revision;
+      renderedIdentifier=identifier;
+      metrics.htmlRebuilds+=1;
+    }else{
+      metrics.htmlReuses+=1;
+    }
+    publish(identifier,revision);
   }
   lastRevision=revision;lastStart=start;lastEnd=end;lastFocused=focused;
   syncGeometry();
-  document.dispatchEvent(new CustomEvent("glyph-editor-identifier-highlighted",{detail:{marker:MARKER,identifier:currentIdentifier,matchCount,revision}}));
 }
 function schedule(force=false){
   if(force)lastRevision=-1;
@@ -149,9 +161,9 @@ document.addEventListener("glyph-editor-document-changed",()=>schedule(true));
 document.addEventListener("glyph-editor-source-replaced",()=>schedule(true));
 document.addEventListener("glyph-editor-lexical-index-updated",()=>schedule(true));
 const status=document.getElementById("status");
-if(status)new MutationObserver(()=>schedule(true)).observe(status,{childList:true,subtree:true,attributes:true});
-new ResizeObserver(()=>schedule(true)).observe(sourceEditor);
-for(const eventName of["glyph-locale-changed","glyph-transition-layout-transaction-ready"]){document.addEventListener(eventName,()=>schedule(true))}
+if(status)new MutationObserver(()=>schedule()).observe(status,{childList:true,subtree:true,attributes:true});
+new ResizeObserver(syncGeometry).observe(sourceEditor);
+for(const eventName of["glyph-locale-changed","glyph-transition-layout-transaction-ready"]){document.addEventListener(eventName,()=>schedule())}
 schedule(true);
 window.glyphEditorIdentifierHighlight={
   marker:MARKER,
@@ -159,6 +171,7 @@ window.glyphEditorIdentifierHighlight={
   identifier:()=>currentIdentifier,
   matchCount:()=>matchCount,
   refresh:()=>schedule(true),
+  metrics:()=>({...metrics}),
 };
 })();
 </script>
