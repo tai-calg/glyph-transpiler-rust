@@ -69,12 +69,12 @@ function scopeBefore(source,lineStart){
   return last;
 }
 function typeContext(lineBefore){
-  if(/:\s*$/.test(lineBefore))return true;
-  if(/\b(?:own|share|link)\s+$/.test(lineBefore))return true;
-  if(/&\s*(?:mut\s+)?$/.test(lineBefore))return true;
-  if(/[<,]\s*$/.test(lineBefore)&&lineBefore.includes(":"))return true;
-  if(/\|\s*$/.test(lineBefore)&&lineBefore.includes(":"))return true;
-  return false;
+  if(/\b(?:own|share|link)\s+$/.test(lineBefore))return"qualified";
+  if(/&\s*(?:mut\s+)?$/.test(lineBefore))return"qualified";
+  if(/:\s*$/.test(lineBefore))return"root";
+  if(/[<,]\s*$/.test(lineBefore)&&lineBefore.includes(":"))return"root";
+  if(/\|\s*$/.test(lineBefore)&&lineBefore.includes(":"))return"root";
+  return null;
 }
 function withDefaults(result,scope){
   return{
@@ -115,7 +115,7 @@ function classify(context){
   }
 
   let match=trimmed.match(/^entry\s+[A-Za-z0-9_]*$/);
-  if(match&&scope?.kind==="system")return withDefaults({id:"system-entry",strict:true,kinds:["Function"],preferredKinds:["Function"]},scope);
+  if(match&&scope?.kind==="system")return withDefaults({id:"system-entry",strict:true,kinds:["EntryFunction"],preferredKinds:["EntryFunction","Function"]},scope);
   match=trimmed.match(/^source\s+[A-Za-z0-9_]*$/);
   if(match&&scope?.kind==="system")return withDefaults({id:"system-source",strict:true,kinds:["Source"],preferredKinds:["Source"]},scope);
   match=trimmed.match(/^sink\s+[A-Za-z0-9_]*$/);
@@ -162,13 +162,17 @@ function classify(context){
     return withDefaults({id:"capability-target",strict:true,kinds:[],static:staticRows(AS_TARGETS,"Capability")},scope);
   }
 
-  if(typeContext(lineBefore)){
+  const typeMode=typeContext(lineBefore);
+  if(typeMode){
     return withDefaults({
       id:"type",
       strict:true,
       kinds:["Type"],
       preferredKinds:["Resource","Type"],
-      static:[...staticRows(BUILTIN_TYPES,"Builtin Type"),...staticRows(CAPABILITY_KEYWORDS,"Capability")],
+      static:[
+        ...staticRows(BUILTIN_TYPES,"Builtin Type"),
+        ...(typeMode==="root"?staticRows(CAPABILITY_KEYWORDS,"Capability"):[]),
+      ],
     },scope);
   }
 
