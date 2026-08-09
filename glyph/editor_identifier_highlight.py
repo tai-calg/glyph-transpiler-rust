@@ -125,6 +125,11 @@ function clear(identifier=""){
   sourceEditor.dataset.activeIdentifier=identifier;
   sourceEditor.dataset.identifierMatchCount="0";
 }
+function invalidate(){
+  renderedRevision=-1;renderedIdentifier="";renderedMatchCount=0;
+  lastRevision=-1;lastStart=-1;lastEnd=-1;
+  clear("");
+}
 function publish(identifier){
   const active=matchCount>0;
   parent.classList.toggle("identifier-highlight-active",active);
@@ -175,7 +180,7 @@ for(const eventName of["input","keyup","mouseup","select","click","focus","blur"
 sourceEditor.addEventListener("scroll",syncGeometry,{passive:true});
 document.addEventListener("selectionchange",()=>{if(document.activeElement===sourceEditor)schedule()});
 document.addEventListener("glyph-editor-document-changed",()=>schedule(true));
-document.addEventListener("glyph-editor-source-replaced",()=>schedule(true));
+document.addEventListener("glyph-editor-source-replaced",()=>{invalidate();schedule(true)});
 document.addEventListener("glyph-editor-lexical-index-updated",()=>schedule(true));
 const status=document.getElementById("status");
 if(status)new MutationObserver(()=>schedule()).observe(status,{childList:true,subtree:true,attributes:true});
