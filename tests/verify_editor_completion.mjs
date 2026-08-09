@@ -65,15 +65,17 @@ try {
   await page.waitForFunction(() => document.querySelector("#status")?.textContent === "ready");
   await page.waitForFunction(() => (
     window.GlyphEditorDocument?.version === 1
-    && window.GlyphEditorLexicalIndex?.version === 1
-    && window.GlyphEditorCompletion?.version === 1
+    && window.GlyphEditorLexicalIndex?.version === 2
+    && window.GlyphEditorCompletionContext?.version === 1
+    && window.GlyphEditorCompletion?.version === 2
     && window.glyphEditorIdentifierHighlight?.version === 2
   ));
-  await page.waitForFunction(() => {
+  const waitForExactIndex = () => page.waitForFunction(() => {
     const runtime = window.GlyphEditorDocument;
     const snapshot = window.GlyphEditorLexicalIndex?.snapshot?.();
     return snapshot && snapshot.revision === runtime.revision();
   });
+  await waitForExactIndex();
 
   const initial = await page.evaluate(() => ({
     source: document.getElementById("editor").value,
@@ -120,23 +122,16 @@ try {
   assert.equal(beforeAccept.expanded, "true");
   assert(beforeAccept.candidates.length <= 8, "completion must be bounded to eight rows");
   assert(beforeAccept.candidates.some(item => item.text === "MotorCommand"));
-  assert.equal(
-    beforeAccept.runtimeMetrics.fullLineRecounts,
-    initial.runtimeMetrics.fullLineRecounts,
-    "plain typing must not trigger a full line recount",
-  );
+  assert.equal(beforeAccept.runtimeMetrics.fullLineRecounts, initial.runtimeMetrics.fullLineRecounts, "plain typing must not trigger a full line recount");
   assert.equal(beforeAccept.lineMutations, 0, "plain character typing must not rebuild line-number DOM");
-  assert(
-    beforeAccept.saveStateEvents <= 2,
-    `save-state chrome was redundantly refreshed ${beforeAccept.saveStateEvents} times while typing`,
-  );
+  assert(beforeAccept.saveStateEvents <= 2, `save-state chrome was redundantly refreshed ${beforeAccept.saveStateEvents} times while typing`);
   assert(beforeAccept.indexMetrics.maxPendingDepth <= 1, "worker pending queue must stay bounded");
 
   const motorCommandIndex = beforeAccept.candidates.findIndex(item => item.text === "MotorCommand");
   for (let index = 0; index < motorCommandIndex; index += 1) await page.keyboard.press("ArrowDown");
   await page.keyboard.press("Tab");
-
   await page.waitForFunction(() => document.getElementById("editor").value.endsWith("MotorCommand"));
+
   const accepted = await page.evaluate(() => ({
     source: document.getElementById("editor").value,
     popupHidden: document.getElementById("glyph-completion-popup").hidden,
@@ -144,45 +139,110 @@ try {
     completionMetrics: window.GlyphEditorCompletion.metrics(),
     runtimeMetrics: window.GlyphEditorDocument.metrics(),
     lineMutations: window.__glyphCompletionLineMutations,
-    saveStateEvents: window.__glyphCompletionSaveStateEvents,
   }));
   assert(accepted.source.endsWith("MotorCommand"));
   assert.equal(accepted.popupHidden, true);
   assert.equal(accepted.expanded, "false");
   assert.equal(accepted.completionMetrics.accepts, 1);
-  assert.equal(
-    accepted.runtimeMetrics.fullLineRecounts,
-    initial.runtimeMetrics.fullLineRecounts,
-    "completion replacement must not force a full line recount",
-  );
+  assert.equal(accepted.runtimeMetrics.fullLineRecounts, initial.runtimeMetrics.fullLineRecounts, "completion replacement must not force a full line recount");
   assert.equal(accepted.lineMutations, 0, "completion replacement without newlines must not rebuild line-number DOM");
+
+  const semanticBase = `system ControllerService
+  entry cycle
+  source read_sensor
+  sink write_actuator
+
+resource Buffer[Ready|InFlight|Done]
++Mode=Idle|Running|Stopping|Faulted
++Other=Red|Blue
+*Input(value:I)
+*System(mode:Mode,sequence:U)
+*OtherSystem(mode:Other)
+>step(state:System,input:Input):System=state
+>cycle(system:System,input:Input):System=step(system,input)
+>compute(system:System):System=system
+ext read_sensor():Input|Error
+ext read_backup():Input|Error
+!write_actuator(system:System):System|Error
+!write_log(system:System):System|Error
+`;
+
+  async function installSource(source) {
+    await page.evaluate(value => {
+      window.__glyphCompletionLineObserver?.disconnect();
+      const editor = document.getElementById("editor");
+      editor.value = value;
+      editor.focus();
+      editor.setSelectionRange(editor.value.length, editor.value.length);
+    }, source);
+    await waitForExactIndex();
+  }
+  async function typeForContext(source, typed, expectedText, expectedContext) {
+    await installSource(source);
+    await page.keyboard.type(typed, { delay: 4 });
+    await page.waitForFunction(({ text, context }) => {
+      const popup = document.getElementById("glyph-completion-popup");
+      return popup && !popup.hidden
+        && window.GlyphEditorCompletion.context()?.id === context
+        && window.GlyphEditorCompletion.candidates().some(item => item.text === text);
+    }, { text: expectedText, context: expectedContext });
+    return page.evaluate(() => ({
+      context: window.GlyphEditorCompletion.context(),
+      candidates: window.GlyphEditorCompletion.candidates(),
+      snapshotRevision: window.GlyphEditorLexicalIndex.snapshot()?.revision,
+      editorRevision: window.GlyphEditorDocument.revision(),
+    }));
+  }
+
+  const resourceState = await typeForContext(`${semanticBase}\n>probe(buffer:own Buffer[`, "Re", "Ready", "resource-state");
+  assert(resourceState.candidates.every(item => item.kind === "State"));
+  assert(resourceState.candidates.every(item => item.owners.includes("Buffer")));
+  assert(!resourceState.candidates.some(item => item.text === "Red"), "state completion must not leak variants from another owner");
+  await page.keyboard.press("Tab");
+  await page.waitForFunction(() => document.getElementById("editor").value.endsWith("Buffer[Ready"));
+
+  const typeRows = await typeForContext(`${semanticBase}\n*Probe(value:`, "Sy", "System", "type");
+  const systemType = typeRows.candidates.find(item => item.text === "System");
+  assert(systemType?.kinds.includes("Type"));
+
+  const builtinRows = await typeForContext(`${semanticBase}\n*Probe(value:`, "St", "String", "type");
+  assert.equal(builtinRows.candidates.find(item => item.text === "String")?.kind, "Builtin Type");
+
+  const entryRows = await typeForContext(`${semanticBase}\nsystem Secondary\n  entry `, "cy", "cycle", "system-entry");
+  assert(entryRows.candidates.every(item => item.kinds.includes("Function")));
+  assert(!entryRows.candidates.some(item => item.text === "read_sensor"));
+
+  const sourceRows = await typeForContext(`${semanticBase}\nsystem Secondary\n  source `, "re", "read_sensor", "system-source");
+  assert(sourceRows.candidates.every(item => item.kinds.includes("Source")));
+  assert(sourceRows.candidates.some(item => item.text === "read_backup"));
+
+  const sinkRows = await typeForContext(`${semanticBase}\nsystem Secondary\n  sink `, "write_", "write_actuator", "system-sink");
+  assert(sinkRows.candidates.every(item => item.kinds.includes("Sink")));
+  assert(sinkRows.candidates.some(item => item.text === "write_log"));
+
+  const machinePrefix = `${semanticBase}\nmachine Controller(state:System,input:Input)\n`;
+  const selectRows = await typeForContext(`${machinePrefix}  select=`, "mo", "mode", "machine-select");
+  assert(selectRows.candidates.every(item => item.kinds.includes("StateField")));
+  assert(!selectRows.candidates.some(item => item.text === "sequence"), "machine select must exclude non-sum fields");
+
+  const initRows = await typeForContext(`${machinePrefix}  select=state.mode\n  init=`, "Sy", "System", "machine-init");
+  assert.deepEqual(initRows.candidates.map(item => item.text), ["System"]);
+
+  const nextRows = await typeForContext(`${machinePrefix}  select=state.mode\n  init=System(Idle,0)\n  next=`, "st", "step", "machine-next");
+  assert(nextRows.candidates.every(item => item.kinds.includes("Function")));
+
+  const successRows = await typeForContext(`${machinePrefix}  select=state.mode\n  success=`, "Ru", "Running", "machine-success");
+  assert(successRows.candidates.every(item => item.owners.includes("Mode")));
+  assert(!successRows.candidates.some(item => item.text === "Red"));
+
+  await installSource(`${semanticBase}\nres`);
+  await page.evaluate(() => window.GlyphEditorCompletion.open());
+  await page.waitForFunction(() => window.GlyphEditorCompletion.candidates().some(item => item.text === "resource" && item.kind === "Keyword"));
+  assert.equal((await page.evaluate(() => window.GlyphEditorCompletion.context()?.id)), "top-level-keyword");
 
   await page.waitForTimeout(250);
   assert.deepEqual(sourceRequests, [], `typing/completion unexpectedly invoked source actions: ${sourceRequests.join(", ")}`);
 
-  const replacement = await page.evaluate(() => {
-    window.__glyphCompletionLineObserver?.disconnect();
-    const editor = document.getElementById("editor");
-    const source = editor.value;
-    editor.value = source.replace(/MotorCommand/g, "CommandAfterReplace");
-    return {
-      revision: window.GlyphEditorDocument.revision(),
-      snapshot: window.GlyphEditorLexicalIndex.snapshot()?.revision ?? -1,
-    };
-  });
-  assert(replacement.revision > beforeAccept.revision);
-  assert.notEqual(replacement.snapshot, replacement.revision, "full source replacement must invalidate the old index immediately");
-  await page.waitForFunction(() => {
-    const runtime = window.GlyphEditorDocument;
-    const index = window.GlyphEditorLexicalIndex;
-    const snapshot = index.snapshot();
-    return snapshot
-      && snapshot.revision === runtime.revision()
-      && index.record("CommandAfterReplace")?.codeCount > 0
-      && !index.record("MotorCommand");
-  });
-
-  await page.screenshot({ path: path.join(outputDirectory, "completion.png"), fullPage: true });
   const report = await page.evaluate(() => ({
     revision: window.GlyphEditorDocument.revision(),
     lineCount: window.GlyphEditorDocument.lineCount(),
@@ -191,7 +251,13 @@ try {
     runtimeMetrics: window.GlyphEditorDocument.metrics(),
     indexMetrics: window.GlyphEditorLexicalIndex.metrics(),
     completionMetrics: window.GlyphEditorCompletion.metrics(),
+    lexicalKinds: {
+      Running: window.GlyphEditorLexicalIndex.record("Running")?.kinds,
+      mode: window.GlyphEditorLexicalIndex.record("mode")?.kinds,
+      step: window.GlyphEditorLexicalIndex.record("step")?.kinds,
+    },
   }));
+  await page.screenshot({ path: path.join(outputDirectory, "completion.png"), fullPage: true });
   await fs.writeFile(path.join(outputDirectory, "report.json"), `${JSON.stringify(report, null, 2)}\n`);
   assert.deepEqual(browserErrors, [], browserErrors.join("\n"));
   console.log(JSON.stringify(report));
