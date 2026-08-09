@@ -147,13 +147,11 @@ function scheduleEnhance(){if(enhanceFrame)return;enhanceFrame=requestAnimationF
 function modalOpen(){return document.querySelector("dialog[open]")}
 document.addEventListener("keydown",event=>{
   const modal=modalOpen();if(!modal)return;
-  if(event.target?.closest?.(focusableEditing))return;
   const saveShortcut=(event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==="s";
   const diagramZoom=(event.ctrlKey||event.metaKey)&&["+","=","-","0"].includes(event.key);
-  const diagramMove=event.key.startsWith("Arrow");
-  if(!saveShortcut&&!diagramZoom&&!diagramMove)return;
-  if(saveShortcut)event.preventDefault();
-  event.stopPropagation();
+  if(saveShortcut||diagramZoom){event.preventDefault();event.stopPropagation();return}
+  if(event.target?.closest?.(focusableEditing))return;
+  if(event.key.startsWith("Arrow"))event.stopPropagation();
 },true);
 
 document.addEventListener("glyph-transition-label-inspector-opened",()=>{
