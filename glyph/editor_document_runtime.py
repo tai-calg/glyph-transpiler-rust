@@ -27,9 +27,10 @@ let caretLine=countNewlines(textValue(),0,knownCaret)+1;
 let beforePlan=null;
 let syntheticPlan=null;
 let deferredRecountTimer=0;
+let deferredCaretTimer=0;
 let suppressValueHook=false;
 let compositionActive=false;
-const metrics={fullLineRecounts:1,incrementalInputs:0,sourceReplacements:0};
+const metrics={fullLineRecounts:1,caretFullScans:1,incrementalInputs:0,sourceReplacements:0};
 
 function renderLines(force=false){
   if(!force&&renderedLineCount===lineCount)return;
@@ -38,6 +39,7 @@ function renderLines(force=false){
   renderedLineCount=lineCount;
 }
 function lineAt(position){
+  metrics.caretFullScans+=1;
   return countNewlines(textValue(),0,Math.max(0,position))+1;
 }
 function syncCaretFromSelection(force=false){
@@ -45,6 +47,14 @@ function syncCaretFromSelection(force=false){
   if(!force&&next===knownCaret)return;
   knownCaret=next;
   caretLine=lineAt(next);
+}
+function scheduleCaretReconcile(){
+  if(deferredCaretTimer)return;
+  deferredCaretTimer=setTimeout(()=>{
+    deferredCaretTimer=0;
+    syncCaretFromSelection(true);
+    dispatch("glyph-editor-caret-reconciled",{caret:knownCaret,caretLine});
+  },0);
 }
 function dispatch(name,detail={}){
   document.dispatchEvent(new CustomEvent(name,{detail:{marker:MARKER,revision,lineCount,...detail}}));
@@ -79,11 +89,11 @@ function makePlan(event){
   const inserted=insertedTextFor(event);
   const type=String(event?.inputType||"");
   let known=inserted!==null&&!type.startsWith("history");
-  let startLine=selectionStart===knownCaret?caretLine:lineAt(selectionStart);
+  let startLine=selectionStart===knownCaret?caretLine:null;
   if(type.startsWith("delete")&&start===end){
     if(type==="deleteContentBackward"&&start>0){
       start-=1;
-      if(source.charCodeAt(start)===10)startLine=Math.max(1,startLine-1);
+      if(startLine!==null&&source.charCodeAt(start)===10)startLine=Math.max(1,startLine-1);
     }else if(type==="deleteContentForward"&&end<source.length){
       end+=1;
     }else known=false;
@@ -104,7 +114,8 @@ function applyInput(event){
   if(plan?.known){
     const delta=plan.insertedNewlines-plan.removedNewlines;
     lineCount=Math.max(1,lineCount+delta);
-    caretLine=Math.max(1,plan.startLine+plan.insertedNewlines);
+    if(plan.startLine!==null)caretLine=Math.max(1,plan.startLine+plan.insertedNewlines);
+    else scheduleCaretReconcile();
     if(delta!==0)renderLines();
   }else{
     scheduleFullLineRecount();
@@ -138,6 +149,7 @@ Object.defineProperty(editor,"value",{
     renderLines();
     knownCaret=editor.selectionStart||0;
     caretLine=countNewlines(value,0,knownCaret)+1;
+    metrics.caretFullScans+=1;
     beforePlan=null;syntheticPlan=null;
     dispatch("glyph-editor-source-replaced",{sourceLength:value.length});
   },
@@ -151,7 +163,7 @@ function replaceRange(start,end,replacement,{select="end"}={}){
   const left=Math.max(0,Math.min(source.length,Number(start)||0));
   const right=Math.max(left,Math.min(source.length,Number(end)||left));
   const text=String(replacement??"");
-  const startLine=left===knownCaret?caretLine:lineAt(left);
+  const startLine=left===knownCaret?caretLine:null;
   syntheticPlan={
     start:left,end:right,startLine,known:true,
     removedNewlines:countNewlines(source,left,right),
