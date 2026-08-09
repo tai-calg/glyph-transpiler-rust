@@ -147,6 +147,12 @@ try {
   assert.equal(accepted.runtimeMetrics.fullLineRecounts, initial.runtimeMetrics.fullLineRecounts, "completion replacement must not force a full line recount");
   assert.equal(accepted.lineMutations, 0, "completion replacement without newlines must not rebuild line-number DOM");
 
+  await page.keyboard.press("ArrowLeft");
+  await page.keyboard.press("ArrowRight");
+  const navigationMetrics = await page.evaluate(() => window.GlyphEditorDocument.metrics());
+  assert.equal(navigationMetrics.caretFullScans, accepted.runtimeMetrics.caretFullScans, "adjacent caret navigation must not rescan from the start of the document");
+  assert(navigationMetrics.incrementalCaretMoves >= accepted.runtimeMetrics.incrementalCaretMoves, "caret navigation must use the incremental line tracker");
+
   const semanticBase = `system ControllerService
   entry cycle
   source read_sensor
@@ -156,7 +162,7 @@ resource Buffer[Ready|InFlight|Done]
 +Mode=Idle|Running|Stopping|Faulted
 +Other=Red|Blue
 *Input(value:I)
-*System(mode:Mode,sequence:U)
+*System(mode:Mode,command:Other,sequence:U)
 *OtherSystem(mode:Other)
 >step(state:System,input:Input):System=state
 >cycle(system:System,input:Input):System=step(system,input)
@@ -224,11 +230,19 @@ ext read_backup():Input|Error
   const selectRows = await typeForContext(`${machinePrefix}  select=`, "mo", "mode", "machine-select");
   assert(selectRows.candidates.every(item => item.kinds.includes("StateField")));
   assert(!selectRows.candidates.some(item => item.text === "sequence"), "machine select must exclude non-sum fields");
+  await page.keyboard.press("Tab");
+  await page.waitForFunction(() => document.getElementById("editor").value.endsWith("select=state.mode"));
+
+  const actionRows = await typeForContext(`${machinePrefix}  select=state.mode\n  action=`, "co", "command", "machine-action");
+  assert(actionRows.candidates.every(item => item.kinds.includes("StateField")));
+  assert(!actionRows.candidates.some(item => item.text === "mode"), "machine action must not offer the select field");
+  await page.keyboard.press("Tab");
+  await page.waitForFunction(() => document.getElementById("editor").value.endsWith("action=state.command"));
 
   const initRows = await typeForContext(`${machinePrefix}  select=state.mode\n  init=`, "Sy", "System", "machine-init");
   assert.deepEqual(initRows.candidates.map(item => item.text), ["System"]);
 
-  const nextRows = await typeForContext(`${machinePrefix}  select=state.mode\n  init=System(Idle,0)\n  next=`, "st", "step", "machine-next");
+  const nextRows = await typeForContext(`${machinePrefix}  select=state.mode\n  init=System(Idle,Red,0)\n  next=`, "st", "step", "machine-next");
   assert(nextRows.candidates.every(item => item.kinds.includes("Function")));
 
   const successRows = await typeForContext(`${machinePrefix}  select=state.mode\n  success=`, "Ru", "Running", "machine-success");
