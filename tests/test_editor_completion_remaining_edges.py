@@ -64,7 +64,11 @@ console.log(JSON.stringify({{shortLength:shortResult.length,longResult,selectedR
         self.assertIn('if(close<0)continue;\n    mark(name,"Source")', LEXICAL_WORKER_JS)
         self.assertIn('if(close<0)continue;\n    mark(name,"Machine")', LEXICAL_WORKER_JS)
         self.assertIn("parts.some(part=>!part.match", LEXICAL_WORKER_JS)
-        self.assertIn('const aliasRe=/^=\\s*', LEXICAL_WORKER_JS)
+        self.assertIn('const aliasRe=/^=[ \\t]*', LEXICAL_WORKER_JS)
+        self.assertNotIn('const aliasRe=/^=\\s*', LEXICAL_WORKER_JS)
+        self.assertIn('const productRe=/^\\*[ \\t]*', LEXICAL_WORKER_JS)
+        self.assertIn('const functionRe=/^([>!~?])[ \\t]*', LEXICAL_WORKER_JS)
+        self.assertIn('const machineRe=/^machine[ \\t]+', LEXICAL_WORKER_JS)
 
     @unittest.skipUnless(shutil.which("node"), "Node.js is not installed")
     def test_worker_keeps_incomplete_declarations_as_identifiers(self) -> None:
