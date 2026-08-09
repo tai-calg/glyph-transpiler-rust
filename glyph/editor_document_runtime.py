@@ -247,7 +247,7 @@ if(typeof nativeSetRangeText==="function"){
       const replacement=String(args[0]??"");
       try{event=new InputEvent("input",{bubbles:true,inputType:"insertReplacementText",data:replacement})}
       catch{event=new Event("input",{bubbles:true})}
-      editor.dispatchEvent(event);
+      try{editor.dispatchEvent(event)}finally{suppressTrackedInput=false}
     },
   });
 }
