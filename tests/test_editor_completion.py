@@ -98,6 +98,8 @@ class EditorCompletionTests(unittest.TestCase):
     def test_lexical_worker_only_promotes_real_top_level_direct_symbols(self) -> None:
         self.assertIn("function directTypeName(raw)", LEXICAL_WORKER_JS)
         self.assertIn("match(/^([A-Za-z_][A-Za-z0-9_]*)$/)", LEXICAL_WORKER_JS)
+        self.assertIn("function findMatchingOnLine", LEXICAL_WORKER_JS)
+        self.assertIn("findMatchingOnLine(codeSource,open)", LEXICAL_WORKER_JS)
         self.assertIn('const productRe=/^\\*', LEXICAL_WORKER_JS)
         self.assertIn('const sumRe=/^\\+', LEXICAL_WORKER_JS)
         self.assertIn('const functionRe=/^([>!~?])', LEXICAL_WORKER_JS)
@@ -137,7 +139,9 @@ class EditorCompletionTests(unittest.TestCase):
         self.assertIn('stateParam:match[2]', CONTEXT_SCRIPT)
         self.assertIn('insertPrefix=`${scope.stateParam}.`', CONTEXT_SCRIPT)
         self.assertIn('excludeText:key==="action"', CONTEXT_SCRIPT)
+        self.assertIn('id:"machine-init",strict:true,kinds:["Type"]', CONTEXT_SCRIPT)
         self.assertIn('id:"machine-next",strict:true,kinds:["EntryFunction"]', CONTEXT_SCRIPT)
+        self.assertGreaterEqual(CONTEXT_SCRIPT.count('insertSuffix:"("'), 2)
         self.assertIn("function lastTypeColon(lineBefore)", CONTEXT_SCRIPT)
         self.assertIn('lineBefore[index+1]!=="="', CONTEXT_SCRIPT)
         self.assertIn('const tail=lineBefore.slice(colon+1)', CONTEXT_SCRIPT)
@@ -151,6 +155,13 @@ class EditorCompletionTests(unittest.TestCase):
         self.assertIn("lexicalIndex.allPositions", HIGHLIGHT_SCRIPT)
         self.assertNotIn("SOURCE_IDENTIFIER", HIGHLIGHT_SCRIPT)
         self.assertNotIn("highlight.textContent=value", HIGHLIGHT_SCRIPT)
+        self.assertIn("renderedRevision!==revision||renderedIdentifier!==identifier", HIGHLIGHT_SCRIPT)
+        self.assertIn("renderedMatchCount=matchCount", HIGHLIGHT_SCRIPT)
+        self.assertIn("matchCount=renderedMatchCount", HIGHLIGHT_SCRIPT)
+        self.assertIn("htmlRebuilds", HIGHLIGHT_SCRIPT)
+        self.assertIn("htmlReuses", HIGHLIGHT_SCRIPT)
+        self.assertIn("new ResizeObserver(syncGeometry)", HIGHLIGHT_SCRIPT)
+        self.assertIn("emit(revision)", HIGHLIGHT_SCRIPT)
 
     def test_completion_has_context_filtering_accept_revalidation_and_ime_guard(self) -> None:
         self.assertIn("contextService.classify", COMPLETION_SCRIPT)
@@ -163,6 +174,7 @@ class EditorCompletionTests(unittest.TestCase):
         self.assertIn("strictStaleDeferrals", COMPLETION_SCRIPT)
         self.assertIn("resumePendingAcceptance", COMPLETION_SCRIPT)
         self.assertIn("insertionText", COMPLETION_SCRIPT)
+        self.assertIn('const suffix=classification?.insertSuffix||""', COMPLETION_SCRIPT)
         self.assertIn("classification?.excludeText", COMPLETION_SCRIPT)
         self.assertNotIn("else metrics.strictStaleAccepts+=1", COMPLETION_SCRIPT)
         self.assertIn("event.isComposing", COMPLETION_SCRIPT)
@@ -200,6 +212,7 @@ class EditorCompletionTests(unittest.TestCase):
 *System(mode:Mode|Error,direct:Mode)
   >fake(state:System):System=state
   *Nested(value:Mode)
+*Broken(bad:Mode
 >real(state:System):System=state
 """
         runner = f"""
@@ -212,6 +225,7 @@ const byName=Object.fromEntries(snapshot.records.map(row=>[row.text,row]));
 console.log(JSON.stringify({{
   mode:byName.mode,
   direct:byName.direct,
+  bad:byName.bad,
   fake:byName.fake,
   nested:byName.Nested,
   real:byName.real,
@@ -225,6 +239,7 @@ console.log(JSON.stringify({{
         self.assertIn("Field", data["mode"]["ownerKinds"]["System"])
         self.assertNotIn("StateField", data["mode"]["ownerKinds"]["System"])
         self.assertIn("StateField", data["direct"]["ownerKinds"]["System"])
+        self.assertEqual(data["bad"]["kinds"], ["Identifier"])
         self.assertEqual(data["fake"]["kinds"], ["Identifier"])
         self.assertEqual(data["nested"]["kinds"], ["Identifier"])
         self.assertIn("Function", data["real"]["kinds"])
@@ -242,13 +257,17 @@ function classify(source){{
   const lineStart=service.boundedLineStart(source,caret);
   let left=caret;
   while(left>lineStart&&/[A-Za-z0-9_]/.test(source[left-1]))left-=1;
-  return service.classify({{source,caret,left,right:caret,prefix:source.slice(left,caret),current:source.slice(left,caret),lineStart}}).id;
+  return service.classify({{source,caret,left,right:caret,prefix:source.slice(left,caret),current:source.slice(left,caret),lineStart}});
 }}
+const bindingBorrow=classify(">borrow(system:System):System\\n  copy := &sy");
+const callComma=classify(">borrow(system:System):System\\n  copy := compute(system,sy");
+const typeBorrow=classify("*Probe(value:& Sy");
+const typeCapability=classify("*Probe(value:own Sy");
 console.log(JSON.stringify({{
-  bindingBorrow:classify(">borrow(system:System):System\\n  copy := &sy"),
-  callComma:classify(">borrow(system:System):System\\n  copy := compute(system,sy"),
-  typeBorrow:classify("*Probe(value:& Sy"),
-  typeCapability:classify("*Probe(value:own Sy"),
+  bindingBorrow:bindingBorrow.id,
+  callComma:callComma.id,
+  typeBorrow:typeBorrow.id,
+  typeCapability:typeCapability.id,
 }}));
 """
         result = subprocess.run(
@@ -260,6 +279,35 @@ console.log(JSON.stringify({{
         self.assertEqual(data["callComma"], "general")
         self.assertEqual(data["typeBorrow"], "type")
         self.assertEqual(data["typeCapability"], "type")
+
+    @unittest.skipUnless(shutil.which("node"), "Node.js is not installed")
+    def test_machine_init_and_next_contexts_request_call_snippets(self) -> None:
+        javascript = _javascript_from_script(CONTEXT_SCRIPT)
+        runner = f"""
+global.window={{GlyphEditorLexicalIndex:{{machineInfo:()=>({{stateType:"System",selectorField:"mode",selectorType:"Mode"}})}}}};
+{javascript}
+const service=window.GlyphEditorCompletionContext;
+function classify(source){{
+  const caret=source.length;
+  const lineStart=service.boundedLineStart(source,caret);
+  let left=caret;
+  while(left>lineStart&&/[A-Za-z0-9_]/.test(source[left-1]))left-=1;
+  return service.classify({{source,caret,left,right:caret,prefix:source.slice(left,caret),current:source.slice(left,caret),lineStart}});
+}}
+const prefix="machine Controller(state:System,input:Input)\\n";
+const init=classify(prefix+"  init=Sy");
+const next=classify(prefix+"  next=st");
+console.log(JSON.stringify({{init,next}}));
+"""
+        result = subprocess.run(
+            ["node", "-e", runner], capture_output=True, text=True, check=False
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        data = json.loads(result.stdout)
+        self.assertEqual(data["init"]["id"], "machine-init")
+        self.assertEqual(data["init"]["insertSuffix"], "(")
+        self.assertEqual(data["next"]["id"], "machine-next")
+        self.assertEqual(data["next"]["insertSuffix"], "(")
 
     @unittest.skipUnless(shutil.which("node"), "Node.js is not installed")
     def test_new_javascript_is_syntactically_valid(self) -> None:
