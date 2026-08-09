@@ -82,10 +82,11 @@ class EditorCompletionTests(unittest.TestCase):
         self.assertNotIn("parse_program", CONTEXT_SCRIPT)
         self.assertNotIn("fetch(", CONTEXT_SCRIPT)
 
-    def test_highlight_uses_exact_shared_revision(self) -> None:
+    def test_highlight_uses_exact_shared_revision_without_copying_stale_source(self) -> None:
         self.assertIn("Number(snapshot.revision)!==revision", HIGHLIGHT_SCRIPT)
         self.assertIn("lexicalIndex.allPositions", HIGHLIGHT_SCRIPT)
         self.assertNotIn("SOURCE_IDENTIFIER", HIGHLIGHT_SCRIPT)
+        self.assertNotIn("highlight.textContent=value", HIGHLIGHT_SCRIPT)
 
     def test_completion_has_context_filtering_accept_revalidation_and_ime_guard(self) -> None:
         self.assertIn("contextService.classify", COMPLETION_SCRIPT)
