@@ -56,14 +56,22 @@ function lineAt(position){
   metrics.caretFullScans+=1;
   return countNewlines(textValue(),0,Math.max(0,position))+1;
 }
+function lineFromKnownCaret(position){
+  if(!caretLineValid)return null;
+  const target=Math.max(0,Number(position)||0);
+  if(target===knownCaret)return caretLine;
+  const source=textValue();
+  if(target>knownCaret)return caretLine+countNewlines(source,knownCaret,target);
+  return Math.max(1,caretLine-countNewlines(source,target,knownCaret));
+}
 function syncCaretFromSelection(force=false){
   const next=editor.selectionStart||0;
   if(!force&&caretLineValid&&next===knownCaret)return;
   if(!force&&caretLineValid){
-    const source=textValue();
-    if(next>knownCaret)caretLine+=countNewlines(source,knownCaret,next);
-    else if(next<knownCaret)caretLine=Math.max(1,caretLine-countNewlines(source,next,knownCaret));
+    const nextLine=lineFromKnownCaret(next);
     knownCaret=next;
+    caretLine=nextLine??caretLine;
+    caretLineValid=nextLine!==null;
     metrics.incrementalCaretMoves+=1;
     return;
   }
@@ -112,7 +120,7 @@ function makePlan(event){
   const inserted=insertedTextFor(event);
   const type=String(event?.inputType||"");
   let known=inserted!==null&&!type.startsWith("history");
-  let startLine=selectionStart===knownCaret&&caretLineValid?caretLine:null;
+  let startLine=lineFromKnownCaret(selectionStart);
   if(type.startsWith("delete")&&start===end){
     if(type==="deleteContentBackward"&&start>0){
       start-=1;
@@ -138,7 +146,7 @@ function applyInput(event){
     const delta=plan.insertedNewlines-plan.removedNewlines;
     lineCount=Math.max(1,lineCount+delta);
     if(plan.startLine!==null){
-      caretLine=Math.max(1,plan.startLine+plan.insertedNewlines);
+      caretLine=Math.max(1,plan.startLine+countNewlines(textValue(),plan.start,knownCaret));
       caretLineValid=true;
     }else{
       caretLineValid=false;
@@ -193,7 +201,7 @@ function replaceRange(start,end,replacement,{select="end"}={}){
   const left=Math.max(0,Math.min(source.length,Number(start)||0));
   const right=Math.max(left,Math.min(source.length,Number(end)||left));
   const text=String(replacement??"");
-  const startLine=left===knownCaret&&caretLineValid?caretLine:null;
+  const startLine=lineFromKnownCaret(left);
   syntheticPlan={
     start:left,end:right,startLine,known:true,
     removedNewlines:countNewlines(source,left,right),
