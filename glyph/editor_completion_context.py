@@ -1,0 +1,184 @@
+from __future__ import annotations
+
+
+_MARKER = "glyph-editor-completion-context-v1"
+
+_SCRIPT = r"""
+<script id="glyph-editor-completion-context-v1-script">
+(()=>{
+const MARKER="glyph-editor-completion-context-v1";
+const MAX_LINE_CONTEXT=2048;
+const MAX_SCOPE_CONTEXT=4096;
+const lexicalIndex=window.GlyphEditorLexicalIndex;
+if(!lexicalIndex||window.GlyphEditorCompletionContext?.marker===MARKER)return;
+
+const BUILTIN_TYPES=[
+  "F","D","U","I","B","S",
+  "u8","u16","u32","u64","i8","i16","i32","i64","f32","f64","bool","String","R","O","V"
+];
+const TOP_LEVEL_KEYWORDS=["system","machine","resource","ext"];
+const SYSTEM_KEYWORDS=["entry","source","sink"];
+const MACHINE_KEYWORDS=["select","action","init","next","success","failure"];
+const CAPABILITY_KEYWORDS=["own","share","link"];
+const AS_TARGETS=["share","link"];
+
+function staticRows(values,kind="Keyword"){
+  return values.map(text=>({text,kind,kinds:[kind],owners:[],origin:"static",count:0,recent:-1,added:0}));
+}
+function boundedLineStart(source,caret){
+  const start=Math.max(0,caret-MAX_LINE_CONTEXT);
+  const chunk=source.slice(start,caret);
+  const newline=chunk.lastIndexOf("\n");
+  if(newline<0&&start>0)return null;
+  return start+newline+1;
+}
+function scopeBefore(source,lineStart){
+  const start=Math.max(0,lineStart-MAX_SCOPE_CONTEXT);
+  const chunk=source.slice(start,lineStart);
+  if(start>0&&chunk.indexOf("\n")<0)return null;
+  let absolute=start;
+  let last=null;
+  for(const line of chunk.split("\n")){
+    const lineStart=absolute;
+    absolute+=line.length+1;
+    if(!line.trim()||/^\s/.test(line))continue;
+    const trimmed=line.trim();
+    let match=trimmed.match(/^system\s+([A-Za-z_][A-Za-z0-9_]*)\b/);
+    if(match){last={kind:"system",name:match[1],start:lineStart};continue}
+    match=trimmed.match(/^machine\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/);
+    if(match){last={kind:"machine",name:match[1],start:lineStart};continue}
+    match=trimmed.match(/^[>~]\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(/);
+    if(match){last={kind:"function",name:match[1],start:lineStart};continue}
+    match=trimmed.match(/^!\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(/);
+    if(match){last={kind:"sink",name:match[1],start:lineStart};continue}
+    match=trimmed.match(/^ext\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/);
+    if(match){last={kind:"source",name:match[1],start:lineStart};continue}
+    match=trimmed.match(/^\?\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(/);
+    if(match){last={kind:"temporal",name:match[1],start:lineStart};continue}
+    last=null;
+  }
+  return last;
+}
+function typeContext(lineBefore){
+  if(/:\s*$/.test(lineBefore))return true;
+  if(/\b(?:own|share|link)\s+$/.test(lineBefore))return true;
+  if(/&\s*(?:mut\s+)?$/.test(lineBefore))return true;
+  if(/[<,]\s*$/.test(lineBefore)&&lineBefore.includes(":"))return true;
+  if(/\|\s*$/.test(lineBefore)&&lineBefore.includes(":"))return true;
+  return false;
+}
+function withDefaults(result,scope){
+  return{
+    id:"general",
+    strict:false,
+    kinds:null,
+    owner:null,
+    preferredKinds:["Binding","Parameter","Field","Function","State","Macro","Source","Sink","Type","Resource"],
+    preferredText:null,
+    exactText:null,
+    static:[],
+    scope,
+    scopeStart:scope?.start??-1,
+    ...result,
+  };
+}
+function classify(context){
+  const source=context.source;
+  const lineStart=boundedLineStart(source,context.caret);
+  if(lineStart===null)return withDefaults({id:"unsafe-long-line",strict:true,kinds:[],static:[]},null);
+  const lineBefore=source.slice(lineStart,context.left);
+  const throughCaret=source.slice(lineStart,context.caret);
+  const hash=throughCaret.indexOf("#");
+  if(hash>=0)return withDefaults({id:"comment",strict:true,kinds:[],static:[]},null);
+  const scope=scopeBefore(source,lineStart);
+  const trimmed=throughCaret.trimStart();
+  const indented=/^\s/.test(source.slice(lineStart,context.caret));
+
+  if(context.left>0&&source[context.left-1]==="'"){
+    return withDefaults({id:"contract",strict:true,kinds:["Contract"]},scope);
+  }
+
+  const resourceState=throughCaret.match(/([A-Za-z_][A-Za-z0-9_]*)\[\s*[A-Za-z0-9_]*$/);
+  if(resourceState){
+    return withDefaults({id:"resource-state",strict:true,kinds:["State"],owner:resourceState[1],preferredKinds:["State"]},scope);
+  }
+
+  let match=trimmed.match(/^entry\s+[A-Za-z0-9_]*$/);
+  if(match)return withDefaults({id:"system-entry",strict:true,kinds:["Function"],preferredKinds:["Function"]},scope);
+  match=trimmed.match(/^source\s+[A-Za-z0-9_]*$/);
+  if(match)return withDefaults({id:"system-source",strict:true,kinds:["Source"],preferredKinds:["Source"]},scope);
+  match=trimmed.match(/^sink\s+[A-Za-z0-9_]*$/);
+  if(match)return withDefaults({id:"system-sink",strict:true,kinds:["Sink"],preferredKinds:["Sink"]},scope);
+
+  const property=trimmed.match(/^(select|action|init|next|success|failure)\s*=\s*[A-Za-z0-9_]*$/);
+  if(property&&scope?.kind==="machine"){
+    const machine=lexicalIndex.machineInfo(scope.name);
+    const key=property[1];
+    if((key==="select"||key==="action")&&machine?.stateType){
+      return withDefaults({id:`machine-${key}`,strict:true,kinds:["StateField"],owner:machine.stateType,preferredKinds:["StateField"]},scope);
+    }
+    if(key==="init"&&machine?.stateType){
+      return withDefaults({id:"machine-init",strict:true,kinds:["Type"],preferredKinds:["Type"],exactText:machine.stateType},scope);
+    }
+    if(key==="next"){
+      return withDefaults({id:"machine-next",strict:true,kinds:["Function"],preferredKinds:["Function"]},scope);
+    }
+    if((key==="success"||key==="failure")&&machine?.selectorType){
+      return withDefaults({id:`machine-${key}`,strict:true,kinds:["State"],owner:machine.selectorType,preferredKinds:["State"]},scope);
+    }
+  }
+
+  if(/\bas\s+[A-Za-z0-9_]*$/.test(trimmed)){
+    return withDefaults({id:"capability-target",strict:true,kinds:[],static:staticRows(AS_TARGETS,"Capability")},scope);
+  }
+
+  if(typeContext(lineBefore)){
+    return withDefaults({
+      id:"type",
+      strict:true,
+      kinds:["Type"],
+      preferredKinds:["Resource","Type"],
+      static:[...staticRows(BUILTIN_TYPES,"Builtin Type"),...staticRows(CAPABILITY_KEYWORDS,"Capability")],
+    },scope);
+  }
+
+  if(indented&&scope?.kind==="system"&&/^\s*[A-Za-z0-9_]*$/.test(throughCaret)){
+    return withDefaults({id:"system-keyword",strict:true,kinds:[],static:staticRows(SYSTEM_KEYWORDS)},scope);
+  }
+  if(indented&&scope?.kind==="machine"&&/^\s*[A-Za-z0-9_]*$/.test(throughCaret)){
+    return withDefaults({id:"machine-keyword",strict:true,kinds:[],static:staticRows(MACHINE_KEYWORDS)},scope);
+  }
+  if(!indented&&/^\s*[A-Za-z0-9_]*$/.test(throughCaret)){
+    return withDefaults({id:"top-level-keyword",strict:false,preferredKinds:["Keyword"],static:staticRows(TOP_LEVEL_KEYWORDS)},scope);
+  }
+
+  return withDefaults({},scope);
+}
+function staticCandidates(classification,prefix){
+  const text=String(prefix??"");
+  return(classification?.static||[])
+    .filter(row=>!text||row.text.startsWith(text))
+    .map(row=>({...row,added:Math.max(0,row.text.length-text.length)}));
+}
+
+window.GlyphEditorCompletionContext={
+  marker:MARKER,
+  version:1,
+  classify,
+  staticCandidates,
+  boundedLineStart,
+};
+})();
+</script>
+"""
+
+
+def enhance_editor_completion_context_html(html: str) -> str:
+    """Install bounded local Glyph syntax context classification for completion."""
+
+    if _MARKER in html:
+        return html
+    return html.replace("</body>", _SCRIPT + "\n</body>")
+
+
+__all__ = ["enhance_editor_completion_context_html"]
