@@ -94,8 +94,8 @@ class DesktopServerTests(unittest.TestCase):
                 html = launch.read().decode("utf-8")
                 self.assertIn("X-Glyph-Desktop-Token", html)
                 self.assertIn('const token = "test-token"', html)
-                self.assertIn("glyph-editor-completion-v1", html)
-                self.assertIn("glyph-editor-lexical-index-v1", html)
+                self.assertIn("glyph-editor-completion-v2", html)
+                self.assertIn("glyph-editor-lexical-index-v2", html)
                 cookie = launch.headers.get("Set-Cookie")
                 self.assertIsNotNone(cookie)
                 assert cookie is not None
