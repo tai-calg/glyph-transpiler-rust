@@ -88,6 +88,17 @@ try {
     const editor = document.getElementById("editor");
     editor.focus();
     editor.setSelectionRange(editor.value.length, editor.value.length);
+    window.__glyphCompletionLineMutations = 0;
+    window.__glyphCompletionSaveStateEvents = 0;
+    const lines = document.getElementById("lines");
+    const observer = new MutationObserver(records => {
+      window.__glyphCompletionLineMutations += records.length;
+    });
+    observer.observe(lines, { childList: true, characterData: true, subtree: true });
+    window.__glyphCompletionLineObserver = observer;
+    document.addEventListener("glyph-save-state-changed", () => {
+      window.__glyphCompletionSaveStateEvents += 1;
+    });
   });
   await page.keyboard.type("MotorC", { delay: 8 });
 
@@ -103,6 +114,8 @@ try {
     runtimeMetrics: window.GlyphEditorDocument.metrics(),
     indexMetrics: window.GlyphEditorLexicalIndex.metrics(),
     expanded: document.getElementById("editor").getAttribute("aria-expanded"),
+    lineMutations: window.__glyphCompletionLineMutations,
+    saveStateEvents: window.__glyphCompletionSaveStateEvents,
   }));
   assert.equal(beforeAccept.expanded, "true");
   assert(beforeAccept.candidates.length <= 8, "completion must be bounded to eight rows");
@@ -111,6 +124,11 @@ try {
     beforeAccept.runtimeMetrics.fullLineRecounts,
     initial.runtimeMetrics.fullLineRecounts,
     "plain typing must not trigger a full line recount",
+  );
+  assert.equal(beforeAccept.lineMutations, 0, "plain character typing must not rebuild line-number DOM");
+  assert(
+    beforeAccept.saveStateEvents <= 2,
+    `save-state chrome was redundantly refreshed ${beforeAccept.saveStateEvents} times while typing`,
   );
   assert(beforeAccept.indexMetrics.maxPendingDepth <= 1, "worker pending queue must stay bounded");
 
@@ -125,6 +143,8 @@ try {
     expanded: document.getElementById("editor").getAttribute("aria-expanded"),
     completionMetrics: window.GlyphEditorCompletion.metrics(),
     runtimeMetrics: window.GlyphEditorDocument.metrics(),
+    lineMutations: window.__glyphCompletionLineMutations,
+    saveStateEvents: window.__glyphCompletionSaveStateEvents,
   }));
   assert(accepted.source.endsWith("MotorCommand"));
   assert.equal(accepted.popupHidden, true);
@@ -135,11 +155,13 @@ try {
     initial.runtimeMetrics.fullLineRecounts,
     "completion replacement must not force a full line recount",
   );
+  assert.equal(accepted.lineMutations, 0, "completion replacement without newlines must not rebuild line-number DOM");
 
   await page.waitForTimeout(250);
   assert.deepEqual(sourceRequests, [], `typing/completion unexpectedly invoked source actions: ${sourceRequests.join(", ")}`);
 
   const replacement = await page.evaluate(() => {
+    window.__glyphCompletionLineObserver?.disconnect();
     const editor = document.getElementById("editor");
     const source = editor.value;
     editor.value = source.replace(/MotorCommand/g, "CommandAfterReplace");
@@ -164,6 +186,8 @@ try {
   const report = await page.evaluate(() => ({
     revision: window.GlyphEditorDocument.revision(),
     lineCount: window.GlyphEditorDocument.lineCount(),
+    lineMutationsDuringTyping: window.__glyphCompletionLineMutations,
+    saveStateEventsDuringTyping: window.__glyphCompletionSaveStateEvents,
     runtimeMetrics: window.GlyphEditorDocument.metrics(),
     indexMetrics: window.GlyphEditorLexicalIndex.metrics(),
     completionMetrics: window.GlyphEditorCompletion.metrics(),
