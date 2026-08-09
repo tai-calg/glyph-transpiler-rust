@@ -3,18 +3,19 @@ from __future__ import annotations
 
 _MARKER = "glyph-editor-document-runtime-v1"
 _SAVE_CONTROLLER_MARKER = "glyph-save-triggered-rendering-v4"
-_BASE_INPUT_LISTENER = "editor.addEventListener('input',()=>{dirty=true;syncLines()});"
-_OPTIMIZED_BASE_INPUT_LISTENER = "editor.addEventListener('input',()=>{syncLines()});"
 _SAVE_INPUT_LISTENER = '''editor.addEventListener("input",()=>{
  dirty=true;
  updateUi();
 });'''
-_OPTIMIZED_SAVE_INPUT_LISTENER = '''editor.addEventListener("input",()=>{
- if(!dirty){
-  dirty=true;
+_OPTIMIZED_SAVE_INPUT_LISTENER = '''let editorDirtyUiPresented=false;
+document.addEventListener("glyph-save-state-changed",event=>{
+ editorDirtyUiPresented=String(event.detail?.persistence||"")!=="saved";
+});
+editor.addEventListener("input",()=>{
+ dirty=true;
+ if(!editorDirtyUiPresented){
+  editorDirtyUiPresented=true;
   updateUi();
- }else{
-  dirty=true;
  }
 });'''
 
@@ -245,25 +246,13 @@ dispatch("glyph-editor-document-runtime-ready",{sourceLength:textValue().length}
 
 
 def _optimize_save_input_listener(html: str) -> str:
-    """Keep base line sync separate so save chrome sees the first dirty transition."""
+    """Update save-state chrome only when it does not already show local edits."""
 
     if _SAVE_CONTROLLER_MARKER not in html:
         return html
-    base_count = html.count(_BASE_INPUT_LISTENER)
-    if base_count != 1:
-        raise ValueError(
-            f"base editor input listener anchor changed: expected 1, got {base_count}"
-        )
-    save_count = html.count(_SAVE_INPUT_LISTENER)
-    if save_count != 1:
-        raise ValueError(
-            f"save input listener anchor changed: expected 1, got {save_count}"
-        )
-    html = html.replace(
-        _BASE_INPUT_LISTENER,
-        _OPTIMIZED_BASE_INPUT_LISTENER,
-        1,
-    )
+    count = html.count(_SAVE_INPUT_LISTENER)
+    if count != 1:
+        raise ValueError(f"save input listener anchor changed: expected 1, got {count}")
     return html.replace(_SAVE_INPUT_LISTENER, _OPTIMIZED_SAVE_INPUT_LISTENER, 1)
 
 
