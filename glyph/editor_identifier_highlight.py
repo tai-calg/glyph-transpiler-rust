@@ -69,7 +69,7 @@ surface.append(highlight);
 parent.insertBefore(surface,sourceEditor);
 sourceEditor.dataset.identifierHighlightReady="true";
 let frame=0,lastRevision=-1,lastStart=-1,lastEnd=-1,lastFocused=false,currentIdentifier="",matchCount=0;
-let renderedRevision=-1,renderedIdentifier="";
+let renderedRevision=-1,renderedIdentifier="",renderedMatchCount=0;
 const metrics={htmlRebuilds:0,htmlReuses:0};
 const esc=value=>String(value??"").replace(/[&<>]/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[char]));
 function identifierAt(value,start,end,focused){
@@ -113,7 +113,7 @@ function clear(identifier=""){
   sourceEditor.dataset.activeIdentifier=identifier;
   sourceEditor.dataset.identifierMatchCount="0";
 }
-function publish(identifier,revision){
+function publish(identifier){
   const active=matchCount>0;
   parent.classList.toggle("identifier-highlight-active",active);
   currentIdentifier=identifier;
@@ -121,6 +121,8 @@ function publish(identifier,revision){
   surface.dataset.identifierMatchCount=String(matchCount);
   sourceEditor.dataset.activeIdentifier=identifier;
   sourceEditor.dataset.identifierMatchCount=String(matchCount);
+}
+function emit(revision){
   document.dispatchEvent(new CustomEvent("glyph-editor-identifier-highlighted",{detail:{marker:MARKER,identifier:currentIdentifier,matchCount,revision}}));
 }
 function render(force=false){
@@ -140,14 +142,17 @@ function render(force=false){
       highlight.innerHTML=renderHtml(value,identifier,positions);
       renderedRevision=revision;
       renderedIdentifier=identifier;
+      renderedMatchCount=matchCount;
       metrics.htmlRebuilds+=1;
     }else{
+      matchCount=renderedMatchCount;
       metrics.htmlReuses+=1;
     }
-    publish(identifier,revision);
+    publish(identifier);
   }
   lastRevision=revision;lastStart=start;lastEnd=end;lastFocused=focused;
   syncGeometry();
+  emit(revision);
 }
 function schedule(force=false){
   if(force)lastRevision=-1;
