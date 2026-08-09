@@ -153,6 +153,21 @@ try {
   assert.equal(navigationMetrics.caretFullScans, accepted.runtimeMetrics.caretFullScans, "adjacent caret navigation must not rescan from the start of the document");
   assert(navigationMetrics.incrementalCaretMoves >= accepted.runtimeMetrics.incrementalCaretMoves, "caret navigation must use the incremental line tracker");
 
+  await page.evaluate(() => window.__glyphCompletionLineObserver?.disconnect());
+  const beforeLineEdit = await page.evaluate(() => ({
+    count: window.GlyphEditorDocument.lineCount(),
+    metrics: window.GlyphEditorDocument.metrics(),
+  }));
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("Backspace");
+  const afterLineEdit = await page.evaluate(() => ({
+    count: window.GlyphEditorDocument.lineCount(),
+    metrics: window.GlyphEditorDocument.metrics(),
+  }));
+  assert.equal(afterLineEdit.count, beforeLineEdit.count, "newline insert/delete must restore the original line count");
+  assert.equal(afterLineEdit.metrics.fullLineRecounts, beforeLineEdit.metrics.fullLineRecounts, "known newline edits must not rescan the document");
+  assert.equal(afterLineEdit.metrics.lineSuffixMutations, beforeLineEdit.metrics.lineSuffixMutations + 2, "newline insert/delete must mutate only the line-number suffix");
+
   const semanticBase = `system ControllerService
   entry cycle
   source read_sensor
@@ -164,9 +179,12 @@ resource Buffer[Ready|InFlight|Done]
 *Input(value:I)
 *System(mode:Mode,command:Other,sequence:U)
 *OtherSystem(mode:Other)
+*ScalarSystem(mode:I)
 >step(state:System,input:Input):System=state
 >cycle(system:System,input:Input):System=step(system,input)
 >compute(system:System):System=system
+>internal_public(system:System):System=system
+~internal_private(system:System):System=system
 ext read_sensor():Input|Error
 ext read_backup():Input|Error
 !write_actuator(system:System):System|Error
@@ -214,9 +232,22 @@ ext read_backup():Input|Error
   const builtinRows = await typeForContext(`${semanticBase}\n*Probe(value:`, "St", "String", "type");
   assert.equal(builtinRows.candidates.find(item => item.text === "String")?.kind, "Builtin Type");
 
+  await installSource(`${semanticBase}\n*Probe(value:own `);
+  await page.evaluate(() => window.GlyphEditorCompletion.open());
+  await page.waitForFunction(() => !document.getElementById("glyph-completion-popup").hidden);
+  const qualifiedTypeRows = await page.evaluate(() => ({
+    context: window.GlyphEditorCompletion.context(),
+    candidates: window.GlyphEditorCompletion.candidates(),
+  }));
+  assert.equal(qualifiedTypeRows.context.id, "type");
+  assert(!qualifiedTypeRows.candidates.some(item => item.kind === "Capability"), "a capability-qualified type must not offer a second capability prefix");
+
   const entryRows = await typeForContext(`${semanticBase}\nsystem Secondary\n  entry `, "cy", "cycle", "system-entry");
   assert(entryRows.candidates.every(item => item.kinds.includes("Function")));
   assert(!entryRows.candidates.some(item => item.text === "read_sensor"));
+
+  const entryPrivateRows = await typeForContext(`${semanticBase}\nsystem Secondary\n  entry `, "internal_", "internal_public", "system-entry");
+  assert(!entryPrivateRows.candidates.some(item => item.text === "internal_private"), "system entry must not offer ~ internal functions");
 
   const sourceRows = await typeForContext(`${semanticBase}\nsystem Secondary\n  source `, "re", "read_sensor", "system-source");
   assert(sourceRows.candidates.every(item => item.kinds.includes("Source")));
@@ -225,6 +256,21 @@ ext read_backup():Input|Error
   const sinkRows = await typeForContext(`${semanticBase}\nsystem Secondary\n  sink `, "write_", "write_actuator", "system-sink");
   assert(sinkRows.candidates.every(item => item.kinds.includes("Sink")));
   assert(sinkRows.candidates.some(item => item.text === "write_log"));
+
+  const ownerKinds = await page.evaluate(() => {
+    const editor = document.getElementById("editor");
+    const row = window.GlyphEditorLexicalIndex.record("mode");
+    return {
+      ownerKinds: row?.ownerKinds,
+      scalarCandidates: window.GlyphEditorLexicalIndex.query("mo", editor.selectionStart, {
+        kinds: ["StateField"], owner: "ScalarSystem", limit: 8,
+      }),
+    };
+  });
+  assert(ownerKinds.ownerKinds.System.includes("StateField"));
+  assert(ownerKinds.ownerKinds.ScalarSystem.includes("Field"));
+  assert(!ownerKinds.ownerKinds.ScalarSystem.includes("StateField"));
+  assert(!ownerKinds.scalarCandidates.some(item => item.text === "mode"), "StateField kind from one owner must not leak to another owner");
 
   const machinePrefix = `${semanticBase}\nmachine Controller(state:System,input:Input)\n`;
   const selectRows = await typeForContext(`${machinePrefix}  select=`, "mo", "mode", "machine-select");
@@ -249,14 +295,66 @@ ext read_backup():Input|Error
   assert(successRows.candidates.every(item => item.owners.includes("Mode")));
   assert(!successRows.candidates.some(item => item.text === "Red"));
 
+  const macroSource = `@MAX 100
+@limit(x) x
+@BLOCK
+  MAX
+@end
+${semanticBase}`;
+  await installSource(macroSource);
+  const macroKinds = await page.evaluate(() => ({
+    MAX: window.GlyphEditorLexicalIndex.record("MAX")?.kinds,
+    limit: window.GlyphEditorLexicalIndex.record("limit")?.kinds,
+    BLOCK: window.GlyphEditorLexicalIndex.record("BLOCK")?.kinds,
+  }));
+  assert(macroKinds.MAX.includes("Macro"), "canonical raw macro must be indexed");
+  assert(macroKinds.limit.includes("Macro"), "canonical AST macro must be indexed");
+  assert(macroKinds.BLOCK.includes("Macro"), "multiline raw macro must be indexed");
+
+  await installSource(`${machinePrefix}  select=m`);
+  await page.evaluate(() => window.GlyphEditorCompletion.open());
+  await page.waitForFunction(() => window.GlyphEditorCompletion.candidates().some(item => item.text === "mode"));
+  const cancelledPending = await page.evaluate(() => {
+    const editor = document.getElementById("editor");
+    const end = editor.selectionStart;
+    window.GlyphEditorDocument.replaceRange(end, end, "o");
+    const accepted = window.GlyphEditorCompletion.accept();
+    const pendingBeforeEscape = window.GlyphEditorCompletion.metrics().pendingAcceptance;
+    const escape = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    editor.dispatchEvent(escape);
+    return {
+      accepted,
+      pendingBeforeEscape,
+      pendingAfterEscape: window.GlyphEditorCompletion.metrics().pendingAcceptance,
+      defaultPrevented: escape.defaultPrevented,
+      source: editor.value,
+    };
+  });
+  assert.equal(cancelledPending.accepted, true, "stale strict acceptance should enter deferred validation");
+  assert.equal(cancelledPending.pendingBeforeEscape, true);
+  assert.equal(cancelledPending.pendingAfterEscape, false, "Escape must cancel deferred acceptance even while popup is hidden");
+  assert.equal(cancelledPending.defaultPrevented, true);
+  assert(cancelledPending.source.endsWith("select=mo"));
+  await waitForExactIndex();
+  await page.waitForTimeout(180);
+  assert((await page.locator("#editor").inputValue()).endsWith("select=mo"), "cancelled deferred acceptance must not insert later");
+
   await installSource(`${semanticBase}\nres`);
   await page.evaluate(() => window.GlyphEditorCompletion.open());
   await page.waitForFunction(() => window.GlyphEditorCompletion.candidates().some(item => item.text === "resource" && item.kind === "Keyword"));
   assert.equal((await page.evaluate(() => window.GlyphEditorCompletion.context()?.id)), "top-level-keyword");
+  await page.keyboard.press("Escape");
+  await page.evaluate(() => window.GlyphEditorLexicalIndex.refresh());
+  await waitForExactIndex();
+  await page.waitForTimeout(180);
+  assert.equal(await page.locator("#glyph-completion-popup").isHidden(), true, "Escape dismissal must survive an index refresh for the unchanged context");
+  await page.keyboard.type("o", { delay: 4 });
+  await page.waitForFunction(() => window.GlyphEditorCompletion.candidates().some(item => item.text === "resource"));
 
   await page.waitForTimeout(250);
   assert.deepEqual(sourceRequests, [], `typing/completion unexpectedly invoked source actions: ${sourceRequests.join(", ")}`);
 
+  await installSource(semanticBase);
   const report = await page.evaluate(() => ({
     revision: window.GlyphEditorDocument.revision(),
     lineCount: window.GlyphEditorDocument.lineCount(),
