@@ -45,8 +45,10 @@ function scopeBefore(source,lineStart){
     const trimmed=line.trim();
     let match=trimmed.match(/^system\s+([A-Za-z_][A-Za-z0-9_]*)\b/);
     if(match){last={kind:"system",name:match[1],start:lineStart};continue}
+    match=trimmed.match(/^machine\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*:/);
+    if(match){last={kind:"machine",name:match[1],stateParam:match[2],start:lineStart};continue}
     match=trimmed.match(/^machine\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/);
-    if(match){last={kind:"machine",name:match[1],start:lineStart};continue}
+    if(match){last={kind:"machine",name:match[1],stateParam:"",start:lineStart};continue}
     match=trimmed.match(/^[>~]\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(/);
     if(match){last={kind:"function",name:match[1],start:lineStart};continue}
     match=trimmed.match(/^!\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(/);
@@ -76,6 +78,8 @@ function withDefaults(result,scope){
     preferredKinds:["Binding","Parameter","Field","Function","State","Macro","Source","Sink","Type","Resource"],
     preferredText:null,
     exactText:null,
+    insertPrefix:"",
+    excludeText:null,
     static:[],
     scope,
     scopeStart:scope?.start??-1,
@@ -104,26 +108,45 @@ function classify(context){
   }
 
   let match=trimmed.match(/^entry\s+[A-Za-z0-9_]*$/);
-  if(match)return withDefaults({id:"system-entry",strict:true,kinds:["Function"],preferredKinds:["Function"]},scope);
+  if(match&&scope?.kind==="system")return withDefaults({id:"system-entry",strict:true,kinds:["Function"],preferredKinds:["Function"]},scope);
   match=trimmed.match(/^source\s+[A-Za-z0-9_]*$/);
-  if(match)return withDefaults({id:"system-source",strict:true,kinds:["Source"],preferredKinds:["Source"]},scope);
+  if(match&&scope?.kind==="system")return withDefaults({id:"system-source",strict:true,kinds:["Source"],preferredKinds:["Source"]},scope);
   match=trimmed.match(/^sink\s+[A-Za-z0-9_]*$/);
-  if(match)return withDefaults({id:"system-sink",strict:true,kinds:["Sink"],preferredKinds:["Sink"]},scope);
+  if(match&&scope?.kind==="system")return withDefaults({id:"system-sink",strict:true,kinds:["Sink"],preferredKinds:["Sink"]},scope);
 
-  const property=trimmed.match(/^(select|action|init|next|success|failure)\s*=\s*[A-Za-z0-9_]*$/);
+  const property=trimmed.match(/^(select|action|init|next|success|failure)\s*=\s*(.*)$/);
   if(property&&scope?.kind==="machine"){
     const machine=lexicalIndex.machineInfo(scope.name);
-    const key=property[1];
+    const key=property[1],value=property[2];
     if((key==="select"||key==="action")&&machine?.stateType){
-      return withDefaults({id:`machine-${key}`,strict:true,kinds:["StateField"],owner:machine.stateType,preferredKinds:["StateField"]},scope);
+      let insertPrefix="";
+      const qualified=value.match(/^([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z0-9_]*)$/);
+      if(qualified){
+        if(!scope.stateParam||qualified[1]!==scope.stateParam){
+          return withDefaults({id:`machine-${key}-invalid-base`,strict:true,kinds:[]},scope);
+        }
+      }else if(/^[A-Za-z0-9_]*$/.test(value)){
+        if(scope.stateParam)insertPrefix=`${scope.stateParam}.`;
+      }else{
+        return withDefaults({id:`machine-${key}-expression`,strict:true,kinds:[]},scope);
+      }
+      return withDefaults({
+        id:`machine-${key}`,
+        strict:true,
+        kinds:["StateField"],
+        owner:machine.stateType,
+        preferredKinds:["StateField"],
+        insertPrefix,
+        excludeText:key==="action"?(machine.selectorField||null):null,
+      },scope);
     }
-    if(key==="init"&&machine?.stateType){
+    if(key==="init"&&/^[A-Za-z0-9_]*$/.test(value)&&machine?.stateType){
       return withDefaults({id:"machine-init",strict:true,kinds:["Type"],preferredKinds:["Type"],exactText:machine.stateType},scope);
     }
-    if(key==="next"){
+    if(key==="next"&&/^[A-Za-z0-9_]*$/.test(value)){
       return withDefaults({id:"machine-next",strict:true,kinds:["Function"],preferredKinds:["Function"]},scope);
     }
-    if((key==="success"||key==="failure")&&machine?.selectorType){
+    if((key==="success"||key==="failure")&&/^[A-Za-z0-9_]*$/.test(value)&&machine?.selectorType){
       return withDefaults({id:`machine-${key}`,strict:true,kinds:["State"],owner:machine.selectorType,preferredKinds:["State"]},scope);
     }
   }
