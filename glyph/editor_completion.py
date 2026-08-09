@@ -146,7 +146,7 @@ function compareCandidates(left,right,classification){
 }
 function mergeCandidates(documentRows,staticRows,classification,context){
   const rows=[];const seen=new Set();
-  for(const row of[...documentRows,...staticRows]){
+  for(const row of[...staticRows,...documentRows]){
     if(!row?.text||row.text===context.current||seen.has(row.text))continue;
     if(classification?.exactText&&row.text!==classification.exactText)continue;
     if(classification?.excludeText&&row.text===classification.excludeText)continue;
