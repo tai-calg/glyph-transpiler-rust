@@ -9,7 +9,8 @@ _STYLE = r"""
 .state-node:focus-visible,
 .transition-io-cluster:focus-visible,
 .diagnostic[data-line]:focus-visible,
-.analysis-item[data-line]:focus-visible{
+.analysis-item[data-line]:focus-visible,
+.splitter:focus-visible{
   outline:2px solid var(--blue);
   outline-offset:2px;
 }
@@ -41,6 +42,7 @@ const pointerSessions=new Map();
 let inspectorOpener=null,restoreInspectorFocus=false,enhanceFrame=0;
 const focusableEditing="input,textarea,select,[contenteditable=true]";
 const pointerTargetSelector="#splitter,.canvas-shell,.state-node,.transition-io-cluster,.edge-label,.transition-label";
+const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
 
 function activateTab(tab){
   if(!tab)return;
@@ -50,27 +52,36 @@ function activateTab(tab){
 function setupTabs(){
   const group=document.querySelector(".tabs");
   const tabs=[...document.querySelectorAll(".tabs .tab")];
+  const panel=document.getElementById("view");
   if(group)group.setAttribute("role","tablist");
-  for(const tab of tabs){
+  let activeId="";
+  tabs.forEach((tab,index)=>{
     const active=tab.classList.contains("active");
+    tab.id=tab.id||`glyph-diagram-tab-${tab.dataset.tab||index}`;
     tab.setAttribute("role","tab");
     tab.setAttribute("aria-selected",active?"true":"false");
     tab.setAttribute("aria-controls","view");
     tab.tabIndex=active?0:-1;
-    if(tab.dataset.guiUxTabReady==="true")continue;
+    if(active)activeId=tab.id;
+    if(tab.dataset.guiUxTabReady==="true")return;
     tab.dataset.guiUxTabReady="true";
     tab.addEventListener("keydown",event=>{
       const items=[...document.querySelectorAll(".tabs .tab")];
-      const index=items.indexOf(tab);if(index<0)return;
+      const itemIndex=items.indexOf(tab);if(itemIndex<0)return;
       let next=-1;
-      if(event.key==="ArrowRight")next=(index+1)%items.length;
-      else if(event.key==="ArrowLeft")next=(index-1+items.length)%items.length;
+      if(event.key==="ArrowRight")next=(itemIndex+1)%items.length;
+      else if(event.key==="ArrowLeft")next=(itemIndex-1+items.length)%items.length;
       else if(event.key==="Home")next=0;
       else if(event.key==="End")next=items.length-1;
       if(next<0)return;
       event.preventDefault();event.stopPropagation();activateTab(items[next]);
     });
     tab.addEventListener("click",()=>requestAnimationFrame(setupTabs));
+  });
+  if(panel){
+    panel.setAttribute("role","tabpanel");
+    if(activeId)panel.setAttribute("aria-labelledby",activeId);
+    else panel.removeAttribute("aria-labelledby");
   }
 }
 function setupLineJumps(){
@@ -131,16 +142,50 @@ function setupInspector(){
     if(opener?.isConnected)requestAnimationFrame(()=>opener.focus({preventScroll:true}));
   }).observe(panel,{attributes:true,attributeFilter:["hidden"]});
 }
+function editorPercent(){
+  const raw=getComputedStyle(document.documentElement).getPropertyValue("--editor").trim();
+  const parsed=Number.parseFloat(raw);
+  if(Number.isFinite(parsed))return clamp(parsed,25,70);
+  const main=document.getElementById("main"),editor=document.querySelector(".editor-pane");
+  return main&&editor&&main.clientWidth?clamp(editor.getBoundingClientRect().width/main.clientWidth*100,25,70):42;
+}
+function publishSplitter(splitter,value){
+  const next=clamp(value,25,70);
+  document.documentElement.style.setProperty("--editor",`${next}%`);
+  splitter.setAttribute("aria-valuenow",String(Math.round(next)));
+  splitter.setAttribute("aria-valuetext",`${Math.round(next)}% source editor`);
+  window.dispatchEvent(new Event("resize"));
+}
 function setupSplitter(){
   const splitter=document.getElementById("splitter");
-  if(!splitter||splitter.dataset.guiUxCancelReady==="true")return;
+  if(!splitter)return;
+  splitter.tabIndex=0;splitter.setAttribute("role","separator");splitter.setAttribute("aria-orientation","vertical");
+  splitter.setAttribute("aria-label","Resize source and diagram panes");splitter.setAttribute("aria-valuemin","25");splitter.setAttribute("aria-valuemax","70");
+  splitter.setAttribute("aria-valuenow",String(Math.round(editorPercent())));
+  if(splitter.dataset.guiUxCancelReady==="true")return;
   splitter.dataset.guiUxCancelReady="true";
   const finish=event=>{try{splitter.onpointerup?.(event)}catch{}};
   splitter.addEventListener("pointercancel",finish,true);
   splitter.addEventListener("lostpointercapture",finish,true);
+  splitter.addEventListener("keydown",event=>{
+    let next=null,current=editorPercent(),step=event.shiftKey?5:2;
+    if(event.key==="ArrowLeft")next=current-step;
+    else if(event.key==="ArrowRight")next=current+step;
+    else if(event.key==="Home")next=25;
+    else if(event.key==="End")next=70;
+    if(next===null)return;
+    event.preventDefault();event.stopPropagation();publishSplitter(splitter,next);
+  });
+}
+function setupSettings(){
+  const button=document.getElementById("glyph-settings"),dialog=document.getElementById("glyph-settings-dialog");
+  if(button&&dialog){button.setAttribute("aria-haspopup","dialog");button.setAttribute("aria-controls",dialog.id)}
+  if(!dialog)return;
+  const heading=dialog.querySelector("h1,h2,h3");
+  if(heading){heading.id=heading.id||"glyph-settings-title";dialog.setAttribute("aria-labelledby",heading.id)}
 }
 function enhance(){
-  enhanceFrame=0;setupTabs();setupLineJumps();setupStateNodes();setupTransitionClusters();setupInspector();setupSplitter();
+  enhanceFrame=0;setupTabs();setupLineJumps();setupStateNodes();setupTransitionClusters();setupInspector();setupSplitter();setupSettings();
 }
 function scheduleEnhance(){if(enhanceFrame)return;enhanceFrame=requestAnimationFrame(enhance)}
 
@@ -204,7 +249,7 @@ const tabsRoot=document.querySelector(".tabs");
 if(tabsRoot)new MutationObserver(setupTabs).observe(tabsRoot,{subtree:true,attributes:true,attributeFilter:["class"]});
 new MutationObserver(scheduleEnhance).observe(document.getElementById("main")||document.body,{childList:true,subtree:true});
 window.glyphDiagramGuiUxGuard={marker:MARKER,version:1,refresh:scheduleEnhance,activePointers:()=>pointerSessions.size};
-enhance();requestAnimationFrame(setupTabs);
+enhance();requestAnimationFrame(enhance);
 })();
 </script>
 """
