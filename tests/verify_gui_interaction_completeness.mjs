@@ -58,18 +58,26 @@ try {
   await page.goto(url, { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => document.querySelector("#status")?.textContent === "ready"
     && window.glyphDiagramGuiUxGuard?.version === 1);
+  await page.waitForFunction(() => [...document.querySelectorAll(".tabs .tab")].every(tab => (
+    tab.getAttribute("aria-selected") === (tab.classList.contains("active") ? "true" : "false")
+  )));
 
-  const tabContract = await page.evaluate(() => ({
-    listRole: document.querySelector(".tabs")?.getAttribute("role"),
-    ioRole: document.querySelector('.tab[data-tab="io"]')?.getAttribute("role"),
-    ioSelected: document.querySelector('.tab[data-tab="io"]')?.getAttribute("aria-selected"),
-    stateSelected: document.querySelector('.tab[data-tab="state"]')?.getAttribute("aria-selected"),
-  }));
+  const tabContract = await page.evaluate(() => {
+    const tabs = [...document.querySelectorAll(".tabs .tab")];
+    return {
+      listRole: document.querySelector(".tabs")?.getAttribute("role"),
+      roles: tabs.map(tab => tab.getAttribute("role")),
+      selected: tabs.map(tab => tab.getAttribute("aria-selected")),
+      active: tabs.map(tab => tab.classList.contains("active")),
+    };
+  });
   assert.equal(tabContract.listRole, "tablist");
-  assert.equal(tabContract.ioRole, "tab");
-  assert.equal(tabContract.ioSelected, "true");
-  assert.equal(tabContract.stateSelected, "false");
+  assert.deepEqual(tabContract.roles, ["tab", "tab"]);
+  assert.equal(tabContract.active.filter(Boolean).length, 1, "exactly one visual tab must be active");
+  assert.deepEqual(tabContract.selected, tabContract.active.map(active => active ? "true" : "false"));
 
+  await page.locator('.tab[data-tab="io"]').click();
+  await page.waitForFunction(() => document.querySelector('.tab[data-tab="io"]')?.getAttribute("aria-selected") === "true");
   await page.locator('.tab[data-tab="io"]').focus();
   await page.keyboard.press("ArrowRight");
   await page.waitForFunction(() => document.querySelector('.tab[data-tab="state"]')?.classList.contains("active"));
