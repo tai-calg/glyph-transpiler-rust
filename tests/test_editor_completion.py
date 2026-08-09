@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 import shutil
 import subprocess
@@ -21,6 +22,11 @@ from glyph.editor_lexical_index import LEXICAL_WORKER_JS
 from glyph.editor_lexical_index import _SCRIPT as INDEX_SCRIPT
 from glyph.editor_lexical_index import enhance_editor_lexical_index_html
 from glyph.readable_diagram_app import _presentation_pipeline
+
+
+def _javascript_from_script(source: str) -> str:
+    match = re.search(r"<script[^>]*>\n(.*)\n</script>", source, re.DOTALL)
+    return match.group(1) if match else source
 
 
 class EditorCompletionTests(unittest.TestCase):
@@ -188,6 +194,74 @@ class EditorCompletionTests(unittest.TestCase):
             self.assertEqual(once, twice)
 
     @unittest.skipUnless(shutil.which("node"), "Node.js is not installed")
+    def test_lexical_worker_rejects_nested_declarations_and_result_state_fields(self) -> None:
+        source = """+Mode=Idle|Running
++Error=Bad|Worse
+*System(mode:Mode|Error,direct:Mode)
+  >fake(state:System):System=state
+  *Nested(value:Mode)
+>real(state:System):System=state
+"""
+        runner = f"""
+const results=[];
+global.self={{postMessage:value=>results.push(value)}};
+{LEXICAL_WORKER_JS}
+self.onmessage({{data:{{revision:7,source:{json.dumps(source)}}}}});
+const snapshot=results.at(-1);
+const byName=Object.fromEntries(snapshot.records.map(row=>[row.text,row]));
+console.log(JSON.stringify({{
+  mode:byName.mode,
+  direct:byName.direct,
+  fake:byName.fake,
+  nested:byName.Nested,
+  real:byName.real,
+}}));
+"""
+        result = subprocess.run(
+            ["node", "-e", runner], capture_output=True, text=True, check=False
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        data = json.loads(result.stdout)
+        self.assertIn("Field", data["mode"]["ownerKinds"]["System"])
+        self.assertNotIn("StateField", data["mode"]["ownerKinds"]["System"])
+        self.assertIn("StateField", data["direct"]["ownerKinds"]["System"])
+        self.assertEqual(data["fake"]["kinds"], ["Identifier"])
+        self.assertEqual(data["nested"]["kinds"], ["Identifier"])
+        self.assertIn("Function", data["real"]["kinds"])
+        self.assertIn("EntryFunction", data["real"]["kinds"])
+
+    @unittest.skipUnless(shutil.which("node"), "Node.js is not installed")
+    def test_context_classifier_separates_value_borrows_from_type_borrows(self) -> None:
+        javascript = _javascript_from_script(CONTEXT_SCRIPT)
+        runner = f"""
+global.window={{GlyphEditorLexicalIndex:{{machineInfo:()=>null}}}};
+{javascript}
+const service=window.GlyphEditorCompletionContext;
+function classify(source){{
+  const caret=source.length;
+  const lineStart=service.boundedLineStart(source,caret);
+  let left=caret;
+  while(left>lineStart&&/[A-Za-z0-9_]/.test(source[left-1]))left-=1;
+  return service.classify({{source,caret,left,right:caret,prefix:source.slice(left,caret),current:source.slice(left,caret),lineStart}}).id;
+}}
+console.log(JSON.stringify({{
+  bindingBorrow:classify(">borrow(system:System):System\\n  copy := &sy"),
+  callComma:classify(">borrow(system:System):System\\n  copy := compute(system,sy"),
+  typeBorrow:classify("*Probe(value:& Sy"),
+  typeCapability:classify("*Probe(value:own Sy"),
+}}));
+"""
+        result = subprocess.run(
+            ["node", "-e", runner], capture_output=True, text=True, check=False
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        data = json.loads(result.stdout)
+        self.assertEqual(data["bindingBorrow"], "general")
+        self.assertEqual(data["callComma"], "general")
+        self.assertEqual(data["typeBorrow"], "type")
+        self.assertEqual(data["typeCapability"], "type")
+
+    @unittest.skipUnless(shutil.which("node"), "Node.js is not installed")
     def test_new_javascript_is_syntactically_valid(self) -> None:
         scripts = {
             "document.js": DOCUMENT_SCRIPT,
@@ -199,8 +273,7 @@ class EditorCompletionTests(unittest.TestCase):
         }
         with tempfile.TemporaryDirectory() as directory:
             for filename, source in scripts.items():
-                match = re.search(r"<script[^>]*>\n(.*)\n</script>", source, re.DOTALL)
-                javascript = match.group(1) if match else source
+                javascript = _javascript_from_script(source)
                 path = Path(directory) / filename
                 path.write_text(javascript, encoding="utf-8")
                 result = subprocess.run(
