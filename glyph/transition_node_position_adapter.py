@@ -162,6 +162,14 @@ function moveActive(event){
   active.stage.dataset.transitionNodeDragConstrained=position.constrained?"true":"false";
   return true;
 }
+function cancelRecord(record,reason){
+  try{record.node.releasePointerCapture?.(record.pointerId)}catch{}
+  record.node.style.left=`${record.startLeft}px`;
+  record.node.style.top=`${record.startTop}px`;
+  record.node.classList.remove("dragging");
+  if(record.stage?.isConnected)record.stage.dataset.transitionNodeCancelReason=reason;
+  if(record.publicationInvalidated)publicationGuard()?.schedule?.(`manual-node-${reason}`);
+}
 async function persist(record){
   if(destroyed||!record.stage.isConnected)return false;
   const data=await diagramState();
@@ -248,7 +256,7 @@ document.addEventListener("pointerup",event=>{
   event.preventDefault();
   event.stopImmediatePropagation();
   const record=active;active=null;
-  record.node.releasePointerCapture?.(event.pointerId);
+  try{record.node.releasePointerCapture?.(event.pointerId)}catch{}
   record.node.classList.remove("dragging");
   if(!record.moved){
     setTimeout(()=>restorePositionStorageState(record.storageBefore),0);
@@ -263,11 +271,7 @@ document.addEventListener("pointerup",event=>{
 document.addEventListener("pointercancel",event=>{
   if(!active||active.pointerId!==event.pointerId)return;
   event.stopImmediatePropagation();
-  const record=active;active=null;
-  record.node.style.left=`${record.startLeft}px`;
-  record.node.style.top=`${record.startTop}px`;
-  record.node.classList.remove("dragging");
-  if(record.publicationInvalidated)publicationGuard()?.schedule?.("manual-node-cancelled");
+  const record=active;active=null;cancelRecord(record,"pointer-cancelled");
 },true);
 document.addEventListener("keydown",event=>{
   if(!event.key.startsWith("Arrow"))return;
@@ -308,6 +312,7 @@ document.addEventListener("keydown",event=>{
 },true);
 document.addEventListener("change",event=>{
   if(event.target?.id==="machine-select"){
+    if(active){const record=active;active=null;cancelRecord(record,"machine-changed")}
     invalidateState();
     scheduleRestore(null,20);
   }
@@ -339,3 +344,6 @@ def enhance_transition_node_position_adapter_html(html: str) -> str:
     if _MARKER in html:
         return html
     return html.replace("</body>", _SCRIPT + "\n</body>")
+
+
+__all__ = ["enhance_transition_node_position_adapter_html"]
