@@ -138,6 +138,99 @@ try {
     assert(!(labelRace.transitionId in value), `old-machine transition ${labelRace.transitionId} leaked into machine 1 storage: ${JSON.stringify(labelStorage)}`);
   }
 
+  await page.locator("#machine-select").selectOption("0");
+  await waitStateReady(page, 0);
+  const nodeStorageFailure = await page.evaluate(async () => {
+    for (const key of Object.keys(localStorage)) {
+      if (key.startsWith("glyph.diagram.positions.v1:")) localStorage.removeItem(key);
+    }
+    const stage = document.querySelector(".state-node")?.closest(".graph-stage");
+    const node = document.querySelector(".state-node");
+    if (!stage || !node) throw new Error("node storage failure fixture is incomplete");
+    const name = node.querySelector(".state-name")?.textContent?.trim() || "";
+    node.classList.add("selected-node");
+    node.focus({ preventScroll: true });
+    const before = { left: node.style.left, top: node.style.top };
+    const width = Number.parseFloat(stage.style.width || "0") || stage.scrollWidth;
+    const key = node.offsetLeft + node.offsetWidth + 32 < width ? "ArrowRight" : "ArrowLeft";
+    const originalSetItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = function blockedSetItem() {
+      throw new DOMException("storage blocked by test", "QuotaExceededError");
+    };
+    try {
+      node.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+      const immediate = { left: node.style.left, top: node.style.top };
+      await new Promise(resolve => setTimeout(resolve, 80));
+      const live = [...document.querySelectorAll(".state-node")].find(item => (item.querySelector(".state-name")?.textContent?.trim() || "") === name);
+      return {
+        name,
+        key,
+        before,
+        immediate,
+        after: live ? { left: live.style.left, top: live.style.top } : null,
+        cancelReason: live?.closest(".graph-stage")?.dataset.transitionNodeCancelReason || stage.dataset.transitionNodeCancelReason || "",
+        storageKeys: Object.keys(localStorage).filter(storageKey => storageKey.startsWith("glyph.diagram.positions.v1:")),
+      };
+    } finally {
+      Storage.prototype.setItem = originalSetItem;
+    }
+  });
+  assert(nodeStorageFailure.name, "node storage failure has no node identity");
+  assert.notDeepEqual(nodeStorageFailure.immediate, nodeStorageFailure.before, "node storage failure did not exercise a move");
+  assert.deepEqual(nodeStorageFailure.after, nodeStorageFailure.before, `failed node persistence did not roll back: ${JSON.stringify(nodeStorageFailure)}`);
+  assert.equal(nodeStorageFailure.cancelReason, "persistence-unavailable");
+  assert.deepEqual(nodeStorageFailure.storageKeys, [], `failed node persistence wrote storage: ${JSON.stringify(nodeStorageFailure)}`);
+  await waitStateReady(page, 0);
+
+  const manualLabel = await page.evaluate(async () => {
+    const cluster = document.querySelector(".transition-io-cluster");
+    if (!cluster) throw new Error("label storage failure fixture is incomplete");
+    const id = cluster.dataset.transitionId || "";
+    const moved = await window.glyphTransitionLayoutInteractionAdapter.keyboardNudge(cluster, 4, 0);
+    return { id, moved };
+  });
+  assert(manualLabel.id, "manual label fixture has no transition identity");
+  assert.equal(manualLabel.moved, true, "manual label setup did not persist");
+  await waitStateReady(page, 0);
+  const manualStorage = await page.evaluate(id => {
+    const entries = Object.fromEntries(
+      Object.keys(localStorage)
+        .filter(key => key.startsWith("glyph.diagram.transition-io.v1:") && key.endsWith(":0"))
+        .map(key => [key, JSON.parse(localStorage.getItem(key) || "{}")]),
+    );
+    return { entries, containsId: Object.values(entries).some(value => id in value) };
+  }, manualLabel.id);
+  assert.equal(manualStorage.containsId, true, `manual label setup was not stored: ${JSON.stringify(manualStorage)}`);
+
+  const labelResetFailure = await page.evaluate(async id => {
+    const cluster = [...document.querySelectorAll(".transition-io-cluster")].find(item => item.dataset.transitionId === id);
+    if (!cluster) throw new Error("manual label disappeared before reset failure test");
+    cluster.focus({ preventScroll: true });
+    const originalSetItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = function blockedSetItem() {
+      throw new DOMException("storage blocked by test", "QuotaExceededError");
+    };
+    try {
+      cluster.dispatchEvent(new KeyboardEvent("keydown", { key: "Delete", bubbles: true, cancelable: true }));
+      await new Promise(resolve => setTimeout(resolve, 80));
+      const live = [...document.querySelectorAll(".transition-io-cluster")].find(item => item.dataset.transitionId === id) || cluster;
+      return {
+        manualIo: live.dataset.manualIo || "",
+        gestureState: live.dataset.manualIoGestureState || "",
+        gestureReason: live.dataset.manualIoGestureReason || "",
+        stored: Object.keys(localStorage)
+          .filter(key => key.startsWith("glyph.diagram.transition-io.v1:") && key.endsWith(":0"))
+          .some(key => id in JSON.parse(localStorage.getItem(key) || "{}")),
+      };
+    } finally {
+      Storage.prototype.setItem = originalSetItem;
+    }
+  }, manualLabel.id);
+  assert.equal(labelResetFailure.manualIo, "true", `failed label reset changed visible ownership: ${JSON.stringify(labelResetFailure)}`);
+  assert.equal(labelResetFailure.gestureState, "reset-failed");
+  assert.equal(labelResetFailure.gestureReason, "persistence-unavailable");
+  assert.equal(labelResetFailure.stored, true, `failed label reset deleted persisted placement: ${JSON.stringify(labelResetFailure)}`);
+
   assert.deepEqual(browserErrors, [], browserErrors.join("\n"));
   console.log(JSON.stringify({
     nodeRaceKey: nodeRace.key,
@@ -148,6 +241,8 @@ try {
     labelMoved: labelRace.moved,
     labelStorageKeys: Object.keys(labelStorage),
     staleTransitionFocusBlocked: true,
+    nodeStorageFailureRolledBack: true,
+    labelResetFailurePreservedManualPlacement: true,
   }));
 } finally {
   await browser.close();
