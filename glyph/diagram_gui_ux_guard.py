@@ -39,7 +39,7 @@ _SCRIPT = r"""
 const MARKER="glyph-diagram-gui-ux-guard-v1";
 if(window.glyphDiagramGuiUxGuard?.marker===MARKER)return;
 const pointerSessions=new Map(),FOCUS_REQUEST_TTL_MS=2000;
-let inspectorOpener=null,restoreInspectorFocus=false,enhanceFrame=0,pendingClusterFocus=null,pendingClusterFocusTimer=0;
+let inspectorOpener=null,inspectorOpenerIdentity=null,restoreInspectorFocus=false,enhanceFrame=0,pendingClusterFocus=null,pendingClusterFocusTimer=0;
 const focusableEditing="input,textarea,select,[contenteditable=true]";
 const pointerTargetSelector="#splitter,.canvas-shell,.state-node,.transition-io-cluster,.edge-label,.transition-label";
 const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
@@ -170,6 +170,19 @@ function setupTransitionClusters(){
     });
   }
 }
+function inspectorIdentityFor(opener){
+  const id=opener?.dataset?.transitionId||"";
+  return id?{id,machineIndex:machineIndex(),diagramDigest:clusterDigest(opener)}:null;
+}
+function restoreInspectorOpener(opener,identity){
+  requestAnimationFrame(()=>{
+    if(opener?.isConnected){opener.focus({preventScroll:true});return}
+    if(!identity||machineIndex()!==identity.machineIndex)return;
+    const replacement=[...document.querySelectorAll(".transition-io-cluster")].find(item=>item.dataset.transitionId===identity.id);
+    if(!replacement||clusterDigest(replacement)!==identity.diagramDigest)return;
+    setupTransitionClusters();replacement.focus({preventScroll:true});
+  });
+}
 function setupInspector(){
   const panel=document.querySelector(".transition-label-inspector");
   if(!panel||panel.dataset.guiUxReady==="true")return;
@@ -178,10 +191,11 @@ function setupInspector(){
   if(title){title.id=title.id||"glyph-transition-label-inspector-title";panel.setAttribute("aria-labelledby",title.id)}
   new MutationObserver(()=>{
     if(!panel.hidden)return;
-    const opener=inspectorOpener;inspectorOpener=null;
+    const opener=inspectorOpener,identity=inspectorOpenerIdentity;
+    inspectorOpener=null;inspectorOpenerIdentity=null;
     if(!restoreInspectorFocus){restoreInspectorFocus=false;return}
     restoreInspectorFocus=false;
-    if(opener?.isConnected)requestAnimationFrame(()=>opener.focus({preventScroll:true}));
+    restoreInspectorOpener(opener,identity);
   }).observe(panel,{attributes:true,attributeFilter:["hidden"]});
 }
 function editorPercent(){
@@ -243,6 +257,7 @@ window.addEventListener("keydown",event=>{
 
 document.addEventListener("glyph-transition-label-inspector-opened",()=>{
   inspectorOpener=window.glyphTransitionLabelInspector?.current?.()||document.activeElement;
+  inspectorOpenerIdentity=inspectorIdentityFor(inspectorOpener);
   restoreInspectorFocus=false;setupInspector();
   const panel=document.querySelector(".transition-label-inspector:not([hidden])");
   requestAnimationFrame(()=>panel?.querySelector(".transition-label-inspector-close")?.focus({preventScroll:true}));
@@ -299,7 +314,7 @@ document.addEventListener("change",event=>{if(event.target?.id==="machine-select
 const tabsRoot=document.querySelector(".tabs");
 if(tabsRoot)new MutationObserver(setupTabs).observe(tabsRoot,{subtree:true,attributes:true,attributeFilter:["class"]});
 new MutationObserver(scheduleEnhance).observe(document.getElementById("main")||document.body,{childList:true,subtree:true});
-window.glyphDiagramGuiUxGuard={marker:MARKER,version:3,refresh:scheduleEnhance,activePointers:()=>pointerSessions.size,pendingClusterFocus:()=>pendingClusterFocus?{...pendingClusterFocus}:null};
+window.glyphDiagramGuiUxGuard={marker:MARKER,version:4,refresh:scheduleEnhance,activePointers:()=>pointerSessions.size,pendingClusterFocus:()=>pendingClusterFocus?{...pendingClusterFocus}:null};
 enhance();requestAnimationFrame(enhance);
 })();
 </script>
