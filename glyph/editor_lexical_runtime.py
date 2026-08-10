@@ -47,14 +47,19 @@ function subsequenceMatch(source,target,foldedSource,foldedTarget){
     const previous=found>0?target[found-1]:"";
     return found===0||previous==="_"||previous==="-"||(/[a-z0-9]/.test(previous)&&/[A-Z]/.test(target[found]));
   };
+  const findWithin=(needle,from,through)=>{
+    for(let index=from;index<=through;index+=1){if(foldedTarget[index]===needle)return index}
+    return-1;
+  };
   let best=null,searchStart=0;
   while(searchStart<foldedTarget.length){
     const start=foldedTarget.indexOf(foldedSource[0],searchStart);
     if(start<0)break;
+    const maximumEnd=Math.min(foldedTarget.length-1,start+source.length+maxGaps-1);
     const positions=[start];
     let cursor=start+1,casePenalty=source[0]!==target[start]?1:0,boundaryHits=boundaryAt(start)?1:0,valid=true;
     for(let index=1;index<foldedSource.length;index+=1){
-      const found=foldedTarget.indexOf(foldedSource[index],cursor);
+      const found=findWithin(foldedSource[index],cursor,maximumEnd);
       if(found<0){valid=false;break}
       positions.push(found);
       if(source[index]!==target[found]&&foldedSource[index]===foldedTarget[found])casePenalty+=1;
