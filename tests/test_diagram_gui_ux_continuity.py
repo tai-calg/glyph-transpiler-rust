@@ -43,7 +43,12 @@ class DiagramGuiUxContinuityTests(unittest.TestCase):
         self.assertIn('if(event.key==="ArrowRight")dx=step', _SCRIPT)
         self.assertIn('modal&&command&&event.key==="Enter"', _SCRIPT)
         self.assertIn('modal&&event.key==="Escape"', _SCRIPT)
-        self.assertIn("event.stopPropagation();return", _SCRIPT)
+        self.assertIn('modal&&event.key==="Tab"', _SCRIPT)
+        self.assertIn("MODAL_FOCUSABLE", _SCRIPT)
+        self.assertIn("function modalFocusables(modal)", _SCRIPT)
+        self.assertIn("function trapModalTab(event,modal)", _SCRIPT)
+        self.assertIn('element.getClientRects().length>0', _SCRIPT)
+        self.assertIn("event.stopImmediatePropagation()", _SCRIPT)
         self.assertIn("armNodeFocus(nodeName(node))", _SCRIPT)
         self.assertIn("restoreNodeFocus()", _SCRIPT)
         self.assertIn("active===document.body", _SCRIPT)
@@ -58,7 +63,7 @@ class DiagramGuiUxContinuityTests(unittest.TestCase):
         self.assertIn('runtime.replaceRange(start,end,"  ")', _SCRIPT)
         self.assertIn('line.replace(/^(?:\\t| {1,2})/,"")', _SCRIPT)
         self.assertIn('window.addEventListener("keydown",handleEditorTab,true)', _SCRIPT)
-        self.assertIn("version:2", _SCRIPT)
+        self.assertIn("version:3", _SCRIPT)
 
     def test_enhancer_is_idempotent(self) -> None:
         html = "<html><head></head><body></body></html>"
