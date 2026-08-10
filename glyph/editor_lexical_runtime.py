@@ -42,32 +42,44 @@ function fuzzyEditBudget(length){
 }
 function subsequenceMatch(source,target,foldedSource,foldedTarget){
   if(source.length<2||source.length>MAX_FUZZY_PREFIX||!target)return null;
-  const positions=[];
-  let cursor=0,casePenalty=0,boundaryHits=0;
-  for(let index=0;index<foldedSource.length;index+=1){
-    const found=foldedTarget.indexOf(foldedSource[index],cursor);
-    if(found<0)return null;
-    positions.push(found);
-    if(source[index]!==target[found]&&foldedSource[index]===foldedTarget[found])casePenalty+=1;
-    const previous=found>0?target[found-1]:"";
-    const boundary=found===0||previous==="_"||previous==="-"||(/[a-z0-9]/.test(previous)&&/[A-Z]/.test(target[found]));
-    if(boundary)boundaryHits+=1;
-    cursor=found+1;
-  }
-  const start=positions[0],span=positions[positions.length-1]-start+1,gaps=span-source.length;
   const maxGaps=Math.min(24,Math.max(4,source.length*2));
-  if(gaps>maxGaps)return null;
-  let consecutive=0;
-  for(let index=1;index<positions.length;index+=1){if(positions[index]===positions[index-1]+1)consecutive+=1}
-  const weakStart=start>0&&boundaryHits===0;
-  if(weakStart&&source.length<4)return null;
-  return{
-    matched:true,
-    kind:"subsequence",
-    score:200+start*10+gaps*5+Math.min(8,casePenalty)-boundaryHits*4-consecutive*2,
-    edits:null,
-    matchedLength:span,
+  const boundaryAt=found=>{
+    const previous=found>0?target[found-1]:"";
+    return found===0||previous==="_"||previous==="-"||(/[a-z0-9]/.test(previous)&&/[A-Z]/.test(target[found]));
   };
+  let best=null,searchStart=0;
+  while(searchStart<foldedTarget.length){
+    const start=foldedTarget.indexOf(foldedSource[0],searchStart);
+    if(start<0)break;
+    const positions=[start];
+    let cursor=start+1,casePenalty=source[0]!==target[start]?1:0,boundaryHits=boundaryAt(start)?1:0,valid=true;
+    for(let index=1;index<foldedSource.length;index+=1){
+      const found=foldedTarget.indexOf(foldedSource[index],cursor);
+      if(found<0){valid=false;break}
+      positions.push(found);
+      if(source[index]!==target[found]&&foldedSource[index]===foldedTarget[found])casePenalty+=1;
+      if(boundaryAt(found))boundaryHits+=1;
+      cursor=found+1;
+    }
+    if(valid){
+      const span=positions[positions.length-1]-start+1,gaps=span-source.length;
+      const weakStart=start>0&&!boundaryAt(start);
+      if(gaps<=maxGaps&&!(weakStart&&source.length<4)){
+        let consecutive=0;
+        for(let index=1;index<positions.length;index+=1){if(positions[index]===positions[index-1]+1)consecutive+=1}
+        const candidate={
+          matched:true,
+          kind:"subsequence",
+          score:200+start*10+gaps*5+Math.min(8,casePenalty)-boundaryHits*4-consecutive*2,
+          edits:null,
+          matchedLength:span,
+        };
+        if(!best||candidate.score<best.score||(candidate.score===best.score&&candidate.matchedLength<best.matchedLength))best=candidate;
+      }
+    }
+    searchStart=start+1;
+  }
+  return best;
 }
 function matchText(query,candidate){
   const source=String(query??"");
@@ -129,6 +141,46 @@ function matchText(query,candidate){
     }
   }
   return subsequenceMatch(source,target,foldedSource,foldedTarget);
+}
+function matchTier(kind){
+  if(kind==="empty"||kind==="prefix")return 0;
+  if(kind==="case-prefix")return 1;
+  if(kind==="fuzzy")return 2;
+  if(kind==="subsequence")return 3;
+  return 4;
+}
+function nonNegativeInteger(value){return Number.isSafeInteger(Number(value))&&Number(value)>=0}
+function stringArray(value){return Array.isArray(value)&&value.every(item=>typeof item==="string")}
+function validSnapshotMessage(result,completed){
+  if(!result||result.type!=="snapshot"||!completed)return false;
+  const revision=Number(result.revision),sourceLength=Number(result.sourceLength);
+  if(!Number.isSafeInteger(revision)||revision<0||revision!==Number(completed.revision))return false;
+  if(!Number.isSafeInteger(sourceLength)||sourceLength<0||sourceLength!==String(completed.source??"").length)return false;
+  if(!Array.isArray(result.records)||!Array.isArray(result.machineRecords))return false;
+  if(!(result.positions instanceof Int32Array)||!(result.codePositions instanceof Int32Array))return false;
+  let expectedAllOffset=0,expectedCodeOffset=0,previousText=null;
+  for(const row of result.records){
+    if(!row||typeof row.text!=="string"||!row.text||!stringArray(row.kinds)||!row.kinds.length||!stringArray(row.owners))return false;
+    if(previousText!==null&&row.text<=previousText)return false;
+    previousText=row.text;
+    if(!nonNegativeInteger(row.allOffset)||!nonNegativeInteger(row.allCount)||!nonNegativeInteger(row.codeOffset)||!nonNegativeInteger(row.codeCount))return false;
+    if(Number(row.allOffset)!==expectedAllOffset||Number(row.codeOffset)!==expectedCodeOffset||Number(row.codeCount)>Number(row.allCount))return false;
+    expectedAllOffset+=Number(row.allCount);expectedCodeOffset+=Number(row.codeCount);
+    if(expectedAllOffset>result.positions.length||expectedCodeOffset>result.codePositions.length)return false;
+    if(typeof row.kind!=="string"||!row.kinds.includes(row.kind))return false;
+    if(!row.ownerKinds||typeof row.ownerKinds!=="object"||Array.isArray(row.ownerKinds))return false;
+    for(const [owner,kinds] of Object.entries(row.ownerKinds)){
+      if(!row.owners.includes(owner)||!stringArray(kinds)||!kinds.every(kind=>row.kinds.includes(kind)))return false;
+    }
+  }
+  if(expectedAllOffset!==result.positions.length||expectedCodeOffset!==result.codePositions.length)return false;
+  let previousMachine="";
+  for(const row of result.machineRecords){
+    if(!row||typeof row.name!=="string"||typeof row.stateType!=="string"||typeof row.selectorField!=="string"||typeof row.selectorType!=="string")return false;
+    if(previousMachine&&row.name<previousMachine)return false;
+    previousMachine=row.name;
+  }
+  return true;
 }
 function clearTimer(){if(timer){clearTimeout(timer);timer=0}}
 function clearRecoveryTimer(){if(recoveryTimer){clearTimeout(recoveryTimer);recoveryTimer=0}}
@@ -202,12 +254,12 @@ function ensureWorker({recovery=false}={}){
   active.onmessage=event=>{
     if(active!==worker)return;
     const result=event.data||{};
-    if(result.type!=="snapshot"){
+    const completed=inFlight;
+    if(!validSnapshotMessage(result,completed)){
       metrics.invalidMessages+=1;
-      handleWorkerFailure(active,{message:"lexical index worker returned an invalid message"});
+      handleWorkerFailure(active,{message:"lexical index worker returned an invalid snapshot"});
       return;
     }
-    const completed=inFlight;
     inFlight=null;
     metrics.buildsCompleted+=1;
     const currentRevision=documentRuntime.revision();
@@ -285,7 +337,9 @@ function machineInfo(name){
 function allPositions(row){return row&&snapshot?snapshot.positions.subarray(row.allOffset,row.allOffset+row.allCount):new Int32Array()}
 function codePositionsFor(row){return row&&snapshot?snapshot.codePositions.subarray(row.codeOffset,row.codeOffset+row.codeCount):new Int32Array()}
 function queryRowOrder(left,right){
-  return Number(left.matchScore||0)-Number(right.matchScore||0)
+  const leftTier=matchTier(left.matchKind),rightTier=matchTier(right.matchKind);
+  return leftTier-rightTier
+    ||Number(left.matchScore||0)-Number(right.matchScore||0)
     ||right.recent-left.recent
     ||right.count-left.count
     ||left.added-right.added
