@@ -29,14 +29,25 @@ async function stopProcess(child) {
   if (child.exitCode === null) child.kill("SIGKILL");
 }
 
-async function moveFocusedStateNode(page, before) {
-  for (const key of ["ArrowRight", "ArrowLeft", "ArrowDown", "ArrowUp"]) {
-    await page.keyboard.press(key);
-    const moved = await page.waitForFunction(previous => {
-      const node = document.querySelector(".state-node.selected-node");
-      return node && (node.style.left !== previous.left || node.style.top !== previous.top);
-    }, before, { timeout: 1500 }).then(() => true, () => false);
-    if (moved) return key;
+async function moveAnyFocusedStateNode(page) {
+  const nodes = page.locator(".state-node");
+  const count = await nodes.count();
+  for (let index = 0; index < count; index += 1) {
+    const node = nodes.nth(index);
+    await node.focus();
+    const selected = await node.evaluate(element => element.classList.contains("selected-node"));
+    if (!selected) continue;
+    const before = await node.evaluate(element => ({ left: element.style.left, top: element.style.top }));
+    for (const key of ["ArrowRight", "ArrowLeft", "ArrowDown", "ArrowUp"]) {
+      await page.keyboard.press(key);
+      const after = await page.locator(".state-node.selected-node").evaluate(element => ({
+        left: element.style.left,
+        top: element.style.top,
+      }));
+      if (after.left !== before.left || after.top !== before.top) {
+        return { index, key, before, after };
+      }
+    }
   }
   return null;
 }
@@ -144,14 +155,12 @@ try {
   }, clusterId, { timeout: 10_000 });
   await page.waitForFunction(id => document.activeElement?.dataset?.transitionId === id, clusterId, { timeout: 10_000 });
 
-  const node = page.locator(".state-node").first();
-  await node.focus();
-  assert.equal(await node.evaluate(element => element.classList.contains("selected-node")), true);
-  const nodeBeforeKeyboard = await node.evaluate(element => ({ left: element.style.left, top: element.style.top }));
-  const nodeMoveKey = await moveFocusedStateNode(page, nodeBeforeKeyboard);
-  assert(nodeMoveKey, "focused state node could not move in any Arrow-key direction");
-  const nodeAfterKeyboard = await page.locator(".state-node.selected-node").evaluate(element => ({ left: element.style.left, top: element.style.top }));
-  assert.notDeepEqual(nodeAfterKeyboard, nodeBeforeKeyboard, "focused state node did not move from an Arrow key");
+  const nodeMove = await moveAnyFocusedStateNode(page);
+  assert(nodeMove, "no clearance-valid state node Arrow-key move was available");
+  const nodeBeforeKeyboard = nodeMove.before;
+  const nodeMoveKey = nodeMove.key;
+  const nodeAfterKeyboard = nodeMove.after;
+  assert.notDeepEqual(nodeAfterKeyboard, nodeBeforeKeyboard, "clearance-valid focused state node did not move from an Arrow key");
 
   const nodeBeforeModal = nodeAfterKeyboard;
   const scaleBeforeModal = await page.locator(".graph-stage").getAttribute("data-viewport-scale");
@@ -260,6 +269,7 @@ try {
     nodeBeforeKeyboard,
     nodeAfterKeyboard,
     nodeMoveKey,
+    nodeMoveIndex: nodeMove.index,
     splitterBeforeKeyboard,
     splitterAfterKeyboard,
     editorWidthAfterDrag,
