@@ -57,7 +57,7 @@ try {
   page.on("request", request => requests.push({ method: request.method(), url: request.url() }));
   await page.goto(url, { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => document.querySelector("#status")?.textContent === "ready"
-    && window.glyphDiagramGuiUxGuard?.version === 1
+    && window.glyphDiagramGuiUxGuard?.version === 3
     && window.glyphTransitionLayoutInteractionAdapter?.version >= 5);
   await page.waitForFunction(() => [...document.querySelectorAll(".tabs .tab")].every(tab => (
     tab.getAttribute("aria-selected") === (tab.classList.contains("active") ? "true" : "false")
