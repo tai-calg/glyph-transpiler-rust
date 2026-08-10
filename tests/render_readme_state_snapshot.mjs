@@ -7,6 +7,10 @@ const port = 8933;
 const url = `http://127.0.0.1:${port}`;
 const output = "build/state-diagram-regression/motor-safety-motor.png";
 const README_SCALE = 0.58;
+const README_SCROLL_LEFT = 778;
+const README_SCROLL_TOP = 303;
+const README_STAGE_WIDTH = 3564;
+const README_STAGE_HEIGHT = 1524;
 
 async function waitForServer(child, logs) {
   for (let attempt = 0; attempt < 150; attempt += 1) {
@@ -84,18 +88,33 @@ try {
     };
   });
 
-  // The automatic whole-scene fit can round to 57% or 58% depending on hosted
-  // measurement timing. setScale preserves the current viewport anchor, so force the
-  // committed 58% scale without replacing the scene-centered pan chosen by fit().
-  await page.evaluate(scale => window.glyphDiagramViewport.setScale(scale), README_SCALE);
-  await page.waitForFunction(scale => {
-    const stage = document.querySelector(".canvas-shell .graph-stage");
-    return stage && Math.abs(Number(stage.dataset.viewportScale || 0) - scale) < 0.001;
-  }, README_SCALE);
-  await page.evaluate(async () => {
+  // The interactive fit may settle at 57% or 58%, with a few pixels of pan drift.
+  // README publication uses a fixed 1800x1100 viewport and a fixed motor-safety stage,
+  // so lock the complete publication transform rather than inheriting hosted timing.
+  await page.evaluate(({ scale, scrollLeft, scrollTop }) => {
+    window.glyphDiagramViewport.setScale(scale);
+    const shell = document.querySelector(".canvas-shell");
+    if (!shell) throw new Error("diagram canvas shell is unavailable");
+    shell.scrollLeft = scrollLeft;
+    shell.scrollTop = scrollTop;
+  }, { scale: README_SCALE, scrollLeft: README_SCROLL_LEFT, scrollTop: README_SCROLL_TOP });
+  await page.waitForFunction(({ scale, scrollLeft, scrollTop }) => {
+    const shell = document.querySelector(".canvas-shell");
+    const stage = shell?.querySelector(".graph-stage");
+    return stage
+      && Math.abs(Number(stage.dataset.viewportScale || 0) - scale) < 0.001
+      && Math.abs(Number(shell.scrollLeft) - scrollLeft) <= 0.5
+      && Math.abs(Number(shell.scrollTop) - scrollTop) <= 0.5;
+  }, { scale: README_SCALE, scrollLeft: README_SCROLL_LEFT, scrollTop: README_SCROLL_TOP });
+  await page.evaluate(async ({ scrollLeft, scrollTop }) => {
+    const shell = document.querySelector(".canvas-shell");
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    shell.scrollLeft = scrollLeft;
+    shell.scrollTop = scrollTop;
     await new Promise(resolve => setTimeout(resolve, 80));
-  });
+    shell.scrollLeft = scrollLeft;
+    shell.scrollTop = scrollTop;
+  }, { scrollLeft: README_SCROLL_LEFT, scrollTop: README_SCROLL_TOP });
 
   const state = await page.evaluate(() => {
     const shell = document.querySelector(".canvas-shell");
@@ -112,6 +131,10 @@ try {
   });
   assert.equal(state.scale, README_SCALE, JSON.stringify({ initial, state }));
   assert.equal(state.zoomText, "58%", JSON.stringify({ initial, state }));
+  assert.equal(state.scrollLeft, README_SCROLL_LEFT, JSON.stringify({ initial, state }));
+  assert.equal(state.scrollTop, README_SCROLL_TOP, JSON.stringify({ initial, state }));
+  assert.equal(state.stageWidth, README_STAGE_WIDTH, JSON.stringify({ initial, state }));
+  assert.equal(state.stageHeight, README_STAGE_HEIGHT, JSON.stringify({ initial, state }));
   assert.equal(state.transitions, 12, JSON.stringify({ initial, state }));
   assert.deepEqual(errors, [], errors.join("\n"));
 
