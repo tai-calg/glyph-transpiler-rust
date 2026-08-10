@@ -56,6 +56,8 @@ try {
       postThrowRemaining: 0,
       messageErrorRemaining: 0,
       invalidMessageRemaining: 0,
+      malformedSnapshotRemaining: 0,
+      futureRevisionRemaining: 0,
     };
     window.__glyphTransportControl = control;
 
@@ -91,6 +93,36 @@ try {
         if (lexical && control.invalidMessageRemaining > 0) {
           control.invalidMessageRemaining -= 1;
           setTimeout(() => this._onmessage?.({ data: { type: "invalid" } }), 0);
+          return;
+        }
+        if (lexical && control.malformedSnapshotRemaining > 0) {
+          control.malformedSnapshotRemaining -= 1;
+          setTimeout(() => this._onmessage?.({
+            data: {
+              type: "snapshot",
+              revision: message.revision,
+              sourceLength: String(message.source || "").length,
+              records: null,
+              positions: new Int32Array(),
+              codePositions: new Int32Array(),
+              machineRecords: [],
+            },
+          }), 0);
+          return;
+        }
+        if (lexical && control.futureRevisionRemaining > 0) {
+          control.futureRevisionRemaining -= 1;
+          setTimeout(() => this._onmessage?.({
+            data: {
+              type: "snapshot",
+              revision: Number(message.revision) + 1,
+              sourceLength: String(message.source || "").length,
+              records: [],
+              positions: new Int32Array(),
+              codePositions: new Int32Array(),
+              machineRecords: [],
+            },
+          }), 0);
           return;
         }
         this._native.postMessage(message);
@@ -154,15 +186,19 @@ try {
   const postThrow = await exercise("postThrowRemaining", "transportFailures");
   const messageError = await exercise("messageErrorRemaining", "transportFailures");
   const invalidMessage = await exercise("invalidMessageRemaining", "invalidMessages");
+  const malformedSnapshot = await exercise("malformedSnapshotRemaining", "invalidMessages");
+  const futureRevision = await exercise("futureRevisionRemaining", "invalidMessages");
 
   assert.equal(postThrow.control.postThrowRemaining, 0, JSON.stringify(postThrow));
   assert.equal(messageError.control.messageErrorRemaining, 0, JSON.stringify(messageError));
   assert.equal(invalidMessage.control.invalidMessageRemaining, 0, JSON.stringify(invalidMessage));
-  assert.equal(invalidMessage.metrics.transportFailures, 2, JSON.stringify(invalidMessage));
-  assert.equal(invalidMessage.metrics.invalidMessages, 1, JSON.stringify(invalidMessage));
+  assert.equal(malformedSnapshot.control.malformedSnapshotRemaining, 0, JSON.stringify(malformedSnapshot));
+  assert.equal(futureRevision.control.futureRevisionRemaining, 0, JSON.stringify(futureRevision));
+  assert.equal(futureRevision.metrics.transportFailures, 2, JSON.stringify(futureRevision));
+  assert.equal(futureRevision.metrics.invalidMessages, 3, JSON.stringify(futureRevision));
   assert.deepEqual(browserErrors, [], browserErrors.join("\n"));
 
-  console.log(JSON.stringify({ postThrow, messageError, invalidMessage }));
+  console.log(JSON.stringify({ postThrow, messageError, invalidMessage, malformedSnapshot, futureRevision }));
 } finally {
   await browser.close();
   await stopProcess(child);
