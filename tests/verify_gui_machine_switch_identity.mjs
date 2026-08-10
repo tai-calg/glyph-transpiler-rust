@@ -154,8 +154,11 @@ try {
     const width = Number.parseFloat(stage.style.width || "0") || stage.scrollWidth;
     const key = node.offsetLeft + node.offsetWidth + 32 < width ? "ArrowRight" : "ArrowLeft";
     const originalSetItem = Storage.prototype.setItem;
-    Storage.prototype.setItem = function blockedSetItem() {
-      throw new DOMException("storage blocked by test", "QuotaExceededError");
+    Storage.prototype.setItem = function blockedSetItem(storageKey, value) {
+      if (String(storageKey).startsWith("glyph.diagram.positions.v1:")) {
+        throw new DOMException("storage blocked by test", "QuotaExceededError");
+      }
+      return originalSetItem.call(this, storageKey, value);
     };
     try {
       node.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
@@ -207,8 +210,11 @@ try {
     if (!cluster) throw new Error("manual label disappeared before reset failure test");
     cluster.focus({ preventScroll: true });
     const originalSetItem = Storage.prototype.setItem;
-    Storage.prototype.setItem = function blockedSetItem() {
-      throw new DOMException("storage blocked by test", "QuotaExceededError");
+    Storage.prototype.setItem = function blockedSetItem(storageKey, value) {
+      if (String(storageKey).startsWith("glyph.diagram.transition-io.v1:")) {
+        throw new DOMException("storage blocked by test", "QuotaExceededError");
+      }
+      return originalSetItem.call(this, storageKey, value);
     };
     try {
       cluster.dispatchEvent(new KeyboardEvent("keydown", { key: "Delete", bubbles: true, cancelable: true }));
