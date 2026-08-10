@@ -245,7 +245,9 @@ function resumePendingAcceptance(){
 }
 function accept(){
   const candidate=candidates[selected];if(!candidate){close();return false}
-  const context=contextAtCaret();if(!context||!candidateMatchesPrefix(candidate.text,context.prefix)){close();return false}
+  const context=contextAtCaret();if(!context){close();return false}
+  const exactPrefix=candidate.text.startsWith(context.prefix);
+  if(!exactPrefix&&!candidateMatchesPrefix(candidate.text,context.prefix)){close();return false}
   const classification=contextService.classify(context);
   if(classification.id!==lastClassification?.id){close();return false}
   metrics.staleAcceptRechecks+=1;
