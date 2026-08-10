@@ -108,6 +108,15 @@ class TransitionNodePositionAdapterTests(unittest.TestCase):
         self.assertIn("canonicalKey(data,record.machineIndex)", html)
         self.assertIn('publicationGuard()?.schedule?.("manual-node-machine-changed")', html)
 
+    def test_storage_failure_rolls_back_instead_of_publishing_saved_state(self) -> None:
+        html = enhance_transition_node_position_adapter_html(DIAGRAM_HTML)
+
+        self.assertIn("if(!write(key,record.positions))", html)
+        self.assertIn('cancelRecord(record,"persistence-unavailable")', html)
+        failure = html.index("if(!write(key,record.positions))")
+        saved = html.index('record.stage.dataset.transitionNodePositions=`saved:', failure)
+        self.assertLess(failure, saved)
+
     def test_failed_persistence_still_requests_recertification(self) -> None:
         html = enhance_transition_node_position_adapter_html(DIAGRAM_HTML)
 
@@ -116,6 +125,7 @@ class TransitionNodePositionAdapterTests(unittest.TestCase):
             'publicationGuard()?.schedule?.("manual-node-keyboard-persist-failed")',
             html,
         )
+        self.assertIn('publicationGuard()?.schedule?.(`manual-node-${reason}`)', html)
 
     def test_enhancer_is_idempotent(self) -> None:
         once = enhance_transition_node_position_adapter_html(DIAGRAM_HTML)
