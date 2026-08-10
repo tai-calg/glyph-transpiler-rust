@@ -93,11 +93,11 @@ jobs:
           run_node tests/verify_gui_machine_switch_identity.mjs build/gui-machine-switch-identity/verify.log
           run_node tests/verify_gui_inspector_rerender_focus.mjs build/gui-inspector-rerender-focus/verify.log
 
-          # README publication must be compared against a fresh canonical render,
-          # not a build artifact left behind by an earlier interactive test.
+          # Documentation raster is rendered with a fixed scale and center so hosted
+          # auto-fit rounding (57% vs 58%) cannot change the committed README image.
           git diff --exit-code -- examples/acceptance/motor_safety.glyph
           rm -f build/state-diagram-regression/motor-safety-motor.png
-          run_node tests/verify_state_diagram_rendering.mjs build/state-diagram-regression/readme-canonical-render.log
+          run_node tests/render_readme_state_snapshot.mjs build/state-diagram-regression/readme-canonical-render.log
           python tests/verify_readme_state_snapshot_hosted.py \
             2>&1 | tee -a build/state-diagram-regression/verify.log
           run_node tests/verify_state_diagram_stability.mjs build/state-diagram-stability/verify.log
