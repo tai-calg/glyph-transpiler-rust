@@ -23,6 +23,13 @@ from .editor_lexical_worker_fast import install_fast_lexical_worker as _install_
 _install_fast_lexical_worker()
 del _install_fast_lexical_worker
 
+from .editor_lexical_runtime_fast_schedule import (
+    install_adaptive_lexical_schedule as _install_adaptive_lexical_schedule,
+)
+
+_install_adaptive_lexical_schedule()
+del _install_adaptive_lexical_schedule
+
 from .editor_completion_fast_publication import (
     install_exact_completion_fast_publication as _install_exact_completion_fast_publication,
 )
@@ -50,9 +57,6 @@ from .temporal_sigils import reject_reserved_temporal_macro_names
 # selector without duplicating the Studio document.
 from . import studio as _studio_module
 from .diagnostic_i18n import localize_message_payload as _localize_message_payload
-from .editor_completion_performance import (
-    enhance_editor_completion_performance_html as _enhance_editor_completion_performance_html,
-)
 from .studio_locale import enhance_studio_locale_html as _enhance_studio_locale_html
 
 _original_studio_snapshot_to_dict = StudioSnapshot.to_dict
@@ -72,9 +76,7 @@ _localized_studio_snapshot_to_dict.__glyph_localized__ = True
 if not getattr(StudioSnapshot.to_dict, "__glyph_localized__", False):
     StudioSnapshot.to_dict = _localized_studio_snapshot_to_dict
 
-_studio_module.STUDIO_HTML = _enhance_editor_completion_performance_html(
-    _enhance_studio_locale_html(_studio_module.STUDIO_HTML)
-)
+_studio_module.STUDIO_HTML = _enhance_studio_locale_html(_studio_module.STUDIO_HTML)
 _studio_module._studio_ui.STUDIO_HTML = _studio_module.STUDIO_HTML
 
 
