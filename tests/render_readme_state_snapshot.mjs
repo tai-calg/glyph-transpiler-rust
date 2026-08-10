@@ -71,38 +71,31 @@ try {
       && stage.querySelectorAll(".transition-io-cluster").length === 12;
   }, null, { timeout: 5000 });
 
-  await page.evaluate(async scale => {
+  const initial = await page.evaluate(async () => {
     if (document.fonts?.ready) await document.fonts.ready;
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     const shell = document.querySelector(".canvas-shell");
     const stage = shell?.querySelector(".graph-stage");
     if (!shell || !stage || !window.glyphDiagramViewport) throw new Error("diagram viewport is unavailable");
-    window.glyphDiagramViewport.setScale(scale);
-  }, README_SCALE);
+    return {
+      scale: Number(stage.dataset.viewportScale || 0),
+      scrollLeft: shell.scrollLeft,
+      scrollTop: shell.scrollTop,
+    };
+  });
+
+  // The automatic whole-scene fit can round to 57% or 58% depending on hosted
+  // measurement timing. setScale preserves the current viewport anchor, so force the
+  // committed 58% scale without replacing the scene-centered pan chosen by fit().
+  await page.evaluate(scale => window.glyphDiagramViewport.setScale(scale), README_SCALE);
   await page.waitForFunction(scale => {
     const stage = document.querySelector(".canvas-shell .graph-stage");
     return stage && Math.abs(Number(stage.dataset.viewportScale || 0) - scale) < 0.001;
   }, README_SCALE);
-
-  // setScale preserves the old viewport anchor. README publication instead uses a
-  // deterministic stage-center anchor so an earlier 57%/58% auto-fit decision cannot
-  // alter the documentation snapshot.
-  await page.evaluate(async scale => {
-    const shell = document.querySelector(".canvas-shell");
-    const stage = shell?.querySelector(".graph-stage");
-    const surface = stage?.parentElement;
-    if (!shell || !stage || !surface) throw new Error("diagram surface is unavailable");
-    const width = Number.parseFloat(stage.style.width || "0") || Number(stage.dataset.viewportLogicalWidth || 0);
-    const height = Number.parseFloat(stage.style.height || "0") || Number(stage.dataset.viewportLogicalHeight || 0);
-    const center = () => {
-      shell.scrollLeft = Math.max(0, surface.offsetLeft + width * scale / 2 - shell.clientWidth / 2);
-      shell.scrollTop = Math.max(0, surface.offsetTop + height * scale / 2 - shell.clientHeight / 2);
-    };
-    center();
+  await page.evaluate(async () => {
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-    center();
     await new Promise(resolve => setTimeout(resolve, 80));
-    center();
-  }, README_SCALE);
+  });
 
   const state = await page.evaluate(() => {
     const shell = document.querySelector(".canvas-shell");
@@ -117,13 +110,13 @@ try {
       transitions: stage?.querySelectorAll(".transition-io-cluster").length || 0,
     };
   });
-  assert.equal(state.scale, README_SCALE, JSON.stringify(state));
-  assert.equal(state.zoomText, "58%", JSON.stringify(state));
-  assert.equal(state.transitions, 12, JSON.stringify(state));
+  assert.equal(state.scale, README_SCALE, JSON.stringify({ initial, state }));
+  assert.equal(state.zoomText, "58%", JSON.stringify({ initial, state }));
+  assert.equal(state.transitions, 12, JSON.stringify({ initial, state }));
   assert.deepEqual(errors, [], errors.join("\n"));
 
   await page.screenshot({ path: output, fullPage: true });
-  console.log(JSON.stringify({ deterministicReadmeSnapshot: true, ...state }));
+  console.log(JSON.stringify({ deterministicReadmeSnapshot: true, initial, ...state }));
 } finally {
   await browser.close();
   await stop(child);
