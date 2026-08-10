@@ -25,13 +25,15 @@ class EditorCompletionFuzzyTests(unittest.TestCase):
         self.assertIn("if(length<=4)return 1", LEXICAL_RUNTIME_SCRIPT)
         self.assertIn("if(length<=8)return 2", LEXICAL_RUNTIME_SCRIPT)
         self.assertIn("return 3", LEXICAL_RUNTIME_SCRIPT)
+        self.assertIn("function boundedEditPrefix(source,target,foldedSource,foldedTarget,budget)", LEXICAL_RUNTIME_SCRIPT)
+        self.assertIn("const low=Math.max(0,sourceIndex-budget),high=Math.min(maximumTarget,sourceIndex+budget)", LEXICAL_RUNTIME_SCRIPT)
         self.assertIn("previousPrevious[targetIndex-2]+1", LEXICAL_RUNTIME_SCRIPT)
         self.assertIn("function subsequenceMatch(source,target,foldedSource,foldedTarget)", LEXICAL_RUNTIME_SCRIPT)
         self.assertIn("while(searchStart<foldedTarget.length)", LEXICAL_RUNTIME_SCRIPT)
         self.assertIn('kind:"case-prefix"', LEXICAL_RUNTIME_SCRIPT)
         self.assertIn('kind:"fuzzy"', LEXICAL_RUNTIME_SCRIPT)
         self.assertIn('kind:"subsequence"', LEXICAL_RUNTIME_SCRIPT)
-        self.assertIn("MAX_FUZZY_PREFIX=48", LEXICAL_RUNTIME_SCRIPT)
+        self.assertIn("MAX_FUZZY_PREFIX=256", LEXICAL_RUNTIME_SCRIPT)
         self.assertIn("const maxGaps=Math.min(24,Math.max(4,source.length*2))", LEXICAL_RUNTIME_SCRIPT)
         self.assertIn("return subsequenceMatch(source,target,foldedSource,foldedTarget)", LEXICAL_RUNTIME_SCRIPT)
 
@@ -67,11 +69,17 @@ class EditorCompletionFuzzyTests(unittest.TestCase):
     @unittest.skipUnless(shutil.which("node"), "Node.js is not installed")
     def test_matcher_handles_edit_distance_and_non_contiguous_intellisense_queries(self) -> None:
         start = LEXICAL_RUNTIME_SCRIPT.index("function fuzzyEditBudget")
-        end = LEXICAL_RUNTIME_SCRIPT.index("\nfunction clearTimer", start)
+        end = LEXICAL_RUNTIME_SCRIPT.index("\nfunction matchTier", start)
         matcher_source = LEXICAL_RUNTIME_SCRIPT[start:end]
         runner = f"""
-const MAX_FUZZY_PREFIX=48;
+const MAX_FUZZY_PREFIX=256;
 {matcher_source}
+const longCandidate=length=>"L"+"a".repeat(length-2)+"Z";
+const withMiddleSubstitution=value=>{{
+  const index=Math.floor(value.length/2);
+  return value.slice(0,index)+"x"+value.slice(index+1);
+}};
+const long64=longCandidate(64),long128=longCandidate(128),long256=longCandidate(256);
 const cases={{
   exact:matchText("Fau","Faulted"),
   omission:matchText("Fal","Faulted"),
@@ -83,6 +91,9 @@ const cases={{
   sparse:matchText("Ftd","Faulted"),
   camel:matchText("MC","MotorCommand"),
   repeatedStart:matchText("MC","MegaMotorCommand"),
+  long64:matchText(withMiddleSubstitution(long64),long64),
+  long128:matchText(withMiddleSubstitution(long128),long128),
+  long256:matchText(withMiddleSubstitution(long256),long256),
   unrelated:matchText("zzz","Faulted"),
 }};
 console.log(JSON.stringify(cases));
@@ -100,6 +111,9 @@ console.log(JSON.stringify(cases));
             "insertion",
             "transposition",
             "caseOmission",
+            "long64",
+            "long128",
+            "long256",
         ):
             self.assertEqual(data[key]["kind"], "fuzzy", key)
             self.assertLessEqual(data[key]["edits"], 3, key)
@@ -107,6 +121,64 @@ console.log(JSON.stringify(cases));
         self.assertEqual(data["camel"]["kind"], "subsequence")
         self.assertEqual(data["repeatedStart"]["kind"], "subsequence")
         self.assertIsNone(data["unrelated"])
+
+    @unittest.skipUnless(shutil.which("node"), "Node.js is not installed")
+    def test_banded_edit_matcher_agrees_with_reference_for_in_budget_mutations(self) -> None:
+        start = LEXICAL_RUNTIME_SCRIPT.index("function fuzzyEditBudget")
+        end = LEXICAL_RUNTIME_SCRIPT.index("\nfunction matchTier", start)
+        matcher_source = LEXICAL_RUNTIME_SCRIPT[start:end]
+        runner = f"""
+const MAX_FUZZY_PREFIX=256;
+{matcher_source}
+function referenceDistance(a,b){{
+  const rows=Array.from({{length:a.length+1}},()=>new Array(b.length+1).fill(0));
+  for(let i=0;i<=a.length;i+=1)rows[i][0]=i;
+  for(let j=0;j<=b.length;j+=1)rows[0][j]=j;
+  for(let i=1;i<=a.length;i+=1){{
+    for(let j=1;j<=b.length;j+=1){{
+      const cost=a[i-1]===b[j-1]?0:1;
+      let value=Math.min(rows[i-1][j]+1,rows[i][j-1]+1,rows[i-1][j-1]+cost);
+      if(i>1&&j>1&&a[i-1]===b[j-2]&&a[i-2]===b[j-1])value=Math.min(value,rows[i-2][j-2]+1);
+      rows[i][j]=value;
+    }}
+  }}
+  return rows[a.length][b.length];
+}}
+function bestPrefixDistance(source,target,budget){{
+  let best=budget+1;
+  for(let length=Math.max(1,source.length-budget);length<=Math.min(target.length,source.length+budget);length+=1){{
+    best=Math.min(best,referenceDistance(source.toLowerCase(),target.slice(0,length).toLowerCase()));
+  }}
+  return best;
+}}
+let seed=0x12345678;
+const random=()=>{{seed=(1664525*seed+1013904223)>>>0;return seed/0x100000000}};
+const chars="abcdef";
+const make=(length)=>Array.from({{length}},()=>chars[Math.floor(random()*chars.length)]).join("");
+const failures=[];
+for(let iteration=0;iteration<250;iteration+=1){{
+  const length=3+Math.floor(random()*28);
+  const source=make(length);
+  let target=source;
+  const mode=iteration%4;
+  const index=Math.floor(random()*target.length);
+  if(mode===0)target=target.slice(0,index)+"x"+target.slice(index+1);
+  if(mode===1)target=target.slice(0,index)+target.slice(index+1);
+  if(mode===2)target=target.slice(0,index)+"x"+target.slice(index);
+  if(mode===3&&target.length>1){{const at=Math.min(index,target.length-2);target=target.slice(0,at)+target[at+1]+target[at]+target.slice(at+2)}}
+  const budget=fuzzyEditBudget(source.length);
+  const distance=bestPrefixDistance(source,target,budget);
+  const matched=matchText(source,target);
+  if(distance<=budget&&!matched)failures.push({{source,target,budget,distance}});
+}}
+console.log(JSON.stringify({{failures}}));
+"""
+        result = subprocess.run(
+            ["node", "-e", runner], capture_output=True, text=True, check=False
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        data = json.loads(result.stdout)
+        self.assertEqual(data["failures"], [])
 
     @unittest.skipUnless(shutil.which("node"), "Node.js is not installed")
     def test_prefix_match_outranks_fuzzy_preferred_kind(self) -> None:
