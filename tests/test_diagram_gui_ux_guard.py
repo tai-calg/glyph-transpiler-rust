@@ -46,7 +46,8 @@ class DiagramGuiUxGuardTests(unittest.TestCase):
         self.assertIn('if(event.key==="Home")next=25', _SCRIPT)
         self.assertIn('button.setAttribute("aria-haspopup","dialog")', _SCRIPT)
         self.assertIn('document.querySelector("dialog[open]")', _SCRIPT)
-        self.assertIn('if(saveShortcut||diagramZoom)', _SCRIPT)
+        self.assertNotIn("const saveShortcut=", _SCRIPT)
+        self.assertNotIn("const diagramZoom=", _SCRIPT)
         self.assertIn('splitter.addEventListener("pointercancel"', _SCRIPT)
         self.assertIn('window.addEventListener("pointerdown"', _SCRIPT)
         self.assertIn('window.addEventListener("lostpointercapture"', _SCRIPT)
@@ -70,6 +71,14 @@ class DiagramGuiUxGuardTests(unittest.TestCase):
         self.assertIn("storageKey(data,record.machineIndex)", LABEL_INTERACTION_SCRIPT)
         self.assertIn("version:6", LABEL_INTERACTION_SCRIPT)
         self.assertIn("keyboardNudge,resetCluster", LABEL_INTERACTION_SCRIPT)
+
+    def test_transition_reset_does_not_publish_success_when_storage_write_fails(self) -> None:
+        self.assertIn("if(!writeStored(key,saved))", LABEL_INTERACTION_SCRIPT)
+        self.assertIn('cluster.dataset.manualIoGestureState="reset-failed"', LABEL_INTERACTION_SCRIPT)
+        self.assertIn('cluster.dataset.manualIoGestureReason="persistence-unavailable"', LABEL_INTERACTION_SCRIPT)
+        failure = LABEL_INTERACTION_SCRIPT.index("if(!writeStored(key,saved))")
+        success = LABEL_INTERACTION_SCRIPT.index('cluster.dataset.manualIo="false"', failure)
+        self.assertLess(failure, success)
 
     def test_enhancer_is_idempotent(self) -> None:
         html = "<html><head></head><body></body></html>"
