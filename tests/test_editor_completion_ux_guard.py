@@ -22,6 +22,13 @@ class EditorCompletionUxGuardTests(unittest.TestCase):
         self.assertIn("min-width:min(210px,calc(100vw - 16px))", _STYLE)
         self.assertIn("max-width:min(440px,calc(100vw - 16px))", _STYLE)
         self.assertIn("overscroll-behavior:contain", _STYLE)
+        self.assertIn("function clampPopupToViewport()", _SCRIPT)
+        self.assertIn("const maximumLeft=Math.max", _SCRIPT)
+        self.assertIn("const maximumTop=Math.max", _SCRIPT)
+        self.assertIn("Math.min(baseTop,maximumTop)", _SCRIPT)
+        self.assertIn('popup.style.setProperty("max-height"', _SCRIPT)
+        self.assertIn("viewportClamps", _SCRIPT)
+        self.assertIn('window.addEventListener("resize",scheduleViewportClamp', _SCRIPT)
 
     def test_completion_options_stay_out_of_tab_order_and_publish_status(self) -> None:
         self.assertIn("option.tabIndex=-1", _SCRIPT)
@@ -50,6 +57,7 @@ class EditorCompletionUxGuardTests(unittest.TestCase):
         self.assertIn('window.visualViewport.addEventListener("scroll"', _SCRIPT)
         self.assertIn("requestAnimationFrame", _SCRIPT)
         self.assertIn('window.dispatchEvent(new Event("resize"))', _SCRIPT)
+        self.assertIn("scheduleViewportClamp()", _SCRIPT)
 
     def test_enhancer_is_idempotent(self) -> None:
         html = "<html><head></head><body><textarea id='editor'></textarea></body></html>"
