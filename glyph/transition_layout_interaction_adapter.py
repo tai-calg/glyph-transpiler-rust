@@ -154,9 +154,21 @@ async function resetCluster(cluster){
   const index=machineIndex(),data=await diagramState();
   if(destroyed||machineIndex()!==index||!cluster?.isConnected)return false;
   const key=storageKey(data,index),saved=parseStored(key),id=cluster.dataset.transitionId||"";
-  if(id in saved){delete saved[id];writeStored(key,saved)}
-  cluster.dataset.manualIo="false";delete cluster.dataset.manualIoRejected;delete cluster.dataset.manualIoAdjusted;cluster.dataset.manualIoGestureState="reset";
-  window.glyphTransitionLayoutTransaction?.schedule("manual-label-reset",0);return true;
+  if(id in saved){
+    delete saved[id];
+    if(!writeStored(key,saved)){
+      cluster.dataset.manualIoGestureState="reset-failed";
+      cluster.dataset.manualIoGestureReason="persistence-unavailable";
+      return false;
+    }
+  }
+  cluster.dataset.manualIo="false";
+  delete cluster.dataset.manualIoRejected;
+  delete cluster.dataset.manualIoAdjusted;
+  delete cluster.dataset.manualIoGestureReason;
+  cluster.dataset.manualIoGestureState="reset";
+  window.glyphTransitionLayoutTransaction?.schedule("manual-label-reset",0);
+  return true;
 }
 async function keyboardNudge(cluster,dx,dy){
   if(!cluster?.isConnected||active)return false;
