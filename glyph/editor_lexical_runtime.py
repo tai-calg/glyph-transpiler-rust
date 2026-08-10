@@ -358,6 +358,8 @@ function queryRowOrder(left,right){
   const leftTier=matchTier(left.matchKind),rightTier=matchTier(right.matchKind);
   return leftTier-rightTier
     ||Number(left.matchScore||0)-Number(right.matchScore||0)
+    ||Number(left.queryPreference??Number.MAX_SAFE_INTEGER)-Number(right.queryPreference??Number.MAX_SAFE_INTEGER)
+    ||Number(right.queryInScope||0)-Number(left.queryInScope||0)
     ||right.recent-left.recent
     ||right.count-left.count
     ||left.added-right.added
@@ -370,12 +372,19 @@ function insertBounded(rows,candidate,limit){
   rows.splice(low,0,candidate);
   if(rows.length>limit)rows.pop();
 }
-function query(prefix,caret,{limit=8,exclude="",kinds=null,owner=null,allowContract=false}={}){
+function finalizeQueryRows(rows){
+  return rows.map(row=>{
+    const result={...row};delete result.queryPreference;delete result.queryInScope;return result;
+  });
+}
+function query(prefix,caret,{limit=8,exclude="",kinds=null,owner=null,allowContract=false,exactText=null,preferredKinds=null,scopeStart=-1}={}){
   if(!snapshot)return[];
   const text=String(prefix??"");
   const records=snapshot.records;
   const rowLimit=Math.max(1,Number(limit)||1);
   const kindSet=Array.isArray(kinds)&&kinds.length?new Set(kinds):null;
+  const preferenceOrder=Array.isArray(preferredKinds)?preferredKinds:[];
+  const scopeBoundary=Number(scopeStart??-1);
   const rows=[];
   const seen=new Set();
   const eligible=row=>{
@@ -388,19 +397,31 @@ function query(prefix,caret,{limit=8,exclude="",kinds=null,owner=null,allowContr
     if(!allowContract&&row.kinds.length===1&&row.kinds[0]==="Contract")return null;
     return candidateKinds;
   };
+  const preferenceFor=candidateKinds=>{
+    let best=Number.MAX_SAFE_INTEGER;
+    for(const kind of candidateKinds){const index=preferenceOrder.indexOf(kind);if(index>=0)best=Math.min(best,index)}
+    return best;
+  };
   const offer=(row,match)=>{
     const candidateKinds=eligible(row);if(!candidateKinds)return;
     const positions=codePositionsFor(row);
+    const recent=lastBefore(positions,Number(caret)||0);
     insertBounded(rows,{
       text:row.text,kind:row.kind,kinds:[...row.kinds],owners:[...row.owners],origin:"document",
-      count:row.codeCount,recent:lastBefore(positions,Number(caret)||0),added:Math.max(0,row.text.length-text.length),
+      count:row.codeCount,recent,added:Math.max(0,row.text.length-text.length),
       matchKind:match.kind,matchScore:match.score,matchEdits:match.edits,
+      queryPreference:preferenceFor(candidateKinds),queryInScope:scopeBoundary>=0&&recent>=scopeBoundary?1:0,
     },rowLimit);
     seen.add(row.text);
   };
+  if(exactText){
+    const exactRow=record(String(exactText));
+    if(exactRow){const match=matchText(text,exactRow.text);if(match)offer(exactRow,match)}
+    return finalizeQueryRows(rows);
+  }
   if(!text){
     for(const row of records)offer(row,{kind:"empty",score:0,edits:0});
-    return rows;
+    return finalizeQueryRows(rows);
   }
   const start=lowerBound(records,text,row=>row.text);
   for(let index=start;index<records.length;index+=1){
@@ -408,7 +429,7 @@ function query(prefix,caret,{limit=8,exclude="",kinds=null,owner=null,allowContr
     if(!row.text.startsWith(text))break;
     offer(row,{kind:"prefix",score:0,edits:0});
   }
-  if(rows.length>=rowLimit)return rows;
+  if(rows.length>=rowLimit)return finalizeQueryRows(rows);
   for(const row of records){
     if(seen.has(row.text))continue;
     const candidateKinds=eligible(row);if(!candidateKinds)continue;
@@ -416,13 +437,15 @@ function query(prefix,caret,{limit=8,exclude="",kinds=null,owner=null,allowContr
     const match=matchText(text,row.text);
     if(!match||match.kind==="prefix")continue;
     const positions=codePositionsFor(row);
+    const recent=lastBefore(positions,Number(caret)||0);
     insertBounded(rows,{
       text:row.text,kind:row.kind,kinds:[...row.kinds],owners:[...row.owners],origin:"document",
-      count:row.codeCount,recent:lastBefore(positions,Number(caret)||0),added:Math.max(0,row.text.length-text.length),
+      count:row.codeCount,recent,added:Math.max(0,row.text.length-text.length),
       matchKind:match.kind,matchScore:match.score,matchEdits:match.edits,
+      queryPreference:preferenceFor(candidateKinds),queryInScope:scopeBoundary>=0&&recent>=scopeBoundary?1:0,
     },rowLimit);
   }
-  return rows;
+  return finalizeQueryRows(rows);
 }
 
 document.addEventListener("glyph-editor-document-changed",event=>{if(event.detail?.composing)return;schedule()});
