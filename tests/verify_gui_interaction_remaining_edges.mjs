@@ -52,7 +52,48 @@ try {
   page.on("request", request => requests.push({ method: request.method(), url: request.url() }));
   await page.goto(url, { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => document.querySelector("#status")?.textContent === "ready"
-    && window.glyphDiagramGuiUxContinuity?.version === 1);
+    && window.glyphDiagramGuiUxContinuity?.version === 2);
+
+  const editor = page.locator("#editor");
+  const originalSource = await editor.inputValue();
+  await editor.focus();
+  await editor.evaluate(element => element.setSelectionRange(0, 0));
+  await page.keyboard.press("Tab");
+  await page.waitForFunction(source => document.querySelector("#editor")?.value === `  ${source}`, originalSource);
+  assert.equal(await page.evaluate(() => document.activeElement?.id), "editor", "ordinary Tab moved focus out of the source editor");
+  await page.keyboard.press("Shift+Tab");
+  await page.waitForFunction(source => document.querySelector("#editor")?.value === source, originalSource);
+  assert.equal(await page.evaluate(() => document.activeElement?.id), "editor", "Shift+Tab moved focus out of the source editor");
+
+  const firstBreak = originalSource.indexOf("\n");
+  const secondBreak = firstBreak >= 0 ? originalSource.indexOf("\n", firstBreak + 1) : -1;
+  if (firstBreak >= 0) {
+    const selectionEnd = secondBreak >= 0 ? secondBreak : firstBreak;
+    await editor.evaluate((element, end) => element.setSelectionRange(0, end), selectionEnd);
+    await page.keyboard.press("Tab");
+    const indentedBlock = await editor.inputValue();
+    assert(indentedBlock.startsWith("  "), "selected-line Tab did not indent the first line");
+    if (selectionEnd > firstBreak) assert(indentedBlock.slice(firstBreak + 3).startsWith("  "), "selected-line Tab did not indent the following line");
+    await page.keyboard.press("Shift+Tab");
+    await page.waitForFunction(source => document.querySelector("#editor")?.value === source, originalSource);
+  }
+
+  await page.evaluate(() => {
+    const editorElement = document.getElementById("editor");
+    window.GlyphEditorDocument.replaceRange(0, 0, "re\n");
+    editorElement.setSelectionRange(2, 2);
+    window.GlyphEditorCompletion.open();
+  });
+  await page.waitForFunction(() => document.querySelector("#editor")?.getAttribute("aria-expanded") === "true"
+    && window.GlyphEditorCompletion?.candidates?.().some(candidate => candidate.text === "resource"));
+  const beforeShiftTabCompletion = await editor.inputValue();
+  await page.keyboard.press("Shift+Tab");
+  await page.waitForTimeout(60);
+  assert.equal(await editor.inputValue(), beforeShiftTabCompletion, "Shift+Tab accepted or modified an autocomplete candidate instead of outdenting");
+  assert.equal(await page.evaluate(() => document.activeElement?.id), "editor", "Shift+Tab escaped the editor while completion was open");
+  assert.equal(await editor.getAttribute("aria-expanded"), "false", "Shift+Tab left the completion popup open");
+  await page.evaluate(() => window.GlyphEditorDocument.replaceRange(0, 3, ""));
+  await page.waitForFunction(source => document.querySelector("#editor")?.value === source, originalSource);
 
   await page.locator('.tab[data-tab="io"]').click();
   await page.waitForFunction(() => document.querySelector('.tab.active')?.dataset.tab === "io"
@@ -68,13 +109,13 @@ try {
   await ioNode.focus();
   await page.keyboard.press("Enter");
   await page.waitForFunction(() => document.activeElement?.id === "editor");
-  const ioJump = await page.locator("#editor").evaluate((editor, line) => {
-    const source = editor.value;
+  const ioJump = await page.locator("#editor").evaluate((editorElement, line) => {
+    const source = editorElement.value;
     const lines = source.split("\n");
     return {
-      start: editor.selectionStart,
-      end: editor.selectionEnd,
-      selected: source.slice(editor.selectionStart, editor.selectionEnd),
+      start: editorElement.selectionStart,
+      end: editorElement.selectionEnd,
+      selected: source.slice(editorElement.selectionStart, editorElement.selectionEnd),
       expected: lines[line - 1] ?? "",
     };
   }, ioLine);
@@ -122,21 +163,35 @@ try {
     top: element.style.top,
   }));
   assert(nodeBefore.name, "state node is missing its stable name");
-  await page.keyboard.press("ArrowRight");
-  await page.waitForFunction(before => {
-    const current = [...document.querySelectorAll(".state-node")].find(element => element.querySelector(".state-name")?.textContent?.trim() === before.name);
-    return current && (current.style.left !== before.left || current.style.top !== before.top);
-  }, nodeBefore, { timeout: 10_000 });
-  await page.waitForFunction(name => {
-    const active = document.activeElement;
-    return active?.classList?.contains("state-node")
-      && active.querySelector(".state-name")?.textContent?.trim() === name
-      && window.glyphDiagramGuiUxContinuity?.pendingNodeFocus() === "";
-  }, nodeBefore.name, { timeout: 10_000 });
+  let stateNodeMoveCount = 0;
+  for (let move = 0; move < 3; move += 1) {
+    const beforeMove = await page.evaluate(name => {
+      const current = [...document.querySelectorAll(".state-node")].find(element => element.querySelector(".state-name")?.textContent?.trim() === name);
+      return current ? { left: current.style.left, top: current.style.top } : null;
+    }, nodeBefore.name);
+    assert(beforeMove, `state node disappeared before keyboard move ${move + 1}`);
+    await page.keyboard.press("ArrowRight");
+    await page.waitForFunction(({ name, before }) => {
+      const current = [...document.querySelectorAll(".state-node")].find(element => element.querySelector(".state-name")?.textContent?.trim() === name);
+      return current && (current.style.left !== before.left || current.style.top !== before.top);
+    }, { name: nodeBefore.name, before: beforeMove }, { timeout: 10_000 });
+    await page.waitForFunction(name => {
+      const active = document.activeElement;
+      return active?.classList?.contains("state-node")
+        && active.querySelector(".state-name")?.textContent?.trim() === name
+        && window.glyphDiagramGuiUxContinuity?.pendingNodeFocus() === "";
+    }, nodeBefore.name, { timeout: 10_000 });
+    stateNodeMoveCount += 1;
+  }
 
   const previewBeforeModal = requests.filter(item => item.method === "POST" && item.url.endsWith("/api/preview")).length;
   await page.locator("#glyph-settings").click();
   await page.waitForFunction(() => document.querySelector("#glyph-settings-dialog")?.open === true);
+  await page.locator("#glyph-settings-close").focus();
+  for (let index = 0; index < 4; index += 1) {
+    await page.keyboard.press("Tab");
+    assert(await page.evaluate(() => document.querySelector("#glyph-settings-dialog")?.contains(document.activeElement)), "Tab escaped the modal settings dialog");
+  }
   await page.locator("#glyph-settings-close").focus();
   await page.keyboard.press("Control+Enter");
   await page.locator("#glyph-language").selectOption("en");
@@ -152,13 +207,17 @@ try {
     && document.activeElement?.id === "glyph-settings");
 
   const report = {
+    tabIndentRoundTrip: true,
+    shiftTabCompletionBlocked: true,
     ioLine,
     ioJump,
     panKey,
     panBefore,
     panAfter,
     stateNode: nodeBefore.name,
+    stateNodeMoveCount,
     previewRequestsBlocked: previewDuringModal - previewBeforeModal,
+    modalTabContained: true,
     settingsFocusRestored: true,
   };
   assert.deepEqual(browserErrors, [], browserErrors.join("\n"));
