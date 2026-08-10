@@ -60,17 +60,25 @@ try {
 
   const ioNode = page.locator(".graph-node[data-line]").first();
   assert(await ioNode.count(), "executable-system fixture has no source-linked I/O graph node");
-  assert(Number(await ioNode.getAttribute("data-line")) > 0, "I/O graph node has no valid source line");
+  const ioLine = Number(await ioNode.getAttribute("data-line"));
+  assert(ioLine > 0, "I/O graph node has no valid source line");
   assert.equal(await ioNode.getAttribute("role"), "button");
   assert.equal(await ioNode.getAttribute("tabindex"), "0");
+  assert((await ioNode.getAttribute("aria-label"))?.includes(`ソース ${ioLine} 行目`), "I/O jump label is not localized to Japanese");
   await ioNode.focus();
   await page.keyboard.press("Enter");
   await page.waitForFunction(() => document.activeElement?.id === "editor");
-  const ioJump = await page.locator("#editor").evaluate(editor => ({
-    start: editor.selectionStart,
-    end: editor.selectionEnd,
-  }));
-  assert(ioJump.end > ioJump.start, `I/O keyboard jump did not select a source line: ${JSON.stringify(ioJump)}`);
+  const ioJump = await page.locator("#editor").evaluate((editor, line) => {
+    const source = editor.value;
+    const lines = source.split("\n");
+    return {
+      start: editor.selectionStart,
+      end: editor.selectionEnd,
+      selected: source.slice(editor.selectionStart, editor.selectionEnd),
+      expected: lines[line - 1] ?? "",
+    };
+  }, ioLine);
+  assert.equal(ioJump.selected, ioJump.expected, `I/O keyboard jump selected the wrong source line: ${JSON.stringify(ioJump)}`);
 
   const typeCard = page.locator(".type-card[data-line]").first();
   if (await typeCard.count()) {
@@ -89,6 +97,7 @@ try {
   }, null, { timeout: 60_000 });
 
   const canvas = page.locator(".canvas-shell").first();
+  assert.equal(await canvas.getAttribute("aria-label"), "図キャンバス。矢印キーで移動");
   const panBefore = await canvas.evaluate(shell => {
     const maxX = Math.max(0, shell.scrollWidth - shell.clientWidth);
     const maxY = Math.max(0, shell.scrollHeight - shell.clientHeight);
@@ -130,21 +139,27 @@ try {
   await page.waitForFunction(() => document.querySelector("#glyph-settings-dialog")?.open === true);
   await page.locator("#glyph-settings-close").focus();
   await page.keyboard.press("Control+Enter");
+  await page.locator("#glyph-language").selectOption("en");
+  await page.waitForFunction(() => document.documentElement.lang === "en"
+    && document.querySelector(".canvas-shell")?.getAttribute("aria-label") === "Diagram canvas; use Arrow keys to pan");
   await page.locator("#glyph-language").focus();
   await page.keyboard.press("Control+Enter");
   await page.waitForTimeout(180);
   const previewDuringModal = requests.filter(item => item.method === "POST" && item.url.endsWith("/api/preview")).length;
   assert.equal(previewDuringModal, previewBeforeModal, "compile shortcut fired behind the settings modal");
   await page.keyboard.press("Escape");
-  await page.waitForFunction(() => document.querySelector("#glyph-settings-dialog")?.open === false);
+  await page.waitForFunction(() => document.querySelector("#glyph-settings-dialog")?.open === false
+    && document.activeElement?.id === "glyph-settings");
 
   const report = {
+    ioLine,
     ioJump,
     panKey,
     panBefore,
     panAfter,
     stateNode: nodeBefore.name,
     previewRequestsBlocked: previewDuringModal - previewBeforeModal,
+    settingsFocusRestored: true,
   };
   assert.deepEqual(browserErrors, [], browserErrors.join("\n"));
   console.log(JSON.stringify(report));
