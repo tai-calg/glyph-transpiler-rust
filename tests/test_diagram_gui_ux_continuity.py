@@ -51,6 +51,14 @@ class DiagramGuiUxContinuityTests(unittest.TestCase):
         self.assertIn('document.documentElement.lang', _SCRIPT)
         self.assertIn('dialog.addEventListener("close"', _SCRIPT)
         self.assertIn('button.focus({preventScroll:true})', _SCRIPT)
+        self.assertIn('event.key!=="Tab"', _SCRIPT)
+        self.assertIn('completionOpen=editor.getAttribute("aria-expanded")==="true"', _SCRIPT)
+        self.assertIn('if(!event.shiftKey&&completionOpen)return', _SCRIPT)
+        self.assertIn('window.GlyphEditorCompletion?.close?.()', _SCRIPT)
+        self.assertIn('runtime.replaceRange(start,end,"  ")', _SCRIPT)
+        self.assertIn('line.replace(/^(?:\\t| {1,2})/,"")', _SCRIPT)
+        self.assertIn('window.addEventListener("keydown",handleEditorTab,true)', _SCRIPT)
+        self.assertIn("version:2", _SCRIPT)
 
     def test_enhancer_is_idempotent(self) -> None:
         html = "<html><head></head><body></body></html>"
