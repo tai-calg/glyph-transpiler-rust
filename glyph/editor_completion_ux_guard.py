@@ -52,8 +52,12 @@ document.body.appendChild(status);
 let suppressAutomaticReopen=false;
 let recoveryFailures=0,recoveryAttempts=0,recoveryTimer=0,recoveryIssued=false;
 let viewportRelayFrame=0,viewportClampFrame=0;
-const metrics={dismissSuppressedReopens:0,guardRecoveries:0,recoveryCycles:0,recoveryExhausted:0,viewportRelays:0,viewportClamps:0};
+const metrics={dismissSuppressedReopens:0,stalePublicationBlocks:0,guardRecoveries:0,recoveryCycles:0,recoveryExhausted:0,viewportRelays:0,viewportClamps:0};
 
+function exactSnapshot(){
+  const snapshot=lexicalIndex.snapshot?.();
+  return Boolean(snapshot&&Number(snapshot.revision)===Number(documentRuntime.revision()));
+}
 function normalizeOptions(){
   for(const option of popup.querySelectorAll('[role="option"]'))option.tabIndex=-1;
 }
@@ -93,6 +97,12 @@ function scheduleViewportClamp(){
   if(viewportClampFrame)return;
   viewportClampFrame=requestAnimationFrame(clampPopupToViewport);
 }
+function blockStalePublication(){
+  if(popup.hidden||exactSnapshot())return false;
+  metrics.stalePublicationBlocks+=1;
+  completion.close();
+  return true;
+}
 function publishStatus(){
   normalizeOptions();
   if(popup.hidden){status.textContent="";return}
@@ -106,11 +116,12 @@ function blockSuppressedReopen(){
   completion.close();
 }
 const popupObserver=new MutationObserver(()=>{
+  if(blockStalePublication())return;
   publishStatus();
   blockSuppressedReopen();
 });
 popupObserver.observe(popup,{childList:true,subtree:true,attributes:true,attributeFilter:["hidden"]});
-publishStatus();
+if(!blockStalePublication())publishStatus();
 
 editor.addEventListener("keydown",event=>{
   if(event.key==="Escape"&&!popup.hidden&&!event.isComposing){suppressAutomaticReopen=true;return}
@@ -119,10 +130,6 @@ editor.addEventListener("keydown",event=>{
 editor.addEventListener("input",()=>{suppressAutomaticReopen=false},true);
 editor.addEventListener("compositionend",()=>{suppressAutomaticReopen=false},true);
 
-function exactSnapshot(){
-  const snapshot=lexicalIndex.snapshot?.();
-  return Boolean(snapshot&&Number(snapshot.revision)===Number(documentRuntime.revision()));
-}
 function clearRecoveryTimer(){
   if(recoveryTimer){clearTimeout(recoveryTimer);recoveryTimer=0}
 }
