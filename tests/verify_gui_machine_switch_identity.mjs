@@ -63,7 +63,7 @@ try {
   await page.waitForFunction(() => document.querySelector("#status")?.textContent === "ready"
     && window.glyphTransitionNodePositionAdapter?.version === 10
     && window.glyphTransitionLayoutInteractionAdapter?.version === 6
-    && window.glyphDiagramGuiUxGuard?.version === 3
+    && window.glyphDiagramGuiUxGuard?.version === 4
     && window.glyphDiagramGuiUxContinuity?.version === 5);
   await page.locator('.tab[data-tab="state"]').click();
   await page.waitForFunction(() => document.getElementById("machine-select")?.options.length >= 2);
