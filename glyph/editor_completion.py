@@ -195,7 +195,14 @@ function update({force=false,allowEmpty=false}={}){
   if(!force&&!allowEmpty&&context.prefix.length<MIN_PREFIX){close();return}
   if(!force&&!context.prefix&&context.left<context.right){close();return}
   metrics.queries+=1;
-  const queryOptions={limit:QUERY_POOL,exclude:context.current,allowContract:classification.id==="contract"};
+  const queryOptions={
+    limit:QUERY_POOL,
+    exclude:context.current,
+    allowContract:classification.id==="contract",
+    exactText:classification.exactText||null,
+    preferredKinds:Array.isArray(classification.preferredKinds)?classification.preferredKinds:null,
+    scopeStart:Number(classification.scopeStart??-1),
+  };
   if(Array.isArray(classification.kinds)&&classification.kinds.length){queryOptions.kinds=classification.kinds;metrics.contextFilteredQueries+=1}
   if(classification.owner)queryOptions.owner=classification.owner;
   let rows=[];
