@@ -6,7 +6,7 @@ import subprocess
 import unittest
 
 import glyph
-from glyph import editor_completion, editor_lexical_index, studio
+from glyph import editor_completion, editor_lexical_index, editor_lexical_runtime
 from glyph.editor_lexical_worker_fast import FAST_LEXICAL_WORKER_JS
 
 
@@ -18,14 +18,16 @@ class EditorCompletionPerformanceTests(unittest.TestCase):
         self.assertIn("Pass 1: collect every identifier position", FAST_LEXICAL_WORKER_JS)
         self.assertIn("Pass 2: classify declarations line-by-line", FAST_LEXICAL_WORKER_JS)
 
-    def test_adaptive_scheduler_is_present_without_taking_recovery_ownership(self) -> None:
-        html = studio.STUDIO_HTML
-        self.assertIn("glyph-editor-completion-performance-v1", html)
-        self.assertIn("if(burst>=3)return 20", html)
-        self.assertIn("if(burst>=1)return 12", html)
-        self.assertIn("return 6", html)
-        self.assertIn("lexicalIndex.refresh?.()", html)
-        self.assertNotIn("new Worker", html.split("glyph-editor-completion-performance-v1-script", 1)[1].split("</script>", 1)[0])
+    def test_adaptive_scheduler_is_in_place_without_taking_recovery_ownership(self) -> None:
+        script = editor_lexical_runtime._SCRIPT
+        self.assertIn("const MIN_DEBOUNCE_MS=6,MID_DEBOUNCE_MS=12,MAX_DEBOUNCE_MS=20", script)
+        self.assertIn("function adaptiveDebounceMs()", script)
+        self.assertIn("burst>=3?MAX_DEBOUNCE_MS", script)
+        self.assertIn("burst>=1?MID_DEBOUNCE_MS", script)
+        self.assertIn("timer=setTimeout(run,adaptiveDebounceMs())", script)
+        self.assertIn("if(recoveryExhausted||recoveryFailures>0||inFlight)", script)
+        self.assertEqual(script.count('new Worker("/assets/editor-lexical-worker.js")'), 1)
+        self.assertEqual(script.count("function handleWorkerFailure"), 1)
 
     def test_exact_snapshot_publication_does_not_wait_for_another_frame(self) -> None:
         script = editor_completion._SCRIPT
