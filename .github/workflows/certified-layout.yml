@@ -62,8 +62,9 @@ jobs:
       - name: Verify publication rendering, editing, and README baseline
         run: |
           git diff --exit-code -- examples/acceptance/motor_safety.glyph
-          rm -f build/state-diagram-regression/motor-safety-motor.png
           timeout 180s node tests/verify_state_diagram_rendering.mjs
+          rm -f build/state-diagram-regression/motor-safety-motor.png
+          timeout 180s node tests/render_readme_state_snapshot.mjs
           python tests/verify_readme_state_snapshot_hosted.py
           timeout 180s node tests/verify_transition_layout_transaction.mjs
           timeout 180s node tests/verify_node_drag_layout.mjs
