@@ -14,6 +14,7 @@ const num=value=>Number.parseFloat(value||"0")||0;
 const scaleFor=stage=>window.glyphDiagramViewport?.scaleFor(stage)||num(stage?.dataset.viewportScale)||1;
 const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
 const publicationGuard=()=>window.glyphTransitionLabelDragGuard||null;
+const machineIndex=()=>document.getElementById("machine-select")?.value||0;
 function escapeId(value){return window.CSS?.escape?CSS.escape(value):String(value).replace(/[^A-Za-z0-9_-]/g,"\\$&")}
 function invalidateState(){stateVersion+=1;stateCache=null;statePromise=null;stateAbort?.abort();stateAbort=null}
 async function diagramState(){
@@ -31,7 +32,7 @@ async function diagramState(){
   })().finally(()=>{if(stateAbort===controller)stateAbort=null;statePromise=null});
   return statePromise;
 }
-function storageKey(data){const index=document.getElementById("machine-select")?.value||0;return`glyph.diagram.transition-io.v1:${data?.digest||"source"}:${index}`}
+function storageKey(data,index=machineIndex()){return`glyph.diagram.transition-io.v1:${data?.digest||"source"}:${index}`}
 function project(point,anchor){const dx=point.x-anchor.x,dy=point.y-anchor.y,distance=Math.hypot(dx,dy);if(!distance||distance<=MAX_DISTANCE)return point;const ratio=MAX_DISTANCE/distance;return{x:anchor.x+dx*ratio,y:anchor.y+dy*ratio}}
 function constrain(point,cluster,stage){const width=Number.parseFloat(stage.style.width||"")||stage.scrollWidth,height=Number.parseFloat(stage.style.height||"")||stage.scrollHeight;return{x:clamp(point.x,cluster.offsetWidth/2+8,width-cluster.offsetWidth/2-8),y:clamp(point.y,cluster.offsetHeight/2+8,height-cluster.offsetHeight/2-8)}}
 function feasible(point,anchor,cluster,stage){let next=constrain(project(point,anchor),cluster,stage);next=project(next,anchor);next=constrain(next,cluster,stage);return Math.hypot(next.x-anchor.x,next.y-anchor.y)<=MAX_DISTANCE+.25?next:null}
@@ -111,27 +112,35 @@ function reject(record,reason){
   markGesture(record,"rejected",reason);
   publicationGuard()?.schedule?.("manual-label-rejected");
 }
+function cancel(record,reason){
+  restoreRecord(record);
+  record.cluster?.classList.remove("dragging-io");
+  markGesture(record,"cancelled",reason);
+  if(record.publicationInvalidated)publicationGuard()?.schedule?.("manual-label-cancelled");
+}
 async function persist(record){
-  if(!record.dragged||!record.finalPoint)return;
-  if(destroyed||!record.stage?.isConnected){markGesture(record,"disconnected","stage-disconnected");return}
-  if(!refreshRecord(record)){markGesture(record,"disconnected","cluster-disconnected");publicationGuard()?.schedule?.("manual-label-disconnected");return}
+  if(!record.dragged||!record.finalPoint)return false;
+  if(destroyed||!record.stage?.isConnected)return false;
+  if(machineIndex()!==record.machineIndex){cancel(record,"machine-changed");return false}
+  if(!refreshRecord(record)){markGesture(record,"disconnected","cluster-disconnected");publicationGuard()?.schedule?.("manual-label-disconnected");return false}
   markGesture(record,"persisting");
   const requested=feasible(record.finalPoint,record.anchor,record.cluster,record.stage);
-  if(!requested){reject(record,"outside-tether");return}
+  if(!requested){reject(record,"outside-tether");return false}
   const point=nearestCertifiablePoint(record,requested);
-  if(!point){reject(record,manualPlacementViolation(record,requested)||"no-certifiable-position");return}
+  if(!point){reject(record,manualPlacementViolation(record,requested)||"no-certifiable-position");return false}
   delete record.cluster.dataset.manualIoRejected;
   record.cluster.dataset.manualIoAdjusted=String(Math.hypot(point.x-requested.x,point.y-requested.y)>0.5);
   const data=await diagramState();
-  if(destroyed||!record.stage?.isConnected){markGesture(record,"disconnected","stage-disconnected-after-state");return}
-  if(!refreshRecord(record)){markGesture(record,"disconnected","cluster-disconnected-after-state");publicationGuard()?.schedule?.("manual-label-disconnected");return}
+  if(destroyed||!record.stage?.isConnected)return false;
+  if(machineIndex()!==record.machineIndex){cancel(record,"machine-changed-after-state");return false}
+  if(!refreshRecord(record)){markGesture(record,"disconnected","cluster-disconnected-after-state");publicationGuard()?.schedule?.("manual-label-disconnected");return false}
   const refreshedRequested=feasible(record.finalPoint,record.anchor,record.cluster,record.stage);
-  if(!refreshedRequested){reject(record,"outside-tether-after-refresh");return}
+  if(!refreshedRequested){reject(record,"outside-tether-after-refresh");return false}
   const refreshedPoint=nearestCertifiablePoint(record,refreshedRequested);
-  if(!refreshedPoint){reject(record,manualPlacementViolation(record,refreshedRequested)||"no-certifiable-position-after-refresh");return}
-  const key=storageKey(data),saved=parseStored(key);
+  if(!refreshedPoint){reject(record,manualPlacementViolation(record,refreshedRequested)||"no-certifiable-position-after-refresh");return false}
+  const key=storageKey(data,record.machineIndex),saved=parseStored(key);
   saved[record.id]={x:refreshedPoint.x,y:refreshedPoint.y,dx:refreshedPoint.x-record.anchor.x,dy:refreshedPoint.y-record.anchor.y,anchorFraction:record.anchorFraction};
-  if(!writeStored(key,saved)){reject(record,"persistence-unavailable");return}
+  if(!writeStored(key,saved)){reject(record,"persistence-unavailable");return false}
   record.cluster.style.left=`${refreshedPoint.x}px`;
   record.cluster.style.top=`${refreshedPoint.y}px`;
   record.cluster.dataset.anchorFraction=String(record.anchorFraction);
@@ -139,8 +148,16 @@ async function persist(record){
   record.cluster.dataset.ioDistance=String(Math.hypot(refreshedPoint.x-record.anchor.x,refreshedPoint.y-record.anchor.y));
   markGesture(record,"persisted");
   window.glyphTransitionLayoutTransaction?.schedule("manual-label-persisted",0);
+  return true;
 }
-async function resetCluster(cluster){const data=await diagramState(),key=storageKey(data),saved=parseStored(key),id=cluster.dataset.transitionId||"";if(id in saved){delete saved[id];writeStored(key,saved)}cluster.dataset.manualIo="false";delete cluster.dataset.manualIoRejected;delete cluster.dataset.manualIoAdjusted;cluster.dataset.manualIoGestureState="reset";window.glyphTransitionLayoutTransaction?.schedule("manual-label-reset",0)}
+async function resetCluster(cluster){
+  const index=machineIndex(),data=await diagramState();
+  if(destroyed||machineIndex()!==index||!cluster?.isConnected)return false;
+  const key=storageKey(data,index),saved=parseStored(key),id=cluster.dataset.transitionId||"";
+  if(id in saved){delete saved[id];writeStored(key,saved)}
+  cluster.dataset.manualIo="false";delete cluster.dataset.manualIoRejected;delete cluster.dataset.manualIoAdjusted;cluster.dataset.manualIoGestureState="reset";
+  window.glyphTransitionLayoutTransaction?.schedule("manual-label-reset",0);return true;
+}
 async function keyboardNudge(cluster,dx,dy){
   if(!cluster?.isConnected||active)return false;
   const stage=cluster.closest(".graph-stage");
@@ -149,10 +166,10 @@ async function keyboardNudge(cluster,dx,dy){
   const left=num(cluster.style.left),top=num(cluster.style.top),anchor={x:num(cluster.dataset.anchorX),y:num(cluster.dataset.anchorY)};
   const point=feasible({x:left+num(dx),y:top+num(dy)},anchor,cluster,stage);
   if(!point)return false;
-  const record={cluster,stage,id:cluster.dataset.transitionId||"",gestureToken:++gestureSequence,left,top,anchor,anchorFraction:clamp(num(cluster.dataset.anchorFraction)||.5,.18,.82),dragged:true,publicationInvalidated:Boolean(publicationGuard()?.invalidate?.(stage,"manual-label-keyboard")),finalPoint:point,finalOffset:{x:point.x-anchor.x,y:point.y-anchor.y}};
+  const record={cluster,stage,machineIndex:machineIndex(),id:cluster.dataset.transitionId||"",gestureToken:++gestureSequence,left,top,anchor,anchorFraction:clamp(num(cluster.dataset.anchorFraction)||.5,.18,.82),dragged:true,publicationInvalidated:Boolean(publicationGuard()?.invalidate?.(stage,"manual-label-keyboard")),finalPoint:point,finalOffset:{x:point.x-anchor.x,y:point.y-anchor.y}};
   cluster.style.left=`${point.x}px`;cluster.style.top=`${point.y}px`;cluster.dataset.ioDistance=String(Math.hypot(point.x-anchor.x,point.y-anchor.y));
   markGesture(record,"keyboard");
-  try{await persist(record);return liveCluster(record)?.dataset.manualIoGestureState==="persisted"}
+  try{return await persist(record)}
   catch(error){restoreRecord(record);markGesture(record,"failed",String(error?.message||error));publicationGuard()?.schedule?.("manual-label-keyboard-failed");report(error,"manual transition keyboard position persistence failed");return false}
 }
 function finish(event){
@@ -169,18 +186,12 @@ function finish(event){
     report(error,"manual transition position persistence failed");
   });
 }
-function cancel(record,reason){
-  restoreRecord(record);
-  record.cluster?.classList.remove("dragging-io");
-  markGesture(record,"cancelled",reason);
-  if(record.publicationInvalidated)publicationGuard()?.schedule?.("manual-label-cancelled");
-}
 document.addEventListener("pointerdown",event=>{
   const cluster=event.target?.closest?.(".transition-io-cluster");if(!cluster||event.button!==0)return;
   const stage=cluster.closest(".graph-stage");if(!stage||stage.dataset.transitionLayoutState!=="ready")return;
   event.preventDefault();event.stopImmediatePropagation();
   select(cluster);cluster.classList.add("dragging-io");cluster.setPointerCapture?.(event.pointerId);
-  active={cluster,stage,id:cluster.dataset.transitionId||"",gestureToken:++gestureSequence,pointerId:event.pointerId,startX:event.clientX,startY:event.clientY,left:num(cluster.style.left),top:num(cluster.style.top),anchor:{x:num(cluster.dataset.anchorX),y:num(cluster.dataset.anchorY)},anchorFraction:clamp(num(cluster.dataset.anchorFraction)||.5,.18,.82),scale:scaleFor(stage),dragged:false,publicationInvalidated:false,finalPoint:null,finalOffset:null};
+  active={cluster,stage,machineIndex:machineIndex(),id:cluster.dataset.transitionId||"",gestureToken:++gestureSequence,pointerId:event.pointerId,startX:event.clientX,startY:event.clientY,left:num(cluster.style.left),top:num(cluster.style.top),anchor:{x:num(cluster.dataset.anchorX),y:num(cluster.dataset.anchorY)},anchorFraction:clamp(num(cluster.dataset.anchorFraction)||.5,.18,.82),scale:scaleFor(stage),dragged:false,publicationInvalidated:false,finalPoint:null,finalOffset:null};
   markGesture(active,"pressed");
 },true);
 document.addEventListener("pointermove",event=>{
@@ -206,9 +217,14 @@ document.addEventListener("lostpointercapture",event=>{
   const record=active;active=null;cancel(record,"pointer-capture-lost");
 },true);
 document.addEventListener("dblclick",event=>{const cluster=event.target?.closest?.(".transition-io-cluster");if(cluster)resetCluster(cluster).catch(error=>report(error,"manual transition position reset failed"))},true);
-document.addEventListener("change",event=>{if(event.target?.id==="machine-select"){selected=null;invalidateState()}});
+document.addEventListener("change",event=>{
+  if(event.target?.id!=="machine-select")return;
+  selected=null;
+  if(active){const record=active;active=null;record.cluster.releasePointerCapture?.(record.pointerId);cancel(record,"machine-changed")}
+  invalidateState();
+});
 for(const eventName of["pagehide","beforeunload"]){window.addEventListener(eventName,()=>{destroyed=true;active=null;selected=null;invalidateState()},{once:true})}
-window.glyphTransitionLayoutInteractionAdapter={marker:MARKER,version:5,validateManualPlacement:manualPlacementViolation,nearestCertifiablePoint,keyboardNudge,resetCluster};
+window.glyphTransitionLayoutInteractionAdapter={marker:MARKER,version:6,validateManualPlacement:manualPlacementViolation,nearestCertifiablePoint,keyboardNudge,resetCluster};
 })();
 </script>
 """
@@ -220,3 +236,6 @@ def enhance_transition_layout_interaction_adapter_html(html: str) -> str:
     if _MARKER in html:
         return html
     return html.replace("</body>", _SCRIPT + "\n</body>")
+
+
+__all__ = ["enhance_transition_layout_interaction_adapter_html"]
