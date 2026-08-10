@@ -58,6 +58,9 @@ function exactSnapshot(){
   const snapshot=lexicalIndex.snapshot?.();
   return Boolean(snapshot&&Number(snapshot.revision)===Number(documentRuntime.revision()));
 }
+function publicationNeedsExactSnapshot(){
+  return completion.candidates?.().some(candidate=>candidate?.origin==="document")===true;
+}
 function normalizeOptions(){
   for(const option of popup.querySelectorAll('[role="option"]'))option.tabIndex=-1;
 }
@@ -105,7 +108,7 @@ function hideStalePublication(){
   status.textContent="";
 }
 function blockStalePublication(){
-  if(popup.hidden||exactSnapshot())return false;
+  if(popup.hidden||!publicationNeedsExactSnapshot()||exactSnapshot())return false;
   metrics.stalePublicationBlocks+=1;
   hideStalePublication();
   return true;
