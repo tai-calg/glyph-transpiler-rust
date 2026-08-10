@@ -36,7 +36,7 @@ class EditorExactRevisionRecoveryTests(unittest.TestCase):
         self.assertIn('emit("glyph-editor-lexical-index-recovery-exhausted"', LEXICAL_RUNTIME_SCRIPT)
         self.assertNotIn("restartCount<1", LEXICAL_RUNTIME_SCRIPT)
 
-    def test_exact_guard_synchronously_invalidates_all_document_derived_ui(self) -> None:
+    def test_exact_guard_hides_stale_ui_but_preserves_accept_revalidation_state(self) -> None:
         for event_name in (
             "glyph-editor-document-changed",
             "glyph-editor-source-replaced",
@@ -46,7 +46,10 @@ class EditorExactRevisionRecoveryTests(unittest.TestCase):
         ):
             self.assertIn(event_name, EXACT_GUARD_SCRIPT)
         self.assertIn("completionNeedsExactSnapshot", EXACT_GUARD_SCRIPT)
-        self.assertIn("completion.close()", EXACT_GUARD_SCRIPT)
+        self.assertIn("function hideCompletionPublication", EXACT_GUARD_SCRIPT)
+        self.assertIn("popup.hidden=true", EXACT_GUARD_SCRIPT)
+        self.assertIn("popup.replaceChildren()", EXACT_GUARD_SCRIPT)
+        self.assertNotIn("completion.close()", EXACT_GUARD_SCRIPT)
         self.assertIn('editor.dataset.activeIdentifier=""', EXACT_GUARD_SCRIPT)
         self.assertIn('parent?.classList.remove("identifier-highlight-active")', EXACT_GUARD_SCRIPT)
         self.assertIn("highlightApi.identifier=()=>exactSnapshot()?originalIdentifier():\"\"", EXACT_GUARD_SCRIPT)
