@@ -54,7 +54,10 @@ class DiagramGuiUxGuardTests(unittest.TestCase):
         self.assertIn("async function keyboardNudge(cluster,dx,dy)", LABEL_INTERACTION_SCRIPT)
         self.assertIn('publicationGuard()?.invalidate?.(stage,"manual-label-keyboard")', LABEL_INTERACTION_SCRIPT)
         self.assertIn("await persist(record)", LABEL_INTERACTION_SCRIPT)
-        self.assertIn("version:5", LABEL_INTERACTION_SCRIPT)
+        self.assertIn("machineIndex:machineIndex()", LABEL_INTERACTION_SCRIPT)
+        self.assertIn("machineIndex()!==record.machineIndex", LABEL_INTERACTION_SCRIPT)
+        self.assertIn("storageKey(data,record.machineIndex)", LABEL_INTERACTION_SCRIPT)
+        self.assertIn("version:6", LABEL_INTERACTION_SCRIPT)
         self.assertIn("keyboardNudge,resetCluster", LABEL_INTERACTION_SCRIPT)
 
     def test_enhancer_is_idempotent(self) -> None:
