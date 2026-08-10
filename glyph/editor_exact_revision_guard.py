@@ -17,7 +17,6 @@ if(!editor||!lexicalIndex||!completion||!highlightApi||!documentRuntime||editor.
 editor.dataset.exactRevisionGuardReady="true";
 const parent=editor.parentElement;
 const surface=parent?.querySelector(".identifier-highlight-surface");
-const status=document.getElementById("glyph-completion-status");
 const metrics={completionInvalidations:0,highlightInvalidations:0,staleUiObservations:0,staleAcceptBlocks:0};
 
 function exactSnapshot(){
@@ -48,6 +47,7 @@ function hideCompletionPublication(){
   popup.replaceChildren();
   editor.setAttribute("aria-expanded","false");
   editor.removeAttribute("aria-activedescendant");
+  const status=document.getElementById("glyph-completion-status");
   if(status)status.textContent="";
 }
 function invalidateVisibleDocumentState(){
