@@ -21,6 +21,7 @@ const MARKER="glyph-diagram-gui-ux-continuity-v1";
 if(window.glyphDiagramGuiUxContinuity?.marker===MARKER)return;
 const LINE_JUMP_SELECTOR=".diagnostic[data-line],.analysis-item[data-line],.graph-node[data-line],.type-card[data-line],.edge-label[data-line]";
 const MODAL_FOCUSABLE='button:not([disabled]),[href],input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
+const MODAL_EDITING="input,textarea,select,[contenteditable=true]";
 const FOCUS_REQUEST_TTL_MS=2000;
 let enhanceFrame=0,pendingNodeFocus=null,pendingNodeFocusTimer=0,pendingControlFocus=null,pendingControlFocusTimer=0;
 const nodeName=node=>node?.querySelector?.(".state-name")?.textContent?.trim()||"";
@@ -199,14 +200,20 @@ window.addEventListener("keydown",handleEditorTab,true);
 window.addEventListener("keydown",event=>{
   const modal=document.querySelector("dialog[open]");
   const command=event.ctrlKey||event.metaKey;
+  const saveShortcut=modal&&command&&event.key.toLowerCase()==="s";
+  const diagramZoom=modal&&command&&["+","=","-","0"].includes(event.key);
   if(modal&&event.key==="Tab"){trapModalTab(event,modal);return}
-  if(modal&&command&&event.key==="Enter"){
+  if(modal&&(saveShortcut||diagramZoom||command&&event.key==="Enter")){
     event.preventDefault();event.stopImmediatePropagation();return;
   }
   if(modal&&event.key==="Escape"){
     event.stopPropagation();return;
   }
-  if(modal||!event.key.startsWith("Arrow"))return;
+  if(modal){
+    if(!event.target?.closest?.(MODAL_EDITING)&&event.key.startsWith("Arrow"))event.stopPropagation();
+    return;
+  }
+  if(!event.key.startsWith("Arrow"))return;
   const node=event.target?.closest?.(".state-node");
   if(!node||document.activeElement!==node)return;
   armNodeFocus(nodeName(node));
