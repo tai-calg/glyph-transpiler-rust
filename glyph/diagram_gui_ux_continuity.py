@@ -111,9 +111,43 @@ function restoreNodeFocus(){
     clearPendingNodeFocus();
   });
 }
+function editorIndentBlock(editor,runtime,shift){
+  const source=editor.value,start=editor.selectionStart||0,end=editor.selectionEnd||start;
+  if(start===end){
+    if(!shift){runtime.replaceRange(start,end,"  ");return true}
+    const lineStart=source.lastIndexOf("\n",Math.max(0,start-1))+1;
+    const indent=source.slice(lineStart).match(/^(?:\t| {1,2})/)?.[0]||"";
+    if(!indent)return false;
+    runtime.replaceRange(lineStart,lineStart+indent.length,"");
+    const caret=Math.max(lineStart,start-indent.length);
+    editor.setSelectionRange(caret,caret);
+    return true;
+  }
+  const blockStart=source.lastIndexOf("\n",Math.max(0,start-1))+1;
+  let probe=end;
+  if(probe>blockStart&&source[probe-1]==="\n")probe-=1;
+  const newlineAfter=source.indexOf("\n",probe);
+  const blockEnd=newlineAfter<0?source.length:newlineAfter;
+  const block=source.slice(blockStart,blockEnd);
+  const replacement=block.split("\n").map(line=>shift?line.replace(/^(?:\t| {1,2})/,""):`  ${line}`).join("\n");
+  if(replacement===block)return false;
+  runtime.replaceRange(blockStart,blockEnd,replacement,{select:"replacement"});
+  return true;
+}
+function handleEditorTab(event){
+  if(event.key!=="Tab"||event.ctrlKey||event.metaKey||event.altKey)return;
+  const editor=document.getElementById("editor"),runtime=window.GlyphEditorDocument;
+  if(event.target!==editor||!runtime||event.isComposing||runtime.compositionActive?.())return;
+  const completionOpen=editor.getAttribute("aria-expanded")==="true";
+  if(!event.shiftKey&&completionOpen)return;
+  event.preventDefault();event.stopImmediatePropagation();
+  if(event.shiftKey)window.GlyphEditorCompletion?.close?.();
+  editorIndentBlock(editor,runtime,event.shiftKey);
+}
 function enhance(){enhanceFrame=0;setupLineJumps();setupCanvasKeyboard();setupSettingsFocus();restoreNodeFocus()}
 function scheduleEnhance(){if(enhanceFrame)return;enhanceFrame=requestAnimationFrame(enhance)}
 
+window.addEventListener("keydown",handleEditorTab,true);
 window.addEventListener("keydown",event=>{
   const modal=document.querySelector("dialog[open]");
   const command=event.ctrlKey||event.metaKey;
@@ -134,7 +168,7 @@ document.addEventListener("glyph-transition-layout-ready",()=>{scheduleEnhance()
 for(const eventName of["glyph-state-transition-ir-v3-labels-ready","glyph-locale-changed"]){document.addEventListener(eventName,scheduleEnhance)}
 document.addEventListener("change",scheduleEnhance);
 new MutationObserver(()=>{scheduleEnhance();restoreNodeFocus()}).observe(document.getElementById("view")||document.body,{childList:true,subtree:true});
-window.glyphDiagramGuiUxContinuity={marker:MARKER,version:1,refresh:scheduleEnhance,pendingNodeFocus:()=>pendingNodeFocusName};
+window.glyphDiagramGuiUxContinuity={marker:MARKER,version:2,refresh:scheduleEnhance,pendingNodeFocus:()=>pendingNodeFocusName};
 enhance();requestAnimationFrame(enhance);
 })();
 </script>
