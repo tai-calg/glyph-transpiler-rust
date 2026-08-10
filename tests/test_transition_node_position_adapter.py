@@ -25,7 +25,8 @@ class TransitionNodePositionAdapterTests(unittest.TestCase):
         self.assertIn("event.stopImmediatePropagation()", html)
         self.assertIn("record.positions=snapshot(record.stage)", html)
         self.assertIn("manual-node-persisted", html)
-        self.assertIn("version:9", html)
+        self.assertIn("machineIndex:machineIndex()", html)
+        self.assertIn("version:10", html)
 
     def test_saved_positions_are_migrated_to_the_expanded_workspace(self) -> None:
         html = enhance_transition_node_position_adapter_html(DIAGRAM_HTML)
@@ -78,10 +79,8 @@ class TransitionNodePositionAdapterTests(unittest.TestCase):
         self.assertLess(threshold, no_movement)
         self.assertLess(no_movement, invalidation)
         self.assertLess(invalidation, movement)
-        self.assertIn(
-            'publicationGuard()?.schedule?.("manual-node-cancelled")',
-            html,
-        )
+        self.assertIn('cancelRecord(record,"pointer-cancelled")', html)
+        self.assertIn('cancelRecord(record,"machine-changed")', html)
 
     def test_keyboard_move_requires_focused_selected_node(self) -> None:
         html = enhance_transition_node_position_adapter_html(DIAGRAM_HTML)
@@ -99,6 +98,15 @@ class TransitionNodePositionAdapterTests(unittest.TestCase):
         self.assertIn('invalidatePublication(record,"manual-node-keyboard")', html)
         self.assertIn("transition node keyboard persistence failed", html)
         self.assertIn("persist(record)", html)
+
+    def test_persistence_is_bound_to_the_machine_that_started_the_gesture(self) -> None:
+        html = enhance_transition_node_position_adapter_html(DIAGRAM_HTML)
+
+        self.assertIn("function canonicalKey(data,index=machineIndex())", html)
+        self.assertIn("machineIndex:machineIndex()", html)
+        self.assertIn("machineIndex()!==record.machineIndex", html)
+        self.assertIn("canonicalKey(data,record.machineIndex)", html)
+        self.assertIn('publicationGuard()?.schedule?.("manual-node-machine-changed")', html)
 
     def test_failed_persistence_still_requests_recertification(self) -> None:
         html = enhance_transition_node_position_adapter_html(DIAGRAM_HTML)
