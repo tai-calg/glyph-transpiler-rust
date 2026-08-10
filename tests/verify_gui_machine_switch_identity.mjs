@@ -62,7 +62,9 @@ try {
   await page.goto(url, { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => document.querySelector("#status")?.textContent === "ready"
     && window.glyphTransitionNodePositionAdapter?.version === 10
-    && window.glyphTransitionLayoutInteractionAdapter?.version === 6);
+    && window.glyphTransitionLayoutInteractionAdapter?.version === 6
+    && window.glyphDiagramGuiUxGuard?.version === 2
+    && window.glyphDiagramGuiUxContinuity?.version === 4);
   await page.locator('.tab[data-tab="state"]').click();
   await page.waitForFunction(() => document.getElementById("machine-select")?.options.length >= 2);
   await waitStateReady(page, 0);
@@ -91,6 +93,8 @@ try {
   });
   assert(nodeRace.moved, `node race did not trigger a position change: ${JSON.stringify(nodeRace)}`);
   await waitStateReady(page, 1);
+  await page.waitForFunction(() => document.activeElement?.id === "machine-select"
+    && window.glyphDiagramGuiUxContinuity?.pendingNodeFocus() === "");
   await page.waitForTimeout(120);
   const nodeStorage = await page.evaluate(() => Object.fromEntries(
     Object.keys(localStorage)
@@ -105,20 +109,25 @@ try {
 
   await page.locator("#machine-select").selectOption("0");
   await waitStateReady(page, 0);
-  const labelRace = await page.evaluate(async () => {
+  await page.waitForFunction(() => document.activeElement?.id === "machine-select");
+  const labelRace = await page.evaluate(() => {
     const selector = document.getElementById("machine-select");
     const cluster = document.querySelector(".transition-io-cluster");
     if (!selector || !cluster) throw new Error("label race fixture is incomplete");
     const transitionId = cluster.dataset.transitionId || "";
-    const promise = window.glyphTransitionLayoutInteractionAdapter.keyboardNudge(cluster, 4, 0);
+    cluster.focus({ preventScroll: true });
+    const before = { left: cluster.style.left, top: cluster.style.top };
+    cluster.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true }));
+    const after = { left: cluster.style.left, top: cluster.style.top };
     selector.value = "1";
     selector.dispatchEvent(new Event("change", { bubbles: true }));
-    const persisted = await promise;
-    return { transitionId, persisted };
+    return { transitionId, moved: before.left !== after.left || before.top !== after.top };
   });
   assert(labelRace.transitionId, "label race has no transition identity");
-  assert.equal(labelRace.persisted, false, "old-machine label nudge persisted after machine switch");
+  assert(labelRace.moved, `label race did not trigger a position change: ${JSON.stringify(labelRace)}`);
   await waitStateReady(page, 1);
+  await page.waitForFunction(() => document.activeElement?.id === "machine-select"
+    && window.glyphDiagramGuiUxGuard?.pendingClusterFocus() === null);
   await page.waitForTimeout(120);
   const labelStorage = await page.evaluate(() => Object.fromEntries(
     Object.keys(localStorage)
@@ -134,9 +143,11 @@ try {
     nodeRaceKey: nodeRace.key,
     nodeMoved: nodeRace.moved,
     nodeStorageKeys: Object.keys(nodeStorage),
+    selectorFocusRestored: true,
     labelTransitionId: labelRace.transitionId,
-    labelPersistedAfterSwitch: labelRace.persisted,
+    labelMoved: labelRace.moved,
     labelStorageKeys: Object.keys(labelStorage),
+    staleTransitionFocusBlocked: true,
   }));
 } finally {
   await browser.close();
