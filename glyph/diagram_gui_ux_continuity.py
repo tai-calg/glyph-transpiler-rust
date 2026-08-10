@@ -21,11 +21,13 @@ const MARKER="glyph-diagram-gui-ux-continuity-v1";
 if(window.glyphDiagramGuiUxContinuity?.marker===MARKER)return;
 const LINE_JUMP_SELECTOR=".diagnostic[data-line],.analysis-item[data-line],.graph-node[data-line],.type-card[data-line],.edge-label[data-line]";
 const MODAL_FOCUSABLE='button:not([disabled]),[href],input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
-let enhanceFrame=0,pendingNodeFocus=null,pendingNodeFocusTimer=0,pendingControlFocus=null;
+const FOCUS_REQUEST_TTL_MS=2000;
+let enhanceFrame=0,pendingNodeFocus=null,pendingNodeFocusTimer=0,pendingControlFocus=null,pendingControlFocusTimer=0;
 const nodeName=node=>node?.querySelector?.(".state-name")?.textContent?.trim()||"";
 const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
 const english=()=>String(document.documentElement.lang||"ja").startsWith("en");
 const machineIndex=()=>String(document.getElementById("machine-select")?.value||"0");
+const diagramDigest=()=>String(document.querySelector(".state-node")?.closest(".graph-stage")?.dataset.diagramDigest||document.querySelector(".graph-stage")?.dataset.diagramDigest||"");
 
 function lineJumpLabel(element,line){
   const subject=(element.getAttribute("title")||element.querySelector?.(".node-name,.type-name")?.textContent||element.textContent||"").trim().replace(/\s+/g," ");
@@ -115,16 +117,16 @@ function clearPendingNodeFocus(){
 }
 function armNodeFocus(name){
   if(!name)return;
-  pendingNodeFocus={name,machineIndex:machineIndex()};
+  pendingNodeFocus={name,machineIndex:machineIndex(),diagramDigest:diagramDigest()};
   if(pendingNodeFocusTimer)clearTimeout(pendingNodeFocusTimer);
-  pendingNodeFocusTimer=setTimeout(clearPendingNodeFocus,2000);
+  pendingNodeFocusTimer=setTimeout(clearPendingNodeFocus,FOCUS_REQUEST_TTL_MS);
 }
 function restoreNodeFocus(){
   if(!pendingNodeFocus)return;
   const expected=pendingNodeFocus;
   requestAnimationFrame(()=>{
     if(pendingNodeFocus!==expected)return;
-    if(machineIndex()!==expected.machineIndex){clearPendingNodeFocus();return}
+    if(machineIndex()!==expected.machineIndex||diagramDigest()!==expected.diagramDigest){clearPendingNodeFocus();return}
     const target=[...document.querySelectorAll(".state-node")].find(node=>nodeName(node)===expected.name);
     if(!target)return;
     const active=document.activeElement;
@@ -136,19 +138,26 @@ function restoreNodeFocus(){
     clearPendingNodeFocus();
   });
 }
+function clearPendingControlFocus(){
+  pendingControlFocus=null;
+  if(pendingControlFocusTimer){clearTimeout(pendingControlFocusTimer);pendingControlFocusTimer=0}
+}
 function armControlFocus(target){
   if(!target||!(target.id==="machine-select"||target.id==="system-select"))return;
   pendingControlFocus={id:target.id,value:String(target.value||"")};
+  if(pendingControlFocusTimer)clearTimeout(pendingControlFocusTimer);
+  pendingControlFocusTimer=setTimeout(clearPendingControlFocus,FOCUS_REQUEST_TTL_MS);
   requestAnimationFrame(restoreControlFocus);
 }
 function restoreControlFocus(){
   if(!pendingControlFocus)return;
   const expected=pendingControlFocus,target=document.getElementById(expected.id);
-  if(!target||String(target.value||"")!==expected.value)return;
+  if(!target)return;
+  if(String(target.value||"")!==expected.value){clearPendingControlFocus();return}
   const active=document.activeElement;
   const neutral=!active||active===document.body||active===document.documentElement||!active.isConnected;
   if(neutral)target.focus({preventScroll:true});
-  pendingControlFocus=null;
+  clearPendingControlFocus();
 }
 function editorIndentBlock(editor,runtime,shift){
   const source=editor.value,start=editor.selectionStart||0,end=editor.selectionEnd||start;
@@ -209,7 +218,7 @@ document.addEventListener("glyph-transition-layout-ready",()=>{scheduleEnhance()
 for(const eventName of["glyph-state-transition-ir-v3-labels-ready","glyph-locale-changed"]){document.addEventListener(eventName,scheduleEnhance)}
 document.addEventListener("change",scheduleEnhance);
 new MutationObserver(()=>{scheduleEnhance();restoreNodeFocus();restoreControlFocus()}).observe(document.getElementById("view")||document.body,{childList:true,subtree:true});
-window.glyphDiagramGuiUxContinuity={marker:MARKER,version:4,refresh:scheduleEnhance,pendingNodeFocus:()=>pendingNodeFocus?.name||"",pendingControlFocus:()=>pendingControlFocus?{...pendingControlFocus}:null};
+window.glyphDiagramGuiUxContinuity={marker:MARKER,version:5,refresh:scheduleEnhance,pendingNodeFocus:()=>pendingNodeFocus?.name||"",pendingControlFocus:()=>pendingControlFocus?{...pendingControlFocus}:null};
 enhance();requestAnimationFrame(enhance);
 })();
 </script>
