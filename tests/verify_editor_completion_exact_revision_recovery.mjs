@@ -180,7 +180,6 @@ try {
   assert(publication.latencyMs >= 0 && publication.latencyMs < POPUP_BUDGET_MS, JSON.stringify(publication));
   assert(publication.staleDocumentQueryBlocks >= 1, `stale document query was not suppressed: ${JSON.stringify(publication)}`);
 
-  // Keep the lexical Worker stale long enough to observe the post-input window directly.
   await page.evaluate(() => { window.__glyphWorkerControl.delayMs = 650; });
   await page.keyboard.type("o");
   const stalePopupWindow = await page.evaluate(() => {
@@ -200,9 +199,7 @@ try {
   assert.equal(stalePopupWindow.activeIdentifier, "", JSON.stringify(stalePopupWindow));
   await waitForExactIndex();
   await page.evaluate(() => { window.__glyphWorkerControl.delayMs = 0; });
-  window;
 
-  // Exact identifier highlighting must disappear synchronously on the next edit.
   await page.evaluate(source => {
     const editor = document.getElementById("editor");
     editor.value = source;
@@ -234,7 +231,6 @@ try {
   await waitForExactIndex();
   await page.evaluate(() => { window.__glyphWorkerControl.delayMs = 0; });
 
-  // Restore a known valid source before exercising actual Worker.onerror recovery.
   await page.evaluate(source => {
     const editor = document.getElementById("editor");
     editor.value = source;
@@ -278,8 +274,6 @@ try {
   assert.equal(recoveryCycle2.metrics.recoveryFailures, 0, JSON.stringify(recoveryCycle2));
   assert.equal(recoveryCycle2.metrics.recoveryAttempts, 0, JSON.stringify(recoveryCycle2));
 
-  // Permanent failure must consume exactly the bounded recovery budget, then remain degraded
-  // even while further editor input continues to schedule lexical work.
   const permanentBefore = await page.evaluate(() => ({
     constructors: window.__glyphWorkerControl.constructors,
     exhausted: window.GlyphEditorLexicalIndex.metrics().recoveryExhausted,
