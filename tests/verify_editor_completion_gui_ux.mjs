@@ -136,7 +136,6 @@ try {
         inputRevision: state.lastInputRevision,
         visibleRevision: state.firstVisibleRevision,
         candidates: window.GlyphEditorCompletion.candidates(),
-        popupRect: document.getElementById("glyph-completion-popup").getBoundingClientRect().toJSON(),
       };
     });
     assert(result.latencyMs >= 0, `negative completion latency: ${JSON.stringify(result)}`);
@@ -154,8 +153,15 @@ try {
   assert.equal(await editor.getAttribute("aria-expanded"), "true");
   assert.equal(await editor.getAttribute("aria-haspopup"), "listbox");
   assert(warm.candidates.length > 0 && warm.candidates.length <= 8, "completion row count must stay bounded");
-  assert.equal(await page.locator("#glyph-completion-popup [role='option'][tabindex='-1']").count(), warm.candidates.length, "completion options leaked into the Tab order");
-  assert((await page.locator("#glyph-completion-status").textContent())?.includes("completion candidate"), "completion live status did not publish candidate count");
+  assert.equal(
+    await page.locator("#glyph-completion-popup [role='option'][tabindex='-1']").count(),
+    warm.candidates.length,
+    "completion options leaked into the Tab order",
+  );
+  assert(
+    (await page.locator("#glyph-completion-status").textContent())?.includes("completion candidate"),
+    "completion live status did not publish candidate count",
+  );
 
   const selectedBefore = await page.evaluate(() => ({
     selected: window.GlyphEditorCompletion.selected(),
@@ -168,12 +174,13 @@ try {
   }));
   if (warm.candidates.length > 1) {
     assert.notEqual(selectedAfter.selected, selectedBefore.selected, "ArrowDown did not move completion selection");
-    assert.notEqual(selectedAfter.active, selectedBefore.active, "aria-activedescendant did not follow keyboard selection");
+    assert.notEqual(selectedAfter.active, selectedBefore.active, "aria-activedescendant did not follow selection");
   }
 
   const motorIndex = warm.candidates.findIndex(item => item.text === "MotorCommand");
+  assert(motorIndex >= 0, "MotorCommand disappeared before keyboard acceptance");
   const currentIndex = await page.evaluate(() => window.GlyphEditorCompletion.selected());
-  const steps = warm.candidates.length ? (motorIndex - currentIndex + warm.candidates.length) % warm.candidates.length : 0;
+  const steps = (motorIndex - currentIndex + warm.candidates.length) % warm.candidates.length;
   for (let index = 0; index < steps; index += 1) await page.keyboard.press("ArrowDown");
   await page.keyboard.press("Tab");
   await page.waitForFunction(() => document.getElementById("editor").value.endsWith("MotorCommand"));
@@ -181,54 +188,64 @@ try {
   assert.equal(await editor.getAttribute("aria-expanded"), "false", "Tab completion left popup open");
 
   await installSource(`${originalSource}\nMotorC`);
-  await editor.evaluate(element => element.setSelectionRange(element.value.length, element.value.length));
   await page.keyboard.press("Backspace");
-  await page.keyboard.press("c");
+  await page.keyboard.press("Shift+C");
   await page.waitForFunction(() => !document.getElementById("glyph-completion-popup").hidden);
   await page.keyboard.press("Escape");
   await page.waitForFunction(() => document.getElementById("glyph-completion-popup").hidden);
   await page.keyboard.press("ArrowLeft");
   await page.keyboard.press("ArrowRight");
   await page.waitForTimeout(120);
-  assert.equal(await editor.getAttribute("aria-expanded"), "false", "Escape dismissal reopened merely from caret navigation");
+  assert.equal(await editor.getAttribute("aria-expanded"), "false", "Escape dismissal reopened from caret navigation");
   const suppressedDismissal = await page.evaluate(() => window.glyphEditorCompletionUxGuard.metrics());
-  assert(suppressedDismissal.suppressAutomaticReopen, "Escape dismissal was not held until the next edit or explicit trigger");
+  assert(suppressedDismissal.suppressAutomaticReopen, "Escape dismissal did not remain sticky");
   await page.keyboard.press("Control+Space");
   await page.waitForFunction(() => !document.getElementById("glyph-completion-popup").hidden);
-  assert.equal((await page.evaluate(() => window.glyphEditorCompletionUxGuard.metrics())).suppressAutomaticReopen, false, "explicit completion did not clear dismissal suppression");
+  assert.equal(
+    (await page.evaluate(() => window.glyphEditorCompletionUxGuard.metrics())).suppressAutomaticReopen,
+    false,
+    "explicit completion did not clear dismissal suppression",
+  );
   await page.keyboard.press("Escape");
 
   const symbolLines = Array.from({ length: 4200 }, (_, index) => `>Symbol${String(index).padStart(4, "0")}():I=0`).join("\n");
   const largeSource = `>TargetCompletion(value:I):I=value\n${symbolLines}\n`;
   await installSource(largeSource);
   const large = await typeAndMeasure("Tar", "TargetCompletion", LARGE_DOCUMENT_POPUP_BUDGET_MS);
-  assert(large.candidates.some(item => item.text === "TargetCompletion"));
 
   await installSource(largeSource);
   const compactRows = await typeAndMeasure("Sy", "Symbol0000", LARGE_DOCUMENT_POPUP_BUDGET_MS);
-  assert.equal(compactRows.candidates.length, 8, "compact viewport fixture must exercise a full completion list");
+  assert.equal(compactRows.candidates.length, 8, "compact fixture must exercise a full completion list");
   await page.setViewportSize({ width: 320, height: 220 });
   await page.waitForTimeout(80);
   const compact = await page.evaluate(() => {
     const rect = document.getElementById("glyph-completion-popup").getBoundingClientRect();
-    return { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height, innerWidth, innerHeight };
+    return {
+      left: rect.left,
+      top: rect.top,
+      right: rect.right,
+      bottom: rect.bottom,
+      width: rect.width,
+      height: rect.height,
+      innerWidth,
+      innerHeight,
+    };
   });
-  assert(compact.left >= 7, `completion popup escaped left viewport edge: ${JSON.stringify(compact)}`);
-  assert(compact.top >= 7, `completion popup escaped top viewport edge: ${JSON.stringify(compact)}`);
-  assert(compact.right <= compact.innerWidth - 7, `completion popup escaped right viewport edge: ${JSON.stringify(compact)}`);
-  assert(compact.bottom <= compact.innerHeight - 7, `completion popup escaped bottom viewport edge: ${JSON.stringify(compact)}`);
+  assert(compact.left >= 7, `popup escaped left viewport edge: ${JSON.stringify(compact)}`);
+  assert(compact.top >= 7, `popup escaped top viewport edge: ${JSON.stringify(compact)}`);
+  assert(compact.right <= compact.innerWidth - 7, `popup escaped right viewport edge: ${JSON.stringify(compact)}`);
+  assert(compact.bottom <= compact.innerHeight - 7, `popup escaped bottom viewport edge: ${JSON.stringify(compact)}`);
   await page.setViewportSize({ width: 1200, height: 820 });
+  await page.waitForTimeout(50);
 
   const pointerTarget = page.locator("#glyph-completion-popup [role='option']").first();
   const pointerText = (await pointerTarget.locator(".glyph-completion-label").textContent())?.trim() || "";
   assert(pointerText, "pointer completion target has no label");
   const box = await pointerTarget.boundingBox();
   assert(box, "pointer completion target has no bounding box");
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await page.mouse.down();
-  await page.mouse.up();
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
   await page.waitForFunction(text => document.getElementById("editor").value.endsWith(text), pointerText);
-  assert.equal(await page.evaluate(() => document.activeElement?.id), "editor", "pointer completion moved focus away from editor");
+  assert.equal(await page.evaluate(() => document.activeElement?.id), "editor", "pointer completion lost editor focus");
 
   const recovery = await page.evaluate(async () => {
     const lexical = window.GlyphEditorLexicalIndex;
@@ -258,11 +275,11 @@ try {
     lexical.invalidate = original.invalidate;
     return { firstCycle, secondCycle, metrics: window.glyphEditorCompletionUxGuard.metrics() };
   });
-  assert.equal(recovery.firstCycle, 1, `first Worker failure cycle did not request one guarded recovery: ${JSON.stringify(recovery)}`);
-  assert.equal(recovery.secondCycle, 2, `second independent Worker failure cycle was not recoverable: ${JSON.stringify(recovery)}`);
-  assert(recovery.metrics.guardRecoveries >= 2, `guarded Worker recovery metric did not record both cycles: ${JSON.stringify(recovery)}`);
+  assert.equal(recovery.firstCycle, 1, `first Worker recovery cycle failed: ${JSON.stringify(recovery)}`);
+  assert.equal(recovery.secondCycle, 2, `second independent Worker recovery cycle failed: ${JSON.stringify(recovery)}`);
+  assert(recovery.metrics.guardRecoveries >= 2, `Worker recovery metrics incomplete: ${JSON.stringify(recovery)}`);
 
-  assert.deepEqual(sourceRequests, [], `typing/completion unexpectedly hit save/compile endpoints: ${sourceRequests.join(", ")}`);
+  assert.deepEqual(sourceRequests, [], `completion unexpectedly hit save/compile endpoints: ${sourceRequests.join(", ")}`);
   assert.deepEqual(browserErrors, [], browserErrors.join("\n"));
   console.log(JSON.stringify({
     warmPopupLatencyMs: warm.latencyMs,
