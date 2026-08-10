@@ -18,7 +18,7 @@ editor.dataset.exactRevisionGuardReady="true";
 const parent=editor.parentElement;
 const surface=parent?.querySelector(".identifier-highlight-surface");
 const status=document.getElementById("glyph-completion-status");
-const metrics={completionInvalidations:0,highlightInvalidations:0,staleUiObservations:0};
+const metrics={completionInvalidations:0,highlightInvalidations:0,staleUiObservations:0,staleAcceptBlocks:0};
 
 function exactSnapshot(){
   const snapshot=lexicalIndex.snapshot?.();
@@ -43,7 +43,7 @@ function hideCompletionPublication(){
   if(!popup||popup.hidden||!completionNeedsExactSnapshot())return;
   metrics.completionInvalidations+=1;
   // Preserve the controller's candidate/revalidation state. Only the stale visual
-  // publication is invalidated; accept() must still re-check an exact snapshot.
+  // publication is invalidated; strict accept() may still defer to an exact snapshot.
   popup.hidden=true;
   popup.replaceChildren();
   editor.setAttribute("aria-expanded","false");
@@ -74,6 +74,18 @@ for(const eventName of[
   document.addEventListener(eventName,invalidateVisibleDocumentState);
 }
 document.addEventListener("glyph-editor-lexical-index-updated",verifyVisibleExactness);
+
+const originalAccept=completion.accept?.bind(completion);
+if(originalAccept)completion.accept=()=>{
+  if(!completionNeedsExactSnapshot()||exactSnapshot())return originalAccept();
+  const context=completion.context?.();
+  // Strict contexts intentionally retain the existing deferred exact-snapshot
+  // validation path. Non-strict document candidates must never be accepted stale.
+  if(context?.strict)return originalAccept();
+  metrics.staleAcceptBlocks+=1;
+  hideCompletionPublication();
+  return false;
+};
 
 const originalIdentifier=highlightApi.identifier?.bind(highlightApi);
 const originalMatchCount=highlightApi.matchCount?.bind(highlightApi);
