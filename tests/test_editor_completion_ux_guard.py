@@ -36,6 +36,13 @@ class EditorCompletionUxGuardTests(unittest.TestCase):
         self.assertIn('status.setAttribute("aria-live","polite")', _SCRIPT)
         self.assertIn("completion candidate", _SCRIPT)
 
+    def test_completion_publication_requires_exact_lexical_revision(self) -> None:
+        self.assertIn("function exactSnapshot()", _SCRIPT)
+        self.assertIn("function blockStalePublication()", _SCRIPT)
+        self.assertIn("if(popup.hidden||exactSnapshot())return false", _SCRIPT)
+        self.assertIn("metrics.stalePublicationBlocks+=1", _SCRIPT)
+        self.assertIn("if(blockStalePublication())return", _SCRIPT)
+
     def test_escape_dismissal_survives_caret_navigation_until_input_or_explicit_open(self) -> None:
         self.assertIn("suppressAutomaticReopen=true", _SCRIPT)
         self.assertIn('event.code==="Space"', _SCRIPT)
@@ -43,10 +50,14 @@ class EditorCompletionUxGuardTests(unittest.TestCase):
         self.assertIn("blockSuppressedReopen", _SCRIPT)
         self.assertIn("completion.close()", _SCRIPT)
 
-    def test_worker_recovery_is_per_failure_cycle_not_page_lifetime(self) -> None:
+    def test_worker_recovery_is_bounded_per_failure_cycle_and_exact_success_resets_budget(self) -> None:
+        self.assertIn("const MAX_RECOVERY_ATTEMPTS=3", _SCRIPT)
         self.assertIn("recoveryFailures=0", _SCRIPT)
-        self.assertIn("recoveryIssued=false", _SCRIPT)
-        self.assertIn("if(recoveryFailures===1&&!recoveryIssued)", _SCRIPT)
+        self.assertIn("recoveryAttempts=0", _SCRIPT)
+        self.assertIn("recoveryAttempts>=MAX_RECOVERY_ATTEMPTS", _SCRIPT)
+        self.assertIn("recoveryAttempts+=1", _SCRIPT)
+        self.assertIn("metrics.recoveryExhausted+=1", _SCRIPT)
+        self.assertNotIn("recoveryFailures===1", _SCRIPT)
         self.assertIn("lexicalIndex.invalidate?.()", _SCRIPT)
         self.assertIn('document.addEventListener("glyph-editor-lexical-index-updated"', _SCRIPT)
         self.assertIn("if(event.detail?.exact)resetRecovery()", _SCRIPT)
