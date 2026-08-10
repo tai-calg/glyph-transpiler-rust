@@ -21,10 +21,11 @@ const MARKER="glyph-diagram-gui-ux-continuity-v1";
 if(window.glyphDiagramGuiUxContinuity?.marker===MARKER)return;
 const LINE_JUMP_SELECTOR=".diagnostic[data-line],.analysis-item[data-line],.graph-node[data-line],.type-card[data-line],.edge-label[data-line]";
 const MODAL_FOCUSABLE='button:not([disabled]),[href],input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
-let enhanceFrame=0,pendingNodeFocusName="",pendingNodeFocusTimer=0;
+let enhanceFrame=0,pendingNodeFocus=null,pendingNodeFocusTimer=0,pendingControlFocus=null;
 const nodeName=node=>node?.querySelector?.(".state-name")?.textContent?.trim()||"";
 const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
 const english=()=>String(document.documentElement.lang||"ja").startsWith("en");
+const machineIndex=()=>String(document.getElementById("machine-select")?.value||"0");
 
 function lineJumpLabel(element,line){
   const subject=(element.getAttribute("title")||element.querySelector?.(".node-name,.type-name")?.textContent||element.textContent||"").trim().replace(/\s+/g," ");
@@ -109,30 +110,45 @@ function setupSettingsFocus(){
   }));
 }
 function clearPendingNodeFocus(){
-  pendingNodeFocusName="";
+  pendingNodeFocus=null;
   if(pendingNodeFocusTimer){clearTimeout(pendingNodeFocusTimer);pendingNodeFocusTimer=0}
 }
 function armNodeFocus(name){
   if(!name)return;
-  pendingNodeFocusName=name;
+  pendingNodeFocus={name,machineIndex:machineIndex()};
   if(pendingNodeFocusTimer)clearTimeout(pendingNodeFocusTimer);
   pendingNodeFocusTimer=setTimeout(clearPendingNodeFocus,2000);
 }
 function restoreNodeFocus(){
-  if(!pendingNodeFocusName)return;
-  const expected=pendingNodeFocusName;
+  if(!pendingNodeFocus)return;
+  const expected=pendingNodeFocus;
   requestAnimationFrame(()=>{
-    if(pendingNodeFocusName!==expected)return;
-    const target=[...document.querySelectorAll(".state-node")].find(node=>nodeName(node)===expected);
+    if(pendingNodeFocus!==expected)return;
+    if(machineIndex()!==expected.machineIndex){clearPendingNodeFocus();return}
+    const target=[...document.querySelectorAll(".state-node")].find(node=>nodeName(node)===expected.name);
     if(!target)return;
     const active=document.activeElement;
     if(active===target){clearPendingNodeFocus();return}
     const activeStateName=active?.classList?.contains("state-node")?nodeName(active):"";
-    if(activeStateName===expected){clearPendingNodeFocus();return}
+    if(activeStateName===expected.name){clearPendingNodeFocus();return}
     const neutral=!active||active===document.body||active===document.documentElement||!active.isConnected;
     if(neutral)target.focus({preventScroll:true});
     clearPendingNodeFocus();
   });
+}
+function armControlFocus(target){
+  if(!target||!(target.id==="machine-select"||target.id==="system-select"))return;
+  pendingControlFocus={id:target.id,value:String(target.value||"")};
+  requestAnimationFrame(restoreControlFocus);
+}
+function restoreControlFocus(){
+  if(!pendingControlFocus)return;
+  const expected=pendingControlFocus,target=document.getElementById(expected.id);
+  if(!target||String(target.value||"")!==expected.value)return;
+  const active=document.activeElement;
+  const neutral=!active||active===document.body||active===document.documentElement||!active.isConnected;
+  if(neutral)target.focus({preventScroll:true});
+  pendingControlFocus=null;
 }
 function editorIndentBlock(editor,runtime,shift){
   const source=editor.value,start=editor.selectionStart||0,end=editor.selectionEnd||start;
@@ -167,7 +183,7 @@ function handleEditorTab(event){
   if(event.shiftKey)window.GlyphEditorCompletion?.close?.();
   editorIndentBlock(editor,runtime,event.shiftKey);
 }
-function enhance(){enhanceFrame=0;setupLineJumps();setupCanvasKeyboard();setupSettingsFocus();restoreNodeFocus()}
+function enhance(){enhanceFrame=0;setupLineJumps();setupCanvasKeyboard();setupSettingsFocus();restoreNodeFocus();restoreControlFocus()}
 function scheduleEnhance(){if(enhanceFrame)return;enhanceFrame=requestAnimationFrame(enhance)}
 
 window.addEventListener("keydown",handleEditorTab,true);
@@ -186,13 +202,14 @@ window.addEventListener("keydown",event=>{
   if(!node||document.activeElement!==node)return;
   armNodeFocus(nodeName(node));
 },true);
+window.addEventListener("change",event=>armControlFocus(event.target),true);
 
-document.addEventListener("glyph-transition-layout-transaction-ready",()=>{scheduleEnhance();restoreNodeFocus()});
-document.addEventListener("glyph-transition-layout-ready",()=>{scheduleEnhance();restoreNodeFocus()});
+document.addEventListener("glyph-transition-layout-transaction-ready",()=>{scheduleEnhance();restoreNodeFocus();restoreControlFocus()});
+document.addEventListener("glyph-transition-layout-ready",()=>{scheduleEnhance();restoreNodeFocus();restoreControlFocus()});
 for(const eventName of["glyph-state-transition-ir-v3-labels-ready","glyph-locale-changed"]){document.addEventListener(eventName,scheduleEnhance)}
 document.addEventListener("change",scheduleEnhance);
-new MutationObserver(()=>{scheduleEnhance();restoreNodeFocus()}).observe(document.getElementById("view")||document.body,{childList:true,subtree:true});
-window.glyphDiagramGuiUxContinuity={marker:MARKER,version:3,refresh:scheduleEnhance,pendingNodeFocus:()=>pendingNodeFocusName};
+new MutationObserver(()=>{scheduleEnhance();restoreNodeFocus();restoreControlFocus()}).observe(document.getElementById("view")||document.body,{childList:true,subtree:true});
+window.glyphDiagramGuiUxContinuity={marker:MARKER,version:4,refresh:scheduleEnhance,pendingNodeFocus:()=>pendingNodeFocus?.name||"",pendingControlFocus:()=>pendingControlFocus?{...pendingControlFocus}:null};
 enhance();requestAnimationFrame(enhance);
 })();
 </script>
