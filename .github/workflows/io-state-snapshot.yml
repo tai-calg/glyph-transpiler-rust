@@ -83,6 +83,7 @@ jobs:
           # Editor and GUI features touched by this change run before the README image baseline.
           run_node tests/verify_editor_completion.mjs build/editor-completion/verify.log
           run_node tests/verify_editor_completion_gui_ux.mjs build/editor-completion-gui-ux/verify.log
+          run_node tests/verify_editor_completion_fuzzy.mjs build/editor-completion-gui-ux/fuzzy.log
           run_node tests/verify_editor_completion_exact_revision_recovery.mjs build/editor-completion-gui-ux/exact-revision-recovery.log
           run_node tests/verify_editor_worker_transport_failures.mjs build/editor-completion-gui-ux/worker-transport-failures.log
           run_node tests/verify_editor_composition_replacement_worker_race.mjs build/editor-completion-gui-ux/composition-replacement-worker-race.log
