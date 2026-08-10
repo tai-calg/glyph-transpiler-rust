@@ -90,6 +90,7 @@ try {
   });
 
   const machineBase = `+Mode=Idle|Running|Stopping|Faulted
++Other=Falter|Fallback
 *Input(value:I)
 *System(mode:Mode)
 >step(state:System,input:Input):System=state
@@ -157,9 +158,16 @@ machine Controller(state:System,input:Input)
     assert.equal(state.context?.id, "machine-success", JSON.stringify({ testCase, state }));
     assert.equal(state.candidate.origin, "document", JSON.stringify({ testCase, state }));
     assert.equal(state.candidate.matchKind, testCase.expectedKind, JSON.stringify({ testCase, state }));
+    assert.equal(state.candidates.some(candidate => candidate.text === "Falter"), false, JSON.stringify({ testCase, state }));
+    assert.equal(state.candidates.some(candidate => candidate.text === "Fallback"), false, JSON.stringify({ testCase, state }));
     if (testCase.expectedKind === "fuzzy") assert(Number(state.candidate.matchEdits || 0) <= 3, JSON.stringify({ testCase, state }));
     typoResults.push({ ...testCase, latencyMs: state.latencyMs, candidate: state.candidate });
   }
+
+  const strictOwner = await typeAndFind(machineBase, "Fal", "Faulted");
+  assert.equal(strictOwner.context?.owner, "Mode", JSON.stringify(strictOwner));
+  assert.equal(strictOwner.context?.strict, true, JSON.stringify(strictOwner));
+  assert.equal(strictOwner.candidates.some(candidate => candidate.text === "Falter" || candidate.text === "Fallback"), false, JSON.stringify(strictOwner));
 
   const acceptState = await typeAndFind(machineBase, "Ftd", "Faulted");
   const faultedIndex = acceptState.candidates.findIndex(candidate => candidate.text === "Faulted");
@@ -185,6 +193,7 @@ machine Controller(state:System,input:Input)
       transposition: match("Fual", "Faulted"),
       sparse: match("Ftd", "Faulted"),
       camel: match("MC", "MotorCommand"),
+      repeatedStart: match("MC", "MegaMotorCommand"),
       unrelated: match("zzz", "Faulted"),
     };
   });
@@ -194,6 +203,7 @@ machine Controller(state:System,input:Input)
   }
   assert.equal(directMatches.sparse?.kind, "subsequence", JSON.stringify(directMatches));
   assert.equal(directMatches.camel?.kind, "subsequence", JSON.stringify(directMatches));
+  assert.equal(directMatches.repeatedStart?.kind, "subsequence", JSON.stringify(directMatches));
   assert.equal(directMatches.unrelated, null, JSON.stringify(directMatches));
 
   const symbolLines = Array.from({ length: 4200 }, (_, index) => `>Symbol${String(index).padStart(4, "0")}():I=0`).join("\n");
@@ -205,6 +215,7 @@ machine Controller(state:System,input:Input)
   assert.deepEqual(browserErrors, [], browserErrors.join("\n"));
   console.log(JSON.stringify({
     typoResults,
+    strictOwner: { context: strictOwner.context, candidates: strictOwner.candidates.map(candidate => candidate.text) },
     fuzzyAcceptance: true,
     staticKeywordFuzzy: { latencyMs: keyword.latencyMs, candidate: keyword.candidate },
     directMatches,
