@@ -18,6 +18,11 @@ from .tooling_delivery_v2 import install_tooling_delivery_v2 as _install_tooling
 _install_tooling_delivery_v2()
 del _install_tooling_delivery_v2
 
+from .editor_lexical_worker_fast import install_fast_lexical_worker as _install_fast_lexical_worker
+
+_install_fast_lexical_worker()
+del _install_fast_lexical_worker
+
 from .compiler import GlyphError
 from .frontend import compile_file, compile_source, parse_program
 from .incremental import CompilationSnapshot, IncrementalCompiler, IncrementalResult
@@ -38,6 +43,9 @@ from .temporal_sigils import reject_reserved_temporal_macro_names
 # selector without duplicating the Studio document.
 from . import studio as _studio_module
 from .diagnostic_i18n import localize_message_payload as _localize_message_payload
+from .editor_completion_performance import (
+    enhance_editor_completion_performance_html as _enhance_editor_completion_performance_html,
+)
 from .studio_locale import enhance_studio_locale_html as _enhance_studio_locale_html
 
 _original_studio_snapshot_to_dict = StudioSnapshot.to_dict
@@ -57,7 +65,9 @@ _localized_studio_snapshot_to_dict.__glyph_localized__ = True
 if not getattr(StudioSnapshot.to_dict, "__glyph_localized__", False):
     StudioSnapshot.to_dict = _localized_studio_snapshot_to_dict
 
-_studio_module.STUDIO_HTML = _enhance_studio_locale_html(_studio_module.STUDIO_HTML)
+_studio_module.STUDIO_HTML = _enhance_editor_completion_performance_html(
+    _enhance_studio_locale_html(_studio_module.STUDIO_HTML)
+)
 _studio_module._studio_ui.STUDIO_HTML = _studio_module.STUDIO_HTML
 
 
