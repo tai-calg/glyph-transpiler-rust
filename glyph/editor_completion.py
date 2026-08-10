@@ -142,17 +142,27 @@ function preferenceIndex(candidate,classification){
   for(const kind of candidate.kinds||[candidate.kind]){const index=order.indexOf(kind);if(index>=0)best=Math.min(best,index)}
   return best;
 }
+function matchTier(candidate){
+  const kind=candidate?.matchKind;
+  if(kind==="empty"||kind==="prefix")return 0;
+  if(kind==="case-prefix")return 1;
+  if(kind==="fuzzy")return 2;
+  if(kind==="subsequence")return 3;
+  return 4;
+}
 function compareCandidates(left,right,classification){
   const exactLeft=classification?.exactText&&left.text===classification.exactText?1:0;
   const exactRight=classification?.exactText&&right.text===classification.exactText?1:0;
   if(exactLeft!==exactRight)return exactRight-exactLeft;
+  const leftTier=matchTier(left),rightTier=matchTier(right);
+  if(leftTier!==rightTier)return leftTier-rightTier;
+  const leftMatch=Number(left.matchScore||0),rightMatch=Number(right.matchScore||0);
+  if(leftMatch!==rightMatch)return leftMatch-rightMatch;
   const leftPref=preferenceIndex(left,classification),rightPref=preferenceIndex(right,classification);
   if(leftPref!==rightPref)return leftPref-rightPref;
   const scopeStart=Number(classification?.scopeStart??-1);
   const leftScope=scopeStart>=0&&left.recent>=scopeStart?1:0,rightScope=scopeStart>=0&&right.recent>=scopeStart?1:0;
   if(leftScope!==rightScope)return rightScope-leftScope;
-  const leftMatch=Number(left.matchScore||0),rightMatch=Number(right.matchScore||0);
-  if(leftMatch!==rightMatch)return leftMatch-rightMatch;
   if(left.origin!==right.origin)return left.origin==="document"?-1:1;
   return right.recent-left.recent||right.count-left.count||left.added-right.added||(left.text<right.text?-1:left.text>right.text?1:0);
 }
