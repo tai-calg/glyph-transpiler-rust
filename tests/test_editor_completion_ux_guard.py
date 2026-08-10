@@ -36,12 +36,19 @@ class EditorCompletionUxGuardTests(unittest.TestCase):
         self.assertIn('status.setAttribute("aria-live","polite")', _SCRIPT)
         self.assertIn("completion candidate", _SCRIPT)
 
-    def test_completion_publication_requires_exact_lexical_revision(self) -> None:
+    def test_document_completion_publication_requires_exact_lexical_revision(self) -> None:
         self.assertIn("function exactSnapshot()", _SCRIPT)
+        self.assertIn("function publicationNeedsExactSnapshot()", _SCRIPT)
+        self.assertIn('candidate?.origin==="document"', _SCRIPT)
         self.assertIn("function blockStalePublication()", _SCRIPT)
-        self.assertIn("if(popup.hidden||exactSnapshot())return false", _SCRIPT)
+        self.assertIn("if(popup.hidden||!publicationNeedsExactSnapshot()||exactSnapshot())return false", _SCRIPT)
         self.assertIn("metrics.stalePublicationBlocks+=1", _SCRIPT)
+        self.assertIn("hideStalePublication()", _SCRIPT)
         self.assertIn("if(blockStalePublication())return", _SCRIPT)
+
+    def test_static_candidates_are_not_coupled_to_lexical_worker_revision(self) -> None:
+        self.assertIn("!publicationNeedsExactSnapshot()", _SCRIPT)
+        self.assertNotIn("if(popup.hidden||exactSnapshot())return false", _SCRIPT)
 
     def test_escape_dismissal_survives_caret_navigation_until_input_or_explicit_open(self) -> None:
         self.assertIn("suppressAutomaticReopen=true", _SCRIPT)
