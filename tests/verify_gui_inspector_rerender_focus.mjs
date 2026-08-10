@@ -51,7 +51,7 @@ try {
   await page.goto(url, { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => document.querySelector("#status")?.textContent === "ready"
     && window.glyphDiagramGuiUxGuard?.version === 4
-    && typeof globalThis.render === "function");
+    && window.glyphDiagramIdentityStamp?.version === 1);
   await page.locator('.tab[data-tab="state"]').click();
   await page.waitForFunction(() => {
     const stage = document.querySelector(".transition-io-cluster")?.closest(".graph-stage");
@@ -72,28 +72,34 @@ try {
   await page.waitForFunction(() => !document.querySelector(".transition-label-inspector")?.hidden
     && document.activeElement?.classList.contains("transition-label-inspector-close"));
 
-  const rerender = await page.evaluate(({ id, digest }) => {
+  const replacement = await page.evaluate(({ id, digest }) => {
     const oldCluster = [...document.querySelectorAll(".transition-io-cluster")].find(item => item.dataset.transitionId === id);
-    if (!oldCluster) throw new Error("transition opener disappeared before rerender");
-    oldCluster.dataset.inspectorRerenderOld = "true";
-    globalThis.render();
+    if (!oldCluster) throw new Error("transition opener disappeared before replacement");
+    const next = oldCluster.cloneNode(true);
+    next.dataset.inspectorRerenderReplacement = "true";
+    delete next.dataset.guiUxInspectorReady;
+    oldCluster.replaceWith(next);
     return {
       oldConnectedImmediately: oldCluster.isConnected,
+      replacementConnected: next.isConnected,
+      replacementDigest: next.closest(".graph-stage")?.dataset.diagramDigest || "",
       inspectorStillOpen: !document.querySelector(".transition-label-inspector")?.hidden,
       digest,
     };
   }, identity);
-  assert.equal(rerender.oldConnectedImmediately, false, "base render did not replace the original transition opener");
-  assert.equal(rerender.inspectorStillOpen, true, "diagram rerender unexpectedly closed the transition inspector");
+  assert.equal(replacement.oldConnectedImmediately, false, "original transition opener remained connected after DOM replacement");
+  assert.equal(replacement.replacementConnected, true, "replacement transition opener is not connected");
+  assert.equal(replacement.replacementDigest, identity.digest, "replacement transition opener changed diagram identity");
+  assert.equal(replacement.inspectorStillOpen, true, "DOM replacement unexpectedly closed the transition inspector");
 
   await page.waitForFunction(({ id, digest }) => {
-    const replacement = [...document.querySelectorAll(".transition-io-cluster")].find(item => item.dataset.transitionId === id);
-    const stage = replacement?.closest(".graph-stage");
-    return replacement
-      && replacement.dataset.inspectorRerenderOld !== "true"
-      && stage?.dataset.diagramDigest === digest
-      && stage.dataset.transitionLayoutState === "ready";
-  }, identity, { timeout: 60_000 });
+    const replacementCluster = [...document.querySelectorAll(".transition-io-cluster")].find(item => (
+      item.dataset.transitionId === id && item.dataset.inspectorRerenderReplacement === "true"
+    ));
+    return replacementCluster
+      && replacementCluster.dataset.guiUxInspectorReady === "true"
+      && replacementCluster.closest(".graph-stage")?.dataset.diagramDigest === digest;
+  }, identity, { timeout: 10_000 });
 
   await page.keyboard.press("Escape");
   await page.waitForFunction(({ id, digest }) => {
@@ -101,6 +107,7 @@ try {
     return document.querySelector(".transition-label-inspector")?.hidden === true
       && active?.classList?.contains("transition-io-cluster")
       && active.dataset.transitionId === id
+      && active.dataset.inspectorRerenderReplacement === "true"
       && active.closest(".graph-stage")?.dataset.diagramDigest === digest;
   }, identity, { timeout: 10_000 });
 
@@ -109,7 +116,8 @@ try {
     transitionId: identity.id,
     diagramDigest: identity.digest,
     originalOpenerDisconnected: true,
-    inspectorRemainedOpenAcrossRerender: true,
+    replacementOpenerBound: true,
+    inspectorRemainedOpenAcrossReplacement: true,
     replacementOpenerFocusRestored: true,
   }));
 } finally {
