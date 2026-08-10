@@ -51,6 +51,49 @@ try {
     if (message.type() === "error") browserErrors.push(`console: ${message.text()}`);
   });
 
+  await page.addInitScript(() => {
+    const NativeWorker = window.Worker;
+    const control = {
+      constructors: 0,
+      posts: 0,
+      injectedFailures: 0,
+      failuresRemaining: 0,
+      delayMs: 0,
+    };
+    window.__glyphWorkerControl = control;
+
+    class ControlledWorker {
+      constructor(url, options) {
+        this.url = String(url || "");
+        this._native = new NativeWorker(url, options);
+        this._onmessage = null;
+        this._onerror = null;
+        if (this.url.includes("editor-lexical-worker.js")) control.constructors += 1;
+        this._native.onmessage = event => this._onmessage?.(event);
+        this._native.onerror = event => this._onerror?.(event);
+      }
+      set onmessage(handler) { this._onmessage = handler; }
+      get onmessage() { return this._onmessage; }
+      set onerror(handler) { this._onerror = handler; }
+      get onerror() { return this._onerror; }
+      postMessage(message) {
+        const lexical = this.url.includes("editor-lexical-worker.js");
+        if (lexical) control.posts += 1;
+        if (lexical && control.failuresRemaining > 0) {
+          control.failuresRemaining -= 1;
+          control.injectedFailures += 1;
+          setTimeout(() => this._onerror?.({ message: "synthetic lexical Worker failure" }), 0);
+          return;
+        }
+        const deliver = () => this._native.postMessage(message);
+        if (lexical && control.delayMs > 0) setTimeout(deliver, control.delayMs);
+        else deliver();
+      }
+      terminate() { return this._native.terminate(); }
+    }
+    window.Worker = ControlledWorker;
+  });
+
   await page.goto(url, { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => document.querySelector("#status")?.textContent === "ready");
   await page.waitForFunction(() => (
@@ -58,11 +101,13 @@ try {
     && window.GlyphEditorLexicalIndex?.version === 2
     && window.GlyphEditorCompletion?.version === 2
     && window.glyphEditorCompletionUxGuard?.version === 1
+    && window.glyphEditorExactRevisionGuard?.version === 1
   ));
-  await page.waitForFunction(() => {
+  const waitForExactIndex = () => page.waitForFunction(() => {
     const snapshot = window.GlyphEditorLexicalIndex?.snapshot?.();
     return snapshot && Number(snapshot.revision) === Number(window.GlyphEditorDocument?.revision?.());
-  });
+  }, null, { timeout: 15_000 });
+  await waitForExactIndex();
 
   await page.evaluate(() => {
     const editor = document.getElementById("editor");
@@ -75,6 +120,7 @@ try {
       visibleAt: 0,
       visibleRuntimeRevision: -1,
       visibleLexicalRevision: -1,
+      staleVisibleObservations: 0,
     };
     editor.addEventListener("input", () => {
       const probe = window.__glyphExactCompletionProbe;
@@ -87,10 +133,14 @@ try {
     const observer = new MutationObserver(() => {
       const probe = window.__glyphExactCompletionProbe;
       const snapshot = lexical.snapshot?.();
-      if (popup.hidden || !popup.querySelector('[role="option"]') || !snapshot || probe.visibleAt) return;
+      if (popup.hidden || !popup.querySelector('[role="option"]') || !snapshot) return;
       const runtimeRevision = Number(runtime.revision());
       const lexicalRevision = Number(snapshot.revision);
-      if (runtimeRevision !== lexicalRevision) return;
+      if (runtimeRevision !== lexicalRevision) {
+        probe.staleVisibleObservations += 1;
+        return;
+      }
+      if (probe.visibleAt) return;
       probe.visibleAt = performance.now();
       probe.visibleRuntimeRevision = runtimeRevision;
       probe.visibleLexicalRevision = lexicalRevision;
@@ -100,6 +150,7 @@ try {
   });
 
   const editor = page.locator("#editor");
+  const originalSource = await editor.inputValue();
   await editor.focus();
   await editor.evaluate(element => element.setSelectionRange(element.value.length, element.value.length));
   const completionMetricsBefore = await page.evaluate(() => window.GlyphEditorCompletion.metrics());
@@ -125,55 +176,159 @@ try {
   }, completionMetricsBefore);
   assert.equal(publication.visibleRuntimeRevision, publication.inputRevision, JSON.stringify(publication));
   assert.equal(publication.visibleLexicalRevision, publication.inputRevision, JSON.stringify(publication));
+  assert.equal(publication.staleVisibleObservations, 0, JSON.stringify(publication));
   assert(publication.latencyMs >= 0 && publication.latencyMs < POPUP_BUDGET_MS, JSON.stringify(publication));
   assert(publication.staleDocumentQueryBlocks >= 1, `stale document query was not suppressed: ${JSON.stringify(publication)}`);
 
-  await page.keyboard.press("Escape");
-  await page.waitForFunction(() => document.getElementById("glyph-completion-popup").hidden);
-
-  const recovery = await page.evaluate(async () => {
-    const lexical = window.GlyphEditorLexicalIndex;
+  // Keep the lexical Worker stale long enough to observe the post-input window directly.
+  await page.evaluate(() => { window.__glyphWorkerControl.delayMs = 650; });
+  await page.keyboard.type("o");
+  const stalePopupWindow = await page.evaluate(() => {
+    const popup = document.getElementById("glyph-completion-popup");
     const runtime = window.GlyphEditorDocument;
-    const original = { snapshot: lexical.snapshot, metrics: lexical.metrics, invalidate: lexical.invalidate };
-    let invalidations = 0;
-    let exact = false;
-    lexical.snapshot = () => exact ? { revision: runtime.revision() } : null;
-    lexical.metrics = () => ({ inFlight: false });
-    lexical.invalidate = () => { invalidations += 1; };
-    const fail = () => document.dispatchEvent(new CustomEvent("glyph-editor-lexical-index-error", { detail: { message: "synthetic repeated worker failure" } }));
-    const succeed = () => document.dispatchEvent(new CustomEvent("glyph-editor-lexical-index-updated", { detail: { exact: true, revision: runtime.revision() } }));
-    const waitForInvalidations = async target => {
-      const deadline = performance.now() + 1800;
-      while (invalidations < target && performance.now() < deadline) {
-        await new Promise(resolve => setTimeout(resolve, 25));
-      }
-      return invalidations;
+    const snapshot = window.GlyphEditorLexicalIndex.snapshot?.();
+    return {
+      popupHidden: popup.hidden,
+      runtimeRevision: Number(runtime.revision()),
+      lexicalRevision: Number(snapshot?.revision ?? -1),
+      activeIdentifier: document.getElementById("editor").dataset.activeIdentifier || "",
+      exactGuard: window.glyphEditorExactRevisionGuard.metrics(),
     };
-
-    fail();
-    const afterFirstFailure = await waitForInvalidations(1);
-    fail();
-    const afterSecondFailure = await waitForInvalidations(2);
-    exact = true;
-    succeed();
-    await new Promise(resolve => setTimeout(resolve, 40));
-    const metrics = window.glyphEditorCompletionUxGuard.metrics();
-
-    lexical.snapshot = original.snapshot;
-    lexical.metrics = original.metrics;
-    lexical.invalidate = original.invalidate;
-    return { afterFirstFailure, afterSecondFailure, metrics };
   });
+  assert.equal(stalePopupWindow.popupHidden, true, JSON.stringify(stalePopupWindow));
+  assert.notEqual(stalePopupWindow.runtimeRevision, stalePopupWindow.lexicalRevision, JSON.stringify(stalePopupWindow));
+  assert.equal(stalePopupWindow.activeIdentifier, "", JSON.stringify(stalePopupWindow));
+  await waitForExactIndex();
+  await page.evaluate(() => { window.__glyphWorkerControl.delayMs = 0; });
+  window;
 
-  assert.equal(recovery.afterFirstFailure, 1, JSON.stringify(recovery));
-  assert.equal(recovery.afterSecondFailure, 2, JSON.stringify(recovery));
-  assert.equal(recovery.metrics.recoveryFailures, 0, JSON.stringify(recovery));
-  assert.equal(recovery.metrics.recoveryAttempts, 0, JSON.stringify(recovery));
-  assert.equal(recovery.metrics.recoveryExhausted, 0, JSON.stringify(recovery));
-  assert(recovery.metrics.guardRecoveries >= 2, JSON.stringify(recovery));
+  // Exact identifier highlighting must disappear synchronously on the next edit.
+  await page.evaluate(source => {
+    const editor = document.getElementById("editor");
+    editor.value = source;
+    const position = source.indexOf("MotorCommand");
+    if (position < 0) throw new Error("MotorCommand missing from exact-revision fixture");
+    editor.focus();
+    editor.setSelectionRange(position + 2, position + 2);
+  }, originalSource);
+  await waitForExactIndex();
+  await page.evaluate(() => window.glyphEditorIdentifierHighlight.refresh());
+  await page.waitForFunction(() => document.getElementById("editor")?.dataset.activeIdentifier === "MotorCommand");
+  await page.evaluate(() => { window.__glyphWorkerControl.delayMs = 650; });
+  await page.keyboard.type("X");
+  const staleHighlightWindow = await page.evaluate(() => {
+    const editor = document.getElementById("editor");
+    const snapshot = window.GlyphEditorLexicalIndex.snapshot?.();
+    return {
+      activeIdentifier: editor.dataset.activeIdentifier || "",
+      apiIdentifier: window.glyphEditorIdentifierHighlight.identifier(),
+      matchCount: window.glyphEditorIdentifierHighlight.matchCount(),
+      runtimeRevision: Number(window.GlyphEditorDocument.revision()),
+      lexicalRevision: Number(snapshot?.revision ?? -1),
+    };
+  });
+  assert.equal(staleHighlightWindow.activeIdentifier, "", JSON.stringify(staleHighlightWindow));
+  assert.equal(staleHighlightWindow.apiIdentifier, "", JSON.stringify(staleHighlightWindow));
+  assert.equal(staleHighlightWindow.matchCount, 0, JSON.stringify(staleHighlightWindow));
+  assert.notEqual(staleHighlightWindow.runtimeRevision, staleHighlightWindow.lexicalRevision, JSON.stringify(staleHighlightWindow));
+  await waitForExactIndex();
+  await page.evaluate(() => { window.__glyphWorkerControl.delayMs = 0; });
+
+  // Restore a known valid source before exercising actual Worker.onerror recovery.
+  await page.evaluate(source => {
+    const editor = document.getElementById("editor");
+    editor.value = source;
+    editor.focus();
+    editor.setSelectionRange(editor.value.length, editor.value.length);
+  }, originalSource);
+  await waitForExactIndex();
+
+  async function runRecoverableFailureCycle() {
+    const before = await page.evaluate(() => ({
+      constructors: window.__glyphWorkerControl.constructors,
+      cycles: window.GlyphEditorLexicalIndex.metrics().recoveryCycles,
+    }));
+    await page.evaluate(() => {
+      window.__glyphWorkerControl.failuresRemaining = 1;
+      window.GlyphEditorLexicalIndex.invalidate();
+    });
+    await page.waitForFunction(expected => {
+      const lexical = window.GlyphEditorLexicalIndex;
+      const runtime = window.GlyphEditorDocument;
+      const snapshot = lexical.snapshot?.();
+      const metrics = lexical.metrics();
+      return window.__glyphWorkerControl.constructors >= expected.constructors + 1
+        && metrics.recoveryCycles >= expected.cycles + 1
+        && metrics.recoveryFailures === 0
+        && metrics.recoveryAttempts === 0
+        && !metrics.recoveryExhausted
+        && snapshot
+        && Number(snapshot.revision) === Number(runtime.revision());
+    }, before, { timeout: 5000 });
+    return page.evaluate(beforeState => ({
+      constructorsDelta: window.__glyphWorkerControl.constructors - beforeState.constructors,
+      metrics: window.GlyphEditorLexicalIndex.metrics(),
+    }), before);
+  }
+
+  const recoveryCycle1 = await runRecoverableFailureCycle();
+  const recoveryCycle2 = await runRecoverableFailureCycle();
+  assert.equal(recoveryCycle1.constructorsDelta, 1, JSON.stringify(recoveryCycle1));
+  assert.equal(recoveryCycle2.constructorsDelta, 1, JSON.stringify(recoveryCycle2));
+  assert.equal(recoveryCycle2.metrics.recoveryFailures, 0, JSON.stringify(recoveryCycle2));
+  assert.equal(recoveryCycle2.metrics.recoveryAttempts, 0, JSON.stringify(recoveryCycle2));
+
+  // Permanent failure must consume exactly the bounded recovery budget, then remain degraded
+  // even while further editor input continues to schedule lexical work.
+  const permanentBefore = await page.evaluate(() => ({
+    constructors: window.__glyphWorkerControl.constructors,
+    exhausted: window.GlyphEditorLexicalIndex.metrics().recoveryExhausted,
+  }));
+  assert.equal(permanentBefore.exhausted, false);
+  await page.evaluate(() => {
+    window.__glyphWorkerControl.failuresRemaining = 20;
+    window.GlyphEditorLexicalIndex.invalidate();
+  });
+  await page.waitForFunction(() => window.GlyphEditorLexicalIndex.metrics().recoveryExhausted === true, null, { timeout: 5000 });
+  const exhausted = await page.evaluate(beforeState => ({
+    constructorsDelta: window.__glyphWorkerControl.constructors - beforeState.constructors,
+    control: { ...window.__glyphWorkerControl },
+    lexical: window.GlyphEditorLexicalIndex.metrics(),
+    popupHidden: document.getElementById("glyph-completion-popup").hidden,
+    activeIdentifier: document.getElementById("editor").dataset.activeIdentifier || "",
+  }), permanentBefore);
+  assert.equal(exhausted.constructorsDelta, 3, JSON.stringify(exhausted));
+  assert.equal(exhausted.lexical.recoveryAttempts, 3, JSON.stringify(exhausted));
+  assert.equal(exhausted.lexical.recoveryExhausted, true, JSON.stringify(exhausted));
+  assert.equal(exhausted.popupHidden, true, JSON.stringify(exhausted));
+  assert.equal(exhausted.activeIdentifier, "", JSON.stringify(exhausted));
+
+  const constructorsAtExhaustion = exhausted.control.constructors;
+  await editor.focus();
+  await editor.evaluate(element => element.setSelectionRange(element.value.length, element.value.length));
+  await page.keyboard.type("abcdef", { delay: 5 });
+  await page.waitForTimeout(700);
+  const degradedAfterInput = await page.evaluate(() => ({
+    constructors: window.__glyphWorkerControl.constructors,
+    lexical: window.GlyphEditorLexicalIndex.metrics(),
+    popupHidden: document.getElementById("glyph-completion-popup").hidden,
+    activeIdentifier: document.getElementById("editor").dataset.activeIdentifier || "",
+  }));
+  assert.equal(degradedAfterInput.constructors, constructorsAtExhaustion, JSON.stringify(degradedAfterInput));
+  assert.equal(degradedAfterInput.lexical.recoveryExhausted, true, JSON.stringify(degradedAfterInput));
+  assert.equal(degradedAfterInput.popupHidden, true, JSON.stringify(degradedAfterInput));
+  assert.equal(degradedAfterInput.activeIdentifier, "", JSON.stringify(degradedAfterInput));
+
   assert.deepEqual(browserErrors, [], browserErrors.join("\n"));
-
-  console.log(JSON.stringify({ publication, recovery }));
+  console.log(JSON.stringify({
+    publication,
+    stalePopupWindow,
+    staleHighlightWindow,
+    recoveryCycle1,
+    recoveryCycle2,
+    exhausted,
+    degradedAfterInput,
+  }));
 } finally {
   await browser.close();
   await stopProcess(child);
