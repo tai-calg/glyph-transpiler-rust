@@ -12,7 +12,9 @@ from glyph.editor_lexical_runtime import _SCRIPT as LEXICAL_RUNTIME_SCRIPT
 
 class EditorCompletionFuzzyTests(unittest.TestCase):
     def test_lexical_refresh_is_low_latency_and_query_is_bounded(self) -> None:
-        self.assertIn("const DEBOUNCE_MS=32", LEXICAL_RUNTIME_SCRIPT)
+        self.assertIn("const MIN_DEBOUNCE_MS=6,MID_DEBOUNCE_MS=12,MAX_DEBOUNCE_MS=20", LEXICAL_RUNTIME_SCRIPT)
+        self.assertIn("function adaptiveDebounceMs()", LEXICAL_RUNTIME_SCRIPT)
+        self.assertIn("timer=setTimeout(run,adaptiveDebounceMs())", LEXICAL_RUNTIME_SCRIPT)
         self.assertIn("function insertBounded(rows,candidate,limit)", LEXICAL_RUNTIME_SCRIPT)
         self.assertIn("function finalizeQueryRows(rows)", LEXICAL_RUNTIME_SCRIPT)
         self.assertIn("if(rows.length>=rowLimit)return finalizeQueryRows(rows)", LEXICAL_RUNTIME_SCRIPT)
