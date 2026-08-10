@@ -59,7 +59,7 @@ popup.setAttribute("role","listbox");popup.setAttribute("aria-label","Glyph comp
 const measure=document.createElement("span");measure.className="glyph-completion-measure";measure.setAttribute("aria-hidden","true");document.body.appendChild(measure);
 editor.setAttribute("aria-autocomplete","list");editor.setAttribute("aria-controls",popup.id);editor.setAttribute("aria-expanded","false");
 let candidates=[],selected=0,frame=0,lastContext=null,lastClassification=null,explicit=false,pendingAcceptance=null,dismissedContextKey="";
-const metrics={queries:0,opens:0,accepts:0,staleAcceptRechecks:0,strictStaleAccepts:0,strictStaleDeferrals:0,contextFilteredQueries:0};
+const metrics={queries:0,opens:0,accepts:0,staleAcceptRechecks:0,strictStaleAccepts:0,strictStaleDeferrals:0,contextFilteredQueries:0,staleDocumentQueryBlocks:0};
 const WORD=/[A-Za-z0-9_]/;
 const IDENTIFIER=/^[A-Za-z_][A-Za-z0-9_]*$/;
 
@@ -165,6 +165,10 @@ function mergeCandidates(documentRows,staticRows,classification,context){
   rows.sort((a,b)=>compareCandidates(a,b,classification));
   return rows.slice(0,MAX_RESULTS);
 }
+function exactLexicalSnapshot(){
+  const snapshot=lexicalIndex.snapshot?.();
+  return Boolean(snapshot&&Number(snapshot.revision)===Number(documentRuntime.revision()));
+}
 function update({force=false,allowEmpty=false}={}){
   frame=0;
   if(documentRuntime.compositionActive()){close();return}
@@ -179,7 +183,9 @@ function update({force=false,allowEmpty=false}={}){
   if(Array.isArray(classification.kinds)&&classification.kinds.length){queryOptions.kinds=classification.kinds;metrics.contextFilteredQueries+=1}
   if(classification.owner)queryOptions.owner=classification.owner;
   let rows=[];
-  if(!classification.strict||!Array.isArray(classification.kinds)||classification.kinds.length){rows=lexicalIndex.query(context.prefix,context.caret,queryOptions)}
+  const documentQueryAllowed=!classification.strict||!Array.isArray(classification.kinds)||classification.kinds.length;
+  if(documentQueryAllowed&&exactLexicalSnapshot())rows=lexicalIndex.query(context.prefix,context.caret,queryOptions);
+  else if(documentQueryAllowed)metrics.staleDocumentQueryBlocks+=1;
   const staticRows=contextService.staticCandidates(classification,context.prefix);
   rows=mergeCandidates(rows,staticRows,classification,context);
   if(!rows.length){close();return}
