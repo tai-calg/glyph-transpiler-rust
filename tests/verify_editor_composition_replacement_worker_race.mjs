@@ -231,6 +231,7 @@ try {
   assert.equal(finalState.metrics.recoveryFailures, 0, JSON.stringify(finalState));
   assert.equal(finalState.metrics.recoveryAttempts, 0, JSON.stringify(finalState));
   assert.equal(finalState.metrics.recoveryExhausted, false, JSON.stringify(finalState));
+  assert.equal(finalState.control.constructors, before.constructors + 1, JSON.stringify(finalState));
   assert.equal(finalState.control.injectedFailures, 1, JSON.stringify(finalState));
   assert.equal(finalState.control.delayedOldDeliveries, 1, JSON.stringify(finalState));
   assert.deepEqual(browserErrors, [], browserErrors.join("\n"));
