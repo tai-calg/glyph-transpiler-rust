@@ -206,9 +206,17 @@ function classify(context){
 }
 function staticCandidates(classification,prefix){
   const text=String(prefix??"");
-  return(classification?.static||[])
-    .filter(row=>!text||row.text.startsWith(text))
-    .map(row=>({...row,added:Math.max(0,row.text.length-text.length)}));
+  return(classification?.static||[]).flatMap(row=>{
+    const match=lexicalIndex.matchText?.(text,row.text);
+    if(text&&!match)return[];
+    return[{
+      ...row,
+      added:Math.max(0,row.text.length-text.length),
+      matchKind:match?.kind||"empty",
+      matchScore:Number(match?.score||0),
+      matchEdits:Number(match?.edits||0),
+    }];
+  });
 }
 
 window.GlyphEditorCompletionContext={
