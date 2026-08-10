@@ -87,6 +87,7 @@ jobs:
           run_node tests/verify_editor_completion_exact_revision_recovery.mjs build/editor-completion-gui-ux/exact-revision-recovery.log
           run_node tests/verify_editor_worker_transport_failures.mjs build/editor-completion-gui-ux/worker-transport-failures.log
           run_node tests/verify_editor_composition_replacement_worker_race.mjs build/editor-completion-gui-ux/composition-replacement-worker-race.log
+          run_node tests/verify_editor_completion_degraded_edges.mjs build/editor-completion-gui-ux/degraded-edges.log
           run_node tests/verify_editor_runtime_edges.mjs build/editor-runtime-edges/verify.log
           run_node tests/verify_save_triggered_studio.mjs build/save-triggered-studio/verify.log
           run_node tests/verify_interactive_save_ux.mjs build/interactive-save-ux/verify.log
