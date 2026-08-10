@@ -39,7 +39,9 @@ class EditorExactRevisionRecoveryTests(unittest.TestCase):
     def test_worker_transport_failures_join_the_same_recovery_state_machine(self) -> None:
         self.assertIn("active.onmessageerror=event=>", LEXICAL_RUNTIME_SCRIPT)
         self.assertIn("metrics.transportFailures+=1", LEXICAL_RUNTIME_SCRIPT)
-        self.assertIn('if(result.type!=="snapshot")', LEXICAL_RUNTIME_SCRIPT)
+        self.assertIn("function validSnapshotMessage(result,completed)", LEXICAL_RUNTIME_SCRIPT)
+        self.assertIn("if(!validSnapshotMessage(result,completed))", LEXICAL_RUNTIME_SCRIPT)
+        self.assertIn("revision!==Number(completed.revision)", LEXICAL_RUNTIME_SCRIPT)
         self.assertIn("metrics.invalidMessages+=1", LEXICAL_RUNTIME_SCRIPT)
         self.assertIn("try{active.postMessage(request)}", LEXICAL_RUNTIME_SCRIPT)
         self.assertIn("handleWorkerFailure(active,{message:String(error?.message||error)})", LEXICAL_RUNTIME_SCRIPT)
