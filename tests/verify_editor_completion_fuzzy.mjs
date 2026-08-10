@@ -89,16 +89,20 @@ try {
     }).observe(popup, { childList: true, subtree: true, attributes: true, attributeFilter: ["hidden"] });
   });
 
-  const machineBase = `+Mode=Idle|Running|Stopping|Faulted
+  const machinePrefix = `+Mode=Idle|Running|Stopping|Faulted
 +Other=Falter|Fallback
 *Input(value:I)
 *System(mode:Mode)
 >step(state:System,input:Input):System=state
+~stap(state:System):System=state
+!stpSink(state:System):I=0
 machine Controller(state:System,input:Input)
   select=state.mode
   init=System(Idle)
-  next=step
+`;
+  const machineBase = `${machinePrefix}  next=step
   success=`;
+  const nextBase = `${machinePrefix}  next=`;
 
   async function installSource(source) {
     await page.evaluate(value => {
@@ -169,6 +173,12 @@ machine Controller(state:System,input:Input)
   assert.equal(strictOwner.context?.strict, true, JSON.stringify(strictOwner));
   assert.equal(strictOwner.candidates.some(candidate => candidate.text === "Falter" || candidate.text === "Fallback"), false, JSON.stringify(strictOwner));
 
+  const strictKind = await typeAndFind(nextBase, "stp", "step");
+  assert.equal(strictKind.context?.id, "machine-next", JSON.stringify(strictKind));
+  assert.equal(strictKind.context?.strict, true, JSON.stringify(strictKind));
+  assert.equal(strictKind.candidates.some(candidate => candidate.text === "stap" || candidate.text === "stpSink"), false, JSON.stringify(strictKind));
+  assert(strictKind.candidates.every(candidate => candidate.kinds.includes("EntryFunction")), JSON.stringify(strictKind));
+
   const acceptState = await typeAndFind(machineBase, "Ftd", "Faulted");
   const faultedIndex = acceptState.candidates.findIndex(candidate => candidate.text === "Faulted");
   assert(faultedIndex >= 0);
@@ -182,8 +192,18 @@ machine Controller(state:System,input:Input)
   assert.equal(keyword.candidate.origin, "static", JSON.stringify(keyword));
   assert.equal(keyword.candidate.matchKind, "fuzzy", JSON.stringify(keyword));
 
+  const longSymbol = `Long${"a".repeat(120)}Tail`;
+  const longIndex = Math.floor(longSymbol.length / 2);
+  const longTyped = `${longSymbol.slice(0, longIndex)}x${longSymbol.slice(longIndex + 1)}`;
+  const longFuzzy = await typeAndFind(`>${longSymbol}():I=0\n`, longTyped, longSymbol, LARGE_FUZZY_POPUP_BUDGET_MS);
+  assert.equal(longFuzzy.candidate.matchKind, "fuzzy", JSON.stringify(longFuzzy));
+  assert.equal(longFuzzy.candidate.matchEdits, 1, JSON.stringify(longFuzzy));
+
   const directMatches = await page.evaluate(() => {
     const match = window.GlyphEditorLexicalIndex.matchText;
+    const long256 = `L${"a".repeat(254)}Z`;
+    const middle = Math.floor(long256.length / 2);
+    const long256Typo = `${long256.slice(0, middle)}x${long256.slice(middle + 1)}`;
     return {
       exact: match("Fau", "Faulted"),
       omission: match("Fal", "Faulted"),
@@ -194,11 +214,12 @@ machine Controller(state:System,input:Input)
       sparse: match("Ftd", "Faulted"),
       camel: match("MC", "MotorCommand"),
       repeatedStart: match("MC", "MegaMotorCommand"),
+      long256: match(long256Typo, long256),
       unrelated: match("zzz", "Faulted"),
     };
   });
   assert.equal(directMatches.exact?.kind, "prefix", JSON.stringify(directMatches));
-  for (const key of ["omission", "multipleOmissions", "substitution", "insertion", "transposition"]) {
+  for (const key of ["omission", "multipleOmissions", "substitution", "insertion", "transposition", "long256"]) {
     assert.equal(directMatches[key]?.kind, "fuzzy", `${key}: ${JSON.stringify(directMatches)}`);
   }
   assert.equal(directMatches.sparse?.kind, "subsequence", JSON.stringify(directMatches));
@@ -211,16 +232,27 @@ machine Controller(state:System,input:Input)
   const largeFuzzy = await typeAndFind(largeSource, "Smbol4199", "Symbol4199", LARGE_FUZZY_POPUP_BUDGET_MS);
   assert.equal(largeFuzzy.candidate.matchKind, "fuzzy", JSON.stringify(largeFuzzy));
   assert(largeFuzzy.lexicalMetrics.fuzzyRowsScanned > 0, JSON.stringify(largeFuzzy));
+  const directLargeQuery = await page.evaluate(() => {
+    const lexical = window.GlyphEditorLexicalIndex;
+    const start = performance.now();
+    const rows = lexical.query("Smbol4199", document.getElementById("editor").selectionStart, { limit: 32 });
+    return { durationMs: performance.now() - start, found: rows.some(row => row.text === "Symbol4199") };
+  });
+  assert.equal(directLargeQuery.found, true, JSON.stringify(directLargeQuery));
+  assert(directLargeQuery.durationMs < 80, JSON.stringify(directLargeQuery));
 
   assert.deepEqual(browserErrors, [], browserErrors.join("\n"));
   console.log(JSON.stringify({
     typoResults,
     strictOwner: { context: strictOwner.context, candidates: strictOwner.candidates.map(candidate => candidate.text) },
+    strictKind: { context: strictKind.context, candidates: strictKind.candidates.map(candidate => candidate.text) },
+    longFuzzy: { latencyMs: longFuzzy.latencyMs, candidate: longFuzzy.candidate },
     fuzzyAcceptance: true,
     staticKeywordFuzzy: { latencyMs: keyword.latencyMs, candidate: keyword.candidate },
     directMatches,
     largeDocumentFuzzyLatencyMs: largeFuzzy.latencyMs,
     largeDocumentCandidate: largeFuzzy.candidate,
+    directLargeQuery,
     lexicalMetrics: largeFuzzy.lexicalMetrics,
   }));
 } finally {
