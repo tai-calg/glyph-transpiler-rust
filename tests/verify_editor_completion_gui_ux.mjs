@@ -214,7 +214,7 @@ try {
   const large = await typeAndMeasure("Tar", "TargetCompletion", LARGE_DOCUMENT_POPUP_BUDGET_MS);
 
   await installSource(largeSource);
-  const compactRows = await typeAndMeasure("Sy", "Symbol0000", LARGE_DOCUMENT_POPUP_BUDGET_MS);
+  const compactRows = await typeAndMeasure("Sy", "Symbol4199", LARGE_DOCUMENT_POPUP_BUDGET_MS);
   assert.equal(compactRows.candidates.length, 8, "compact fixture must exercise a full completion list");
   await page.setViewportSize({ width: 320, height: 220 });
   await page.waitForTimeout(80);
