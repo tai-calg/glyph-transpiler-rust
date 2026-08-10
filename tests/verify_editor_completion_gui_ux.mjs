@@ -90,7 +90,7 @@ try {
       state.lastInputRevision = runtime.revision();
       state.firstVisibleAt = 0;
       state.firstVisibleRevision = -1;
-    }, true);
+    });
     const observer = new MutationObserver(() => {
       const state = window.__glyphCompletionUxLatency;
       if (popup.hidden || !popup.querySelector('[role="option"]') || state.firstVisibleAt) return;
