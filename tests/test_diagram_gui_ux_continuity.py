@@ -48,11 +48,16 @@ class DiagramGuiUxContinuityTests(unittest.TestCase):
         self.assertIn("function modalFocusables(modal)", _SCRIPT)
         self.assertIn("function trapModalTab(event,modal)", _SCRIPT)
         self.assertIn('element.getClientRects().length>0', _SCRIPT)
-        self.assertIn("event.stopImmediatePropagation()", _SCRIPT)
+        self.assertIn("FOCUS_REQUEST_TTL_MS=2000", _SCRIPT)
+        self.assertIn("const diagramDigest=()", _SCRIPT)
+        self.assertIn("diagramDigest:diagramDigest()", _SCRIPT)
+        self.assertIn("diagramDigest()!==expected.diagramDigest", _SCRIPT)
         self.assertIn("armNodeFocus(nodeName(node))", _SCRIPT)
         self.assertIn("machineIndex:machineIndex()", _SCRIPT)
         self.assertIn("machineIndex()!==expected.machineIndex", _SCRIPT)
         self.assertIn("restoreNodeFocus()", _SCRIPT)
+        self.assertIn("function clearPendingControlFocus()", _SCRIPT)
+        self.assertIn("pendingControlFocusTimer", _SCRIPT)
         self.assertIn("active===document.body", _SCRIPT)
         self.assertIn("function armControlFocus(target)", _SCRIPT)
         self.assertIn('target.id==="machine-select"||target.id==="system-select"', _SCRIPT)
@@ -69,7 +74,7 @@ class DiagramGuiUxContinuityTests(unittest.TestCase):
         self.assertIn('runtime.replaceRange(start,end,"  ")', _SCRIPT)
         self.assertIn('line.replace(/^(?:\\t| {1,2})/,"")', _SCRIPT)
         self.assertIn('window.addEventListener("keydown",handleEditorTab,true)', _SCRIPT)
-        self.assertIn("version:4", _SCRIPT)
+        self.assertIn("version:5", _SCRIPT)
 
     def test_enhancer_is_idempotent(self) -> None:
         html = "<html><head></head><body></body></html>"
