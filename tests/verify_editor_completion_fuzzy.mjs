@@ -179,6 +179,21 @@ machine Controller(state:System,input:Input)
   assert.equal(strictKind.candidates.some(candidate => candidate.text === "stap" || candidate.text === "stpSink"), false, JSON.stringify(strictKind));
   assert(strictKind.candidates.every(candidate => candidate.kinds.includes("EntryFunction")), JSON.stringify(strictKind));
 
+  const confounders = Array.from({ length: 40 }, (_, index) => `= SystmTarget${String(index).padStart(2, "0")}=I`).join("\n");
+  const exactPoolBase = `+Mode=Idle|Faulted
+${confounders}
+*Input(value:I)
+*SystemTarget(mode:Mode)
+>stepExact(state:SystemTarget,input:Input):SystemTarget=state
+machine ExactController(state:SystemTarget,input:Input)
+  select=state.mode
+  init=`;
+  const exactPool = await typeAndFind(exactPoolBase, "SystmTarget", "SystemTarget");
+  assert.equal(exactPool.context?.id, "machine-init", JSON.stringify(exactPool));
+  assert.equal(exactPool.context?.exactText, "SystemTarget", JSON.stringify(exactPool));
+  assert.equal(exactPool.candidate.matchKind, "fuzzy", JSON.stringify(exactPool));
+  assert.deepEqual(exactPool.candidates.map(candidate => candidate.text), ["SystemTarget"], JSON.stringify(exactPool));
+
   const acceptState = await typeAndFind(machineBase, "Ftd", "Faulted");
   const faultedIndex = acceptState.candidates.findIndex(candidate => candidate.text === "Faulted");
   assert(faultedIndex >= 0);
@@ -246,6 +261,7 @@ machine Controller(state:System,input:Input)
     typoResults,
     strictOwner: { context: strictOwner.context, candidates: strictOwner.candidates.map(candidate => candidate.text) },
     strictKind: { context: strictKind.context, candidates: strictKind.candidates.map(candidate => candidate.text) },
+    exactPool: { context: exactPool.context, candidates: exactPool.candidates.map(candidate => candidate.text) },
     longFuzzy: { latencyMs: longFuzzy.latencyMs, candidate: longFuzzy.candidate },
     fuzzyAcceptance: true,
     staticKeywordFuzzy: { latencyMs: keyword.latencyMs, candidate: keyword.candidate },
