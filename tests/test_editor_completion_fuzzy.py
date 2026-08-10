@@ -14,7 +14,8 @@ class EditorCompletionFuzzyTests(unittest.TestCase):
     def test_lexical_refresh_is_low_latency_and_query_is_bounded(self) -> None:
         self.assertIn("const DEBOUNCE_MS=32", LEXICAL_RUNTIME_SCRIPT)
         self.assertIn("function insertBounded(rows,candidate,limit)", LEXICAL_RUNTIME_SCRIPT)
-        self.assertIn("if(rows.length>=rowLimit)return rows", LEXICAL_RUNTIME_SCRIPT)
+        self.assertIn("function finalizeQueryRows(rows)", LEXICAL_RUNTIME_SCRIPT)
+        self.assertIn("if(rows.length>=rowLimit)return finalizeQueryRows(rows)", LEXICAL_RUNTIME_SCRIPT)
         self.assertIn("metrics.fuzzyRowsScanned+=1", LEXICAL_RUNTIME_SCRIPT)
         query_start = LEXICAL_RUNTIME_SCRIPT.index("function query(prefix,caret")
         query_end = LEXICAL_RUNTIME_SCRIPT.index("\ndocument.addEventListener", query_start)
