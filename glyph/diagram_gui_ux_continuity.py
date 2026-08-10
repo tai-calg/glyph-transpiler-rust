@@ -23,17 +23,22 @@ const LINE_JUMP_SELECTOR=".diagnostic[data-line],.analysis-item[data-line],.grap
 let enhanceFrame=0,pendingNodeFocusName="",pendingNodeFocusTimer=0;
 const nodeName=node=>node?.querySelector?.(".state-name")?.textContent?.trim()||"";
 const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
+const english=()=>String(document.documentElement.lang||"ja").startsWith("en");
 
 function lineJumpLabel(element,line){
   const subject=(element.getAttribute("title")||element.querySelector?.(".node-name,.type-name")?.textContent||element.textContent||"").trim().replace(/\s+/g," ");
-  const prefix=(document.documentElement.lang||"ja").startsWith("en")?`Source line ${line}`:`ソース ${line} 行目`;
+  const prefix=english()?`Source line ${line}`:`ソース ${line} 行目`;
   return subject?`${subject} · ${prefix}`:prefix;
+}
+function ownLocalizedLabel(element,value){
+  if(!element.getAttribute("aria-label"))element.dataset.guiUxContinuityLabel="true";
+  if(element.dataset.guiUxContinuityLabel==="true")element.setAttribute("aria-label",value);
 }
 function setupLineJumps(){
   for(const element of document.querySelectorAll(LINE_JUMP_SELECTOR)){
     const line=Number(element.dataset.line||0);if(line<=0)continue;
     element.tabIndex=0;element.setAttribute("role","button");
-    if(!element.getAttribute("aria-label"))element.setAttribute("aria-label",lineJumpLabel(element,line));
+    ownLocalizedLabel(element,lineJumpLabel(element,line));
     if(element.dataset.guiUxJumpReady==="true")continue;
     element.dataset.guiUxJumpReady="true";
     element.addEventListener("keydown",event=>{
@@ -46,7 +51,7 @@ function setupCanvasKeyboard(){
   for(const shell of document.querySelectorAll(".canvas-shell")){
     shell.tabIndex=0;shell.setAttribute("role","region");
     shell.setAttribute("aria-keyshortcuts","ArrowUp ArrowDown ArrowLeft ArrowRight");
-    if(!shell.getAttribute("aria-label"))shell.setAttribute("aria-label",(document.documentElement.lang||"ja").startsWith("en")?"Diagram canvas; use Arrow keys to pan":"図キャンバス。矢印キーで移動");
+    ownLocalizedLabel(shell,english()?"Diagram canvas; use Arrow keys to pan":"図キャンバス。矢印キーで移動");
     if(shell.dataset.guiUxKeyboardPanReady==="true")continue;
     shell.dataset.guiUxKeyboardPanReady="true";
     shell.addEventListener("keydown",event=>{
@@ -65,6 +70,16 @@ function setupCanvasKeyboard(){
       shell.scrollLeft=nextLeft;shell.scrollTop=nextTop;
     });
   }
+}
+function setupSettingsFocus(){
+  const button=document.getElementById("glyph-settings"),dialog=document.getElementById("glyph-settings-dialog");
+  if(!button||!dialog||dialog.dataset.guiUxFocusReturnReady==="true")return;
+  dialog.dataset.guiUxFocusReturnReady="true";
+  dialog.addEventListener("close",()=>requestAnimationFrame(()=>{
+    const active=document.activeElement;
+    const neutral=!active||active===document.body||active===document.documentElement||!active.isConnected||dialog.contains(active);
+    if(neutral&&button.isConnected)button.focus({preventScroll:true});
+  }));
 }
 function clearPendingNodeFocus(){
   pendingNodeFocusName="";
@@ -92,7 +107,7 @@ function restoreNodeFocus(){
     clearPendingNodeFocus();
   });
 }
-function enhance(){enhanceFrame=0;setupLineJumps();setupCanvasKeyboard();restoreNodeFocus()}
+function enhance(){enhanceFrame=0;setupLineJumps();setupCanvasKeyboard();setupSettingsFocus();restoreNodeFocus()}
 function scheduleEnhance(){if(enhanceFrame)return;enhanceFrame=requestAnimationFrame(enhance)}
 
 window.addEventListener("keydown",event=>{
