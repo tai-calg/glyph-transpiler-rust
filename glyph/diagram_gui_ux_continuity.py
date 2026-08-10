@@ -120,6 +120,9 @@ window.addEventListener("keydown",event=>{
   if(modal&&command&&event.key==="Enter"){
     event.preventDefault();event.stopImmediatePropagation();return;
   }
+  if(modal&&event.key==="Escape"){
+    event.stopPropagation();return;
+  }
   if(modal||!event.key.startsWith("Arrow"))return;
   const node=event.target?.closest?.(".state-node");
   if(!node||document.activeElement!==node)return;
