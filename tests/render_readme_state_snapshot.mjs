@@ -75,7 +75,6 @@ try {
     if (document.fonts?.ready) await document.fonts.ready;
     const shell = document.querySelector(".canvas-shell");
     const stage = shell?.querySelector(".graph-stage");
-    assert;
     if (!shell || !stage || !window.glyphDiagramViewport) throw new Error("diagram viewport is unavailable");
     window.glyphDiagramViewport.setScale(scale);
   }, README_SCALE);
