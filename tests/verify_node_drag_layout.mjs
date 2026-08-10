@@ -181,7 +181,7 @@ try {
   await page.click('button[data-tab="state"]');
   const initial = await waitForReady(page, "initial");
 
-  assert.equal(initial.nodeAdapterVersion, 8, JSON.stringify(initial));
+  assert.equal(initial.nodeAdapterVersion, 10, JSON.stringify(initial));
   assert.equal(initial.nodeGuardVersion, 2, JSON.stringify(initial));
   assert.equal(initial.certificatePresent, false, JSON.stringify(initial));
   assert.equal(initial.routerPresent, false, JSON.stringify(initial));
