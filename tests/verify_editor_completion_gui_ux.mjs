@@ -153,6 +153,7 @@ try {
   assert.equal(await editor.getAttribute("aria-expanded"), "true");
   assert.equal(await editor.getAttribute("aria-haspopup"), "listbox");
   assert(warm.candidates.length > 0 && warm.candidates.length <= 8, "completion row count must stay bounded");
+  await page.screenshot({ path: "build/editor-completion-gui-ux/intellisense-popup.png", fullPage: false });
   assert.equal(
     await page.locator("#glyph-completion-popup [role='option'][tabindex='-1']").count(),
     warm.candidates.length,
