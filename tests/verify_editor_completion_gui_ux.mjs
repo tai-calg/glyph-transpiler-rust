@@ -258,16 +258,21 @@ try {
     lexical.invalidate = () => { invalidations += 1; };
     const fail = () => document.dispatchEvent(new CustomEvent("glyph-editor-lexical-index-error", { detail: { message: "synthetic worker failure" } }));
     const succeed = () => document.dispatchEvent(new CustomEvent("glyph-editor-lexical-index-updated", { detail: { exact: true, revision: runtime.revision() } }));
+    const waitForInvalidations = async target => {
+      const deadline = performance.now() + 1500;
+      while (invalidations < target && performance.now() < deadline) {
+        await new Promise(resolve => setTimeout(resolve, 25));
+      }
+      return invalidations;
+    };
     fail();
-    await new Promise(resolve => setTimeout(resolve, 340));
-    const firstCycle = invalidations;
+    const firstCycle = await waitForInvalidations(1);
     exact = true;
     succeed();
     await new Promise(resolve => setTimeout(resolve, 30));
     exact = false;
     fail();
-    await new Promise(resolve => setTimeout(resolve, 340));
-    const secondCycle = invalidations;
+    const secondCycle = await waitForInvalidations(2);
     exact = true;
     succeed();
     lexical.snapshot = original.snapshot;
