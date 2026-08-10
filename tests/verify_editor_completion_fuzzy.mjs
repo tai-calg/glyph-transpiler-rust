@@ -143,24 +143,25 @@ machine Controller(state:System,input:Input)
   }
 
   const typoCases = [
-    { typed: "Fal", mode: "single internal omission" },
-    { typed: "Flted", mode: "multiple omissions" },
-    { typed: "Fauxt", mode: "substitution" },
-    { typed: "Fauult", mode: "extra character" },
-    { typed: "Fual", mode: "adjacent transposition" },
-    { typed: "fal", mode: "case plus omission" },
+    { typed: "Fal", mode: "single internal omission", expectedKind: "fuzzy" },
+    { typed: "Flted", mode: "multiple omissions", expectedKind: "fuzzy" },
+    { typed: "Fauxt", mode: "substitution", expectedKind: "fuzzy" },
+    { typed: "Fauult", mode: "extra character", expectedKind: "fuzzy" },
+    { typed: "Fual", mode: "adjacent transposition", expectedKind: "fuzzy" },
+    { typed: "fal", mode: "case plus omission", expectedKind: "fuzzy" },
+    { typed: "Ftd", mode: "sparse non-contiguous subsequence", expectedKind: "subsequence" },
   ];
   const typoResults = [];
   for (const testCase of typoCases) {
     const state = await typeAndFind(machineBase, testCase.typed, "Faulted");
     assert.equal(state.context?.id, "machine-success", JSON.stringify({ testCase, state }));
     assert.equal(state.candidate.origin, "document", JSON.stringify({ testCase, state }));
-    assert(["fuzzy", "case-prefix"].includes(state.candidate.matchKind), JSON.stringify({ testCase, state }));
-    assert(Number(state.candidate.matchEdits || 0) <= 3, JSON.stringify({ testCase, state }));
+    assert.equal(state.candidate.matchKind, testCase.expectedKind, JSON.stringify({ testCase, state }));
+    if (testCase.expectedKind === "fuzzy") assert(Number(state.candidate.matchEdits || 0) <= 3, JSON.stringify({ testCase, state }));
     typoResults.push({ ...testCase, latencyMs: state.latencyMs, candidate: state.candidate });
   }
 
-  const acceptState = await typeAndFind(machineBase, "Fal", "Faulted");
+  const acceptState = await typeAndFind(machineBase, "Ftd", "Faulted");
   const faultedIndex = acceptState.candidates.findIndex(candidate => candidate.text === "Faulted");
   assert(faultedIndex >= 0);
   const selected = await page.evaluate(() => window.GlyphEditorCompletion.selected());
@@ -182,6 +183,8 @@ machine Controller(state:System,input:Input)
       substitution: match("Fauxt", "Faulted"),
       insertion: match("Fauult", "Faulted"),
       transposition: match("Fual", "Faulted"),
+      sparse: match("Ftd", "Faulted"),
+      camel: match("MC", "MotorCommand"),
       unrelated: match("zzz", "Faulted"),
     };
   });
@@ -189,6 +192,8 @@ machine Controller(state:System,input:Input)
   for (const key of ["omission", "multipleOmissions", "substitution", "insertion", "transposition"]) {
     assert.equal(directMatches[key]?.kind, "fuzzy", `${key}: ${JSON.stringify(directMatches)}`);
   }
+  assert.equal(directMatches.sparse?.kind, "subsequence", JSON.stringify(directMatches));
+  assert.equal(directMatches.camel?.kind, "subsequence", JSON.stringify(directMatches));
   assert.equal(directMatches.unrelated, null, JSON.stringify(directMatches));
 
   const symbolLines = Array.from({ length: 4200 }, (_, index) => `>Symbol${String(index).padStart(4, "0")}():I=0`).join("\n");
