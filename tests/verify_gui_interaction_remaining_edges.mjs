@@ -52,7 +52,7 @@ try {
   page.on("request", request => requests.push({ method: request.method(), url: request.url() }));
   await page.goto(url, { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => document.querySelector("#status")?.textContent === "ready"
-    && window.glyphDiagramGuiUxContinuity?.version === 2);
+    && window.glyphDiagramGuiUxContinuity?.version === 3);
 
   const editor = page.locator("#editor");
   const originalSource = await editor.inputValue();
@@ -192,6 +192,8 @@ try {
     await page.keyboard.press("Tab");
     assert(await page.evaluate(() => document.querySelector("#glyph-settings-dialog")?.contains(document.activeElement)), "Tab escaped the modal settings dialog");
   }
+  await page.keyboard.press("Shift+Tab");
+  assert(await page.evaluate(() => document.querySelector("#glyph-settings-dialog")?.contains(document.activeElement)), "Shift+Tab escaped the modal settings dialog");
   await page.locator("#glyph-settings-close").focus();
   await page.keyboard.press("Control+Enter");
   await page.locator("#glyph-language").selectOption("en");
@@ -218,6 +220,7 @@ try {
     stateNodeMoveCount,
     previewRequestsBlocked: previewDuringModal - previewBeforeModal,
     modalTabContained: true,
+    modalShiftTabContained: true,
     settingsFocusRestored: true,
   };
   assert.deepEqual(browserErrors, [], browserErrors.join("\n"));
