@@ -67,7 +67,9 @@ def test_every_persisted_geometry_has_an_explicit_coordinate_frame() -> None:
     assert "cluster.dataset.anchorFraction=String(anchor.fraction)" in clusters
     assert "cluster.dataset.ioDistance=String(Math.hypot(point.x-anchor.x,point.y-anchor.y))" in clusters
 
-    assert '${data?.digest||"source"}:state:${machineIndex()}' in node_owner
+    assert "function canonicalKey(data,index=machineIndex())" in node_owner
+    assert "machineIndex:machineIndex()" in node_owner
+    assert "canonicalKey(data,record.machineIndex)" in node_owner
     assert "value[nodeName(node)]={x:num(node.style.left),y:num(node.style.top)}" in node_owner
 
     assert 'const digest=activeStage()?.dataset.diagramDigest||"source"' in viewport
