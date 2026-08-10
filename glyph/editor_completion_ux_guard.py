@@ -30,6 +30,7 @@ _SCRIPT = r"""
 <script id="glyph-editor-completion-ux-guard-v1-script">
 (()=>{
 const MARKER="glyph-editor-completion-ux-guard-v1";
+const VIEWPORT_MARGIN=8;
 const editor=document.getElementById("editor");
 const popup=document.getElementById("glyph-completion-popup");
 const completion=window.GlyphEditorCompletion;
@@ -49,17 +50,54 @@ document.body.appendChild(status);
 
 let suppressAutomaticReopen=false;
 let recoveryFailures=0,recoveryTimer=0,recoveryIssued=false;
-let viewportFrame=0;
-const metrics={dismissSuppressedReopens:0,guardRecoveries:0,recoveryCycles:0,viewportRelays:0};
+let viewportRelayFrame=0,viewportClampFrame=0;
+const metrics={dismissSuppressedReopens:0,guardRecoveries:0,recoveryCycles:0,viewportRelays:0,viewportClamps:0};
 
 function normalizeOptions(){
   for(const option of popup.querySelectorAll('[role="option"]'))option.tabIndex=-1;
+}
+function visibleViewport(){
+  const visual=window.visualViewport;
+  return{
+    left:Number(visual?.offsetLeft||0),
+    top:Number(visual?.offsetTop||0),
+    width:Number(visual?.width||window.innerWidth||0),
+    height:Number(visual?.height||window.innerHeight||0),
+  };
+}
+function clampPopupToViewport(){
+  viewportClampFrame=0;
+  if(popup.hidden)return;
+  const viewport=visibleViewport();
+  const availableWidth=Math.max(1,viewport.width-VIEWPORT_MARGIN*2);
+  const availableHeight=Math.max(1,viewport.height-VIEWPORT_MARGIN*2);
+  popup.style.setProperty("max-width",`${availableWidth}px`,"important");
+  popup.style.setProperty("max-height",`${availableHeight}px`,"important");
+  const rect=popup.getBoundingClientRect();
+  const minimumLeft=viewport.left+VIEWPORT_MARGIN;
+  const minimumTop=viewport.top+VIEWPORT_MARGIN;
+  const maximumLeft=Math.max(minimumLeft,viewport.left+viewport.width-rect.width-VIEWPORT_MARGIN);
+  const maximumTop=Math.max(minimumTop,viewport.top+viewport.height-rect.height-VIEWPORT_MARGIN);
+  const currentLeft=Number.parseFloat(popup.style.left);
+  const currentTop=Number.parseFloat(popup.style.top);
+  const baseLeft=Number.isFinite(currentLeft)?currentLeft:rect.left;
+  const baseTop=Number.isFinite(currentTop)?currentTop:rect.top;
+  const nextLeft=Math.max(minimumLeft,Math.min(baseLeft,maximumLeft));
+  const nextTop=Math.max(minimumTop,Math.min(baseTop,maximumTop));
+  if(Math.abs(nextLeft-baseLeft)>.25||Math.abs(nextTop-baseTop)>.25)metrics.viewportClamps+=1;
+  popup.style.left=`${nextLeft}px`;
+  popup.style.top=`${nextTop}px`;
+}
+function scheduleViewportClamp(){
+  if(viewportClampFrame)return;
+  viewportClampFrame=requestAnimationFrame(clampPopupToViewport);
 }
 function publishStatus(){
   normalizeOptions();
   if(popup.hidden){status.textContent="";return}
   const count=popup.querySelectorAll('[role="option"]').length;
   status.textContent=count?`${count} completion candidate${count===1?"":"s"}`:"";
+  scheduleViewportClamp();
 }
 function blockSuppressedReopen(){
   if(!suppressAutomaticReopen||popup.hidden)return;
@@ -115,13 +153,15 @@ document.addEventListener("glyph-editor-lexical-index-updated",event=>{
 });
 
 function relayVisualViewport(){
-  if(viewportFrame)return;
-  viewportFrame=requestAnimationFrame(()=>{
-    viewportFrame=0;
+  if(viewportRelayFrame)return;
+  viewportRelayFrame=requestAnimationFrame(()=>{
+    viewportRelayFrame=0;
     metrics.viewportRelays+=1;
     window.dispatchEvent(new Event("resize"));
+    scheduleViewportClamp();
   });
 }
+window.addEventListener("resize",scheduleViewportClamp,{passive:true});
 if(window.visualViewport){
   window.visualViewport.addEventListener("resize",relayVisualViewport,{passive:true});
   window.visualViewport.addEventListener("scroll",relayVisualViewport,{passive:true});
@@ -130,6 +170,7 @@ if(window.visualViewport){
 window.glyphEditorCompletionUxGuard={
   marker:MARKER,
   version:1,
+  clamp:()=>{scheduleViewportClamp()},
   metrics:()=>({...metrics,recoveryFailures,recoveryIssued,suppressAutomaticReopen}),
 };
 })();
