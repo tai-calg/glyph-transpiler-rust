@@ -38,12 +38,13 @@ _SCRIPT = r"""
 (()=>{
 const MARKER="glyph-diagram-gui-ux-guard-v1";
 if(window.glyphDiagramGuiUxGuard?.marker===MARKER)return;
-const pointerSessions=new Map();
-let inspectorOpener=null,restoreInspectorFocus=false,enhanceFrame=0,pendingClusterFocus=null;
+const pointerSessions=new Map(),FOCUS_REQUEST_TTL_MS=2000;
+let inspectorOpener=null,restoreInspectorFocus=false,enhanceFrame=0,pendingClusterFocus=null,pendingClusterFocusTimer=0;
 const focusableEditing="input,textarea,select,[contenteditable=true]";
 const pointerTargetSelector="#splitter,.canvas-shell,.state-node,.transition-io-cluster,.edge-label,.transition-label";
 const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
 const machineIndex=()=>String(document.getElementById("machine-select")?.value||"0");
+const clusterDigest=cluster=>String(cluster?.closest?.(".graph-stage")?.dataset.diagramDigest||"");
 
 function activateTab(tab){
   if(!tab)return;
@@ -115,19 +116,27 @@ function setupStateNodes(){
     });
   }
 }
+function clearPendingClusterFocus(){
+  pendingClusterFocus=null;
+  if(pendingClusterFocusTimer){clearTimeout(pendingClusterFocusTimer);pendingClusterFocusTimer=0}
+}
 function armClusterFocus(cluster){
   const id=cluster?.dataset.transitionId||"";
-  pendingClusterFocus=id?{id,machineIndex:machineIndex()}:null;
+  if(!id){clearPendingClusterFocus();return}
+  pendingClusterFocus={id,machineIndex:machineIndex(),diagramDigest:clusterDigest(cluster)};
+  if(pendingClusterFocusTimer)clearTimeout(pendingClusterFocusTimer);
+  pendingClusterFocusTimer=setTimeout(clearPendingClusterFocus,FOCUS_REQUEST_TTL_MS);
 }
 function restoreClusterFocus(){
   if(!pendingClusterFocus)return;
   const expected=pendingClusterFocus;
   requestAnimationFrame(()=>{
     if(pendingClusterFocus!==expected)return;
-    if(machineIndex()!==expected.machineIndex){pendingClusterFocus=null;return}
+    if(machineIndex()!==expected.machineIndex){clearPendingClusterFocus();return}
     const cluster=[...document.querySelectorAll(".transition-io-cluster")].find(item=>item.dataset.transitionId===expected.id);
     if(!cluster)return;
-    pendingClusterFocus=null;setupTransitionClusters();cluster.focus({preventScroll:true});
+    if(clusterDigest(cluster)!==expected.diagramDigest){clearPendingClusterFocus();return}
+    clearPendingClusterFocus();setupTransitionClusters();cluster.focus({preventScroll:true});
   });
 }
 function setupTransitionClusters(){
@@ -286,11 +295,11 @@ window.addEventListener("blur",()=>{
 
 document.addEventListener("glyph-transition-layout-transaction-ready",()=>{scheduleEnhance();restoreClusterFocus()});
 for(const eventName of["glyph-transition-layout-ready","glyph-state-transition-ir-v3-labels-ready","glyph-locale-changed","glyph-save-state-changed"]){document.addEventListener(eventName,scheduleEnhance)}
-document.addEventListener("change",event=>{if(event.target?.id==="machine-select")pendingClusterFocus=null;scheduleEnhance()});
+document.addEventListener("change",event=>{if(event.target?.id==="machine-select")clearPendingClusterFocus();scheduleEnhance()});
 const tabsRoot=document.querySelector(".tabs");
 if(tabsRoot)new MutationObserver(setupTabs).observe(tabsRoot,{subtree:true,attributes:true,attributeFilter:["class"]});
 new MutationObserver(scheduleEnhance).observe(document.getElementById("main")||document.body,{childList:true,subtree:true});
-window.glyphDiagramGuiUxGuard={marker:MARKER,version:2,refresh:scheduleEnhance,activePointers:()=>pointerSessions.size,pendingClusterFocus:()=>pendingClusterFocus?{...pendingClusterFocus}:null};
+window.glyphDiagramGuiUxGuard={marker:MARKER,version:3,refresh:scheduleEnhance,activePointers:()=>pointerSessions.size,pendingClusterFocus:()=>pendingClusterFocus?{...pendingClusterFocus}:null};
 enhance();requestAnimationFrame(enhance);
 })();
 </script>
