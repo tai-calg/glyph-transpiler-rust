@@ -50,8 +50,14 @@ class DiagramGuiUxContinuityTests(unittest.TestCase):
         self.assertIn('element.getClientRects().length>0', _SCRIPT)
         self.assertIn("event.stopImmediatePropagation()", _SCRIPT)
         self.assertIn("armNodeFocus(nodeName(node))", _SCRIPT)
+        self.assertIn("machineIndex:machineIndex()", _SCRIPT)
+        self.assertIn("machineIndex()!==expected.machineIndex", _SCRIPT)
         self.assertIn("restoreNodeFocus()", _SCRIPT)
         self.assertIn("active===document.body", _SCRIPT)
+        self.assertIn("function armControlFocus(target)", _SCRIPT)
+        self.assertIn('target.id==="machine-select"||target.id==="system-select"', _SCRIPT)
+        self.assertIn("function restoreControlFocus()", _SCRIPT)
+        self.assertIn('window.addEventListener("change",event=>armControlFocus(event.target),true)', _SCRIPT)
         self.assertIn('element.dataset.guiUxContinuityLabel="true"', _SCRIPT)
         self.assertIn('document.documentElement.lang', _SCRIPT)
         self.assertIn('dialog.addEventListener("close"', _SCRIPT)
@@ -63,7 +69,7 @@ class DiagramGuiUxContinuityTests(unittest.TestCase):
         self.assertIn('runtime.replaceRange(start,end,"  ")', _SCRIPT)
         self.assertIn('line.replace(/^(?:\\t| {1,2})/,"")', _SCRIPT)
         self.assertIn('window.addEventListener("keydown",handleEditorTab,true)', _SCRIPT)
-        self.assertIn("version:3", _SCRIPT)
+        self.assertIn("version:4", _SCRIPT)
 
     def test_enhancer_is_idempotent(self) -> None:
         html = "<html><head></head><body></body></html>"
