@@ -178,7 +178,10 @@ async function persist(record){
     return false;
   }
   const key=canonicalKey(data,record.machineIndex);
-  write(key,record.positions);
+  if(!write(key,record.positions)){
+    cancelRecord(record,"persistence-unavailable");
+    return false;
+  }
   workspace()?.markPositionMigration?.(record.stage,key);
   if(record.stage.isConnected)apply(record.stage,record.positions,key);
   record.stage.dataset.transitionNodePositions=`saved:${Object.keys(record.positions).length}`;
