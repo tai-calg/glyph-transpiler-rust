@@ -49,6 +49,13 @@ class DiagramGuiUxGuardTests(unittest.TestCase):
         self.assertIn('node.dispatchEvent(new PointerEvent("pointercancel"', _SCRIPT)
         self.assertIn('window.addEventListener("blur"', _SCRIPT)
         self.assertIn('legacyLabel.dispatchEvent(new PointerEvent("pointerup"', _SCRIPT)
+        self.assertIn("FOCUS_REQUEST_TTL_MS=2000", _SCRIPT)
+        self.assertIn("const clusterDigest=cluster=>", _SCRIPT)
+        self.assertIn("diagramDigest:clusterDigest(cluster)", _SCRIPT)
+        self.assertIn("clusterDigest(cluster)!==expected.diagramDigest", _SCRIPT)
+        self.assertIn("function clearPendingClusterFocus()", _SCRIPT)
+        self.assertIn("pendingClusterFocusTimer", _SCRIPT)
+        self.assertIn("version:3", _SCRIPT)
 
     def test_transition_label_adapter_exposes_keyboard_placement_contract(self) -> None:
         self.assertIn("async function keyboardNudge(cluster,dx,dy)", LABEL_INTERACTION_SCRIPT)
