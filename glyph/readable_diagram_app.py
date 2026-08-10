@@ -27,6 +27,7 @@ from .diagram_save_controller import enhance_save_controller_html
 from .diagram_save_presentation import enhance_save_presentation_html
 from .diagram_workspace_layout import enhance_workspace_layout_html
 from .editor_completion import enhance_editor_completion_html
+from .editor_completion_ux_guard import enhance_editor_completion_ux_guard_html
 from .editor_document_runtime import enhance_editor_document_runtime_html
 from .editor_identifier_highlight import enhance_editor_identifier_highlight_html
 from .editor_lexical_index import enhance_editor_lexical_index_html
@@ -113,6 +114,7 @@ def _presentation_pipeline():
         enhance_editor_lexical_index_html,
         enhance_editor_identifier_highlight_html,
         enhance_editor_completion_html,
+        enhance_editor_completion_ux_guard_html,
         enhance_diagram_gui_ux_guard_html,
         enhance_diagram_gui_ux_continuity_html,
     )
