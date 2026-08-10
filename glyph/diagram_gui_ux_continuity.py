@@ -34,6 +34,10 @@ function ownLocalizedLabel(element,value){
   if(!element.getAttribute("aria-label"))element.dataset.guiUxContinuityLabel="true";
   if(element.dataset.guiUxContinuityLabel==="true")element.setAttribute("aria-label",value);
 }
+function activateLineJump(element,line){
+  if(typeof globalThis.jumpToLine==="function"){globalThis.jumpToLine(line);return}
+  element.click();
+}
 function setupLineJumps(){
   for(const element of document.querySelectorAll(LINE_JUMP_SELECTOR)){
     const line=Number(element.dataset.line||0);if(line<=0)continue;
@@ -43,7 +47,7 @@ function setupLineJumps(){
     element.dataset.guiUxJumpReady="true";
     element.addEventListener("keydown",event=>{
       if(event.key!=="Enter"&&event.key!==" ")return;
-      event.preventDefault();event.stopPropagation();element.click();
+      event.preventDefault();event.stopPropagation();activateLineJump(element,line);
     });
   }
 }
