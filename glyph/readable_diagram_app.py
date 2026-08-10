@@ -14,6 +14,7 @@ from .diagram_editor_route_guard import enhance_diagram_editor_route_guard_html
 from .diagram_geometry_kernel import enhance_diagram_geometry_kernel_html
 from .diagram_gui_ux_continuity import enhance_diagram_gui_ux_continuity_html
 from .diagram_gui_ux_guard import enhance_diagram_gui_ux_guard_html
+from .diagram_identity_stamp import enhance_diagram_identity_stamp_html
 from .diagram_label_editor import enhance_diagram_label_editor_html
 from .diagram_live_stability import (
     enhance_diagram_live_stability_html,
@@ -85,6 +86,7 @@ def _presentation_pipeline():
         enhance_workspace_layout_html,
         enhance_state_viewport_reservation_html,
         enhance_diagram_canvas_navigation_html,
+        enhance_diagram_identity_stamp_html,
         enhance_diagram_canvas_viewport_html,
         enhance_diagram_middle_drag_zoom_html,
         enhance_state_diagram_workspace_html,
