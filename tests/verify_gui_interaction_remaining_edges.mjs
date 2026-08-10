@@ -52,7 +52,7 @@ try {
   page.on("request", request => requests.push({ method: request.method(), url: request.url() }));
   await page.goto(url, { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => document.querySelector("#status")?.textContent === "ready"
-    && window.glyphDiagramGuiUxContinuity?.version === 3);
+    && window.glyphDiagramGuiUxContinuity?.version === 4);
 
   const editor = page.locator("#editor");
   const originalSource = await editor.inputValue();
