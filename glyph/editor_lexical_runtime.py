@@ -40,6 +40,35 @@ function fuzzyEditBudget(length){
   if(length<=8)return 2;
   return 3;
 }
+function subsequenceMatch(source,target,foldedSource,foldedTarget){
+  if(source.length<2||source.length>MAX_FUZZY_PREFIX||!target)return null;
+  const positions=[];
+  let cursor=0,casePenalty=0,boundaryHits=0;
+  for(let index=0;index<foldedSource.length;index+=1){
+    const found=foldedTarget.indexOf(foldedSource[index],cursor);
+    if(found<0)return null;
+    positions.push(found);
+    if(source[index]!==target[found]&&foldedSource[index]===foldedTarget[found])casePenalty+=1;
+    const previous=found>0?target[found-1]:"";
+    const boundary=found===0||previous==="_"||previous==="-"||(/[a-z0-9]/.test(previous)&&/[A-Z]/.test(target[found]));
+    if(boundary)boundaryHits+=1;
+    cursor=found+1;
+  }
+  const start=positions[0],span=positions[positions.length-1]-start+1,gaps=span-source.length;
+  const maxGaps=Math.min(24,Math.max(4,source.length*2));
+  if(gaps>maxGaps)return null;
+  let consecutive=0;
+  for(let index=1;index<positions.length;index+=1){if(positions[index]===positions[index-1]+1)consecutive+=1}
+  const weakStart=start>0&&boundaryHits===0;
+  if(weakStart&&source.length<4)return null;
+  return{
+    matched:true,
+    kind:"subsequence",
+    score:200+start*10+gaps*5+Math.min(8,casePenalty)-boundaryHits*4-consecutive*2,
+    edits:null,
+    matchedLength:span,
+  };
+}
 function matchText(query,candidate){
   const source=String(query??"");
   const target=String(candidate??"");
@@ -48,51 +77,58 @@ function matchText(query,candidate){
   const foldedSource=source.toLowerCase(),foldedTarget=target.toLowerCase();
   if(foldedTarget.startsWith(foldedSource))return{matched:true,kind:"case-prefix",score:8,edits:0,matchedLength:source.length};
   const budget=fuzzyEditBudget(source.length);
-  if(!budget||source.length>MAX_FUZZY_PREFIX||!target)return null;
-  const minimumTarget=Math.max(1,source.length-budget);
-  const maximumTarget=Math.min(target.length,source.length+budget,MAX_FUZZY_PREFIX+budget);
-  if(maximumTarget<minimumTarget)return null;
-  let previousPrevious=null;
-  let previous=Array.from({length:maximumTarget+1},(_,index)=>index);
-  for(let sourceIndex=1;sourceIndex<=foldedSource.length;sourceIndex+=1){
-    const current=new Array(maximumTarget+1);
-    current[0]=sourceIndex;
-    let rowMinimum=current[0];
-    for(let targetIndex=1;targetIndex<=maximumTarget;targetIndex+=1){
-      const substitution=previous[targetIndex-1]+(foldedSource[sourceIndex-1]===foldedTarget[targetIndex-1]?0:1);
-      let value=Math.min(previous[targetIndex]+1,current[targetIndex-1]+1,substitution);
-      if(previousPrevious&&sourceIndex>1&&targetIndex>1
-        && foldedSource[sourceIndex-1]===foldedTarget[targetIndex-2]
-        && foldedSource[sourceIndex-2]===foldedTarget[targetIndex-1]){
-        value=Math.min(value,previousPrevious[targetIndex-2]+1);
+  if(budget&&source.length<=MAX_FUZZY_PREFIX&&target){
+    const minimumTarget=Math.max(1,source.length-budget);
+    const maximumTarget=Math.min(target.length,source.length+budget,MAX_FUZZY_PREFIX+budget);
+    if(maximumTarget>=minimumTarget){
+      let previousPrevious=null;
+      let previous=Array.from({length:maximumTarget+1},(_,index)=>index);
+      let viable=true;
+      for(let sourceIndex=1;sourceIndex<=foldedSource.length;sourceIndex+=1){
+        const current=new Array(maximumTarget+1);
+        current[0]=sourceIndex;
+        let rowMinimum=current[0];
+        for(let targetIndex=1;targetIndex<=maximumTarget;targetIndex+=1){
+          const substitution=previous[targetIndex-1]+(foldedSource[sourceIndex-1]===foldedTarget[targetIndex-1]?0:1);
+          let value=Math.min(previous[targetIndex]+1,current[targetIndex-1]+1,substitution);
+          if(previousPrevious&&sourceIndex>1&&targetIndex>1
+            && foldedSource[sourceIndex-1]===foldedTarget[targetIndex-2]
+            && foldedSource[sourceIndex-2]===foldedTarget[targetIndex-1]){
+            value=Math.min(value,previousPrevious[targetIndex-2]+1);
+          }
+          current[targetIndex]=value;
+          rowMinimum=Math.min(rowMinimum,value);
+        }
+        if(rowMinimum>budget&&sourceIndex>budget+1){viable=false;break}
+        previousPrevious=previous;
+        previous=current;
       }
-      current[targetIndex]=value;
-      rowMinimum=Math.min(rowMinimum,value);
+      if(viable){
+        let bestEdits=budget+1,bestLength=-1;
+        for(let length=minimumTarget;length<=maximumTarget;length+=1){
+          const edits=previous[length];
+          if(edits<bestEdits||(edits===bestEdits&&Math.abs(length-source.length)<Math.abs(bestLength-source.length))){
+            bestEdits=edits;bestLength=length;
+          }
+        }
+        if(bestEdits<=budget&&bestLength>=0){
+          let casePenalty=0;
+          const compared=Math.min(source.length,bestLength);
+          for(let index=0;index<compared;index+=1){
+            if(source[index]!==target[index]&&foldedSource[index]===foldedTarget[index])casePenalty+=1;
+          }
+          return{
+            matched:true,
+            kind:"fuzzy",
+            score:100+bestEdits*24+Math.abs(bestLength-source.length)*3+Math.min(6,casePenalty),
+            edits:bestEdits,
+            matchedLength:bestLength,
+          };
+        }
+      }
     }
-    if(rowMinimum>budget&&sourceIndex>budget+1)return null;
-    previousPrevious=previous;
-    previous=current;
   }
-  let bestEdits=budget+1,bestLength=-1;
-  for(let length=minimumTarget;length<=maximumTarget;length+=1){
-    const edits=previous[length];
-    if(edits<bestEdits||(edits===bestEdits&&Math.abs(length-source.length)<Math.abs(bestLength-source.length))){
-      bestEdits=edits;bestLength=length;
-    }
-  }
-  if(bestEdits>budget||bestLength<0)return null;
-  let casePenalty=0;
-  const compared=Math.min(source.length,bestLength);
-  for(let index=0;index<compared;index+=1){
-    if(source[index]!==target[index]&&foldedSource[index]===foldedTarget[index])casePenalty+=1;
-  }
-  return{
-    matched:true,
-    kind:"fuzzy",
-    score:100+bestEdits*24+Math.abs(bestLength-source.length)*3+Math.min(6,casePenalty),
-    edits:bestEdits,
-    matchedLength:bestLength,
-  };
+  return subsequenceMatch(source,target,foldedSource,foldedTarget);
 }
 function clearTimer(){if(timer){clearTimeout(timer);timer=0}}
 function clearRecoveryTimer(){if(recoveryTimer){clearTimeout(recoveryTimer);recoveryTimer=0}}
