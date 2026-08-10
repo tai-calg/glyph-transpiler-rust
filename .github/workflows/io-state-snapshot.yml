@@ -81,9 +81,9 @@ jobs:
           run_node tests/verify_transition_arrow_clearance.mjs build/transition-arrow-clearance/verify.log
 
           # Editor and GUI features touched by this change run before the README image baseline.
-          # This keeps their functional regressions visible even when main carries a stale PNG baseline.
           run_node tests/verify_editor_completion.mjs build/editor-completion/verify.log
           run_node tests/verify_editor_completion_gui_ux.mjs build/editor-completion-gui-ux/verify.log
+          run_node tests/verify_editor_completion_exact_revision_recovery.mjs build/editor-completion-gui-ux/exact-revision-recovery.log
           run_node tests/verify_editor_runtime_edges.mjs build/editor-runtime-edges/verify.log
           run_node tests/verify_save_triggered_studio.mjs build/save-triggered-studio/verify.log
           run_node tests/verify_interactive_save_ux.mjs build/interactive-save-ux/verify.log
@@ -93,6 +93,11 @@ jobs:
           run_node tests/verify_gui_machine_switch_identity.mjs build/gui-machine-switch-identity/verify.log
           run_node tests/verify_gui_inspector_rerender_focus.mjs build/gui-inspector-rerender-focus/verify.log
 
+          # README publication must be compared against a fresh canonical render,
+          # not a build artifact left behind by an earlier interactive test.
+          git diff --exit-code -- examples/acceptance/motor_safety.glyph
+          rm -f build/state-diagram-regression/motor-safety-motor.png
+          run_node tests/verify_state_diagram_rendering.mjs build/state-diagram-regression/readme-canonical-render.log
           python tests/verify_readme_state_snapshot.py \
             2>&1 | tee -a build/state-diagram-regression/verify.log
           run_node tests/verify_state_diagram_stability.mjs build/state-diagram-stability/verify.log
