@@ -45,8 +45,8 @@ async function diagramState(){
   return statePromise;
 }
 function machineIndex(){return document.getElementById("machine-select")?.value||0}
-function canonicalKey(data){return`${POSITION_KEY_PREFIX}${data?.digest||"source"}:state:${machineIndex()}`}
-function legacyKeys(){return[`${POSITION_KEY_PREFIX}source:state:${machineIndex()}`]}
+function canonicalKey(data,index=machineIndex()){return`${POSITION_KEY_PREFIX}${data?.digest||"source"}:state:${index}`}
+function legacyKeys(index=machineIndex()){return[`${POSITION_KEY_PREFIX}source:state:${index}`]}
 function parse(key){try{return JSON.parse(localStorage.getItem(key)||"{}")||{}}catch{return{}}}
 function write(key,value){
   try{localStorage.setItem(key,JSON.stringify(value));return true}
@@ -163,22 +163,28 @@ function moveActive(event){
   return true;
 }
 async function persist(record){
-  if(destroyed||!record.stage.isConnected)return;
-  const data=await diagramState(),key=canonicalKey(data);
+  if(destroyed||!record.stage.isConnected)return false;
+  const data=await diagramState();
+  if(destroyed||!record.stage.isConnected||machineIndex()!==record.machineIndex){
+    if(record.publicationInvalidated)publicationGuard()?.schedule?.("manual-node-machine-changed");
+    return false;
+  }
+  const key=canonicalKey(data,record.machineIndex);
   write(key,record.positions);
   workspace()?.markPositionMigration?.(record.stage,key);
   if(record.stage.isConnected)apply(record.stage,record.positions,key);
   record.stage.dataset.transitionNodePositions=`saved:${Object.keys(record.positions).length}`;
   window.glyphTransitionLayoutTransaction?.schedule("manual-node-persisted",0);
+  return true;
 }
 async function restore(stage,token){
   if(!stage||!stage.isConnected||destroyed)return false;
   const data=await diagramState();
   if(token!==restoreGeneration||!stage.isConnected||destroyed)return false;
-  const key=canonicalKey(data);
+  const index=machineIndex(),key=canonicalKey(data,index);
   let value=parse(key),source=key;
   if(!Object.keys(value).length){
-    for(const candidate of legacyKeys()){
+    for(const candidate of legacyKeys(index)){
       const found=parse(candidate);
       if(Object.keys(found).length){value=found;source=candidate;break}
     }
@@ -219,6 +225,7 @@ document.addEventListener("pointerdown",event=>{
   active={
     node,
     stage,
+    machineIndex:machineIndex(),
     pointerId:event.pointerId,
     startX:event.clientX,
     startY:event.clientY,
@@ -279,6 +286,7 @@ document.addEventListener("keydown",event=>{
   const record={
     node,
     stage,
+    machineIndex:machineIndex(),
     startLeft:num(node.style.left),
     startTop:num(node.style.top),
     publicationInvalidated:false,
@@ -319,7 +327,7 @@ for(const eventName of["pagehide","beforeunload"]){
 }
 lastStage=document.querySelector(".state-node")?.closest(".graph-stage")||null;
 scheduleRestore(lastStage,0);
-window.glyphTransitionNodePositionAdapter={marker:MARKER,version:9,restore:()=>scheduleRestore(null,0)};
+window.glyphTransitionNodePositionAdapter={marker:MARKER,version:10,restore:()=>scheduleRestore(null,0)};
 })();
 </script>
 """
