@@ -19,6 +19,7 @@ let recoveryFailures=0,recoveryAttempts=0,recoveryExhausted=false;
 const metrics={
   buildsSent:0,buildsCompleted:0,staleAccepted:0,staleDiscarded:0,maxPendingDepth:0,
   workerRestarts:0,workerStarts:0,workerFailures:0,recoveryCycles:0,recoveryAttempts:0,recoveryExhausted:0,
+  transportFailures:0,invalidMessages:0,
 };
 
 const emit=(name,detail={})=>document.dispatchEvent(new CustomEvent(name,{detail:{marker:MARKER,...detail}}));
@@ -91,6 +92,7 @@ function ensureWorker({recovery=false}={}){
   catch(error){
     const message=String(error?.message||error);
     metrics.workerFailures+=1;
+    metrics.transportFailures+=1;
     if(recoveryFailures===0)metrics.recoveryCycles+=1;
     recoveryFailures+=1;
     emit("glyph-editor-lexical-index-error",{message,revision:documentRuntime.revision(),recoveryFailures,recoveryAttempts});
@@ -103,7 +105,11 @@ function ensureWorker({recovery=false}={}){
   active.onmessage=event=>{
     if(active!==worker)return;
     const result=event.data||{};
-    if(result.type!=="snapshot")return;
+    if(result.type!=="snapshot"){
+      metrics.invalidMessages+=1;
+      handleWorkerFailure(active,{message:"lexical index worker returned an invalid message"});
+      return;
+    }
     const completed=inFlight;
     inFlight=null;
     metrics.buildsCompleted+=1;
@@ -121,6 +127,10 @@ function ensureWorker({recovery=false}={}){
     if(next&&Number(next.revision)>Number(completed?.revision||-1))send(next,{recovery:recoveryFailures>0});
   };
   active.onerror=event=>handleWorkerFailure(active,event);
+  active.onmessageerror=event=>{
+    metrics.transportFailures+=1;
+    handleWorkerFailure(active,{message:String(event?.message||"lexical index worker message deserialization failed")});
+  };
   return active;
 }
 function send(request,{recovery=false}={}){
@@ -128,7 +138,12 @@ function send(request,{recovery=false}={}){
   if(!active)return false;
   inFlight=request;
   metrics.buildsSent+=1;
-  active.postMessage(request);
+  try{active.postMessage(request)}
+  catch(error){
+    metrics.transportFailures+=1;
+    handleWorkerFailure(active,{message:String(error?.message||error)});
+    return false;
+  }
   return true;
 }
 function buildRequest(){return{revision:documentRuntime.revision(),source:editor.value}}
