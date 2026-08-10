@@ -41,7 +41,7 @@ class DiagramGuiUxContinuityTests(unittest.TestCase):
         self.assertIn("event.stopImmediatePropagation();activateLineJump", _SCRIPT)
         self.assertIn('shell.setAttribute("aria-keyshortcuts"', _SCRIPT)
         self.assertIn('if(event.key==="ArrowRight")dx=step', _SCRIPT)
-        self.assertIn('modal&&command&&event.key==="Enter"', _SCRIPT)
+        self.assertIn('modal&&(saveShortcut||diagramZoom||command&&event.key==="Enter")', _SCRIPT)
         self.assertIn('modal&&event.key==="Escape"', _SCRIPT)
         self.assertIn('modal&&event.key==="Tab"', _SCRIPT)
         self.assertIn('const saveShortcut=modal&&command&&event.key.toLowerCase()==="s"', _SCRIPT)
