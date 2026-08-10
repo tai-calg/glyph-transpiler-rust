@@ -10,7 +10,7 @@ const MARKER="glyph-editor-lexical-runtime-v3";
 const DEBOUNCE_MS=32;
 const RECOVERY_DELAY_MS=100;
 const MAX_RECOVERY_ATTEMPTS=3;
-const MAX_FUZZY_PREFIX=48;
+const MAX_FUZZY_PREFIX=256;
 const editor=document.getElementById("editor");
 const documentRuntime=window.GlyphEditorDocument;
 if(!editor||!documentRuntime||editor.dataset.lexicalIndexReady==="true")return;
@@ -81,6 +81,67 @@ function subsequenceMatch(source,target,foldedSource,foldedTarget){
   }
   return best;
 }
+function boundedEditPrefix(source,target,foldedSource,foldedTarget,budget){
+  const sourceLength=foldedSource.length;
+  const maximumTarget=Math.min(target.length,sourceLength+budget);
+  const minimumTarget=Math.max(1,sourceLength-budget);
+  if(maximumTarget<minimumTarget)return null;
+  const infinity=budget+2;
+  const first=new Int16Array(maximumTarget+1);
+  const second=new Int16Array(maximumTarget+1);
+  const third=new Int16Array(maximumTarget+1);
+  let previous=first,previousPrevious=null,current=second,spare=third;
+  let previousLow=0,previousHigh=Math.min(maximumTarget,budget);
+  let previousPreviousLow=1,previousPreviousHigh=0;
+  for(let targetIndex=0;targetIndex<=previousHigh;targetIndex+=1)previous[targetIndex]=targetIndex;
+  for(let sourceIndex=1;sourceIndex<=sourceLength;sourceIndex+=1){
+    const low=Math.max(0,sourceIndex-budget),high=Math.min(maximumTarget,sourceIndex+budget);
+    for(let targetIndex=low;targetIndex<=high;targetIndex+=1){
+      if(targetIndex===0){current[targetIndex]=sourceIndex;continue}
+      const deletion=targetIndex>=previousLow&&targetIndex<=previousHigh?previous[targetIndex]+1:infinity;
+      const insertion=targetIndex-1>=low?current[targetIndex-1]+1:infinity;
+      const substitution=targetIndex-1>=previousLow&&targetIndex-1<=previousHigh
+        ?previous[targetIndex-1]+(foldedSource[sourceIndex-1]===foldedTarget[targetIndex-1]?0:1)
+        :infinity;
+      let value=Math.min(deletion,insertion,substitution);
+      if(previousPrevious&&sourceIndex>1&&targetIndex>1
+        && foldedSource[sourceIndex-1]===foldedTarget[targetIndex-2]
+        && foldedSource[sourceIndex-2]===foldedTarget[targetIndex-1]
+        && targetIndex-2>=previousPreviousLow&&targetIndex-2<=previousPreviousHigh){
+        value=Math.min(value,previousPrevious[targetIndex-2]+1);
+      }
+      current[targetIndex]=value;
+    }
+    const oldPreviousPrevious=previousPrevious;
+    previousPrevious=previous;
+    previous=current;
+    current=spare;
+    spare=oldPreviousPrevious||first;
+    previousPreviousLow=previousLow;previousPreviousHigh=previousHigh;
+    previousLow=low;previousHigh=high;
+  }
+  let bestEdits=budget+1,bestLength=-1;
+  for(let length=minimumTarget;length<=maximumTarget;length+=1){
+    if(length<previousLow||length>previousHigh)continue;
+    const edits=previous[length];
+    if(edits<bestEdits||(edits===bestEdits&&Math.abs(length-source.length)<Math.abs(bestLength-source.length))){
+      bestEdits=edits;bestLength=length;
+    }
+  }
+  if(bestEdits>budget||bestLength<0)return null;
+  let casePenalty=0;
+  const compared=Math.min(source.length,bestLength);
+  for(let index=0;index<compared;index+=1){
+    if(source[index]!==target[index]&&foldedSource[index]===foldedTarget[index])casePenalty+=1;
+  }
+  return{
+    matched:true,
+    kind:"fuzzy",
+    score:100+bestEdits*24+Math.abs(bestLength-source.length)*3+Math.min(6,casePenalty),
+    edits:bestEdits,
+    matchedLength:bestLength,
+  };
+}
 function matchText(query,candidate){
   const source=String(query??"");
   const target=String(candidate??"");
@@ -90,55 +151,8 @@ function matchText(query,candidate){
   if(foldedTarget.startsWith(foldedSource))return{matched:true,kind:"case-prefix",score:8,edits:0,matchedLength:source.length};
   const budget=fuzzyEditBudget(source.length);
   if(budget&&source.length<=MAX_FUZZY_PREFIX&&target){
-    const minimumTarget=Math.max(1,source.length-budget);
-    const maximumTarget=Math.min(target.length,source.length+budget,MAX_FUZZY_PREFIX+budget);
-    if(maximumTarget>=minimumTarget){
-      let previousPrevious=null;
-      let previous=Array.from({length:maximumTarget+1},(_,index)=>index);
-      let viable=true;
-      for(let sourceIndex=1;sourceIndex<=foldedSource.length;sourceIndex+=1){
-        const current=new Array(maximumTarget+1);
-        current[0]=sourceIndex;
-        let rowMinimum=current[0];
-        for(let targetIndex=1;targetIndex<=maximumTarget;targetIndex+=1){
-          const substitution=previous[targetIndex-1]+(foldedSource[sourceIndex-1]===foldedTarget[targetIndex-1]?0:1);
-          let value=Math.min(previous[targetIndex]+1,current[targetIndex-1]+1,substitution);
-          if(previousPrevious&&sourceIndex>1&&targetIndex>1
-            && foldedSource[sourceIndex-1]===foldedTarget[targetIndex-2]
-            && foldedSource[sourceIndex-2]===foldedTarget[targetIndex-1]){
-            value=Math.min(value,previousPrevious[targetIndex-2]+1);
-          }
-          current[targetIndex]=value;
-          rowMinimum=Math.min(rowMinimum,value);
-        }
-        if(rowMinimum>budget&&sourceIndex>budget+1){viable=false;break}
-        previousPrevious=previous;
-        previous=current;
-      }
-      if(viable){
-        let bestEdits=budget+1,bestLength=-1;
-        for(let length=minimumTarget;length<=maximumTarget;length+=1){
-          const edits=previous[length];
-          if(edits<bestEdits||(edits===bestEdits&&Math.abs(length-source.length)<Math.abs(bestLength-source.length))){
-            bestEdits=edits;bestLength=length;
-          }
-        }
-        if(bestEdits<=budget&&bestLength>=0){
-          let casePenalty=0;
-          const compared=Math.min(source.length,bestLength);
-          for(let index=0;index<compared;index+=1){
-            if(source[index]!==target[index]&&foldedSource[index]===foldedTarget[index])casePenalty+=1;
-          }
-          return{
-            matched:true,
-            kind:"fuzzy",
-            score:100+bestEdits*24+Math.abs(bestLength-source.length)*3+Math.min(6,casePenalty),
-            edits:bestEdits,
-            matchedLength:bestLength,
-          };
-        }
-      }
-    }
+    const fuzzy=boundedEditPrefix(source,target,foldedSource,foldedTarget,budget);
+    if(fuzzy)return fuzzy;
   }
   return subsequenceMatch(source,target,foldedSource,foldedTarget);
 }
