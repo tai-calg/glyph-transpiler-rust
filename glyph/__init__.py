@@ -23,6 +23,13 @@ from .editor_lexical_worker_fast import install_fast_lexical_worker as _install_
 _install_fast_lexical_worker()
 del _install_fast_lexical_worker
 
+from .editor_completion_fast_publication import (
+    install_exact_completion_fast_publication as _install_exact_completion_fast_publication,
+)
+
+_install_exact_completion_fast_publication()
+del _install_exact_completion_fast_publication
+
 from .compiler import GlyphError
 from .frontend import compile_file, compile_source, parse_program
 from .incremental import CompilationSnapshot, IncrementalCompiler, IncrementalResult
