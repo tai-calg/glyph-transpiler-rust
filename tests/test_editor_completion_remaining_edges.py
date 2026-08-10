@@ -54,21 +54,17 @@ console.log(JSON.stringify({{shortLength:shortResult.length,longResult,selectedR
         self.assertEqual(data["rejects"], 2)
 
     def test_worker_marks_delimited_declarations_only_after_closure(self) -> None:
-        product_close = LEXICAL_WORKER_JS.index(
-            'const close=findMatchingOnLine(codeSource,open);'
-        )
+        product_close = LEXICAL_WORKER_JS.index("close=findMatchingOnLine(line,open);")
         product_mark = LEXICAL_WORKER_JS.index('mark(name,"Type");', product_close)
         self.assertLess(product_close, product_mark)
-        self.assertIn('if(close<0)continue;\n    mark(name,"Resource")', LEXICAL_WORKER_JS)
-        self.assertIn('if(close<0)continue;\n    const kind=', LEXICAL_WORKER_JS)
-        self.assertIn('if(close<0)continue;\n    mark(name,"Source")', LEXICAL_WORKER_JS)
-        self.assertIn('if(close<0)continue;\n    mark(name,"Machine")', LEXICAL_WORKER_JS)
+        self.assertIn('for(const rawLine of source.split("\\n"))', LEXICAL_WORKER_JS)
+        self.assertIn("const indented=/^[ \\t]/.test(line)", LEXICAL_WORKER_JS)
+        self.assertIn('close=findMatchingOnLine(line,open,"[","]")', LEXICAL_WORKER_JS)
+        self.assertGreaterEqual(LEXICAL_WORKER_JS.count("if(close>=0)"), 5)
         self.assertIn("parts.some(part=>!part.match", LEXICAL_WORKER_JS)
-        self.assertIn('const aliasRe=/^=[ \\t]*', LEXICAL_WORKER_JS)
-        self.assertNotIn('const aliasRe=/^=\\s*', LEXICAL_WORKER_JS)
-        self.assertIn('const productRe=/^\\*[ \\t]*', LEXICAL_WORKER_JS)
-        self.assertIn('const functionRe=/^([>!~?])[ \\t]*', LEXICAL_WORKER_JS)
-        self.assertIn('const machineRe=/^machine[ \\t]+', LEXICAL_WORKER_JS)
+        self.assertNotIn("stripComments(source)", LEXICAL_WORKER_JS)
+        self.assertNotIn("productRe.exec", LEXICAL_WORKER_JS)
+        self.assertNotIn("machineRe.exec", LEXICAL_WORKER_JS)
 
     @unittest.skipUnless(shutil.which("node"), "Node.js is not installed")
     def test_worker_keeps_incomplete_declarations_as_identifiers(self) -> None:
