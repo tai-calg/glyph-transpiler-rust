@@ -17,6 +17,7 @@ if(!editor||!lexicalIndex||!completion||!highlightApi||!documentRuntime||editor.
 editor.dataset.exactRevisionGuardReady="true";
 const parent=editor.parentElement;
 const surface=parent?.querySelector(".identifier-highlight-surface");
+const status=document.getElementById("glyph-completion-status");
 const metrics={completionInvalidations:0,highlightInvalidations:0,staleUiObservations:0};
 
 function exactSnapshot(){
@@ -38,13 +39,19 @@ function clearHighlightDom(){
   editor.dataset.activeIdentifier="";
   editor.dataset.identifierMatchCount="0";
 }
-function clearCompletion(){
+function hideCompletionPublication(){
   if(!popup||popup.hidden||!completionNeedsExactSnapshot())return;
   metrics.completionInvalidations+=1;
-  completion.close();
+  // Preserve the controller's candidate/revalidation state. Only the stale visual
+  // publication is invalidated; accept() must still re-check an exact snapshot.
+  popup.hidden=true;
+  popup.replaceChildren();
+  editor.setAttribute("aria-expanded","false");
+  editor.removeAttribute("aria-activedescendant");
+  if(status)status.textContent="";
 }
 function invalidateVisibleDocumentState(){
-  clearCompletion();
+  hideCompletionPublication();
   clearHighlightDom();
 }
 function verifyVisibleExactness(){
