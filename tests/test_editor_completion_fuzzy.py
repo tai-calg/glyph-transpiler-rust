@@ -20,22 +20,26 @@ class EditorCompletionFuzzyTests(unittest.TestCase):
         query_end = LEXICAL_RUNTIME_SCRIPT.index("\ndocument.addEventListener", query_start)
         self.assertNotIn("rows.sort(", LEXICAL_RUNTIME_SCRIPT[query_start:query_end])
 
-    def test_generic_matcher_covers_bounded_edit_classes(self) -> None:
+    def test_generic_matcher_covers_bounded_edit_and_subsequence_classes(self) -> None:
         self.assertIn("function fuzzyEditBudget(length)", LEXICAL_RUNTIME_SCRIPT)
         self.assertIn("if(length<=4)return 1", LEXICAL_RUNTIME_SCRIPT)
         self.assertIn("if(length<=8)return 2", LEXICAL_RUNTIME_SCRIPT)
         self.assertIn("return 3", LEXICAL_RUNTIME_SCRIPT)
         self.assertIn("previousPrevious[targetIndex-2]+1", LEXICAL_RUNTIME_SCRIPT)
+        self.assertIn("function subsequenceMatch(source,target,foldedSource,foldedTarget)", LEXICAL_RUNTIME_SCRIPT)
         self.assertIn('kind:"case-prefix"', LEXICAL_RUNTIME_SCRIPT)
         self.assertIn('kind:"fuzzy"', LEXICAL_RUNTIME_SCRIPT)
+        self.assertIn('kind:"subsequence"', LEXICAL_RUNTIME_SCRIPT)
         self.assertIn("MAX_FUZZY_PREFIX=48", LEXICAL_RUNTIME_SCRIPT)
+        self.assertIn("const maxGaps=Math.min(24,Math.max(4,source.length*2))", LEXICAL_RUNTIME_SCRIPT)
+        self.assertIn("return subsequenceMatch(source,target,foldedSource,foldedTarget)", LEXICAL_RUNTIME_SCRIPT)
 
     def test_static_and_document_acceptance_share_the_same_matcher(self) -> None:
         self.assertIn("lexicalIndex.matchText?.(text,row.text)", CONTEXT_SCRIPT)
         self.assertIn("function candidateMatchesPrefix(text,prefix)", COMPLETION_SCRIPT)
         self.assertIn("lexicalIndex.matchText?.(prefix,text)?.matched", COMPLETION_SCRIPT)
         self.assertIn("!candidateMatchesPrefix(pending.text,context.prefix)", COMPLETION_SCRIPT)
-        self.assertIn("!candidateMatchesPrefix(candidate.text,context.prefix)", COMPLETION_SCRIPT)
+        self.assertIn("!exactPrefix&&!candidateMatchesPrefix(candidate.text,context.prefix)", COMPLETION_SCRIPT)
         self.assertNotIn("!pending.text.startsWith(context.prefix)", COMPLETION_SCRIPT)
         self.assertNotIn("!candidate.text.startsWith(context.prefix)", COMPLETION_SCRIPT)
 
@@ -45,7 +49,7 @@ class EditorCompletionFuzzyTests(unittest.TestCase):
         self.assertIn("QUERY_POOL=32", COMPLETION_SCRIPT)
 
     @unittest.skipUnless(shutil.which("node"), "Node.js is not installed")
-    def test_matcher_handles_deletion_insertion_substitution_and_transposition(self) -> None:
+    def test_matcher_handles_edit_distance_and_non_contiguous_intellisense_queries(self) -> None:
         start = LEXICAL_RUNTIME_SCRIPT.index("function fuzzyEditBudget")
         end = LEXICAL_RUNTIME_SCRIPT.index("\nfunction clearTimer", start)
         matcher_source = LEXICAL_RUNTIME_SCRIPT[start:end]
@@ -60,6 +64,8 @@ const cases={{
   insertion:matchText("Fauult","Faulted"),
   transposition:matchText("Fual","Faulted"),
   caseOmission:matchText("fal","Faulted"),
+  sparse:matchText("Ftd","Faulted"),
+  camel:matchText("MC","MotorCommand"),
   unrelated:matchText("zzz","Faulted"),
 }};
 console.log(JSON.stringify(cases));
@@ -80,6 +86,8 @@ console.log(JSON.stringify(cases));
         ):
             self.assertEqual(data[key]["kind"], "fuzzy", key)
             self.assertLessEqual(data[key]["edits"], 3, key)
+        self.assertEqual(data["sparse"]["kind"], "subsequence")
+        self.assertEqual(data["camel"]["kind"], "subsequence")
         self.assertIsNone(data["unrelated"])
 
 
