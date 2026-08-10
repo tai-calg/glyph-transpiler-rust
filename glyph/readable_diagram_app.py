@@ -29,8 +29,10 @@ from .diagram_workspace_layout import enhance_workspace_layout_html
 from .editor_completion import enhance_editor_completion_html
 from .editor_completion_ux_guard import enhance_editor_completion_ux_guard_html
 from .editor_document_runtime import enhance_editor_document_runtime_html
+from .editor_exact_revision_guard import enhance_editor_exact_revision_guard_html
 from .editor_identifier_highlight import enhance_editor_identifier_highlight_html
 from .editor_lexical_index import enhance_editor_lexical_index_html
+from .editor_lexical_runtime import enhance_editor_lexical_runtime_html
 from .state_diagram_workspace import enhance_state_diagram_workspace_html
 from .state_viewport_reservation import enhance_state_viewport_reservation_html
 from .transition_arrow_clearance import enhance_transition_arrow_clearance_html
@@ -111,9 +113,11 @@ def _presentation_pipeline():
         enhance_save_controller_html,
         enhance_save_presentation_html,
         enhance_editor_document_runtime_html,
+        enhance_editor_lexical_runtime_html,
         enhance_editor_lexical_index_html,
         enhance_editor_identifier_highlight_html,
         enhance_editor_completion_html,
+        enhance_editor_exact_revision_guard_html,
         enhance_editor_completion_ux_guard_html,
         enhance_diagram_gui_ux_guard_html,
         enhance_diagram_gui_ux_continuity_html,
