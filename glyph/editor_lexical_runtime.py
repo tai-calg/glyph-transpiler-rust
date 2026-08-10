@@ -90,7 +90,7 @@ function boundedEditPrefix(source,target,foldedSource,foldedTarget,budget){
   const first=new Int16Array(maximumTarget+1);
   const second=new Int16Array(maximumTarget+1);
   const third=new Int16Array(maximumTarget+1);
-  let previous=first,previousPrevious=null,current=second,spare=third;
+  let previous=first,previousPrevious=third,current=second;
   let previousLow=0,previousHigh=Math.min(maximumTarget,budget);
   let previousPreviousLow=1,previousPreviousHigh=0;
   for(let targetIndex=0;targetIndex<=previousHigh;targetIndex+=1)previous[targetIndex]=targetIndex;
@@ -104,7 +104,7 @@ function boundedEditPrefix(source,target,foldedSource,foldedTarget,budget){
         ?previous[targetIndex-1]+(foldedSource[sourceIndex-1]===foldedTarget[targetIndex-1]?0:1)
         :infinity;
       let value=Math.min(deletion,insertion,substitution);
-      if(previousPrevious&&sourceIndex>1&&targetIndex>1
+      if(sourceIndex>1&&targetIndex>1
         && foldedSource[sourceIndex-1]===foldedTarget[targetIndex-2]
         && foldedSource[sourceIndex-2]===foldedTarget[targetIndex-1]
         && targetIndex-2>=previousPreviousLow&&targetIndex-2<=previousPreviousHigh){
@@ -112,11 +112,10 @@ function boundedEditPrefix(source,target,foldedSource,foldedTarget,budget){
       }
       current[targetIndex]=value;
     }
-    const oldPreviousPrevious=previousPrevious;
+    const reusable=previousPrevious;
     previousPrevious=previous;
     previous=current;
-    current=spare;
-    spare=oldPreviousPrevious||first;
+    current=reusable;
     previousPreviousLow=previousLow;previousPreviousHigh=previousHigh;
     previousLow=low;previousHigh=high;
   }
