@@ -35,6 +35,8 @@ class DiagramGuiUxContinuityTests(unittest.TestCase):
         self.assertIn(".graph-node[data-line]", _SCRIPT)
         self.assertIn(".type-card[data-line]", _SCRIPT)
         self.assertIn('event.key!=="Enter"&&event.key!==" "', _SCRIPT)
+        self.assertIn('typeof globalThis.jumpToLine==="function"', _SCRIPT)
+        self.assertIn("globalThis.jumpToLine(line)", _SCRIPT)
         self.assertIn('shell.setAttribute("aria-keyshortcuts"', _SCRIPT)
         self.assertIn('if(event.key==="ArrowRight")dx=step', _SCRIPT)
         self.assertIn('modal&&command&&event.key==="Enter"', _SCRIPT)
