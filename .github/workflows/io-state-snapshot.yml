@@ -98,7 +98,7 @@ jobs:
           git diff --exit-code -- examples/acceptance/motor_safety.glyph
           rm -f build/state-diagram-regression/motor-safety-motor.png
           run_node tests/verify_state_diagram_rendering.mjs build/state-diagram-regression/readme-canonical-render.log
-          python tests/verify_readme_state_snapshot.py \
+          python tests/verify_readme_state_snapshot_hosted.py \
             2>&1 | tee -a build/state-diagram-regression/verify.log
           run_node tests/verify_state_diagram_stability.mjs build/state-diagram-stability/verify.log
           run_node tests/verify_transition_layout_transaction.mjs build/transition-layout-transaction/verify.log
