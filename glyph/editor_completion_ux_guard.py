@@ -31,6 +31,7 @@ _SCRIPT = r"""
 (()=>{
 const MARKER="glyph-editor-completion-ux-guard-v1";
 const VIEWPORT_MARGIN=8;
+const MAX_RECOVERY_ATTEMPTS=3;
 const editor=document.getElementById("editor");
 const popup=document.getElementById("glyph-completion-popup");
 const completion=window.GlyphEditorCompletion;
@@ -49,9 +50,9 @@ status.setAttribute("aria-atomic","true");
 document.body.appendChild(status);
 
 let suppressAutomaticReopen=false;
-let recoveryFailures=0,recoveryTimer=0,recoveryIssued=false;
+let recoveryFailures=0,recoveryAttempts=0,recoveryTimer=0,recoveryIssued=false;
 let viewportRelayFrame=0,viewportClampFrame=0;
-const metrics={dismissSuppressedReopens:0,guardRecoveries:0,recoveryCycles:0,viewportRelays:0,viewportClamps:0};
+const metrics={dismissSuppressedReopens:0,guardRecoveries:0,recoveryCycles:0,recoveryExhausted:0,viewportRelays:0,viewportClamps:0};
 
 function normalizeOptions(){
   for(const option of popup.querySelectorAll('[role="option"]'))option.tabIndex=-1;
@@ -127,6 +128,7 @@ function clearRecoveryTimer(){
 }
 function resetRecovery(){
   recoveryFailures=0;
+  recoveryAttempts=0;
   recoveryIssued=false;
   clearRecoveryTimer();
 }
@@ -135,17 +137,22 @@ function recoverWorker(){
   if(exactSnapshot()){resetRecovery();return}
   const state=lexicalIndex.metrics?.()||{};
   if(state.inFlight){recoveryTimer=setTimeout(recoverWorker,250);return}
-  if(recoveryFailures===1&&!recoveryIssued){
-    recoveryIssued=true;
-    metrics.guardRecoveries+=1;
-    lexicalIndex.invalidate?.();
-    recoveryTimer=setTimeout(recoverWorker,500);
+  if(recoveryAttempts>=MAX_RECOVERY_ATTEMPTS){
+    metrics.recoveryExhausted+=1;
+    recoveryIssued=false;
+    return;
   }
+  recoveryAttempts+=1;
+  recoveryIssued=true;
+  metrics.guardRecoveries+=1;
+  lexicalIndex.invalidate?.();
+  recoveryTimer=setTimeout(recoverWorker,500);
 }
 function armWorkerRecovery(){
-  if(recoveryFailures===0)metrics.recoveryCycles+=1;
+  if(recoveryFailures===0){metrics.recoveryCycles+=1;recoveryAttempts=0}
   recoveryFailures+=1;
-  if(!recoveryTimer)recoveryTimer=setTimeout(recoverWorker,250);
+  clearRecoveryTimer();
+  recoveryTimer=setTimeout(recoverWorker,100);
 }
 document.addEventListener("glyph-editor-lexical-index-error",armWorkerRecovery);
 document.addEventListener("glyph-editor-lexical-index-updated",event=>{
@@ -171,7 +178,7 @@ window.glyphEditorCompletionUxGuard={
   marker:MARKER,
   version:1,
   clamp:()=>{scheduleViewportClamp()},
-  metrics:()=>({...metrics,recoveryFailures,recoveryIssued,suppressAutomaticReopen}),
+  metrics:()=>({...metrics,recoveryFailures,recoveryAttempts,recoveryIssued,suppressAutomaticReopen}),
 };
 })();
 </script>
