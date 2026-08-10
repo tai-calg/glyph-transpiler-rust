@@ -36,7 +36,15 @@ class EditorExactRevisionRecoveryTests(unittest.TestCase):
         self.assertIn('emit("glyph-editor-lexical-index-recovery-exhausted"', LEXICAL_RUNTIME_SCRIPT)
         self.assertNotIn("restartCount<1", LEXICAL_RUNTIME_SCRIPT)
 
-    def test_exact_guard_hides_stale_ui_but_preserves_accept_revalidation_state(self) -> None:
+    def test_worker_transport_failures_join_the_same_recovery_state_machine(self) -> None:
+        self.assertIn("active.onmessageerror=event=>", LEXICAL_RUNTIME_SCRIPT)
+        self.assertIn("metrics.transportFailures+=1", LEXICAL_RUNTIME_SCRIPT)
+        self.assertIn('if(result.type!=="snapshot")', LEXICAL_RUNTIME_SCRIPT)
+        self.assertIn("metrics.invalidMessages+=1", LEXICAL_RUNTIME_SCRIPT)
+        self.assertIn("try{active.postMessage(request)}", LEXICAL_RUNTIME_SCRIPT)
+        self.assertIn("handleWorkerFailure(active,{message:String(error?.message||error)})", LEXICAL_RUNTIME_SCRIPT)
+
+    def test_exact_guard_hides_stale_ui_but_preserves_strict_accept_revalidation_state(self) -> None:
         for event_name in (
             "glyph-editor-document-changed",
             "glyph-editor-source-replaced",
@@ -50,6 +58,9 @@ class EditorExactRevisionRecoveryTests(unittest.TestCase):
         self.assertIn("popup.hidden=true", EXACT_GUARD_SCRIPT)
         self.assertIn("popup.replaceChildren()", EXACT_GUARD_SCRIPT)
         self.assertNotIn("completion.close()", EXACT_GUARD_SCRIPT)
+        self.assertIn("const originalAccept=completion.accept?.bind(completion)", EXACT_GUARD_SCRIPT)
+        self.assertIn("if(context?.strict)return originalAccept()", EXACT_GUARD_SCRIPT)
+        self.assertIn("metrics.staleAcceptBlocks+=1", EXACT_GUARD_SCRIPT)
         self.assertIn('editor.dataset.activeIdentifier=""', EXACT_GUARD_SCRIPT)
         self.assertIn('parent?.classList.remove("identifier-highlight-active")', EXACT_GUARD_SCRIPT)
         self.assertIn("highlightApi.identifier=()=>exactSnapshot()?originalIdentifier():\"\"", EXACT_GUARD_SCRIPT)
