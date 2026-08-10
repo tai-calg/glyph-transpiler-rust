@@ -72,7 +72,7 @@ parent.insertBefore(surface,sourceEditor);
 sourceEditor.dataset.identifierHighlightReady="true";
 let frame=0,lastRevision=-1,lastStart=-1,lastEnd=-1,lastFocused=false,currentIdentifier="",matchCount=0;
 let renderedRevision=-1,renderedIdentifier="",renderedMatchCount=0;
-const metrics={htmlRebuilds:0,htmlReuses:0,boundedIdentifierRejects:0,visibleInvalidations:0};
+const metrics={htmlRebuilds:0,htmlReuses:0,boundedIdentifierRejects:0,visibleInvalidations:0,stalePublicationBlocks:0};
 const esc=value=>String(value??"").replace(/[&<>]/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[char]));
 function identifierAt(value,start,end,focused){
   if(!focused)return"";
@@ -149,8 +149,12 @@ function render(force=false){
   if(!force&&revision===lastRevision&&start===lastStart&&end===lastEnd&&focused===lastFocused){syncGeometry();return}
   const identifier=identifierAt(value,start,end,focused);
   const snapshot=lexicalIndex.snapshot();
-  if(!focused||!identifier||!snapshot||Number(snapshot.revision)!==revision){
-    clear(identifier);
+  const exactSnapshot=Boolean(snapshot&&Number(snapshot.revision)===revision);
+  if(!focused||!identifier){
+    clear("");
+  }else if(!exactSnapshot){
+    metrics.stalePublicationBlocks+=1;
+    clear("");
   }else{
     if(renderedRevision!==revision||renderedIdentifier!==identifier){
       const row=lexicalIndex.record(identifier);
@@ -189,7 +193,7 @@ for(const eventName of["glyph-locale-changed","glyph-transition-layout-transacti
 schedule(true);
 window.glyphEditorIdentifierHighlight={
   marker:MARKER,
-  version:2,
+  version:3,
   identifier:()=>currentIdentifier,
   matchCount:()=>matchCount,
   refresh:()=>schedule(true),
