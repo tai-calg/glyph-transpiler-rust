@@ -20,6 +20,7 @@ _SCRIPT = r"""
 const MARKER="glyph-diagram-gui-ux-continuity-v1";
 if(window.glyphDiagramGuiUxContinuity?.marker===MARKER)return;
 const LINE_JUMP_SELECTOR=".diagnostic[data-line],.analysis-item[data-line],.graph-node[data-line],.type-card[data-line],.edge-label[data-line]";
+const MODAL_FOCUSABLE='button:not([disabled]),[href],input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
 let enhanceFrame=0,pendingNodeFocusName="",pendingNodeFocusTimer=0;
 const nodeName=node=>node?.querySelector?.(".state-name")?.textContent?.trim()||"";
 const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
@@ -75,10 +76,32 @@ function setupCanvasKeyboard(){
     });
   }
 }
+function modalFocusables(modal){
+  return[...modal.querySelectorAll(MODAL_FOCUSABLE)].filter(element=>{
+    if(element.closest("[inert]"))return false;
+    const style=getComputedStyle(element);
+    return style.visibility!=="hidden"&&style.display!=="none"&&element.getClientRects().length>0;
+  });
+}
+function trapModalTab(event,modal){
+  if(event.key!=="Tab")return false;
+  const items=modalFocusables(modal);
+  event.preventDefault();event.stopImmediatePropagation();
+  if(!items.length){
+    if(!modal.hasAttribute("tabindex"))modal.tabIndex=-1;
+    modal.focus({preventScroll:true});return true;
+  }
+  const active=document.activeElement,index=items.indexOf(active);
+  let nextIndex;
+  if(index<0)nextIndex=event.shiftKey?items.length-1:0;
+  else nextIndex=event.shiftKey?(index-1+items.length)%items.length:(index+1)%items.length;
+  items[nextIndex].focus({preventScroll:true});return true;
+}
 function setupSettingsFocus(){
   const button=document.getElementById("glyph-settings"),dialog=document.getElementById("glyph-settings-dialog");
   if(!button||!dialog||dialog.dataset.guiUxFocusReturnReady==="true")return;
   dialog.dataset.guiUxFocusReturnReady="true";
+  if(!dialog.hasAttribute("tabindex"))dialog.tabIndex=-1;
   dialog.addEventListener("close",()=>requestAnimationFrame(()=>{
     const active=document.activeElement;
     const neutral=!active||active===document.body||active===document.documentElement||!active.isConnected||dialog.contains(active);
@@ -151,6 +174,7 @@ window.addEventListener("keydown",handleEditorTab,true);
 window.addEventListener("keydown",event=>{
   const modal=document.querySelector("dialog[open]");
   const command=event.ctrlKey||event.metaKey;
+  if(modal&&event.key==="Tab"){trapModalTab(event,modal);return}
   if(modal&&command&&event.key==="Enter"){
     event.preventDefault();event.stopImmediatePropagation();return;
   }
@@ -168,7 +192,7 @@ document.addEventListener("glyph-transition-layout-ready",()=>{scheduleEnhance()
 for(const eventName of["glyph-state-transition-ir-v3-labels-ready","glyph-locale-changed"]){document.addEventListener(eventName,scheduleEnhance)}
 document.addEventListener("change",scheduleEnhance);
 new MutationObserver(()=>{scheduleEnhance();restoreNodeFocus()}).observe(document.getElementById("view")||document.body,{childList:true,subtree:true});
-window.glyphDiagramGuiUxContinuity={marker:MARKER,version:2,refresh:scheduleEnhance,pendingNodeFocus:()=>pendingNodeFocusName};
+window.glyphDiagramGuiUxContinuity={marker:MARKER,version:3,refresh:scheduleEnhance,pendingNodeFocus:()=>pendingNodeFocusName};
 enhance();requestAnimationFrame(enhance);
 })();
 </script>
