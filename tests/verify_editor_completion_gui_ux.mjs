@@ -246,6 +246,7 @@ try {
   await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
   await page.waitForFunction(text => document.getElementById("editor").value.endsWith(text), pointerText);
   assert.equal(await page.evaluate(() => document.activeElement?.id), "editor", "pointer completion lost editor focus");
+  await waitForExactIndex();
 
   const recovery = await page.evaluate(async () => {
     const lexical = window.GlyphEditorLexicalIndex;
