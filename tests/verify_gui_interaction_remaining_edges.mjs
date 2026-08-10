@@ -28,7 +28,7 @@ const logs = [];
 const browserErrors = [];
 const requests = [];
 const port = 8905;
-const child = spawn("python3", ["glyph.py", "examples/state_diagrams/conveyor_control.glyph"], {
+const child = spawn("python3", ["glyph.py", "examples/acceptance/door_controller.glyph"], {
   env: {
     ...process.env,
     GLYPH_DIAGRAM_PORT: String(port),
@@ -54,8 +54,12 @@ try {
   await page.waitForFunction(() => document.querySelector("#status")?.textContent === "ready"
     && window.glyphDiagramGuiUxContinuity?.version === 1);
 
+  await page.locator('.tab[data-tab="io"]').click();
+  await page.waitForFunction(() => document.querySelector('.tab.active')?.dataset.tab === "io"
+    && document.querySelectorAll(".graph-node[data-line]").length > 0);
+
   const ioNode = page.locator(".graph-node[data-line]").first();
-  assert(await ioNode.count(), "I/O graph fixture has no source-linked graph node");
+  assert(await ioNode.count(), "executable-system fixture has no source-linked I/O graph node");
   assert(Number(await ioNode.getAttribute("data-line")) > 0, "I/O graph node has no valid source line");
   assert.equal(await ioNode.getAttribute("role"), "button");
   assert.equal(await ioNode.getAttribute("tabindex"), "0");
@@ -79,7 +83,9 @@ try {
   await page.locator('.tab[data-tab="state"]').click();
   await page.waitForFunction(() => {
     const stage = document.querySelector(".state-node")?.closest(".graph-stage");
-    return stage?.dataset.transitionLayoutState === "ready" && document.querySelectorAll(".state-node").length > 0;
+    return document.querySelector('.tab.active')?.dataset.tab === "state"
+      && stage?.dataset.transitionLayoutState === "ready"
+      && document.querySelectorAll(".state-node").length > 0;
   }, null, { timeout: 60_000 });
 
   const canvas = page.locator(".canvas-shell").first();
@@ -99,7 +105,7 @@ try {
   if (panKey === "ArrowRight") assert(panAfter.left > panBefore.left, `ArrowRight did not pan canvas: ${JSON.stringify({ panBefore, panAfter })}`);
   else assert(panAfter.top > panBefore.top, `ArrowDown did not pan canvas: ${JSON.stringify({ panBefore, panAfter })}`);
 
-  let node = page.locator(".state-node").first();
+  const node = page.locator(".state-node").first();
   await node.focus();
   const nodeBefore = await node.evaluate(element => ({
     name: element.querySelector(".state-name")?.textContent?.trim() || "",
