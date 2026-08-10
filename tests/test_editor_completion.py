@@ -151,7 +151,12 @@ class EditorCompletionTests(unittest.TestCase):
         self.assertNotIn("fetch(", CONTEXT_SCRIPT)
 
     def test_highlight_uses_exact_shared_revision_without_copying_stale_source(self) -> None:
-        self.assertIn("Number(snapshot.revision)!==revision", HIGHLIGHT_SCRIPT)
+        self.assertIn(
+            "const exactSnapshot=Boolean(snapshot&&Number(snapshot.revision)===revision)",
+            HIGHLIGHT_SCRIPT,
+        )
+        self.assertIn("else if(!exactSnapshot)", HIGHLIGHT_SCRIPT)
+        self.assertIn("stalePublicationBlocks", HIGHLIGHT_SCRIPT)
         self.assertIn("lexicalIndex.allPositions", HIGHLIGHT_SCRIPT)
         self.assertNotIn("SOURCE_IDENTIFIER", HIGHLIGHT_SCRIPT)
         self.assertNotIn("highlight.textContent=value", HIGHLIGHT_SCRIPT)
