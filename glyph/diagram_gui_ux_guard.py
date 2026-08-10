@@ -40,7 +40,6 @@ const MARKER="glyph-diagram-gui-ux-guard-v1";
 if(window.glyphDiagramGuiUxGuard?.marker===MARKER)return;
 const pointerSessions=new Map(),FOCUS_REQUEST_TTL_MS=2000;
 let inspectorOpener=null,inspectorOpenerIdentity=null,restoreInspectorFocus=false,enhanceFrame=0,pendingClusterFocus=null,pendingClusterFocusTimer=0;
-const focusableEditing="input,textarea,select,[contenteditable=true]";
 const pointerTargetSelector="#splitter,.canvas-shell,.state-node,.transition-io-cluster,.edge-label,.transition-label";
 const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
 const machineIndex=()=>String(document.getElementById("machine-select")?.value||"0");
@@ -246,15 +245,6 @@ function enhance(){
 function scheduleEnhance(){if(enhanceFrame)return;enhanceFrame=requestAnimationFrame(enhance)}
 
 function modalOpen(){return document.querySelector("dialog[open]")}
-window.addEventListener("keydown",event=>{
-  const modal=modalOpen();if(!modal)return;
-  const saveShortcut=(event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==="s";
-  const diagramZoom=(event.ctrlKey||event.metaKey)&&["+","=","-","0"].includes(event.key);
-  if(saveShortcut||diagramZoom){event.preventDefault();event.stopPropagation();return}
-  if(event.target?.closest?.(focusableEditing))return;
-  if(event.key.startsWith("Arrow"))event.stopPropagation();
-},true);
-
 document.addEventListener("glyph-transition-label-inspector-opened",()=>{
   inspectorOpener=window.glyphTransitionLabelInspector?.current?.()||document.activeElement;
   inspectorOpenerIdentity=inspectorIdentityFor(inspectorOpener);
