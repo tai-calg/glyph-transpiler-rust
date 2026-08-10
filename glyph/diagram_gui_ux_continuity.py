@@ -43,12 +43,12 @@ function setupLineJumps(){
     const line=Number(element.dataset.line||0);if(line<=0)continue;
     element.tabIndex=0;element.setAttribute("role","button");
     ownLocalizedLabel(element,lineJumpLabel(element,line));
-    if(element.dataset.guiUxJumpReady==="true")continue;
-    element.dataset.guiUxJumpReady="true";
+    if(element.dataset.guiUxContinuityJumpReady==="true")continue;
+    element.dataset.guiUxContinuityJumpReady="true";
     element.addEventListener("keydown",event=>{
       if(event.key!=="Enter"&&event.key!==" ")return;
-      event.preventDefault();event.stopPropagation();activateLineJump(element,line);
-    });
+      event.preventDefault();event.stopImmediatePropagation();activateLineJump(element,line);
+    },true);
   }
 }
 function setupCanvasKeyboard(){
