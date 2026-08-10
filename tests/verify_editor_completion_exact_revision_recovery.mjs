@@ -102,6 +102,7 @@ try {
   const editor = page.locator("#editor");
   await editor.focus();
   await editor.evaluate(element => element.setSelectionRange(element.value.length, element.value.length));
+  const completionMetricsBefore = await page.evaluate(() => window.GlyphEditorCompletion.metrics());
   await page.keyboard.type("MotorC", { delay: 4 });
   await page.waitForFunction(() => {
     const popup = document.getElementById("glyph-completion-popup");
@@ -111,19 +112,21 @@ try {
       && window.GlyphEditorCompletion.candidates().some(item => item.text === "MotorCommand");
   }, null, { timeout: 5000 });
 
-  const publication = await page.evaluate(() => {
+  const publication = await page.evaluate(before => {
     const probe = window.__glyphExactCompletionProbe;
-    const metrics = window.glyphEditorCompletionUxGuard.metrics();
+    const guardMetrics = window.glyphEditorCompletionUxGuard.metrics();
+    const completionMetrics = window.GlyphEditorCompletion.metrics();
     return {
       ...probe,
       latencyMs: probe.visibleAt - probe.inputAt,
-      stalePublicationBlocks: metrics.stalePublicationBlocks,
+      stalePublicationBlocks: guardMetrics.stalePublicationBlocks,
+      staleDocumentQueryBlocks: completionMetrics.staleDocumentQueryBlocks - Number(before.staleDocumentQueryBlocks || 0),
     };
-  });
+  }, completionMetricsBefore);
   assert.equal(publication.visibleRuntimeRevision, publication.inputRevision, JSON.stringify(publication));
   assert.equal(publication.visibleLexicalRevision, publication.inputRevision, JSON.stringify(publication));
   assert(publication.latencyMs >= 0 && publication.latencyMs < POPUP_BUDGET_MS, JSON.stringify(publication));
-  assert(publication.stalePublicationBlocks >= 1, `stale publication was not suppressed: ${JSON.stringify(publication)}`);
+  assert(publication.staleDocumentQueryBlocks >= 1, `stale document query was not suppressed: ${JSON.stringify(publication)}`);
 
   await page.keyboard.press("Escape");
   await page.waitForFunction(() => document.getElementById("glyph-completion-popup").hidden);
