@@ -97,10 +97,17 @@ function scheduleViewportClamp(){
   if(viewportClampFrame)return;
   viewportClampFrame=requestAnimationFrame(clampPopupToViewport);
 }
+function hideStalePublication(){
+  popup.hidden=true;
+  popup.replaceChildren();
+  editor.setAttribute("aria-expanded","false");
+  editor.removeAttribute("aria-activedescendant");
+  status.textContent="";
+}
 function blockStalePublication(){
   if(popup.hidden||exactSnapshot())return false;
   metrics.stalePublicationBlocks+=1;
-  completion.close();
+  hideStalePublication();
   return true;
 }
 function publishStatus(){
