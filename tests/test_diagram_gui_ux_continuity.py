@@ -41,6 +41,10 @@ class DiagramGuiUxContinuityTests(unittest.TestCase):
         self.assertIn("armNodeFocus(nodeName(node))", _SCRIPT)
         self.assertIn("restoreNodeFocus()", _SCRIPT)
         self.assertIn("active===document.body", _SCRIPT)
+        self.assertIn('element.dataset.guiUxContinuityLabel="true"', _SCRIPT)
+        self.assertIn('document.documentElement.lang', _SCRIPT)
+        self.assertIn('dialog.addEventListener("close"', _SCRIPT)
+        self.assertIn('button.focus({preventScroll:true})', _SCRIPT)
 
     def test_enhancer_is_idempotent(self) -> None:
         html = "<html><head></head><body></body></html>"
