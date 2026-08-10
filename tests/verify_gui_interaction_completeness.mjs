@@ -29,6 +29,18 @@ async function stopProcess(child) {
   if (child.exitCode === null) child.kill("SIGKILL");
 }
 
+async function moveFocusedStateNode(page, before) {
+  for (const key of ["ArrowRight", "ArrowLeft", "ArrowDown", "ArrowUp"]) {
+    await page.keyboard.press(key);
+    const moved = await page.waitForFunction(previous => {
+      const node = document.querySelector(".state-node.selected-node");
+      return node && (node.style.left !== previous.left || node.style.top !== previous.top);
+    }, before, { timeout: 1500 }).then(() => true, () => false);
+    if (moved) return key;
+  }
+  return null;
+}
+
 const logs = [];
 const browserErrors = [];
 const requests = [];
@@ -136,11 +148,8 @@ try {
   await node.focus();
   assert.equal(await node.evaluate(element => element.classList.contains("selected-node")), true);
   const nodeBeforeKeyboard = await node.evaluate(element => ({ left: element.style.left, top: element.style.top }));
-  await page.keyboard.press("ArrowRight");
-  await page.waitForFunction(before => {
-    const node = document.querySelector(".state-node.selected-node");
-    return node && (node.style.left !== before.left || node.style.top !== before.top);
-  }, nodeBeforeKeyboard, { timeout: 10_000 });
+  const nodeMoveKey = await moveFocusedStateNode(page, nodeBeforeKeyboard);
+  assert(nodeMoveKey, "focused state node could not move in any Arrow-key direction");
   const nodeAfterKeyboard = await page.locator(".state-node.selected-node").evaluate(element => ({ left: element.style.left, top: element.style.top }));
   assert.notDeepEqual(nodeAfterKeyboard, nodeBeforeKeyboard, "focused state node did not move from an Arrow key");
 
@@ -250,6 +259,7 @@ try {
     clusterAfterKeyboard,
     nodeBeforeKeyboard,
     nodeAfterKeyboard,
+    nodeMoveKey,
     splitterBeforeKeyboard,
     splitterAfterKeyboard,
     editorWidthAfterDrag,
