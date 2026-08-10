@@ -37,6 +37,10 @@ class DiagramGuiUxGuardTests(unittest.TestCase):
         self.assertIn('adapter?.keyboardNudge?.(cluster,dx,dy)', _SCRIPT)
         self.assertIn('adapter?.resetCluster?.(cluster)', _SCRIPT)
         self.assertIn('glyph-transition-label-inspector-opened', _SCRIPT)
+        self.assertIn("function inspectorIdentityFor(opener)", _SCRIPT)
+        self.assertIn("function restoreInspectorOpener(opener,identity)", _SCRIPT)
+        self.assertIn("inspectorOpenerIdentity=inspectorIdentityFor(inspectorOpener)", _SCRIPT)
+        self.assertIn("clusterDigest(replacement)!==identity.diagramDigest", _SCRIPT)
         self.assertIn('splitter.setAttribute("role","separator")', _SCRIPT)
         self.assertIn('splitter.setAttribute("aria-valuemin","25")', _SCRIPT)
         self.assertIn('if(event.key==="Home")next=25', _SCRIPT)
@@ -55,7 +59,7 @@ class DiagramGuiUxGuardTests(unittest.TestCase):
         self.assertIn("clusterDigest(cluster)!==expected.diagramDigest", _SCRIPT)
         self.assertIn("function clearPendingClusterFocus()", _SCRIPT)
         self.assertIn("pendingClusterFocusTimer", _SCRIPT)
-        self.assertIn("version:3", _SCRIPT)
+        self.assertIn("version:4", _SCRIPT)
 
     def test_transition_label_adapter_exposes_keyboard_placement_contract(self) -> None:
         self.assertIn("async function keyboardNudge(cluster,dx,dy)", LABEL_INTERACTION_SCRIPT)
