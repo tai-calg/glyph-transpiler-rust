@@ -47,7 +47,7 @@ _SCRIPT = r"""
 <script id="glyph-editor-completion-v2-script">
 (()=>{
 const MARKER="glyph-editor-completion-v2";
-const MIN_PREFIX=2,MAX_RESULTS=8,QUERY_POOL=64,MAX_IDENTIFIER_TAIL=256;
+const MIN_PREFIX=2,MAX_RESULTS=8,QUERY_POOL=32,MAX_IDENTIFIER_TAIL=256;
 const editor=document.getElementById("editor");
 const documentRuntime=window.GlyphEditorDocument;
 const lexicalIndex=window.GlyphEditorLexicalIndex;
@@ -151,6 +151,8 @@ function compareCandidates(left,right,classification){
   const scopeStart=Number(classification?.scopeStart??-1);
   const leftScope=scopeStart>=0&&left.recent>=scopeStart?1:0,rightScope=scopeStart>=0&&right.recent>=scopeStart?1:0;
   if(leftScope!==rightScope)return rightScope-leftScope;
+  const leftMatch=Number(left.matchScore||0),rightMatch=Number(right.matchScore||0);
+  if(leftMatch!==rightMatch)return leftMatch-rightMatch;
   if(left.origin!==right.origin)return left.origin==="document"?-1:1;
   return right.recent-left.recent||right.count-left.count||left.added-right.added||(left.text<right.text?-1:left.text>right.text?1:0);
 }
@@ -168,6 +170,10 @@ function mergeCandidates(documentRows,staticRows,classification,context){
 function exactLexicalSnapshot(){
   const snapshot=lexicalIndex.snapshot?.();
   return Boolean(snapshot&&Number(snapshot.revision)===Number(documentRuntime.revision()));
+}
+function candidateMatchesPrefix(text,prefix){
+  if(!prefix)return true;
+  return Boolean(lexicalIndex.matchText?.(prefix,text)?.matched);
 }
 function update({force=false,allowEmpty=false}={}){
   frame=0;
@@ -231,7 +237,7 @@ function resumePendingAcceptance(){
   const snapshot=lexicalIndex.snapshot();
   if(!snapshot||Number(snapshot.revision)!==pending.revision)return false;
   const context=contextAtCaret();
-  if(!context||context.caret!==pending.caret||context.left!==pending.left||context.right!==pending.right||!pending.text.startsWith(context.prefix)){pendingAcceptance=null;return false}
+  if(!context||context.caret!==pending.caret||context.left!==pending.left||context.right!==pending.right||!candidateMatchesPrefix(pending.text,context.prefix)){pendingAcceptance=null;return false}
   const classification=contextService.classify(context);
   if(classification.id!==pending.classificationId||!recordMatchesClassification(lexicalIndex.record(pending.text),classification)){pendingAcceptance=null;return false}
   pendingAcceptance=null;
@@ -239,7 +245,7 @@ function resumePendingAcceptance(){
 }
 function accept(){
   const candidate=candidates[selected];if(!candidate){close();return false}
-  const context=contextAtCaret();if(!context||!candidate.text.startsWith(context.prefix)){close();return false}
+  const context=contextAtCaret();if(!context||!candidateMatchesPrefix(candidate.text,context.prefix)){close();return false}
   const classification=contextService.classify(context);
   if(classification.id!==lastClassification?.id){close();return false}
   metrics.staleAcceptRechecks+=1;
