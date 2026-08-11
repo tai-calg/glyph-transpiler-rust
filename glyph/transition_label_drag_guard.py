@@ -41,7 +41,7 @@ function schedule(reason){
 window.glyphTransitionLabelDragGuard=Object.freeze({
   marker:MARKER,
   version:3,
-  interactionOwner:"glyph-transition-layout-interaction-adapter-v4",
+  interactionOwner:"glyph-transition-layout-interaction-adapter-v6",
   ownsPointerEvents:false,
   ownsPersistence:false,
   invalidate,

@@ -12,6 +12,9 @@ from .diagram_editor_exports import enhance_diagram_editor_exports_html
 from .diagram_editor_render_guard import enhance_diagram_editor_render_guard_html
 from .diagram_editor_route_guard import enhance_diagram_editor_route_guard_html
 from .diagram_geometry_kernel import enhance_diagram_geometry_kernel_html
+from .diagram_gui_ux_continuity import enhance_diagram_gui_ux_continuity_html
+from .diagram_gui_ux_guard import enhance_diagram_gui_ux_guard_html
+from .diagram_identity_stamp import enhance_diagram_identity_stamp_html
 from .diagram_label_editor import enhance_diagram_label_editor_html
 from .diagram_live_stability import (
     enhance_diagram_live_stability_html,
@@ -23,7 +26,13 @@ from .diagram_rendered_geometry_adapter import enhance_diagram_rendered_geometry
 from .diagram_save_controller import enhance_save_controller_html
 from .diagram_save_presentation import enhance_save_presentation_html
 from .diagram_workspace_layout import enhance_workspace_layout_html
+from .editor_completion import enhance_editor_completion_html
+from .editor_completion_ux_guard import enhance_editor_completion_ux_guard_html
+from .editor_document_runtime import enhance_editor_document_runtime_html
+from .editor_exact_revision_guard import enhance_editor_exact_revision_guard_html
 from .editor_identifier_highlight import enhance_editor_identifier_highlight_html
+from .editor_lexical_index import enhance_editor_lexical_index_html
+from .editor_lexical_runtime import enhance_editor_lexical_runtime_html
 from .state_diagram_workspace import enhance_state_diagram_workspace_html
 from .state_viewport_reservation import enhance_state_viewport_reservation_html
 from .transition_arrow_clearance import enhance_transition_arrow_clearance_html
@@ -76,11 +85,11 @@ def _presentation_pipeline():
         enhance_diagram_editor_render_guard_html,
         enhance_code_derived_system_html,
         enhance_diagram_live_stability_html,
-        enhance_editor_identifier_highlight_html,
         enhance_diagram_label_editor_html,
         enhance_workspace_layout_html,
         enhance_state_viewport_reservation_html,
         enhance_diagram_canvas_navigation_html,
+        enhance_diagram_identity_stamp_html,
         enhance_diagram_canvas_viewport_html,
         enhance_diagram_middle_drag_zoom_html,
         enhance_state_diagram_workspace_html,
@@ -103,6 +112,15 @@ def _presentation_pipeline():
         enhance_adaptive_state_focus_html,
         enhance_save_controller_html,
         enhance_save_presentation_html,
+        enhance_editor_document_runtime_html,
+        enhance_editor_lexical_runtime_html,
+        enhance_editor_lexical_index_html,
+        enhance_editor_identifier_highlight_html,
+        enhance_editor_completion_html,
+        enhance_editor_exact_revision_guard_html,
+        enhance_editor_completion_ux_guard_html,
+        enhance_diagram_gui_ux_guard_html,
+        enhance_diagram_gui_ux_continuity_html,
     )
 
 

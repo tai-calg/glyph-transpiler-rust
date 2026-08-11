@@ -1,0 +1,73 @@
+from __future__ import annotations
+
+import unittest
+
+from glyph.editor_exact_revision_guard import _SCRIPT as EXACT_GUARD_SCRIPT
+from glyph.editor_lexical_runtime import _SCRIPT as LEXICAL_RUNTIME_SCRIPT
+from glyph.readable_diagram_app import _presentation_pipeline
+
+
+class EditorExactRevisionRecoveryTests(unittest.TestCase):
+    def test_pipeline_prefers_bounded_runtime_before_legacy_compatibility_enhancer(self) -> None:
+        names = [enhancer.__name__ for enhancer in _presentation_pipeline()]
+        document = names.index("enhance_editor_document_runtime_html")
+        runtime = names.index("enhance_editor_lexical_runtime_html")
+        legacy = names.index("enhance_editor_lexical_index_html")
+        highlight = names.index("enhance_editor_identifier_highlight_html")
+        completion = names.index("enhance_editor_completion_html")
+        exact = names.index("enhance_editor_exact_revision_guard_html")
+        ux = names.index("enhance_editor_completion_ux_guard_html")
+        self.assertLess(document, runtime)
+        self.assertLess(runtime, legacy)
+        self.assertLess(legacy, highlight)
+        self.assertLess(highlight, completion)
+        self.assertLess(completion, exact)
+        self.assertLess(exact, ux)
+
+    def test_worker_recovery_has_one_bounded_runtime_owner(self) -> None:
+        self.assertIn("const MAX_RECOVERY_ATTEMPTS=3", LEXICAL_RUNTIME_SCRIPT)
+        self.assertIn("function handleWorkerFailure", LEXICAL_RUNTIME_SCRIPT)
+        self.assertIn("function scheduleRecovery", LEXICAL_RUNTIME_SCRIPT)
+        self.assertIn("recoveryAttempts+=1", LEXICAL_RUNTIME_SCRIPT)
+        self.assertIn("if(recoveryAttempts>=MAX_RECOVERY_ATTEMPTS)markRecoveryExhausted()", LEXICAL_RUNTIME_SCRIPT)
+        self.assertIn("if(recoveryExhausted||recoveryFailures>0){pending=request", LEXICAL_RUNTIME_SCRIPT)
+        self.assertIn("if(recoveryExhausted||recoveryFailures>0){pending=buildRequest()", LEXICAL_RUNTIME_SCRIPT)
+        self.assertIn("if(exact)resetRecoveryAfterExact()", LEXICAL_RUNTIME_SCRIPT)
+        self.assertIn('emit("glyph-editor-lexical-index-recovery-exhausted"', LEXICAL_RUNTIME_SCRIPT)
+        self.assertNotIn("restartCount<1", LEXICAL_RUNTIME_SCRIPT)
+
+    def test_worker_transport_failures_join_the_same_recovery_state_machine(self) -> None:
+        self.assertIn("active.onmessageerror=event=>", LEXICAL_RUNTIME_SCRIPT)
+        self.assertIn("metrics.transportFailures+=1", LEXICAL_RUNTIME_SCRIPT)
+        self.assertIn("function validSnapshotMessage(result,completed)", LEXICAL_RUNTIME_SCRIPT)
+        self.assertIn("if(!validSnapshotMessage(result,completed))", LEXICAL_RUNTIME_SCRIPT)
+        self.assertIn("revision!==Number(completed.revision)", LEXICAL_RUNTIME_SCRIPT)
+        self.assertIn("metrics.invalidMessages+=1", LEXICAL_RUNTIME_SCRIPT)
+        self.assertIn("try{active.postMessage(request)}", LEXICAL_RUNTIME_SCRIPT)
+        self.assertIn("handleWorkerFailure(active,{message:String(error?.message||error)})", LEXICAL_RUNTIME_SCRIPT)
+
+    def test_exact_guard_hides_stale_ui_but_preserves_strict_accept_revalidation_state(self) -> None:
+        for event_name in (
+            "glyph-editor-document-changed",
+            "glyph-editor-source-replaced",
+            "glyph-editor-lexical-index-invalidated",
+            "glyph-editor-lexical-index-error",
+            "glyph-editor-lexical-index-recovery-exhausted",
+        ):
+            self.assertIn(event_name, EXACT_GUARD_SCRIPT)
+        self.assertIn("completionNeedsExactSnapshot", EXACT_GUARD_SCRIPT)
+        self.assertIn("function hideCompletionPublication", EXACT_GUARD_SCRIPT)
+        self.assertIn("popup.hidden=true", EXACT_GUARD_SCRIPT)
+        self.assertIn("popup.replaceChildren()", EXACT_GUARD_SCRIPT)
+        self.assertNotIn("completion.close()", EXACT_GUARD_SCRIPT)
+        self.assertIn("const originalAccept=completion.accept?.bind(completion)", EXACT_GUARD_SCRIPT)
+        self.assertIn("if(context?.strict)return originalAccept()", EXACT_GUARD_SCRIPT)
+        self.assertIn("metrics.staleAcceptBlocks+=1", EXACT_GUARD_SCRIPT)
+        self.assertIn('editor.dataset.activeIdentifier=""', EXACT_GUARD_SCRIPT)
+        self.assertIn('parent?.classList.remove("identifier-highlight-active")', EXACT_GUARD_SCRIPT)
+        self.assertIn("highlightApi.identifier=()=>exactSnapshot()?originalIdentifier():\"\"", EXACT_GUARD_SCRIPT)
+        self.assertIn("highlightApi.matchCount=()=>exactSnapshot()?originalMatchCount():0", EXACT_GUARD_SCRIPT)
+
+
+if __name__ == "__main__":
+    unittest.main()
