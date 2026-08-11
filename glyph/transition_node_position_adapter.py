@@ -45,8 +45,8 @@ async function diagramState(){
   return statePromise;
 }
 function machineIndex(){return document.getElementById("machine-select")?.value||0}
-function canonicalKey(data){return`${POSITION_KEY_PREFIX}${data?.digest||"source"}:state:${machineIndex()}`}
-function legacyKeys(){return[`${POSITION_KEY_PREFIX}source:state:${machineIndex()}`]}
+function canonicalKey(data,index=machineIndex()){return`${POSITION_KEY_PREFIX}${data?.digest||"source"}:state:${index}`}
+function legacyKeys(index=machineIndex()){return[`${POSITION_KEY_PREFIX}source:state:${index}`]}
 function parse(key){try{return JSON.parse(localStorage.getItem(key)||"{}")||{}}catch{return{}}}
 function write(key,value){
   try{localStorage.setItem(key,JSON.stringify(value));return true}
@@ -162,14 +162,31 @@ function moveActive(event){
   active.stage.dataset.transitionNodeDragConstrained=position.constrained?"true":"false";
   return true;
 }
+function cancelRecord(record,reason){
+  try{record.node.releasePointerCapture?.(record.pointerId)}catch{}
+  record.node.style.left=`${record.startLeft}px`;
+  record.node.style.top=`${record.startTop}px`;
+  record.node.classList.remove("dragging");
+  if(record.stage?.isConnected)record.stage.dataset.transitionNodeCancelReason=reason;
+  if(record.publicationInvalidated)publicationGuard()?.schedule?.(`manual-node-${reason}`);
+}
 async function persist(record){
-  if(destroyed||!record.stage.isConnected)return;
-  const data=await diagramState(),key=canonicalKey(data);
-  write(key,record.positions);
+  if(destroyed||!record.stage.isConnected)return false;
+  const data=await diagramState();
+  if(destroyed||!record.stage.isConnected||machineIndex()!==record.machineIndex){
+    if(record.publicationInvalidated)publicationGuard()?.schedule?.("manual-node-machine-changed");
+    return false;
+  }
+  const key=canonicalKey(data,record.machineIndex);
+  if(!write(key,record.positions)){
+    cancelRecord(record,"persistence-unavailable");
+    return false;
+  }
   workspace()?.markPositionMigration?.(record.stage,key);
   if(record.stage.isConnected)apply(record.stage,record.positions,key);
   record.stage.dataset.transitionNodePositions=`saved:${Object.keys(record.positions).length}`;
   window.glyphTransitionLayoutTransaction?.schedule("manual-node-persisted",0);
+  return true;
 }
 function nextFrame(){return new Promise(resolve=>requestAnimationFrame(resolve))}
 async function waitForWorkspaceOrigin(stage,token){
@@ -190,10 +207,10 @@ async function restore(stage,token){
     return false;
   }
   if(token!==restoreGeneration||!stage.isConnected||destroyed)return false;
-  const key=canonicalKey(data);
+  const index=machineIndex(),key=canonicalKey(data,index);
   let value=parse(key),source=key;
   if(!Object.keys(value).length){
-    for(const candidate of legacyKeys()){
+    for(const candidate of legacyKeys(index)){
       const found=parse(candidate);
       if(Object.keys(found).length){value=found;source=candidate;break}
     }
@@ -228,11 +245,13 @@ document.addEventListener("pointerdown",event=>{
   event.preventDefault();
   event.stopImmediatePropagation();
   select(node);
+  node.focus?.({preventScroll:true});
   node.classList.add("dragging");
   node.setPointerCapture?.(event.pointerId);
   active={
     node,
     stage,
+    machineIndex:machineIndex(),
     pointerId:event.pointerId,
     startX:event.clientX,
     startY:event.clientY,
@@ -255,7 +274,7 @@ document.addEventListener("pointerup",event=>{
   event.preventDefault();
   event.stopImmediatePropagation();
   const record=active;active=null;
-  record.node.releasePointerCapture?.(event.pointerId);
+  try{record.node.releasePointerCapture?.(event.pointerId)}catch{}
   record.node.classList.remove("dragging");
   if(!record.moved){
     setTimeout(()=>restorePositionStorageState(record.storageBefore),0);
@@ -270,11 +289,7 @@ document.addEventListener("pointerup",event=>{
 document.addEventListener("pointercancel",event=>{
   if(!active||active.pointerId!==event.pointerId)return;
   event.stopImmediatePropagation();
-  const record=active;active=null;
-  record.node.style.left=`${record.startLeft}px`;
-  record.node.style.top=`${record.startTop}px`;
-  record.node.classList.remove("dragging");
-  if(record.publicationInvalidated)publicationGuard()?.schedule?.("manual-node-cancelled");
+  const record=active;active=null;cancelRecord(record,"pointer-cancelled");
 },true);
 document.addEventListener("keydown",event=>{
   if(!event.key.startsWith("Arrow"))return;
@@ -282,6 +297,7 @@ document.addEventListener("keydown",event=>{
   const node=document.querySelector(".state-node.selected-node");
   const stage=node?.closest(".graph-stage");
   if(!node||!stage||stage.dataset.transitionLayoutState!=="ready")return;
+  if(document.activeElement!==node)return;
   event.preventDefault();
   event.stopImmediatePropagation();
   const step=event.shiftKey?1:8;
@@ -292,6 +308,7 @@ document.addEventListener("keydown",event=>{
   const record={
     node,
     stage,
+    machineIndex:machineIndex(),
     startLeft:num(node.style.left),
     startTop:num(node.style.top),
     publicationInvalidated:false,
@@ -313,6 +330,7 @@ document.addEventListener("keydown",event=>{
 },true);
 document.addEventListener("change",event=>{
   if(event.target?.id==="machine-select"){
+    if(active){const record=active;active=null;cancelRecord(record,"machine-changed")}
     invalidateState();
     scheduleRestore(null,20);
   }
@@ -332,7 +350,7 @@ for(const eventName of["pagehide","beforeunload"]){
 }
 lastStage=document.querySelector(".state-node")?.closest(".graph-stage")||null;
 scheduleRestore(lastStage,0);
-window.glyphTransitionNodePositionAdapter={marker:MARKER,version:8,restore:()=>scheduleRestore(null,0)};
+window.glyphTransitionNodePositionAdapter={marker:MARKER,version:10,restore:()=>scheduleRestore(null,0)};
 })();
 </script>
 """
@@ -344,3 +362,6 @@ def enhance_transition_node_position_adapter_html(html: str) -> str:
     if _MARKER in html:
         return html
     return html.replace("</body>", _SCRIPT + "\n</body>")
+
+
+__all__ = ["enhance_transition_node_position_adapter_html"]
