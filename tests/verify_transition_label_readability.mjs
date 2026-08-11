@@ -206,6 +206,19 @@ try {
           id: transition.id || `T${index + 1}`,
           text: expectedLabel(transition),
         }));
+        await page.waitForFunction(expectedLabels => {
+          const rendered = [...document.querySelectorAll(".transition-io-cluster")].map(cluster => ({
+            id: cluster.dataset.transitionId,
+            text: (cluster.querySelector(".transition-io-value")?.textContent || "").trim(),
+            semanticText: (cluster.dataset.ioValue || "").trim(),
+          }));
+          return rendered.length === expectedLabels.length
+            && rendered.every((item, index) => (
+              item.id === expectedLabels[index].id
+              && item.text === expectedLabels[index].text
+              && item.semanticText === expectedLabels[index].text
+            ));
+        }, expected, { timeout: 5_000 });
         const inspection = await inspectLabels(page);
         assert.deepEqual(
           inspection.labels.map(({ id, text }) => ({ id, text })),

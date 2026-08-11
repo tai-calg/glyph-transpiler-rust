@@ -58,6 +58,9 @@ async function layoutState(page) {
       layoutProfile: stage?.dataset.transitionLayoutProfile || "",
       layoutMode: stage?.dataset.transitionLayoutMode || "",
       layoutBudgetMs: Number(stage?.dataset.transitionLayoutBudgetMs || 0),
+      frameSliceBudgetMs: Number(stage?.dataset.transitionLayoutFrameSliceBudgetMs || 0),
+      ownerDispatchMaxMs: Number(stage?.dataset.transitionLayoutOwnerDispatchMaxMs || 0),
+      frameSliceExceeded: stage?.dataset.transitionLayoutFrameSliceBudgetExceeded || "",
       renderBudgetMs: Number(stage?.dataset.transitionIoRenderBudgetMs || 0),
       denseCanvas: stage?.dataset.transitionDenseCanvas || "",
       generation: Number(stage?.dataset.transitionLayoutGeneration || 0),
@@ -68,6 +71,7 @@ async function layoutState(page) {
       transactionVersion: transaction?.version ?? null,
       transactionGeneration: transaction?.generation ?? null,
       completedGeneration: transaction?.completedGeneration ?? null,
+      transactionAudit: transaction?.audit?.() ?? null,
       workspaceVersion: workspace?.version ?? null,
       workspaceAudit: workspace?.audit?.() ?? null,
       detailCount: document.querySelectorAll(".transition-index .transition-detail").length,
@@ -85,14 +89,18 @@ function assertOrdinary(current) {
   assert.equal(current.layoutProfile, "ordinary", JSON.stringify(current));
   assert.equal(current.layoutMode, "base", JSON.stringify(current));
   assert.equal(current.layoutBudgetMs, 48, JSON.stringify(current));
+  assert.equal(current.frameSliceBudgetMs, 8, JSON.stringify(current));
+  assert(current.ownerDispatchMaxMs <= 8, JSON.stringify(current));
+  assert.equal(current.frameSliceExceeded, "false", JSON.stringify(current));
   assert.equal(current.renderBudgetMs, 16, JSON.stringify(current));
   assert.equal(current.denseCanvas, "disabled", JSON.stringify(current));
   assert.equal(current.error, "", JSON.stringify(current));
   assert(current.transitionCount > 0, "no transition labels rendered");
   assert(current.maximumLabelDistance <= current.labelDistanceLimit + 0.5, JSON.stringify(current));
-  assert.equal(current.transactionVersion, 8, JSON.stringify(current));
+  assert.equal(current.transactionVersion, 9, JSON.stringify(current));
   assert(current.transactionGeneration >= current.completedGeneration, JSON.stringify(current));
-  assert.equal(current.workspaceVersion, 3, JSON.stringify(current));
+  assert.equal(current.transactionAudit?.frameSliceBudgetMs, 8, JSON.stringify(current));
+  assert.equal(current.workspaceVersion, 4, JSON.stringify(current));
   assert.equal(current.workspaceAudit?.ok, true, JSON.stringify(current));
   assert(current.detailCount > 0, JSON.stringify(current));
   assert.equal(current.initialReady, "true", JSON.stringify(current));
@@ -153,4 +161,4 @@ try {
   await stop(child);
 }
 
-console.log("verified bounded ordinary transaction and repeated I/O-to-state restoration");
+console.log("verified frame-bounded ordinary transaction and repeated I/O-to-state restoration");

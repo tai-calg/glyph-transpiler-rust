@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Mapping
 
 from glyph import GlyphError
+from glyph.assembly_frontend import require_rust_codegen_supported
 from glyph.compilation import CompilationPipeline
 from glyph.incremental import IncrementalCompiler, watch_file
 from glyph.repl import run_repl
@@ -62,16 +63,35 @@ def _source_href(input_path: Path, diagram_dir: Path | None) -> str | None:
 
 
 def _tooling_diagnostics(files: Mapping[str, str]) -> tuple[dict[str, object], ...]:
-    content = files.get("type-algebra-tooling.json")
-    if content is None:
-        return ()
-    payload = json.loads(content)
-    if not isinstance(payload, dict):
-        return ()
-    diagnostics = payload.get("diagnostics")
-    if not isinstance(diagnostics, list):
-        return ()
-    return tuple(dict(item) for item in diagnostics if isinstance(item, Mapping))
+    result: list[dict[str, object]] = []
+
+    type_content = files.get("type-algebra-tooling.json")
+    if type_content is not None:
+        payload = json.loads(type_content)
+        if isinstance(payload, dict) and isinstance(payload.get("diagnostics"), list):
+            result.extend(
+                dict(item)
+                for item in payload["diagnostics"]
+                if isinstance(item, Mapping)
+            )
+
+    assembly_content = files.get("machine-assembly-ir.json")
+    if assembly_content is not None:
+        payload = json.loads(assembly_content)
+        if isinstance(payload, dict) and isinstance(payload.get("assemblies"), list):
+            for assembly in payload["assemblies"]:
+                if not isinstance(assembly, Mapping):
+                    continue
+                diagnostics = assembly.get("diagnostics")
+                if not isinstance(diagnostics, list):
+                    continue
+                result.extend(
+                    dict(item)
+                    for item in diagnostics
+                    if isinstance(item, Mapping)
+                )
+
+    return tuple(result)
 
 
 def _emit_tooling_diagnostics(files: Mapping[str, str]) -> None:
@@ -132,6 +152,14 @@ def main(argv: list[str] | None = None) -> int:
         if args.check:
             print(f"OK: {args.input}")
             return 0
+
+        rust_requested = bool(
+            args.output
+            or args.host_output
+            or (not args.diagram_dir and not args.ast_json)
+        )
+        if rust_requested:
+            require_rust_codegen_supported(outputs.model)
 
         if args.output:
             args.output.parent.mkdir(parents=True, exist_ok=True)

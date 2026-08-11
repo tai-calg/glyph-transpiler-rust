@@ -583,17 +583,11 @@ for(const eventName of["glyph-locale-changed","glyph-execution-context-changed"]
 document.addEventListener("change",event=>{
   if(event.target?.id==="machine-select")invalidate("machine-change");
 });
-let rerouteRaf=0;
-document.addEventListener("pointermove",event=>{
-  if(!event.target?.closest?.(".state-node"))return;
-  cancelAnimationFrame(rerouteRaf);
-  rerouteRaf=requestAnimationFrame(()=>reroute());
-},true);
 document.addEventListener("pointerup",event=>{
   if(event.target?.closest?.(".state-node"))schedule(null,"node-drag-end");
 },true);
 for(const eventName of["pagehide","beforeunload"]){
-  window.addEventListener(eventName,()=>{destroyed=true;generation+=1;cancelAnimationFrame(raf);cancelAnimationFrame(rerouteRaf)},{once:true});
+  window.addEventListener(eventName,()=>{destroyed=true;generation+=1;cancelAnimationFrame(raf)},{once:true});
 }
 window.glyphTransitionIoClusters={
   marker:MARKER,
@@ -601,6 +595,7 @@ window.glyphTransitionIoClusters={
   profile:"ordinary",
   budgetMs:RENDER_BUDGET_MS,
   maxDistance:MAX_DISTANCE,
+  nodeDragRouting:"deferred-full",
   render:()=>render(stageOf(),"api"),
   schedule,
   reroute,
