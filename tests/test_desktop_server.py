@@ -80,21 +80,31 @@ class DesktopServerTests(unittest.TestCase):
             thread.start()
             host, port = desktop.server.server_address[:2]
             api_url = f"http://{host}:{port}/api/state"
+            worker_url = f"http://{host}:{port}/assets/editor-lexical-worker.js"
             try:
                 with self.assertRaises(HTTPError) as rejected:
                     urlopen(api_url, timeout=3)
                 self.assertEqual(rejected.exception.code, HTTPStatus.FORBIDDEN)
+                with self.assertRaises(HTTPError) as rejected_worker:
+                    urlopen(worker_url, timeout=3)
+                self.assertEqual(rejected_worker.exception.code, HTTPStatus.FORBIDDEN)
 
                 launch = urlopen(desktop.launch_url, timeout=3)
                 self.assertEqual(launch.status, HTTPStatus.OK)
                 html = launch.read().decode("utf-8")
                 self.assertIn("X-Glyph-Desktop-Token", html)
                 self.assertIn('const token = "test-token"', html)
+                self.assertIn("glyph-editor-completion-v2", html)
+                self.assertIn("glyph-editor-lexical-index-v2", html)
                 cookie = launch.headers.get("Set-Cookie")
                 self.assertIsNotNone(cookie)
                 assert cookie is not None
                 self.assertIn("glyph_desktop_session=test-token", cookie)
                 self.assertIn("HttpOnly", cookie)
+                csp = launch.headers.get("Content-Security-Policy")
+                self.assertIsNotNone(csp)
+                assert csp is not None
+                self.assertIn("worker-src 'self'", csp)
 
                 request = Request(
                     api_url,
@@ -103,6 +113,20 @@ class DesktopServerTests(unittest.TestCase):
                 state = json.loads(urlopen(request, timeout=3).read().decode("utf-8"))
                 self.assertEqual(state["status"], "ready")
                 self.assertEqual(Path(state["source_path"]), source_path)
+
+                worker_request = Request(
+                    worker_url,
+                    headers={"X-Glyph-Desktop-Token": "test-token"},
+                )
+                worker_response = urlopen(worker_request, timeout=3)
+                self.assertEqual(worker_response.status, HTTPStatus.OK)
+                self.assertEqual(
+                    worker_response.headers.get_content_type(),
+                    "text/javascript",
+                )
+                worker_source = worker_response.read().decode("utf-8")
+                self.assertIn("self.onmessage", worker_source)
+                self.assertIn('type:"snapshot"', worker_source)
             finally:
                 desktop.close()
                 thread.join(timeout=2)

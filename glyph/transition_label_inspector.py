@@ -134,6 +134,14 @@ function position(panel,cluster){
   panel.style.left=`${Math.round(left)}px`;
   panel.style.top=`${Math.round(top)}px`;
 }
+function focusInspector(panel){
+  const closeButton=panel.querySelector(".transition-label-inspector-close");
+  closeButton?.focus({preventScroll:true});
+  requestAnimationFrame(()=>{
+    if(panel.hidden||panel.contains(document.activeElement))return;
+    closeButton?.focus({preventScroll:true});
+  });
+}
 function open(cluster){
   const panel=ensureInspector(),status=cluster.dataset.rtaiSemanticStatus||"unknown";
   const full=text(cluster.dataset.ioValue||cluster.querySelector(".transition-io-value")?.textContent||cluster.textContent).trim();
@@ -150,13 +158,14 @@ function open(cluster){
       ${row(isJapanese()?"解析状態":"Analysis",semanticLabel(status),`transition-label-inspector-status`)}
       ${row(isJapanese()?"理由":"Reason",reason)}
     </div>
-    <div class="transition-label-inspector-hint">${isJapanese()?"ドラッグでラベルを移動できる。Alt + ダブルクリックで配置を自動位置へ戻す。":"Drag the label to move it. Alt + double-click resets its placement."}</div>`;
+    <div class="transition-label-inspector-hint">${isJapanese()?"矢印キーで微調整（Shiftで大きく移動）、Deleteで自動配置へ戻せる。ドラッグでも移動でき、Alt + ダブルクリックでも自動配置へ戻せる。":"Use Arrow keys to nudge (Shift for larger steps) and Delete to reset. Drag also moves the label; Alt + double-click resets it."}</div>`;
   const statusElement=panel.querySelector(".transition-label-inspector-status");
   if(statusElement)statusElement.dataset.status=status;
   currentCluster=cluster;
   panel.hidden=false;
   panel.dataset.transitionId=cluster.dataset.transitionId||"";
   panel.dataset.fullText=full;
+  focusInspector(panel);
   requestAnimationFrame(()=>position(panel,cluster));
   document.dispatchEvent(new CustomEvent("glyph-transition-label-inspector-opened",{detail:{marker:MARKER,transitionId:cluster.dataset.transitionId||"",fullText:full}}));
 }
@@ -186,7 +195,7 @@ window.glyphTransitionLabelInspector={marker:MARKER,version:1,open,close,current
 
 
 def enhance_transition_label_inspector_html(html: str) -> str:
-    """Keep transition labels draggable and show their complete text on double click."""
+    """Keep transition labels movable and expose full text with keyboard-safe focus."""
 
     if _MARKER in html:
         return html

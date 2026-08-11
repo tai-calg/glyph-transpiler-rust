@@ -99,6 +99,21 @@ async function drag(page, locator, deltaX, deltaY) {
   await page.mouse.up();
 }
 
+async function moveFocusedStateNode(page, before) {
+  for (const key of ["ArrowRight", "ArrowLeft", "ArrowDown", "ArrowUp"]) {
+    await page.keyboard.press(key);
+    const moved = await page.waitForFunction(previous => {
+      const node = document.querySelector(".state-node.selected-node");
+      if (!node) return false;
+      const left = Number.parseFloat(node.style.left || "0") || 0;
+      const top = Number.parseFloat(node.style.top || "0") || 0;
+      return Math.abs(left - previous.left) > 1 || Math.abs(top - previous.top) > 1;
+    }, before, { timeout: 800 }).then(() => true, () => false);
+    if (moved) return key;
+  }
+  return null;
+}
+
 function ready(current, minimumGeneration = 0, requirePersisted = false) {
   return current.layoutState === "ready"
     && current.publicationReady === "true"
@@ -181,7 +196,7 @@ try {
   await page.click('button[data-tab="state"]');
   const initial = await waitForReady(page, "initial");
 
-  assert.equal(initial.nodeAdapterVersion, 8, JSON.stringify(initial));
+  assert.equal(initial.nodeAdapterVersion, 10, JSON.stringify(initial));
   assert.equal(initial.nodeGuardVersion, 2, JSON.stringify(initial));
   assert.equal(initial.certificatePresent, false, JSON.stringify(initial));
   assert.equal(initial.routerPresent, false, JSON.stringify(initial));
@@ -231,23 +246,19 @@ try {
     const node = document.querySelector(".state-node.selected-node") || document.querySelector(".state-node");
     const stage = node?.closest(".graph-stage");
     if (!node || !stage) return null;
+    document.querySelector(".state-node.selected-node")?.classList.remove("selected-node");
     node.classList.add("selected-node");
-    const left = Number.parseFloat(node.style.left || "0") || 0;
-    const top = Number.parseFloat(node.style.top || "0") || 0;
-    const width = Number.parseFloat(stage.style.width || "0") || stage.scrollWidth;
-    const direction = left + node.offsetWidth + 24 < width ? "ArrowRight" : "ArrowLeft";
-    document.activeElement?.blur?.();
-    return { left, top, direction };
+    node.focus({ preventScroll: true });
+    return {
+      left: Number.parseFloat(node.style.left || "0") || 0,
+      top: Number.parseFloat(node.style.top || "0") || 0,
+      focused: document.activeElement === node,
+    };
   });
   assert(keyboardSetup, "keyboard node setup failed");
-  await page.keyboard.press(keyboardSetup.direction);
-  await page.waitForFunction(before => {
-    const node = document.querySelector(".state-node.selected-node");
-    if (!node) return false;
-    const left = Number.parseFloat(node.style.left || "0") || 0;
-    const top = Number.parseFloat(node.style.top || "0") || 0;
-    return Math.abs(left - before.left) > 1 || Math.abs(top - before.top) > 1;
-  }, keyboardSetup, { timeout: 3000 });
+  assert.equal(keyboardSetup.focused, true, "keyboard node did not receive focus");
+  const nodeMoveKey = await moveFocusedStateNode(page, keyboardSetup);
+  assert(nodeMoveKey, "focused state node could not move in any Arrow-key direction");
   const keyboardReady = await waitForReady(
     page,
     "node-keyboard",
@@ -272,7 +283,10 @@ try {
   assert.deepEqual(browserErrors, [], browserErrors.join("\n"));
 
   await page.close();
-  console.log("verified broad workspace, transition details, initial-arrow following, node persistence, and editor isolation");
+  console.log(JSON.stringify({
+    verified: "broad workspace, transition details, initial-arrow following, node persistence, and editor isolation",
+    nodeMoveKey,
+  }));
 } finally {
   await browser.close();
   await stopProcess(child);

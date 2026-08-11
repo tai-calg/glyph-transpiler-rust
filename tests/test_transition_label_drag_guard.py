@@ -12,7 +12,7 @@ class TransitionLabelDragGuardTests(unittest.TestCase):
     def test_enhancer_is_passive_and_delegates_to_the_unified_owner(self) -> None:
         html = enhance_transition_label_drag_guard_html(DIAGRAM_HTML)
         self.assertIn("glyph-transition-label-drag-guard-v2-script", html)
-        self.assertIn('interactionOwner:"glyph-transition-layout-interaction-adapter-v4"', html)
+        self.assertIn('interactionOwner:"glyph-transition-layout-interaction-adapter-v6"', html)
         self.assertIn("ownsPointerEvents:false", html)
         self.assertIn("ownsPersistence:false", html)
         self.assertIn("function invalidate(stage,reason)", html)

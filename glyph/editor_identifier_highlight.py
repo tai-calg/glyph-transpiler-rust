@@ -40,14 +40,8 @@ _STYLE = r"""
   background:rgba(148,163,184,.24);
   box-shadow:0 0 0 1px rgba(148,163,184,.13);
 }
-.editor-wrap>.lines{
-  position:relative;
-  z-index:4;
-}
-.editor-wrap>.editor{
-  position:relative;
-  z-index:1;
-}
+.editor-wrap>.lines{position:relative;z-index:4}
+.editor-wrap>.editor{position:relative;z-index:1}
 .theme-monochrome .identifier-highlight-layer mark{
   background:rgba(0,0,0,.12)!important;
   box-shadow:0 0 0 1px rgba(0,0,0,.14)!important;
@@ -60,9 +54,12 @@ _SCRIPT = r"""
 (()=>{
 const MARKER="glyph-editor-identifier-highlight-v1";
 const IDENTIFIER=/^[A-Za-z_][A-Za-z0-9_]*$/;
-const SOURCE_IDENTIFIER=/[A-Za-z_][A-Za-z0-9_]*/g;
+const IDENTIFIER_PART=/[A-Za-z0-9_]/;
+const MAX_IDENTIFIER_LENGTH=256;
 const sourceEditor=document.getElementById("editor");
-if(!sourceEditor||sourceEditor.dataset.identifierHighlightReady==="true")return;
+const documentRuntime=window.GlyphEditorDocument;
+const lexicalIndex=window.GlyphEditorLexicalIndex;
+if(!sourceEditor||!documentRuntime||!lexicalIndex||sourceEditor.dataset.identifierHighlightReady==="true")return;
 const parent=sourceEditor.parentElement;
 const surface=document.createElement("div");
 surface.className="identifier-highlight-surface";
@@ -73,30 +70,38 @@ highlight.setAttribute("aria-hidden","true");
 surface.append(highlight);
 parent.insertBefore(surface,sourceEditor);
 sourceEditor.dataset.identifierHighlightReady="true";
-let frame=0,lastValue="",lastStart=-1,lastEnd=-1,lastFocused=false,currentIdentifier="",matchCount=0;
+let frame=0,lastRevision=-1,lastStart=-1,lastEnd=-1,lastFocused=false,currentIdentifier="",matchCount=0;
+let renderedRevision=-1,renderedIdentifier="",renderedMatchCount=0;
+const metrics={htmlRebuilds:0,htmlReuses:0,boundedIdentifierRejects:0,visibleInvalidations:0,stalePublicationBlocks:0};
 const esc=value=>String(value??"").replace(/[&<>]/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[char]));
 function identifierAt(value,start,end,focused){
   if(!focused)return"";
   if(start!==end){
+    if(end-start>MAX_IDENTIFIER_LENGTH){metrics.boundedIdentifierRejects+=1;return""}
     const selected=value.slice(start,end);
     return IDENTIFIER.test(selected)?selected:"";
   }
-  let left=start,right=start;
-  while(left>0&&/[A-Za-z0-9_]/.test(value[left-1]))left-=1;
-  while(right<value.length&&/[A-Za-z0-9_]/.test(value[right]))right+=1;
+  let left=start,right=start,budget=MAX_IDENTIFIER_LENGTH;
+  while(left>0&&IDENTIFIER_PART.test(value[left-1])){
+    if(budget===0){metrics.boundedIdentifierRejects+=1;return""}
+    left-=1;budget-=1;
+  }
+  while(right<value.length&&IDENTIFIER_PART.test(value[right])){
+    if(budget===0){metrics.boundedIdentifierRejects+=1;return""}
+    right+=1;budget-=1;
+  }
   const candidate=value.slice(left,right);
   return IDENTIFIER.test(candidate)?candidate:"";
 }
-function renderHtml(value,identifier){
-  if(!identifier)return esc(value)||"\u200b";
+function renderHtml(value,identifier,positions){
+  if(!identifier||!positions?.length)return esc(value)||"\u200b";
   let html="",cursor=0,count=0;
-  SOURCE_IDENTIFIER.lastIndex=0;
-  for(let match=SOURCE_IDENTIFIER.exec(value);match;match=SOURCE_IDENTIFIER.exec(value)){
-    const token=match[0],index=match.index;
-    html+=esc(value.slice(cursor,index));
-    if(token===identifier){html+=`<mark>${esc(token)}</mark>`;count+=1}
-    else html+=esc(token);
-    cursor=index+token.length;
+  for(const position of positions){
+    if(position<cursor||value.slice(position,position+identifier.length)!==identifier)continue;
+    html+=esc(value.slice(cursor,position));
+    html+=`<mark>${esc(identifier)}</mark>`;
+    cursor=position+identifier.length;
+    count+=1;
   }
   html+=esc(value.slice(cursor));
   matchCount=count;
@@ -112,36 +117,79 @@ function syncGeometry(){
   highlight.style.height=`${Math.max(sourceEditor.clientHeight,sourceEditor.scrollHeight)}px`;
   highlight.style.transform=`translate(${-sourceEditor.scrollLeft}px,${-sourceEditor.scrollTop}px)`;
 }
-function render(force=false){
-  frame=0;
-  const value=sourceEditor.value,start=sourceEditor.selectionStart||0,end=sourceEditor.selectionEnd||0,focused=document.activeElement===sourceEditor;
-  if(!force&&value===lastValue&&start===lastStart&&end===lastEnd&&focused===lastFocused){syncGeometry();return}
-  const identifier=identifierAt(value,start,end,focused);
-  currentIdentifier=identifier;
-  matchCount=0;
-  highlight.innerHTML=renderHtml(value,identifier);
-  const active=Boolean(focused&&identifier);
+function clear(identifier=""){
+  currentIdentifier=identifier;matchCount=0;
+  parent.classList.remove("identifier-highlight-active");
+  surface.dataset.identifier=identifier;
+  surface.dataset.identifierMatchCount="0";
+  sourceEditor.dataset.activeIdentifier=identifier;
+  sourceEditor.dataset.identifierMatchCount="0";
+}
+function invalidateVisible(){
+  lastRevision=-1;lastStart=-1;lastEnd=-1;
+  metrics.visibleInvalidations+=1;
+  clear("");
+}
+function publish(identifier){
+  const active=matchCount>0;
   parent.classList.toggle("identifier-highlight-active",active);
+  currentIdentifier=identifier;
   surface.dataset.identifier=identifier;
   surface.dataset.identifierMatchCount=String(matchCount);
   sourceEditor.dataset.activeIdentifier=identifier;
   sourceEditor.dataset.identifierMatchCount=String(matchCount);
-  lastValue=value;lastStart=start;lastEnd=end;lastFocused=focused;
+}
+function emit(revision){
+  document.dispatchEvent(new CustomEvent("glyph-editor-identifier-highlighted",{detail:{marker:MARKER,identifier:currentIdentifier,matchCount,revision}}));
+}
+function render(force=false){
+  frame=0;
+  const value=sourceEditor.value,start=sourceEditor.selectionStart||0,end=sourceEditor.selectionEnd||0,focused=document.activeElement===sourceEditor;
+  const revision=documentRuntime.revision();
+  if(!force&&revision===lastRevision&&start===lastStart&&end===lastEnd&&focused===lastFocused){syncGeometry();return}
+  const identifier=identifierAt(value,start,end,focused);
+  const snapshot=lexicalIndex.snapshot();
+  const exactSnapshot=Boolean(snapshot&&Number(snapshot.revision)===revision);
+  if(!focused||!identifier){
+    clear("");
+  }else if(!exactSnapshot){
+    metrics.stalePublicationBlocks+=1;
+    clear("");
+  }else{
+    if(renderedRevision!==revision||renderedIdentifier!==identifier){
+      const row=lexicalIndex.record(identifier);
+      const positions=row?lexicalIndex.allPositions(row):new Int32Array();
+      matchCount=0;
+      highlight.innerHTML=renderHtml(value,identifier,positions);
+      renderedRevision=revision;
+      renderedIdentifier=identifier;
+      renderedMatchCount=matchCount;
+      metrics.htmlRebuilds+=1;
+    }else{
+      matchCount=renderedMatchCount;
+      metrics.htmlReuses+=1;
+    }
+    publish(identifier);
+  }
+  lastRevision=revision;lastStart=start;lastEnd=end;lastFocused=focused;
   syncGeometry();
-  document.dispatchEvent(new CustomEvent("glyph-editor-identifier-highlighted",{detail:{marker:MARKER,identifier,matchCount}}));
+  emit(revision);
 }
 function schedule(force=false){
-  if(force)lastValue="\u0000";
+  if(force)lastRevision=-1;
   if(frame)return;
   frame=requestAnimationFrame(()=>render(force));
 }
 for(const eventName of["input","keyup","mouseup","select","click","focus","blur"]){sourceEditor.addEventListener(eventName,()=>schedule())}
 sourceEditor.addEventListener("scroll",syncGeometry,{passive:true});
 document.addEventListener("selectionchange",()=>{if(document.activeElement===sourceEditor)schedule()});
+document.addEventListener("glyph-editor-document-changed",()=>schedule(true));
+document.addEventListener("glyph-editor-source-replaced",()=>{invalidateVisible();schedule(true)});
+document.addEventListener("glyph-editor-lexical-index-updated",()=>schedule(true));
 const status=document.getElementById("status");
-if(status)new MutationObserver(()=>schedule(true)).observe(status,{childList:true,subtree:true,attributes:true});
-new ResizeObserver(()=>schedule(true)).observe(sourceEditor);
-for(const eventName of["glyph-locale-changed","glyph-transition-layout-transaction-ready"]){document.addEventListener(eventName,()=>schedule(true))}
+if(status)new MutationObserver(()=>schedule()).observe(status,{childList:true,subtree:true,attributes:true});
+new ResizeObserver(syncGeometry).observe(sourceEditor);
+for(const eventName of["glyph-locale-changed","glyph-transition-layout-transaction-ready"]){document.addEventListener(eventName,()=>schedule())}
 schedule(true);
 window.glyphEditorIdentifierHighlight={
   marker:MARKER,
@@ -149,6 +197,7 @@ window.glyphEditorIdentifierHighlight={
   identifier:()=>currentIdentifier,
   matchCount:()=>matchCount,
   refresh:()=>schedule(true),
+  metrics:()=>({...metrics}),
 };
 })();
 </script>
@@ -156,7 +205,7 @@ window.glyphEditorIdentifierHighlight={
 
 
 def enhance_editor_identifier_highlight_html(html: str) -> str:
-    """Highlight every exact lexical occurrence without obscuring the editor."""
+    """Highlight exact lexical occurrences using the shared editor index."""
 
     if _MARKER in html:
         return html

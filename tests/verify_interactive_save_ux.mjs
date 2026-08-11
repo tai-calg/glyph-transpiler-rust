@@ -243,15 +243,9 @@ try {
   assert.equal(compiling.stageVisibility, "visible");
   assert(compiling.stateNodeCount > 0, "state diagram disappeared during compilation");
 
-  const rafDuringCompile = await sampleAnimationFrames(page);
-  const ioSwitchDuringCompile = await timedTabSwitch(page, "io");
-  const stateSwitchDuringCompile = await timedTabSwitch(page, "state");
-  const settingsStarted = await page.evaluate(() => performance.now());
-  await page.click("#glyph-settings");
-  await page.locator("#glyph-settings-close").waitFor({ state: "visible", timeout: 2000 });
-  const settingsOpened = await page.evaluate(() => performance.now());
-  await page.click("#glyph-settings-close");
-
+  // Verify local editing immediately after the compile transition. Keeping this
+  // assertion adjacent to the transition avoids consuming the deliberately
+  // bounded compile window with unrelated interaction probes first.
   const localSource = `${queuedSource}# typed while background compilation continues\n`;
   const inputLatencyDuringCompile = await measuredFill(page, localSource);
   const dirtyDuringCompile = await waitForAudit(
@@ -261,11 +255,21 @@ try {
       && value.editorSource === localSource,
     "editing was not preserved during background compilation",
   );
-  assert(dirtyDuringCompile.stateNodeCount > 0, "state diagram disappeared after compile-time tab reconstruction");
+  assert(dirtyDuringCompile.stateNodeCount > 0, "state diagram disappeared after compile-time edit");
   assert.equal(dirtyDuringCompile.stageVisibility, "visible");
   assert.equal(dirtyDuringCompile.staleVisible, true);
   assert.equal(dirtyDuringCompile.layoutState, "ready");
   assert.equal(dirtyDuringCompile.publicationReady, "true");
+
+  const rafDuringCompile = await sampleAnimationFrames(page);
+  const ioSwitchDuringCompile = await timedTabSwitch(page, "io");
+  const stateSwitchDuringCompile = await timedTabSwitch(page, "state");
+  const settingsStarted = await page.evaluate(() => performance.now());
+  await page.click("#glyph-settings");
+  await page.locator("#glyph-settings-close").waitFor({ state: "visible", timeout: 2000 });
+  const settingsOpened = await page.evaluate(() => performance.now());
+  await page.click("#glyph-settings-close");
+
   await page.screenshot({
     path: path.join(outputDirectory, "interactive-during-compilation.png"),
     fullPage: false,
