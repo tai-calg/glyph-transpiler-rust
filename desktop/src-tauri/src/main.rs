@@ -174,8 +174,14 @@ async fn restart_backend(
 }
 
 fn main() {
-    let application = tauri::Builder::default()
-        .plugin(tauri_plugin_shell::init())
+    let builder = tauri::Builder::default().plugin(tauri_plugin_shell::init());
+
+    // E2E入力は明示的なCargo featureでだけ有効化する。
+    // 通常のdev/release buildではWebDriver HTTP serverを登録しない。
+    #[cfg(feature = "desktop-e2e")]
+    let builder = builder.plugin(tauri_plugin_wdio_webdriver::init());
+
+    let application = builder
         .manage(BackendState::default())
         .invoke_handler(tauri::generate_handler![
             initialize_backend,
