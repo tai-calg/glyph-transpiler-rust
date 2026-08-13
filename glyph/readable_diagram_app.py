@@ -33,7 +33,6 @@ from .editor_exact_revision_guard import enhance_editor_exact_revision_guard_htm
 from .editor_identifier_highlight import enhance_editor_identifier_highlight_html
 from .editor_lexical_index import enhance_editor_lexical_index_html
 from .editor_lexical_runtime import enhance_editor_lexical_runtime_html
-from .source_file_picker import enhance_source_file_picker_html
 from .state_diagram_workspace import enhance_state_diagram_workspace_html
 from .state_viewport_reservation import enhance_state_viewport_reservation_html
 from .transition_arrow_clearance import enhance_transition_arrow_clearance_html
@@ -113,7 +112,6 @@ def _presentation_pipeline():
         enhance_adaptive_state_focus_html,
         enhance_save_controller_html,
         enhance_save_presentation_html,
-        enhance_source_file_picker_html,
         enhance_editor_document_runtime_html,
         enhance_editor_lexical_runtime_html,
         enhance_editor_lexical_index_html,
