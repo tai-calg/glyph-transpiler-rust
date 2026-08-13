@@ -178,7 +178,7 @@ function classify(context){
     return withDefaults({id:"preprocessor-directive",strict:true,kinds:[],static:staticRows(PREPROCESSOR_DIRECTIVES,"Directive"),allowEmptyStatic:true},scope);
   }
   if(temporalFormula){
-    return withDefaults({id:"temporal-formula",strict:false,preferredKinds:["Binding","Parameter","Field","State"],static:[...staticRows(TEMPORAL_WORD_OPERATORS,"Temporal"),...staticRows(["true","false"],"Keyword")],allowEmptyStatic:true},scope);
+    return withDefaults({id:"temporal-formula",strict:false,preferredKinds:["Binding","Parameter","Field","State"],static:[...staticRows(TEMPORAL_WORD_OPERATORS,"Temporal"),...staticRows(["true","false"],"Keyword")]},scope);
   }
 
   const resourceState=throughCaret.match(/([A-Za-z_][A-Za-z0-9_]*)\[\s*[A-Za-z0-9_]*$/);
@@ -247,6 +247,9 @@ function classify(context){
         ...(typeMode==="borrow"?staticRows(BORROW_KEYWORDS,"Capability"):[]),
       ],
     },scope);
+  }
+  if(/&\s*$/.test(lineBefore)){
+    return withDefaults({id:"value-borrow",strict:false,static:staticRows(BORROW_KEYWORDS,"Capability")},scope);
   }
 
   if(indented&&scope?.kind==="bounded-unknown"){
