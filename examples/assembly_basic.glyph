@@ -4,6 +4,26 @@
 #   instance_name=MachineName
 #   source_instance.effect -> target_instance.input
 
+machine Door(state:DoorState,input:DoorInput)
+  select=state.mode
+  init=DoorState(Closed)
+  next=door_next(state,input)
+  success=Open
+  failure=DoorFault
+
+machine Alarm(state:AlarmState,input:AlarmInput)
+  select=state.mode
+  init=AlarmState(Armed)
+  next=alarm_next(state,input)
+  success=Triggered
+  failure=AlarmFault
+
+assembly BuildingControl
+  door=Door
+  alarm=Alarm
+
+  door.notify_alarm -> alarm.input
+
 +DoorInput=OpenRequest|ForcedOpen
 +DoorMode=Closed|Open|DoorFault
 *DoorState(mode:DoorMode)
@@ -27,23 +47,3 @@
 >alarm_next(state:AlarmState,input:AlarmInput):AlarmState
   input==DoorForced>>AlarmState(Triggered)
   _>>state
-
-machine Door(state:DoorState,input:DoorInput)
-  select=state.mode
-  init=DoorState(Closed)
-  next=door_next(state,input)
-  success=Open
-  failure=DoorFault
-
-machine Alarm(state:AlarmState,input:AlarmInput)
-  select=state.mode
-  init=AlarmState(Armed)
-  next=alarm_next(state,input)
-  success=Triggered
-  failure=AlarmFault
-
-assembly BuildingControl
-  door=Door
-  alarm=Alarm
-
-  door.notify_alarm -> alarm.input
