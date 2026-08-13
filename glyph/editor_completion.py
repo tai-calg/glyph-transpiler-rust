@@ -192,7 +192,7 @@ function update({force=false,allowEmpty=false}={}){
   if(!force&&dismissedContextKey&&dismissedContextKey===contextKey(context)){close();return}
   const classification=contextService.classify(context);
   if(classification.id==="comment"||classification.id==="unsafe-long-line"||classification.id==="unsafe-scope"){close();return}
-  const staticPrefixReady=Array.isArray(classification.static)&&classification.static.length>0&&context.prefix.length>0;
+  const staticPrefixReady=Array.isArray(classification.static)&&classification.static.length>0&&(context.prefix.length>0||classification.allowEmptyStatic===true);
   if(!force&&!allowEmpty&&context.prefix.length<MIN_PREFIX&&!staticPrefixReady){close();return}
   if(!force&&!context.prefix&&context.left<context.right){close();return}
   metrics.queries+=1;
