@@ -192,7 +192,8 @@ function update({force=false,allowEmpty=false}={}){
   if(!force&&dismissedContextKey&&dismissedContextKey===contextKey(context)){close();return}
   const classification=contextService.classify(context);
   if(classification.id==="comment"||classification.id==="unsafe-long-line"||classification.id==="unsafe-scope"){close();return}
-  if(!force&&!allowEmpty&&context.prefix.length<MIN_PREFIX){close();return}
+  const staticPrefixReady=Array.isArray(classification.static)&&classification.static.length>0&&context.prefix.length>0;
+  if(!force&&!allowEmpty&&context.prefix.length<MIN_PREFIX&&!staticPrefixReady){close();return}
   if(!force&&!context.prefix&&context.left<context.right){close();return}
   metrics.queries+=1;
   const queryOptions={
@@ -207,8 +208,9 @@ function update({force=false,allowEmpty=false}={}){
   if(classification.owner)queryOptions.owner=classification.owner;
   let rows=[];
   const documentQueryAllowed=!classification.strict||!Array.isArray(classification.kinds)||classification.kinds.length;
-  if(documentQueryAllowed&&exactLexicalSnapshot())rows=lexicalIndex.query(context.prefix,context.caret,queryOptions);
-  else if(documentQueryAllowed)metrics.staleDocumentQueryBlocks+=1;
+  const documentPrefixReady=force||allowEmpty||context.prefix.length>=MIN_PREFIX;
+  if(documentQueryAllowed&&documentPrefixReady&&exactLexicalSnapshot())rows=lexicalIndex.query(context.prefix,context.caret,queryOptions);
+  else if(documentQueryAllowed&&documentPrefixReady)metrics.staleDocumentQueryBlocks+=1;
   const staticRows=contextService.staticCandidates(classification,context.prefix);
   rows=mergeCandidates(rows,staticRows,classification,context);
   if(!rows.length){close();return}
