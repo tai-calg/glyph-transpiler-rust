@@ -20,6 +20,8 @@ const TOP_LEVEL_KEYWORDS=["system","machine","resource","ext"];
 const SYSTEM_KEYWORDS=["entry","source","sink"];
 const MACHINE_KEYWORDS=["select","action","init","next","success","failure"];
 const CAPABILITY_KEYWORDS=["own","share","link"];
+const EXPRESSION_KEYWORDS=["as"];
+const BORROW_KEYWORDS=["mut"];
 const AS_TARGETS=["share","link"];
 
 function staticRows(values,kind="Keyword"){
@@ -84,7 +86,8 @@ function typeContext(lineBefore){
   const tail=lineBefore.slice(colon+1);
   if(/^\s*$/.test(tail))return"root";
   if(/\b(?:own|share|link)\s+$/.test(tail))return"qualified";
-  if(/&\s*(?:mut\s+)?$/.test(tail))return"qualified";
+  if(/&\s*$/.test(tail))return"borrow";
+  if(/&\s*mut\s+$/.test(tail))return"qualified";
   if(/[<,|]\s*$/.test(tail))return"root";
   return null;
 }
@@ -185,6 +188,7 @@ function classify(context){
       static:[
         ...staticRows(BUILTIN_TYPES,"Builtin Type"),
         ...(typeMode==="root"?staticRows(CAPABILITY_KEYWORDS,"Capability"):[]),
+        ...(typeMode==="borrow"?staticRows(BORROW_KEYWORDS,"Capability"):[]),
       ],
     },scope);
   }
@@ -202,7 +206,7 @@ function classify(context){
     return withDefaults({id:"top-level-keyword",strict:false,preferredKinds:["Keyword"],static:staticRows(TOP_LEVEL_KEYWORDS)},scope);
   }
 
-  return withDefaults({},scope);
+  return withDefaults({static:staticRows(EXPRESSION_KEYWORDS)},scope);
 }
 function staticCandidates(classification,prefix){
   const text=String(prefix??"");
