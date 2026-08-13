@@ -132,6 +132,7 @@ console.log(JSON.stringify({{
         self.assertIn("own", data["capability"]["candidates"])
         self.assertIn("mut", data["typeBorrow"]["candidates"])
         self.assertIn("mut", data["valueBorrow"]["candidates"])
+        self.assertEqual(data["valueBorrow"]["id"], "general")
         self.assertIn("as", data["asKeyword"]["candidates"])
         self.assertIn("true", data["trueKeyword"]["candidates"])
         self.assertIn("false", data["falseKeyword"]["candidates"])
