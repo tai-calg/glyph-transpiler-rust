@@ -55,9 +55,10 @@ class SourceFilePickerTests(unittest.TestCase):
             with self.assertRaises(SourceSelectionError):
                 resolve_source_selection(selected_root, "../outside.glyph")
 
-    def test_enhancer_adds_file_selector_once(self) -> None:
+    def test_enhancer_reuses_path_label_as_layout_neutral_file_trigger(self) -> None:
         html = (
             '<html><head></head><body><header>'
+            '<div class="path" id="path">example.glyph</div>'
             '<div class="status" id="status">ready</div>'
             '</header></body></html>'
         )
@@ -65,7 +66,12 @@ class SourceFilePickerTests(unittest.TestCase):
         enhanced_twice = enhance_source_file_picker_html(enhanced)
 
         self.assertEqual(enhanced, enhanced_twice)
+        self.assertEqual(enhanced.count('<div class="path" id="path">'), 1)
+        self.assertIn('id="source-file-menu"', enhanced)
         self.assertIn('id="source-file-select"', enhanced)
+        self.assertIn('source-file-menu[hidden]{display:none!important}', enhanced)
+        self.assertIn("trigger.setAttribute('role', 'button')", enhanced)
+        self.assertIn("trigger.setAttribute('tabindex', '0')", enhanced)
         self.assertIn("/api/source-files", enhanced)
         self.assertIn("/api/open-source", enhanced)
         self.assertIn("Unsaved editor changes will be discarded", enhanced)
