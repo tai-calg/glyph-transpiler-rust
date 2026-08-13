@@ -21,6 +21,7 @@ from .io_state_views import build_io_state_views
 from .readable_diagram_app import prepare_diagram_app
 from .source_file_picker import (
     SourceSelectionError,
+    enhance_source_file_picker_html,
     find_source_picker_root,
     resolve_source_selection,
     source_file_catalog,
@@ -101,6 +102,7 @@ def create_desktop_server(
     """
 
     prepare_diagram_app()
+    diagram_app.DIAGRAM_HTML = enhance_source_file_picker_html(diagram_app.DIAGRAM_HTML)
     app = GlyphDiagramApp(source_path, view_builder=view_builder)
     app.rebuild()
     app.start_watching()
