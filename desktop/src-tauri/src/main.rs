@@ -49,6 +49,34 @@ fn default_workspace(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(path)
 }
 
+fn repository_examples_directory() -> Option<PathBuf> {
+    let manifest_directory = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let manifest_candidate = manifest_directory
+        .parent()
+        .and_then(Path::parent)
+        .map(|root| root.join("examples"));
+    let cwd_candidate = std::env::current_dir().ok().map(|root| root.join("examples"));
+
+    cwd_candidate
+        .into_iter()
+        .chain(manifest_candidate)
+        .find(|candidate| candidate.is_dir())
+        .and_then(|candidate| candidate.canonicalize().ok())
+}
+
+fn file_dialog_directory(state: &BackendState) -> Option<PathBuf> {
+    if let Some(examples) = repository_examples_directory() {
+        return Some(examples);
+    }
+
+    state
+        .current_source
+        .lock()
+        .ok()
+        .and_then(|current| current.clone())
+        .and_then(|source| source.parent().map(Path::to_path_buf))
+}
+
 fn stop_backend(state: &BackendState) {
     state.generation.fetch_add(1, Ordering::SeqCst);
     if let Ok(mut slot) = state.child.lock() {
@@ -141,11 +169,15 @@ async fn open_glyph_file(
     app: AppHandle,
     state: State<'_, BackendState>,
 ) -> Result<Option<BackendInfo>, String> {
-    let selected = tauri::async_runtime::spawn_blocking(|| {
-        rfd::FileDialog::new()
+    let initial_directory = file_dialog_directory(state.inner());
+    let selected = tauri::async_runtime::spawn_blocking(move || {
+        let mut dialog = rfd::FileDialog::new()
             .add_filter("Glyph source", &["glyph"])
-            .set_title("Open Glyph source")
-            .pick_file()
+            .set_title("Open Glyph source");
+        if let Some(directory) = initial_directory {
+            dialog = dialog.set_directory(directory);
+        }
+        dialog.pick_file()
     })
     .await
     .map_err(error_text)?;
