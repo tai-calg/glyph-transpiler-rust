@@ -147,6 +147,7 @@ function withDefaults(result,scope){
     insertSuffix:"",
     excludeText:null,
     static:[],
+    staticMinPrefix:2,
     allowEmptyStatic:false,
     scope,
     scopeStart:scope?.start??-1,
@@ -172,13 +173,13 @@ function classify(context){
   }
 
   if(afterAt&&temporalFormula){
-    return withDefaults({id:"temporal-sigil",strict:true,kinds:[],static:staticRows(TEMPORAL_SIGILS,"Temporal"),allowEmptyStatic:true},scope);
+    return withDefaults({id:"temporal-sigil",strict:true,kinds:[],static:staticRows(TEMPORAL_SIGILS,"Temporal"),staticMinPrefix:0,allowEmptyStatic:true},scope);
   }
   if(afterAt&&!indented&&/^@[A-Za-z0-9_]*$/.test(trimmed)){
-    return withDefaults({id:"preprocessor-directive",strict:true,kinds:[],static:staticRows(PREPROCESSOR_DIRECTIVES,"Directive"),allowEmptyStatic:true},scope);
+    return withDefaults({id:"preprocessor-directive",strict:true,kinds:[],static:staticRows(PREPROCESSOR_DIRECTIVES,"Directive"),staticMinPrefix:0,allowEmptyStatic:true},scope);
   }
   if(temporalFormula){
-    return withDefaults({id:"temporal-formula",strict:false,preferredKinds:["Binding","Parameter","Field","State"],static:[...staticRows(TEMPORAL_WORD_OPERATORS,"Temporal"),...staticRows(["true","false"],"Keyword")]},scope);
+    return withDefaults({id:"temporal-formula",strict:false,preferredKinds:["Binding","Parameter","Field","State"],static:[...staticRows(TEMPORAL_WORD_OPERATORS,"Temporal"),...staticRows(["true","false"],"Keyword")],staticMinPrefix:1},scope);
   }
 
   const resourceState=throughCaret.match(/([A-Za-z_][A-Za-z0-9_]*)\[\s*[A-Za-z0-9_]*$/);
@@ -231,7 +232,7 @@ function classify(context){
   }
 
   if(/\bas\s+[A-Za-z0-9_]*$/.test(trimmed)){
-    return withDefaults({id:"capability-target",strict:true,kinds:[],static:staticRows(AS_TARGETS,"Capability")},scope);
+    return withDefaults({id:"capability-target",strict:true,kinds:[],static:staticRows(AS_TARGETS,"Capability"),staticMinPrefix:1},scope);
   }
 
   const typeMode=typeContext(lineBefore);
@@ -246,10 +247,11 @@ function classify(context){
         ...(typeMode==="root"?staticRows(CAPABILITY_KEYWORDS,"Capability"):[]),
         ...(typeMode==="borrow"?staticRows(BORROW_KEYWORDS,"Capability"):[]),
       ],
+      staticMinPrefix:typeMode==="borrow"?1:2,
     },scope);
   }
   if(/&\s*$/.test(lineBefore)){
-    return withDefaults({static:staticRows(BORROW_KEYWORDS,"Capability")},scope);
+    return withDefaults({static:staticRows(BORROW_KEYWORDS,"Capability"),staticMinPrefix:1},scope);
   }
 
   if(indented&&scope?.kind==="bounded-unknown"){
@@ -268,7 +270,7 @@ function classify(context){
     return withDefaults({id:"top-level-keyword",strict:false,preferredKinds:["Keyword"],static:staticRows(TOP_LEVEL_KEYWORDS)},scope);
   }
 
-  return withDefaults({static:staticRows(EXPRESSION_KEYWORDS)},scope);
+  return withDefaults({static:staticRows(EXPRESSION_KEYWORDS),staticMinPrefix:1},scope);
 }
 function staticCandidates(classification,prefix){
   const text=String(prefix??"");
