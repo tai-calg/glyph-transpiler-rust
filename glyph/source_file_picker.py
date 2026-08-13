@@ -46,7 +46,11 @@ def source_file_catalog(root: str | Path, current_path: str | Path) -> dict[str,
             "label": path.relative_to(root_path).as_posix(),
         }
         for path in sorted(root_path.rglob("*.glyph"))
-        if path.is_file() and not any(part.startswith(".") for part in path.relative_to(root_path).parts)
+        if path.is_file()
+        and not any(
+            part.startswith(".")
+            for part in path.relative_to(root_path).parts
+        )
     ]
     try:
         current_relative: str | None = current.relative_to(root_path).as_posix()
@@ -81,36 +85,47 @@ def resolve_source_selection(root: str | Path, selected: object) -> Path:
 
 
 def enhance_source_file_picker_html(html: str) -> str:
-    """Add an examples-first source selector to the shared Studio header."""
+    """Make the existing source-path label open an examples-first file picker."""
 
     if _PICKER_MARKER in html:
         return html
+    if 'id="path"' not in html:
+        raise ValueError("source file picker requires the Studio path label")
 
-    status_anchor = '<div class="status" id="status">'
-    picker = (
-        '<label class="source-file-picker" '
-        + _PICKER_MARKER
-        + '><span>File</span><select id="source-file-select" '
-        'aria-label="Glyph source file"><option value="">Loading…</option></select></label>'
-    )
-    if status_anchor not in html:
-        raise ValueError("source file picker requires the Studio status anchor")
-    html = html.replace(status_anchor, picker + status_anchor, 1)
-
+    menu = r'''
+<div id="source-file-menu" class="source-file-menu" hidden data-glyph-source-file-picker="1" role="dialog" aria-label="Glyph source file picker">
+  <div class="source-file-menu-title">Open Glyph source</div>
+  <select id="source-file-select" aria-label="Glyph source file"><option value="">Loading…</option></select>
+  <div class="source-file-menu-root" id="source-file-root">examples/</div>
+</div>
+'''
     style = r'''
 <style data-glyph-source-file-picker-style="1">
-.source-file-picker{display:flex;align-items:center;gap:6px;min-width:0;color:var(--muted);font-size:11px}
-.source-file-picker span{white-space:nowrap}
-.source-file-picker select{width:min(260px,24vw);padding:6px 28px 6px 8px;font:12px ui-monospace,SFMono-Regular,Menlo,monospace;overflow:hidden;text-overflow:ellipsis}
-.source-file-picker select:disabled{opacity:.55}
-@media(max-width:980px){.source-file-picker span{display:none}.source-file-picker select{width:180px}}
+#path[data-source-picker-ready="true"]{cursor:pointer}
+#path[data-source-picker-ready="true"]:hover{color:var(--text)}
+#path[data-source-picker-ready="true"]:focus-visible{outline:2px solid var(--blue);outline-offset:3px;border-radius:3px}
+.source-file-menu[hidden]{display:none!important}
+.source-file-menu{position:fixed;z-index:1000;width:min(360px,calc(100vw - 16px));padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--panel);box-shadow:var(--shadow)}
+.source-file-menu-title{font-weight:700;margin-bottom:8px}
+.source-file-menu select{width:100%;min-width:0;font:12px ui-monospace,SFMono-Regular,Menlo,monospace}
+.source-file-menu-root{margin-top:7px;color:var(--muted);font:10px ui-monospace,SFMono-Regular,Menlo,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 </style>
 '''
     script = r'''
 <script data-glyph-source-file-picker-script="1">
 (() => {
+  const trigger = document.getElementById('path');
+  const menu = document.getElementById('source-file-menu');
   const picker = document.getElementById('source-file-select');
-  if (!picker) return;
+  const rootLabel = document.getElementById('source-file-root');
+  if (!trigger || !menu || !picker || !rootLabel) return;
+
+  trigger.dataset.sourcePickerReady = 'true';
+  trigger.setAttribute('role', 'button');
+  trigger.setAttribute('tabindex', '0');
+  trigger.setAttribute('aria-haspopup', 'dialog');
+  trigger.setAttribute('aria-expanded', 'false');
+  trigger.title = 'Click to choose a Glyph source file';
 
   const requestJson = async (path, options = {}) => {
     const response = await fetch(path, {
@@ -131,37 +146,80 @@ def enhance_source_file_picker_html(html: str) -> str:
     }
   };
 
+  const close = () => {
+    menu.hidden = true;
+    trigger.setAttribute('aria-expanded', 'false');
+  };
+
+  const position = () => {
+    const rect = trigger.getBoundingClientRect();
+    const width = Math.min(360, Math.max(240, window.innerWidth - 16));
+    const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
+    menu.style.left = `${left}px`;
+    menu.style.top = `${Math.min(window.innerHeight - 120, rect.bottom + 7)}px`;
+  };
+
   const refresh = async () => {
     picker.disabled = true;
+    const catalog = await requestJson('/api/source-files');
+    picker.replaceChildren();
+    if (!catalog.current) {
+      const current = document.createElement('option');
+      current.value = '';
+      current.textContent = `Current: ${catalog.current_path || '(outside examples)'}`;
+      current.selected = true;
+      picker.appendChild(current);
+    }
+    for (const file of catalog.files || []) {
+      const option = document.createElement('option');
+      option.value = file.path;
+      option.textContent = file.label;
+      option.selected = file.path === catalog.current;
+      picker.appendChild(option);
+    }
+    picker.dataset.current = catalog.current || '';
+    rootLabel.textContent = catalog.root || 'examples/';
+    picker.disabled = false;
+  };
+
+  const open = async () => {
+    position();
+    menu.hidden = false;
+    trigger.setAttribute('aria-expanded', 'true');
     try {
-      const catalog = await requestJson('/api/source-files');
-      picker.replaceChildren();
-      if (!catalog.current) {
-        const current = document.createElement('option');
-        current.value = '';
-        current.textContent = `Current: ${catalog.current_path || '(outside examples)'}`;
-        current.selected = true;
-        picker.appendChild(current);
-      }
-      for (const file of catalog.files || []) {
-        const option = document.createElement('option');
-        option.value = file.path;
-        option.textContent = file.label;
-        option.selected = file.path === catalog.current;
-        picker.appendChild(option);
-      }
-      picker.dataset.current = catalog.current || '';
-      picker.title = `Source root: ${catalog.root || ''}`;
-      picker.disabled = false;
+      await refresh();
+      picker.focus();
     } catch (error) {
       picker.replaceChildren();
       const option = document.createElement('option');
       option.textContent = 'File list unavailable';
       picker.appendChild(option);
-      picker.title = String(error);
       picker.disabled = true;
+      rootLabel.textContent = String(error);
     }
   };
+
+  trigger.addEventListener('click', event => {
+    event.stopPropagation();
+    if (menu.hidden) open();
+    else close();
+  });
+  trigger.addEventListener('keydown', event => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      if (menu.hidden) open();
+      else close();
+    }
+  });
+  menu.addEventListener('click', event => event.stopPropagation());
+  document.addEventListener('click', () => close());
+  window.addEventListener('resize', () => { if (!menu.hidden) position(); });
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && !menu.hidden) {
+      close();
+      trigger.focus();
+    }
+  });
 
   picker.addEventListener('change', async () => {
     const selected = picker.value;
@@ -184,9 +242,10 @@ def enhance_source_file_picker_html(html: str) -> str:
       window.alert(`Could not open Glyph source: ${error}`);
     }
   });
-
-  refresh();
 })();
 </script>
 '''
-    return html.replace("</head>", style + "</head>", 1).replace("</body>", script + "</body>", 1)
+    return (
+        html.replace("</head>", style + "</head>", 1)
+        .replace("</body>", menu + script + "</body>", 1)
+    )
