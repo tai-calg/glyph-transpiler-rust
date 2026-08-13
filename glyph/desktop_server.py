@@ -319,12 +319,12 @@ def create_desktop_server(
                         HTTPStatus.BAD_REQUEST,
                     )
                     return
-                with app_lock:
-                    operation = app_box[0].submit_save(
-                        source,
-                        base_digest=base_digest,
-                        request_id=request_id,
-                    )
+                app_now = current_app()
+                operation = app_now.submit_save(
+                    source,
+                    base_digest=base_digest,
+                    request_id=request_id,
+                )
                 self._json(
                     operation.to_dict(),
                     HTTPStatus(operation.http_status),
@@ -332,8 +332,7 @@ def create_desktop_server(
                 return
             if path == "/api/rebuild":
                 try:
-                    with app_lock:
-                        snapshot = app_box[0].rebuild_async()
+                    snapshot = current_app().rebuild_async()
                 except SaveWriteError as exc:
                     self._json(
                         {"error": exc.code, "message": str(exc)},
