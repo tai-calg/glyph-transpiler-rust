@@ -59,14 +59,19 @@ class EditorReservedWordCompletionTests(unittest.TestCase):
         self.assertNotIn("in", CANONICAL_RESERVED_WORDS)
         self.assertNotIn("out", CANONICAL_RESERVED_WORDS)
 
-    def test_static_reserved_words_bypass_only_the_static_prefix_gate(self) -> None:
+    def test_static_reserved_words_use_contextual_prefix_gates(self) -> None:
         self.assertIn('const TOP_LEVEL_KEYWORDS=["system","machine","assembly","resource","ext"]', CONTEXT_SCRIPT)
         self.assertIn('const EXPRESSION_KEYWORDS=["as","true","false"]', CONTEXT_SCRIPT)
         self.assertIn('const BORROW_KEYWORDS=["mut"]', CONTEXT_SCRIPT)
         self.assertIn('const TEMPORAL_WORD_OPERATORS=["U","W"]', CONTEXT_SCRIPT)
         self.assertIn('const TEMPORAL_SIGILS=["A","E"]', CONTEXT_SCRIPT)
         self.assertIn('const PREPROCESSOR_DIRECTIVES=["end"]', CONTEXT_SCRIPT)
+        self.assertIn("staticMinPrefix:2", CONTEXT_SCRIPT)
+        self.assertIn("staticMinPrefix:1", CONTEXT_SCRIPT)
+        self.assertIn("staticMinPrefix:0", CONTEXT_SCRIPT)
+        self.assertIn("classification.staticMinPrefix??MIN_PREFIX", COMPLETION_SCRIPT)
         self.assertIn("classification.allowEmptyStatic===true", COMPLETION_SCRIPT)
+        self.assertIn("context.prefix.length>=staticMinPrefix", COMPLETION_SCRIPT)
         self.assertIn("context.prefix.length<MIN_PREFIX&&!staticPrefixReady", COMPLETION_SCRIPT)
         self.assertIn(
             "const documentPrefixReady=force||allowEmpty||context.prefix.length>=MIN_PREFIX",
@@ -100,15 +105,16 @@ function inspect(source){{
   const classification=service.classify(context);
   return{{
     id:classification.id,
+    staticMinPrefix:Number(classification.staticMinPrefix),
     allowEmptyStatic:Boolean(classification.allowEmptyStatic),
     candidates:service.staticCandidates(classification,prefix).map(row=>row.text),
   }};
 }}
 console.log(JSON.stringify({{
-  assembly:inspect("a"),
-  system:inspect("system Controller\\n  e"),
-  machine:inspect("machine Flow(state:S)\\n  a"),
-  capability:inspect("*Probe(value:o"),
+  assembly:inspect("as"),
+  system:inspect("system Controller\\n  en"),
+  machine:inspect("machine Flow(state:S)\\n  ac"),
+  capability:inspect("*Probe(value:ow"),
   typeBorrow:inspect("*Probe(value:& m"),
   valueBorrow:inspect(">borrow(x:S):S\\n  y := &m"),
   asKeyword:inspect(">convert(x:U):U\\n  y := x a"),
@@ -117,7 +123,7 @@ console.log(JSON.stringify({{
   temporalOperator:inspect("?Safe(x:B)=ready U"),
   temporalSigil:inspect("?Safe(x:B)=@"),
   preprocessorEnd:inspect("@"),
-  assemblyBody:inspect("assembly App\\n  a"),
+  assemblyBody:inspect("assembly App\\n  as"),
 }}));
 """
         result = subprocess.run(
@@ -127,19 +133,25 @@ console.log(JSON.stringify({{
         data = json.loads(result.stdout)
 
         self.assertIn("assembly", data["assembly"]["candidates"])
+        self.assertEqual(data["assembly"]["staticMinPrefix"], 2)
         self.assertIn("entry", data["system"]["candidates"])
         self.assertIn("action", data["machine"]["candidates"])
         self.assertIn("own", data["capability"]["candidates"])
         self.assertIn("mut", data["typeBorrow"]["candidates"])
+        self.assertEqual(data["typeBorrow"]["staticMinPrefix"], 1)
         self.assertIn("mut", data["valueBorrow"]["candidates"])
         self.assertEqual(data["valueBorrow"]["id"], "general")
+        self.assertEqual(data["valueBorrow"]["staticMinPrefix"], 1)
         self.assertIn("as", data["asKeyword"]["candidates"])
+        self.assertEqual(data["asKeyword"]["staticMinPrefix"], 1)
         self.assertIn("true", data["trueKeyword"]["candidates"])
         self.assertIn("false", data["falseKeyword"]["candidates"])
         self.assertIn("U", data["temporalOperator"]["candidates"])
         self.assertCountEqual(data["temporalSigil"]["candidates"], ["A", "E"])
+        self.assertEqual(data["temporalSigil"]["staticMinPrefix"], 0)
         self.assertTrue(data["temporalSigil"]["allowEmptyStatic"])
         self.assertEqual(data["preprocessorEnd"]["candidates"], ["end"])
+        self.assertEqual(data["preprocessorEnd"]["staticMinPrefix"], 0)
         self.assertTrue(data["preprocessorEnd"]["allowEmptyStatic"])
         self.assertEqual(data["assemblyBody"]["id"], "assembly-body")
         self.assertNotIn("as", data["assemblyBody"]["candidates"])
