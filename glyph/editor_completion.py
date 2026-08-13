@@ -192,7 +192,8 @@ function update({force=false,allowEmpty=false}={}){
   if(!force&&dismissedContextKey&&dismissedContextKey===contextKey(context)){close();return}
   const classification=contextService.classify(context);
   if(classification.id==="comment"||classification.id==="unsafe-long-line"||classification.id==="unsafe-scope"){close();return}
-  const staticPrefixReady=Array.isArray(classification.static)&&classification.static.length>0&&(context.prefix.length>0||classification.allowEmptyStatic===true);
+  const staticMinPrefix=Math.max(0,Number(classification.staticMinPrefix??MIN_PREFIX));
+  const staticPrefixReady=Array.isArray(classification.static)&&classification.static.length>0&&(classification.allowEmptyStatic===true||context.prefix.length>=staticMinPrefix);
   if(!force&&!allowEmpty&&context.prefix.length<MIN_PREFIX&&!staticPrefixReady){close();return}
   if(!force&&!context.prefix&&context.left<context.right){close();return}
   metrics.queries+=1;
@@ -211,7 +212,7 @@ function update({force=false,allowEmpty=false}={}){
   const documentPrefixReady=force||allowEmpty||context.prefix.length>=MIN_PREFIX;
   if(documentQueryAllowed&&documentPrefixReady&&exactLexicalSnapshot())rows=lexicalIndex.query(context.prefix,context.caret,queryOptions);
   else if(documentQueryAllowed&&documentPrefixReady)metrics.staleDocumentQueryBlocks+=1;
-  const staticRows=contextService.staticCandidates(classification,context.prefix);
+  const staticRows=staticPrefixReady||force||allowEmpty?contextService.staticCandidates(classification,context.prefix):[];
   rows=mergeCandidates(rows,staticRows,classification,context);
   if(!rows.length){close();return}
   lastContext=context;lastClassification=classification;candidates=rows;selected=0;explicit=allowEmpty||force;render();
