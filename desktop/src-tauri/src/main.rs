@@ -55,7 +55,9 @@ fn repository_examples_directory() -> Option<PathBuf> {
         .parent()
         .and_then(Path::parent)
         .map(|root| root.join("examples"));
-    let cwd_candidate = std::env::current_dir().ok().map(|root| root.join("examples"));
+    let cwd_candidate = std::env::current_dir()
+        .ok()
+        .map(|root| root.join("examples"));
 
     cwd_candidate
         .into_iter()
