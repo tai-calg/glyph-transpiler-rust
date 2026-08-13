@@ -65,4 +65,5 @@ jobs:
           file desktop/src-tauri/target/debug/glyph-desktop
 
       - name: Run native GUI E2E with embedded WebDriver
-        run: npm exec --prefix desktop -- wdio run ./wdio.conf.js
+        working-directory: desktop
+        run: ./node_modules/.bin/wdio run ./wdio.conf.js
