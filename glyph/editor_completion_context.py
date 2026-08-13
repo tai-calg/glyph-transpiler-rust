@@ -249,7 +249,7 @@ function classify(context){
     },scope);
   }
   if(/&\s*$/.test(lineBefore)){
-    return withDefaults({id:"value-borrow",strict:false,static:staticRows(BORROW_KEYWORDS,"Capability")},scope);
+    return withDefaults({static:staticRows(BORROW_KEYWORDS,"Capability")},scope);
   }
 
   if(indented&&scope?.kind==="bounded-unknown"){
