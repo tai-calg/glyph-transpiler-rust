@@ -29,7 +29,7 @@ def test_assembly_basic_example_stays_compilable() -> None:
             route["source_instance"],
             route["effect"],
             route["target_instance"],
-            route["target_input"],
+            route["input"],
         )
         for route in ir.routes
     ] == [("door", "notify_alarm", "alarm", "input")]
