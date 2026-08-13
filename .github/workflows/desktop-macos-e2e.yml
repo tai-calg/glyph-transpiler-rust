@@ -48,5 +48,18 @@ jobs:
       - name: Install Desktop JavaScript dependencies
         run: npm install --prefix desktop
 
-      - name: Run native Tauri E2E with embedded WebDriver
-        run: npm run e2e --prefix desktop
+      - name: Check E2E-enabled Tauri backend
+        run: cargo check --manifest-path desktop/src-tauri/Cargo.toml --features desktop-e2e
+
+      - name: Build E2E-enabled Tauri binary
+        run: npm run build:e2e --prefix desktop
+
+      - name: Verify native executable
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -x desktop/src-tauri/target/debug/glyph-desktop
+          file desktop/src-tauri/target/debug/glyph-desktop
+
+      - name: Run native GUI E2E with embedded WebDriver
+        run: npm exec --prefix desktop -- wdio run ./wdio.conf.js
