@@ -1,7 +1,7 @@
 name: I/O State Diagram Snapshot
 
 on:
-  pull_request:
+  pull_request_target:
     branches: [main]
     paths:
       - "glyph.py"
@@ -24,10 +24,21 @@ permissions:
 
 jobs:
   render:
-    runs-on: ubuntu-latest
+    if: >-
+      github.actor_id == '62682789' &&
+      (
+        github.event_name != 'pull_request_target' ||
+        (
+          github.event.pull_request.user.id == 62682789 &&
+          github.event.pull_request.head.repo.full_name == github.repository
+        )
+      )
+    runs-on: [self-hosted, linux, ARM64]
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -39,7 +50,7 @@ jobs:
         run: |
           python -m pip install pillow==12.0.0
           npm install playwright@1.54.2
-          npx playwright install --with-deps chromium
+          npx playwright install chromium
 
       - name: Compile and verify state diagrams
         shell: bash

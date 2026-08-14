@@ -1,7 +1,7 @@
 name: Public UI SDK
 
 on:
-  pull_request:
+  pull_request_target:
     branches: [main, feature/gradio-live-host, feature/gradio-ui-ir]
     paths:
       - "glyph/ui.py"
@@ -27,12 +27,23 @@ permissions:
 
 jobs:
   core-contract:
-    runs-on: ubuntu-latest
+    if: >-
+      github.actor_id == '62682789' &&
+      (
+        github.event_name != 'pull_request_target' ||
+        (
+          github.event.pull_request.user.id == 62682789 &&
+          github.event.pull_request.head.repo.full_name == github.repository
+        )
+      )
+    runs-on: [self-hosted, linux, ARM64]
     strategy:
       matrix:
         python-version: ["3.10", "3.12"]
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
@@ -52,9 +63,20 @@ jobs:
           PY
 
   package-smoke:
-    runs-on: ubuntu-latest
+    if: >-
+      github.actor_id == '62682789' &&
+      (
+        github.event_name != 'pull_request_target' ||
+        (
+          github.event.pull_request.user.id == 62682789 &&
+          github.event.pull_request.head.repo.full_name == github.repository
+        )
+      )
+    runs-on: [self-hosted, linux, ARM64]
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -113,9 +135,20 @@ jobs:
           PY
 
   gradio-backend:
-    runs-on: ubuntu-latest
+    if: >-
+      github.actor_id == '62682789' &&
+      (
+        github.event_name != 'pull_request_target' ||
+        (
+          github.event.pull_request.user.id == 62682789 &&
+          github.event.pull_request.head.repo.full_name == github.repository
+        )
+      )
+    runs-on: [self-hosted, linux, ARM64]
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
