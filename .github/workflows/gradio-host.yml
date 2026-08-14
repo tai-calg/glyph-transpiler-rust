@@ -1,7 +1,7 @@
 name: Gradio Host
 
 on:
-  pull_request:
+  pull_request_target:
     branches: [main, feature/gradio-live-host, feature/gradio-ui-ir]
     paths:
       - "glyph/pure_runtime.py"
@@ -29,10 +29,21 @@ permissions:
 
 jobs:
   build-gradio-host:
-    runs-on: ubuntu-latest
+    if: >-
+      github.actor_id == '62682789' &&
+      (
+        github.event_name != 'pull_request_target' ||
+        (
+          github.event.pull_request.user.id == 62682789 &&
+          github.event.pull_request.head.repo.full_name == github.repository
+        )
+      )
+    runs-on: [self-hosted, linux, ARM64]
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || github.sha }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
