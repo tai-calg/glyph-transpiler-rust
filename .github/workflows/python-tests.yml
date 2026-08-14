@@ -1,7 +1,7 @@
 name: Python Test Collection
 
 on:
-  pull_request:
+  pull_request_target:
     branches: [main]
     paths:
       - "glyph.py"
@@ -18,10 +18,21 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    if: >-
+      github.actor_id == '62682789' &&
+      (
+        github.event_name != 'pull_request_target' ||
+        (
+          github.event.pull_request.user.id == 62682789 &&
+          github.event.pull_request.head.repo.full_name == github.repository
+        )
+      )
+    runs-on: [self-hosted, linux, ARM64]
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
