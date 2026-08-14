@@ -19,6 +19,13 @@ from .diagram_app import GlyphDiagramApp, SaveWriteError, ViewBuilder
 from .editor_lexical_index import LEXICAL_WORKER_JS
 from .io_state_views import build_io_state_views
 from .readable_diagram_app import prepare_diagram_app
+from .source_file_picker import (
+    SourceSelectionError,
+    enhance_source_file_picker_html,
+    find_source_picker_root,
+    resolve_source_selection,
+    source_file_catalog,
+)
 
 
 _COOKIE_NAME = "glyph_desktop_session"
@@ -27,10 +34,14 @@ _HEADER_NAME = "X-Glyph-Desktop-Token"
 
 @dataclass
 class DesktopServer:
-    app: GlyphDiagramApp
+    _app_box: list[GlyphDiagramApp]
     server: ThreadingHTTPServer
     token: str
     require_auth: bool = True
+
+    @property
+    def app(self) -> GlyphDiagramApp:
+        return self._app_box[0]
 
     @property
     def origin(self) -> str:
@@ -91,10 +102,35 @@ def create_desktop_server(
     """
 
     prepare_diagram_app()
+    diagram_app.DIAGRAM_HTML = enhance_source_file_picker_html(diagram_app.DIAGRAM_HTML)
     app = GlyphDiagramApp(source_path, view_builder=view_builder)
     app.rebuild()
     app.start_watching()
+    app_box = [app]
+    app_lock = threading.RLock()
+    source_root = find_source_picker_root(source_path)
     session_token = token or secrets.token_urlsafe(32)
+
+    def current_app() -> GlyphDiagramApp:
+        with app_lock:
+            return app_box[0]
+
+    def switch_source(selected: object) -> GlyphDiagramApp:
+        target = resolve_source_selection(source_root, selected)
+        with app_lock:
+            current = app_box[0]
+            if target == current.input_path:
+                return current
+            replacement = GlyphDiagramApp(target, view_builder=view_builder)
+            try:
+                replacement.rebuild()
+                replacement.start_watching()
+            except Exception:
+                replacement.stop()
+                raise
+            app_box[0] = replacement
+        current.stop()
+        return replacement
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "GlyphDesktop/1"
@@ -212,14 +248,18 @@ def create_desktop_server(
                 self._javascript(LEXICAL_WORKER_JS)
                 return
             if path == "/api/state":
-                self._json(app.state_dict())
+                self._json(current_app().state_dict())
                 return
             if path == "/api/status":
-                self._json(app.status_dict())
+                self._json(current_app().status_dict())
+                return
+            if path == "/api/source-files":
+                app_now = current_app()
+                self._json(source_file_catalog(source_root, app_now.input_path))
                 return
             if path.startswith("/api/save-status/"):
                 request_id = unquote(path.removeprefix("/api/save-status/"))
-                operation = app.save_request_dict(request_id)
+                operation = current_app().save_request_dict(request_id)
                 if operation is None:
                     self._json(
                         {"error": "save_request_not_found"},
@@ -234,6 +274,26 @@ def create_desktop_server(
             if not self._require_auth():
                 return
             path = urlsplit(self.path).path
+            if path == "/api/open-source":
+                body = self._body()
+                if body is None:
+                    return
+                try:
+                    selected_app = switch_source(body.get("path"))
+                except SourceSelectionError as exc:
+                    self._json(
+                        {"error": "invalid_source_path", "message": str(exc)},
+                        HTTPStatus.BAD_REQUEST,
+                    )
+                    return
+                except OSError as exc:
+                    self._json(
+                        {"error": "source_open_failed", "message": str(exc)},
+                        HTTPStatus.INTERNAL_SERVER_ERROR,
+                    )
+                    return
+                self._json(selected_app.state_dict())
+                return
             if path == "/api/save":
                 body = self._body()
                 if body is None:
@@ -259,7 +319,8 @@ def create_desktop_server(
                         HTTPStatus.BAD_REQUEST,
                     )
                     return
-                operation = app.submit_save(
+                app_now = current_app()
+                operation = app_now.submit_save(
                     source,
                     base_digest=base_digest,
                     request_id=request_id,
@@ -271,7 +332,7 @@ def create_desktop_server(
                 return
             if path == "/api/rebuild":
                 try:
-                    snapshot = app.rebuild_async()
+                    snapshot = current_app().rebuild_async()
                 except SaveWriteError as exc:
                     self._json(
                         {"error": exc.code, "message": str(exc)},
@@ -284,7 +345,7 @@ def create_desktop_server(
 
     server = ThreadingHTTPServer((host, port), Handler)
     return DesktopServer(
-        app=app,
+        _app_box=app_box,
         server=server,
         token=session_token,
         require_auth=require_auth,

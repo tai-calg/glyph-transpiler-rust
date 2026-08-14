@@ -3,6 +3,40 @@ from __future__ import annotations
 
 _MARKER = "glyph-editor-completion-context-v1"
 
+# Canonical word-like source tokens recognized by the current Glyph parser stack.
+# Symbol-only syntax (*, +, =, >, ~, !, ?, @, :=, />, ->, etc.) is intentionally
+# excluded because editor word completion operates on identifier-shaped text.
+CANONICAL_RESERVED_WORDS = frozenset(
+    {
+        "system",
+        "machine",
+        "assembly",
+        "resource",
+        "ext",
+        "entry",
+        "source",
+        "sink",
+        "select",
+        "action",
+        "init",
+        "next",
+        "success",
+        "failure",
+        "own",
+        "share",
+        "link",
+        "mut",
+        "as",
+        "true",
+        "false",
+        "A",
+        "E",
+        "U",
+        "W",
+        "end",
+    }
+)
+
 _SCRIPT = r"""
 <script id="glyph-editor-completion-context-v1-script">
 (()=>{
@@ -16,11 +50,16 @@ const BUILTIN_TYPES=[
   "F","D","U","I","B","S",
   "u8","u16","u32","u64","i8","i16","i32","i64","f32","f64","bool","String","R","O","V"
 ];
-const TOP_LEVEL_KEYWORDS=["system","machine","resource","ext"];
+const TOP_LEVEL_KEYWORDS=["system","machine","assembly","resource","ext"];
 const SYSTEM_KEYWORDS=["entry","source","sink"];
 const MACHINE_KEYWORDS=["select","action","init","next","success","failure"];
 const CAPABILITY_KEYWORDS=["own","share","link"];
+const EXPRESSION_KEYWORDS=["as","true","false"];
+const BORROW_KEYWORDS=["mut"];
 const AS_TARGETS=["share","link"];
+const TEMPORAL_WORD_OPERATORS=["U","W"];
+const TEMPORAL_SIGILS=["A","E"];
+const PREPROCESSOR_DIRECTIVES=["end"];
 
 function staticRows(values,kind="Keyword"){
   return values.map(text=>({text,kind,kinds:[kind],owners:[],origin:"static",count:0,recent:-1,added:0}));
@@ -59,6 +98,8 @@ function scopeBefore(source,lineStart){
     if(match){last={kind:"machine",name:match[1],stateParam:match[2],start:lineStart};continue}
     match=trimmed.match(/^machine\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/);
     if(match){last={kind:"machine",name:match[1],stateParam:"",start:lineStart};continue}
+    match=trimmed.match(/^assembly\s+([A-Za-z_][A-Za-z0-9_]*)\b/);
+    if(match){last={kind:"assembly",name:match[1],start:lineStart};continue}
     match=trimmed.match(/^[>~]\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(/);
     if(match){last={kind:"function",name:match[1],start:lineStart};continue}
     match=trimmed.match(/^!\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(/);
@@ -84,9 +125,14 @@ function typeContext(lineBefore){
   const tail=lineBefore.slice(colon+1);
   if(/^\s*$/.test(tail))return"root";
   if(/\b(?:own|share|link)\s+$/.test(tail))return"qualified";
-  if(/&\s*(?:mut\s+)?$/.test(tail))return"qualified";
+  if(/&\s*$/.test(tail))return"borrow";
+  if(/&\s*mut\s+$/.test(tail))return"qualified";
   if(/[<,|]\s*$/.test(tail))return"root";
   return null;
+}
+function isTemporalFormula(trimmed){
+  return /^\?\s*[A-Za-z_][A-Za-z0-9_]*\s*\([^)]*\)\s*=/.test(trimmed)
+    || /^'\?\s*[A-Za-z_][A-Za-z0-9_]*\s*=/.test(trimmed);
 }
 function withDefaults(result,scope){
   return{
@@ -101,6 +147,8 @@ function withDefaults(result,scope){
     insertSuffix:"",
     excludeText:null,
     static:[],
+    staticMinPrefix:2,
+    allowEmptyStatic:false,
     scope,
     scopeStart:scope?.start??-1,
     ...result,
@@ -117,9 +165,21 @@ function classify(context){
   const scope=scopeBefore(source,lineStart);
   const trimmed=throughCaret.trimStart();
   const indented=/^\s/.test(source.slice(lineStart,context.caret));
+  const afterAt=context.left>lineStart&&source[context.left-1]==="@";
+  const temporalFormula=isTemporalFormula(trimmed);
 
   if(context.left>0&&source[context.left-1]==="'"){
     return withDefaults({id:"contract",strict:true,kinds:["Contract"]},scope);
+  }
+
+  if(afterAt&&temporalFormula){
+    return withDefaults({id:"temporal-sigil",strict:true,kinds:[],static:staticRows(TEMPORAL_SIGILS,"Temporal"),staticMinPrefix:0,allowEmptyStatic:true},scope);
+  }
+  if(afterAt&&!indented&&/^@[A-Za-z0-9_]*$/.test(trimmed)){
+    return withDefaults({id:"preprocessor-directive",strict:true,kinds:[],static:staticRows(PREPROCESSOR_DIRECTIVES,"Directive"),staticMinPrefix:0,allowEmptyStatic:true},scope);
+  }
+  if(temporalFormula){
+    return withDefaults({id:"temporal-formula",strict:false,preferredKinds:["Binding","Parameter","Field","State"],static:[...staticRows(TEMPORAL_WORD_OPERATORS,"Temporal"),...staticRows(["true","false"],"Keyword")],staticMinPrefix:1},scope);
   }
 
   const resourceState=throughCaret.match(/([A-Za-z_][A-Za-z0-9_]*)\[\s*[A-Za-z0-9_]*$/);
@@ -172,7 +232,7 @@ function classify(context){
   }
 
   if(/\bas\s+[A-Za-z0-9_]*$/.test(trimmed)){
-    return withDefaults({id:"capability-target",strict:true,kinds:[],static:staticRows(AS_TARGETS,"Capability")},scope);
+    return withDefaults({id:"capability-target",strict:true,kinds:[],static:staticRows(AS_TARGETS,"Capability"),staticMinPrefix:1},scope);
   }
 
   const typeMode=typeContext(lineBefore);
@@ -185,8 +245,13 @@ function classify(context){
       static:[
         ...staticRows(BUILTIN_TYPES,"Builtin Type"),
         ...(typeMode==="root"?staticRows(CAPABILITY_KEYWORDS,"Capability"):[]),
+        ...(typeMode==="borrow"?staticRows(BORROW_KEYWORDS,"Capability"):[]),
       ],
+      staticMinPrefix:typeMode==="borrow"?1:2,
     },scope);
+  }
+  if(/&\s*$/.test(lineBefore)){
+    return withDefaults({static:staticRows(BORROW_KEYWORDS,"Capability"),staticMinPrefix:1},scope);
   }
 
   if(indented&&scope?.kind==="bounded-unknown"){
@@ -198,11 +263,14 @@ function classify(context){
   if(indented&&scope?.kind==="machine"&&/^\s*[A-Za-z0-9_]*$/.test(throughCaret)){
     return withDefaults({id:"machine-keyword",strict:true,kinds:[],static:staticRows(MACHINE_KEYWORDS)},scope);
   }
+  if(indented&&scope?.kind==="assembly"){
+    return withDefaults({id:"assembly-body",strict:false,static:[]},scope);
+  }
   if(!indented&&/^\s*[A-Za-z0-9_]*$/.test(throughCaret)){
     return withDefaults({id:"top-level-keyword",strict:false,preferredKinds:["Keyword"],static:staticRows(TOP_LEVEL_KEYWORDS)},scope);
   }
 
-  return withDefaults({},scope);
+  return withDefaults({static:staticRows(EXPRESSION_KEYWORDS),staticMinPrefix:1},scope);
 }
 function staticCandidates(classification,prefix){
   const text=String(prefix??"");
@@ -239,4 +307,4 @@ def enhance_editor_completion_context_html(html: str) -> str:
     return html.replace("</body>", _SCRIPT + "\n</body>")
 
 
-__all__ = ["enhance_editor_completion_context_html"]
+__all__ = ["CANONICAL_RESERVED_WORDS", "enhance_editor_completion_context_html"]

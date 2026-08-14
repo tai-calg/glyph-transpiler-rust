@@ -1,0 +1,49 @@
+# Minimal complete Machine Assembly example.
+#
+# Assembly body syntax:
+#   instance_name=MachineName
+#   source_instance.effect -> target_instance.input
+
+machine Door(state:DoorState,input:DoorInput)
+  select=state.mode
+  init=DoorState(Closed)
+  next=door_next(state,input)
+  success=Open
+  failure=DoorFault
+
+machine Alarm(state:AlarmState,input:AlarmInput)
+  select=state.mode
+  init=AlarmState(Armed)
+  next=alarm_next(state,input)
+  success=Triggered
+  failure=AlarmFault
+
+assembly BuildingControl
+  door=Door
+  alarm=Alarm
+
+  door.notify_alarm -> alarm.input
+
++DoorInput=OpenRequest|ForcedOpen
++DoorMode=Closed|Open|DoorFault
+*DoorState(mode:DoorMode)
+
++AlarmInput=DoorForced
++AlarmMode=Armed|Triggered|AlarmFault
+*AlarmState(mode:AlarmMode)
+
+# A routed effect has one payload argument and unit result.
+!notify_alarm(event:AlarmInput):()
+
+>door_force(state:DoorState):DoorState
+  sent := notify_alarm(DoorForced)
+  DoorState(DoorFault)
+
+>door_next(state:DoorState,input:DoorInput):DoorState
+  input==ForcedOpen>>door_force(state)
+  input==OpenRequest>>DoorState(Open)
+  _>>state
+
+>alarm_next(state:AlarmState,input:AlarmInput):AlarmState
+  input==DoorForced>>AlarmState(Triggered)
+  _>>state

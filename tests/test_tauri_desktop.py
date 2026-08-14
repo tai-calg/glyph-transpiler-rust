@@ -32,6 +32,21 @@ class TauriDesktopTests(unittest.TestCase):
         )
         self.assertFalse((DESKTOP / "resources" / "default.glyph").exists())
 
+    def test_gui_file_picker_is_visible_and_defaults_to_examples(self) -> None:
+        html = (DESKTOP / "ui" / "index.html").read_text(encoding="utf-8")
+        javascript = (DESKTOP / "ui" / "app.js").read_text(encoding="utf-8")
+        rust = (DESKTOP / "src-tauri" / "src" / "main.rs").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn('id="open-file"', html)
+        self.assertIn('invoke("open_glyph_file")', javascript)
+        self.assertIn('root.join("examples")', rust)
+        self.assertIn("repository_examples_directory()", rust)
+        self.assertIn("dialog = dialog.set_directory(directory);", rust)
+        self.assertIn("current_source", rust)
+        self.assertIn("source.parent().map(Path::to_path_buf)", rust)
+
     def test_tauri_security_boundary_is_narrow(self) -> None:
         config = json.loads(
             (DESKTOP / "src-tauri" / "tauri.conf.json").read_text(encoding="utf-8")
